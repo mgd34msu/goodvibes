@@ -37,7 +37,7 @@ import type {
   RecurrenceInfo,
   WindowExpansion,
 } from './types.js';
-import { utcToZonedWallClockMs } from './caldav-ics.js';
+import { utcToZonedWallClockMs } from '../utils/timezone.js';
 import { eventDateTimeEpochMs } from './event-time.js';
 
 const WEEKDAY_TOKENS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'] as const;

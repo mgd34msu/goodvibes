@@ -161,6 +161,14 @@ export function createSshBackend(ctx: BackendContext): Backend {
         } finally { lease.release(); }
       });
     },
+    async forget(peerId) {
+      const slot = pool.get(peerId);
+      if (!slot) return;
+      pool.delete(peerId);
+      // A slot still leased is cleaned when its last lease releases.
+      retire(slot);
+      await slot.cleanup;
+    },
     teardown: () => lifetime.close(async () => {
       pool.clear();
       for (const slot of slots) retire(slot);

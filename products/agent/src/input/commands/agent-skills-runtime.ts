@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { AgentSkillRegistry, buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { AgentSkillRegistry, buildAgentSkillRequirements, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness, formatAgentSkillRequirement, formatSkillDeleteBundleLines } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { type AgentSkillBundleRecord, type AgentSkillRecord } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry-types';
 import { discoverSkills, type SkillRecord } from '../../agent/skill-discovery.ts';
 import { parseSkillStandardMarkdown, skillStandardFilePath } from '@goodvibes/engine/terminal-shell/agent-turn/skill-standard';
@@ -165,7 +165,7 @@ function renderBundleList(title: string, registry: AgentSkillRegistry, bundles: 
     `${title} (${bundles.length})`,
     `  store ${snapshot.path}`,
     `  enabled bundles: ${snapshot.enabledBundles.length}`,
-    `  active skills: ${snapshot.activeSkills.length}`,
+    `  skills applied to turns: ${snapshot.activeSkills.length}`,
     ...bundles.map((bundle) => summarizeBundle(bundle, snapshot.skills)),
   ].join('\n');
 }
@@ -372,8 +372,8 @@ const MY_SKILLS = defineCommand<CommandContext>({
       run: (values, _c, registry) => formatSkillReceipt('Marked Agent skill stale', registry.markStale(values.skill!, values.reason!)),
     }),
     change({
-      id: 'delete', label: 'Delete a skill', word: 'delete', inputs: [SKILL], sentence: '{skill} is removed from the Agent-local registry.', risk: 'cannot-be-undone', example: { skill: 'sk-release' },
-      run: (values, _c, registry) => formatSkillReceipt('Deleted Agent skill', registry.deleteSkill(values.skill!)),
+      id: 'delete', label: 'Delete a skill', word: 'delete', inputs: [SKILL], sentence: '{skill} is removed from the Agent-local registry and from every bundle; a bundle left empty is removed, and one that keeps other skills waits for review again.', risk: 'cannot-be-undone', example: { skill: 'sk-release' },
+      run: (values, _c, registry) => { const deleted = registry.deleteSkill(values.skill!); return formatSkillReceipt('Deleted Agent skill', deleted.skill, formatSkillDeleteBundleLines(deleted)); },
     }),
     show({ id: 'discover', label: 'See skill files found on disk', word: 'discover', sentence: 'Lists SKILL.md and .md skill files in the project and global skill folders.', run: async (_v, ctx) => renderDiscoveredSkills(await discoverSkills(requireShellPaths(ctx))) }),
     change({

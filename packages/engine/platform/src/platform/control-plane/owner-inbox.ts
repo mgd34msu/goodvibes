@@ -56,7 +56,7 @@ import type { RevisionSource } from '../utils/revision.js';
 import type { AskPresentation } from '../permissions/ask-presentation.js';
 import type { PermissionPromptRequest } from '../permissions/prompt.js';
 import { logger } from '../utils/logger.js';
-import { askerLivenessPath, isTakerGone, processTaker, sessionAskerKey, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
+import { askerLivenessPath, isClaimGone, isTakerGone, processTaker, sessionAskerKey, settleAskerLock, type OwnerAskerKind } from './owner-asker-liveness.js';
 
 export { OWNER_ANSWER_AGENT_METADATA, OWNER_ANSWER_SESSION_METADATA, OWNER_ASKER_SESSION_FILE_METADATA };
 
@@ -531,11 +531,17 @@ export function validateNewOwnerItem(input: NewOwnerItem): Omit<StoredOwnerItem,
   };
 }
 
-function storedStatus(entry: StoredOwnerEntry, now: number): OwnerItemStatus {
+/**
+ * `claimGone` says whether the process holding a decision claim died: a
+ * claimed row past its deadline whose holder is gone can never commit, so it
+ * reads as expired like any other row past its deadline.
+ */
+function storedStatus(entry: StoredOwnerEntry, now: number, claimGone: (token: string) => boolean): OwnerItemStatus {
   if (entry.withdrawnReason !== undefined) return 'withdrawn';
   if (entry.answer !== undefined) return 'answered';
   // A decision whose choice is being applied was claimed inside its deadline: it stays open until that commits.
-  if (entry.applyingToken === undefined && entry.item.expiresAt !== undefined && entry.item.expiresAt <= now) return 'expired';
+  if (entry.item.expiresAt !== undefined && entry.item.expiresAt <= now
+    && (entry.applyingToken === undefined || claimGone(entry.applyingToken))) return 'expired';
   return 'open';
 }
 
@@ -549,9 +555,9 @@ function storedDelivery(entry: StoredOwnerEntry, presence: (asker: OwnerAsker) =
   return askerDelivery(asker, presence(asker));
 }
 
-function projectStored(entry: StoredOwnerEntry, now: number, presence: (asker: OwnerAsker) => OwnerAskerPresence): OwnerItem {
+function projectStored(entry: StoredOwnerEntry, now: number, presence: (asker: OwnerAsker) => OwnerAskerPresence, claimGone: (token: string) => boolean): OwnerItem {
   const { item } = entry;
-  const status = storedStatus(entry, now);
+  const status = storedStatus(entry, now, claimGone);
   const delivery = storedDelivery(entry, presence);
   return {
     id: item.id,
@@ -782,8 +788,11 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   /** Whether the asker has a question still open (not answered, withdrawn or expired). One indexed read. */
   #hasOpenQuestion(scope: QuestionAskerScope): boolean {
     const now = this.#now();
-    return this.#questions.undelivered(scope).some((entry) => storedStatus(entry, now) === 'open');
+    return this.#questions.undelivered(scope).some((entry) => storedStatus(entry, now, this.#claimGone) === 'open');
   }
+
+  /** Whether the process that holds a decision claim on this inbox's store is gone. */
+  #claimGone = (token: string): boolean => isClaimGone(this.#questions.path, token);
 
   /**
    * Whether the asker is running (some process holds its lock). When it is not
@@ -835,7 +844,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   }
 
   #project(entry: StoredOwnerEntry, now: number): OwnerItem {
-    const item = projectStored(entry, now, this.#presenceOf);
+    const item = projectStored(entry, now, this.#presenceOf, this.#claimGone);
     // Expiry closes a question without any write; the first read after it settles the asker's lock file.
     if (item.status === 'expired' && entry.closedAt === undefined) this.#closed(item);
     return item;
@@ -959,7 +968,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     const { created, entry } = this.#questions.post(
       { ...item, ...(postedBy !== undefined ? { postedBy } : {}) },
       now,
-      (existing) => storedStatus(existing, now) === 'open',
+      (existing) => storedStatus(existing, now, this.#claimGone) === 'open',
     );
     const projected = this.#project(entry, now);
     if (created) this.#emitStored(entry, projected);
@@ -997,7 +1006,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     if (entry) {
       const item = this.#project(entry, now);
       if (item.status !== 'open') return { applied: false, item, refusal: closedRefusal(item) };
-      if (entry.applyingToken !== undefined && !isTakerGone(this.#questions.path, entry.applyingToken)) {
+      if (entry.applyingToken !== undefined && !isClaimGone(this.#questions.path, entry.applyingToken)) {
         return { applied: false, item, refusal: decisionInProgressRefusal() };
       }
       const checked = this.#checkAnswer(item, answer);
@@ -1231,7 +1240,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   async #answerWithEffect(item: OwnerItem, answer: OwnerAnswer, by: OwnerAnswerSource, effect: OwnerAnswerEffect): Promise<OwnerAnswerOutcome> {
     const path = this.#questions.path;
     const token = `${processTaker(path)}:${randomUUID()}`;
-    const claimed = this.#questions.claimDecision(item.id, token, this.#now(), (held) => isTakerGone(path, held.split(':')[0] ?? held));
+    const claimed = this.#questions.claimDecision(item.id, token, this.#now(), (held) => isClaimGone(path, held));
     if (!claimed) return { applied: false, refusal: unknownRefusal(item.id) };
     if (!claimed.claimed) {
       const current = this.#project(claimed.entry, this.#now());
@@ -1338,7 +1347,7 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     }
     const path = this.#questions.path;
     const token = `${processTaker(path)}:${randomUUID()}`;
-    const claimed = this.#questions.claimDecision(item.id, token, this.#now(), (held) => isTakerGone(path, held.split(':')[0] ?? held));
+    const claimed = this.#questions.claimDecision(item.id, token, this.#now(), (held) => isClaimGone(path, held));
     if (!claimed) return { applied: false, refusal: unknownRefusal(item.id) };
     if (!claimed.claimed) {
       const current = this.#project(claimed.entry, this.#now());

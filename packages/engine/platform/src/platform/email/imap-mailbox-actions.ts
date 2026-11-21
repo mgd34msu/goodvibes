@@ -104,11 +104,57 @@ export async function applyImapMessageAction(
     if (!upper.includes('UIDPLUS')) {
       throw new Error('This mail server can neither move a message nor expunge one message by UID, so nothing was changed.');
     }
+    // A message already marked \Deleted may be the half of an earlier archive
+    // or delete that stopped after COPY: finish that one instead of copying again.
+    if (await carriesDeletedFlag(session, uid)) {
+      await finishInterruptedMove(session, mailbox, selected.uidValidity, uid, target);
+      return { uid, action, movedTo: target };
+    }
     await session.command(`UID COPY ${uid} ${formatMailboxName(target)}`);
-    await session.command(`UID STORE ${uid} +FLAGS.SILENT (\\Deleted)`);
-    await session.command(`UID EXPUNGE ${uid}`);
+    let marked = false;
+    try {
+      await session.command(`UID STORE ${uid} +FLAGS.SILENT (\\Deleted)`);
+      marked = true;
+      await session.command(`UID EXPUNGE ${uid}`);
+    } catch {
+      throw new Error(`The message was copied to '${target}' but is still in '${mailbox}'${marked ? ' (marked deleted)' : ''}, so delete the original in your mail program instead of repeating the action.`);
+    }
   }
   return { uid, action, movedTo: target };
+}
+
+/** Whether the message's FLAGS carry `\Deleted` (one UID FETCH FLAGS). */
+async function carriesDeletedFlag(session: ImapSession, uid: number): Promise<boolean> {
+  const lines = await session.command(`UID FETCH ${uid} FLAGS`);
+  const flags = lines.map((line) => /^\* \d+ FETCH .*?\bFLAGS \(([^)]*)\)/i.exec(line)?.[1]).find((value) => value !== undefined);
+  return flags !== undefined && flags.split(/\s+/).some((flag) => flag.toLowerCase() === '\\deleted');
+}
+
+/**
+ * Complete an archive or delete that copied the message and marked it deleted
+ * but did not expunge it: when the target folder holds a message with the same
+ * Message-ID, only the original is expunged. A \Deleted mark another program
+ * set, with no copy in the target, is refused with nothing changed, so a
+ * message is never expunged without its copy.
+ */
+async function finishInterruptedMove(session: ImapSession, mailbox: string, uidValidity: number | null, uid: number, target: string): Promise<void> {
+  const header = parseFetchResponses(await session.commandFrames(`UID FETCH ${uid} BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)]`))
+    .map((response) => fetchSection(response, (spec) => spec.startsWith('HEADER.FIELDS')))
+    .find((section) => section !== undefined && section !== null);
+  const messageId = /^Message-ID:\s*(<[^<>"\\\r\n]+>)/im.exec((header ?? '').replace(/\r?\n[ \t]+/g, ' '))?.[1];
+  let copied = false;
+  if (messageId !== undefined) {
+    await session.command(`EXAMINE ${formatMailboxName(target)}`);
+    copied = parseSearchNumbers(await session.command(`UID SEARCH HEADER Message-ID "${messageId}"`)).length > 0;
+    const reselected = parseMailboxStatus(await session.command(`SELECT ${formatMailboxName(mailbox)}`));
+    if (reselected.uidValidity !== uidValidity) {
+      throw new Error(`The mailbox '${mailbox}' was reset while this message was being changed, so nothing more was changed. Refresh the list and try again.`);
+    }
+  }
+  if (!copied) {
+    throw new Error(`Message ${uid} is already marked deleted in '${mailbox}' and no copy of it is in '${target}', so nothing was changed. Clear the deleted mark or remove it in your mail program.`);
+  }
+  await session.command(`UID EXPUNGE ${uid}`);
 }
 
 /**
@@ -119,7 +165,13 @@ export async function fetchImapAttachment(session: ImapSession, uid: number, ind
   requireUid(uid);
   const structure = await session.commandFrames(`UID FETCH ${uid} BODYSTRUCTURE`);
   if (parseFetchResponses(structure).length === 0) return null;
-  const attachments = parseBodyStructure(extractBodyStructure(structure)).filter((part) => part.isAttachment);
+  const parts = parseBodyStructure(extractBodyStructure(structure));
+  // An answer whose structure could not be read says nothing about the
+  // attachments, and is not reported as a message that has none.
+  if (parts.length === 0) {
+    throw new Error(`The mail server's description of message ${uid} could not be read, so its attachments cannot be handed over. Open it in your mail program.`);
+  }
+  const attachments = parts.filter((part) => part.isAttachment);
   const part = attachments[index];
   if (!part) throw new Error(`Message ${uid} has ${attachments.length} attachment${attachments.length === 1 ? '' : 's'}; there is none at position ${index + 1}.`);
   if (part.sizeBytes > IMAP_ATTACHMENT_LITERAL_BYTES) {
@@ -155,9 +207,17 @@ export async function fetchImapAttachment(session: ImapSession, uid: number, ind
 /** The newest draft in `mailbox` saved under `messageId` (one EXAMINE and one UID SEARCH), or null when there is none. */
 export async function findImapDraftByMessageId(session: ImapSession, mailbox: string, messageId: string): Promise<{ readonly uid: number; readonly uidValidity: number | null } | null> {
   const examined = parseMailboxStatus(await session.command(`EXAMINE ${formatMailboxName(mailbox)}`));
+  const uid = await findSelectedDraftByMessageId(session, messageId);
+  return uid === null ? null : { uid, uidValidity: examined.uidValidity };
+}
+
+/**
+ * The newest message saved under `messageId` in the mailbox already selected
+ * (one UID SEARCH, the selection is kept), other than `except`, or null.
+ */
+export async function findSelectedDraftByMessageId(session: ImapSession, messageId: string, except?: number): Promise<number | null> {
   const uids = parseSearchNumbers(await session.command(`UID SEARCH HEADER Message-ID "${messageId}"`));
-  const uid = uids.at(-1);
-  return uid === undefined ? null : { uid, uidValidity: examined.uidValidity };
+  return uids.filter((uid) => uid !== except).at(-1) ?? null;
 }
 
 export async function listImapDrafts(session: ImapSession, mailbox: string, limit: number, before?: number): Promise<{ drafts: ImapDraftSummary[]; total: number; uidValidity: number | null }> {

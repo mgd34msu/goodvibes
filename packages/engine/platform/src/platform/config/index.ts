@@ -373,7 +373,7 @@ export type {
 // The one way a product builds its credential store (the daemon home is required).
 export { createRuntimeSecretsManager } from '../runtime/secrets-composition.js';
 export type { DaemonSecretsCompositionInput } from '../runtime/secrets-composition.js';
-export { ServiceRegistry, captureServiceReadSource, describePendingProjectService, pendingProjectServiceLines, projectServiceRef } from './service-registry.js';
+export { ServiceRegistry, SERVICE_SECRET_KEY_FIELDS, SERVICE_SECRET_REFERENCE_FIELDS, captureServiceReadSource, describePendingProjectService, pendingProjectServiceLines, projectServiceRef } from './service-registry.js';
 export type * from './service-registry.js';
 export { SubscriptionManager, SubscriptionSessionEndedError, captureSubscriptionReadSource, sharedSubscriptionsPath, subscriptionExportForm, subscriptionState, subscriptionAuthFreshness, SUBSCRIPTION_EXPIRING_SOON_MS } from './subscriptions.js';
 export type {

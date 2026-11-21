@@ -48,7 +48,7 @@ export class ProfileManager {
   /**
    * save - Persist a profile under the given name.
    * Overwrites an existing profile with the same name. The profile is stored
-   * under `sanitizeName(name)`, so names that differ only in case, spacing or
+   * under `storedName(name)`, so names that differ only in case, spacing or
    * punctuation ("Work Laptop", "work-laptop") are one profile. A name of
    * which nothing can be stored is refused (see storedName).
    */
@@ -80,13 +80,14 @@ export class ProfileManager {
   }
 
   /**
-   * load - Load a profile by name. Returns the profile data or throws if not found.
+   * load - Load a profile by name. Returns the profile data or throws if not
+   * found; a name of which nothing can be stored names no profile.
    */
   public load(name: string): { data: ProfileData; timestamp: number } {
     if (!name || !name.trim()) throw new Error('Profile name cannot be empty');
-    const sanitizedName = this.sanitizeName(name);
-    const filePath = join(this.profilesDir, `${sanitizedName}.json`);
-    if (!existsSync(filePath)) {
+    const sanitizedName = this.storedName(name);
+    const filePath = sanitizedName === undefined ? undefined : join(this.profilesDir, `${sanitizedName}.json`);
+    if (filePath === undefined || !existsSync(filePath)) {
       throw new Error(`Profile not found: ${name}`);
     }
     try {
@@ -120,9 +121,9 @@ export class ProfileManager {
     const profiles: ProfileInfo[] = [];
     for (const file of files) {
       const name = file.replace(/\.json$/, '');
-      // load() and delete() address a profile by its sanitized name, so a file
+      // load() and delete() address a profile by its stored name, so a file
       // under any other name could be listed but never opened or removed.
-      if (this.sanitizeName(name) !== name) {
+      if (this.storedName(name) !== name) {
         logger.warn('ProfileManager: ignoring a profile file whose name is not a stored profile name', { file });
         continue;
       }
@@ -157,7 +158,8 @@ export class ProfileManager {
    */
   public delete(name: string): boolean {
     if (!name || !name.trim()) return false;
-    const sanitizedName = this.sanitizeName(name);
+    const sanitizedName = this.storedName(name);
+    if (sanitizedName === undefined) return false;
     const filePath = join(this.profilesDir, `${sanitizedName}.json`);
     try {
       unlinkSync(filePath);
@@ -170,17 +172,9 @@ export class ProfileManager {
   }
 
   /**
-   * sanitizeName - Safe filename from profile name; 'profile' when nothing of
-   * the name can be stored.
-   */
-  public sanitizeName(name: string): string {
-    return this.storedName(name) ?? 'profile';
-  }
-
-  /**
    * storedName - The name a profile is stored under, or undefined when none
-   * of its characters can be stored. The one test save() and imports use to
-   * refuse a name before anything is written.
+   * of its characters can be stored: such a name is refused by save() and
+   * imports, and names no profile for load(), delete() and list().
    */
   public storedName(name: string): string | undefined {
     const stored = storedNameStem(name);

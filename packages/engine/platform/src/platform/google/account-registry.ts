@@ -462,25 +462,40 @@ export class AgentAccountRegistry {
   }
 
   private writeStore(store: AccountStoreFile, guard?: AgentAccountWriteGuard, keepPreviousCopy = false): void {
-    const content = formatStore(store);
+    writeAccountStoreFile(this.storePath, store, { ...(guard === undefined ? {} : { guard }), keepPreviousCopy });
+  }
+}
+
+/**
+ * Replace the account store file with `store`: a private temporary file, then a
+ * rename over the store. With `keepPreviousCopy` (the read skipped entries, a
+ * stricter content check or a hand edit, that this rewrite would lose) the file
+ * as it was is first copied beside the store as `.dropped-<ms>.bak`. Both
+ * registries write through this, so they lose nothing differently. The caller
+ * holds the store's writer lock.
+ */
+export function writeAccountStoreFile(
+  storePath: string,
+  store: AccountStoreFile,
+  options: { readonly guard?: AgentAccountWriteGuard; readonly keepPreviousCopy: boolean },
+): void {
+  const { guard, keepPreviousCopy } = options;
+  const content = formatStore(store);
+  guard?.assertCurrent();
+  mkdirSync(dirname(storePath), { recursive: true });
+  if (keepPreviousCopy && existsSync(storePath)) {
+    copyFileSync(storePath, `${storePath}.dropped-${Date.now()}.bak`);
+  }
+  const tmpPath = `${storePath}.${randomUUID()}.tmp`;
+  let ownsTemporary = false;
+  try {
     guard?.assertCurrent();
-    mkdirSync(dirname(this.storePath), { recursive: true });
-    // Entries skipped on read (stricter content check, hand edit) would be lost by this
-    // rewrite, so the file as it was stays beside the store.
-    if (keepPreviousCopy && existsSync(this.storePath)) {
-      copyFileSync(this.storePath, `${this.storePath}.dropped-${Date.now()}.bak`);
-    }
-    const tmpPath = `${this.storePath}.${randomUUID()}.tmp`;
-    let ownsTemporary = false;
-    try {
-      guard?.assertCurrent();
-      writeFileSync(tmpPath, content, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
-      ownsTemporary = true;
-      guard?.assertCurrent();
-      renameSync(tmpPath, this.storePath);
-      ownsTemporary = false;
-    } finally {
-      if (ownsTemporary) { try { unlinkSync(tmpPath); } catch { /* Clean up only this operation's private temporary file. */ } }
-    }
+    writeFileSync(tmpPath, content, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
+    ownsTemporary = true;
+    guard?.assertCurrent();
+    renameSync(tmpPath, storePath);
+    ownsTemporary = false;
+  } finally {
+    if (ownsTemporary) { try { unlinkSync(tmpPath); } catch { /* Clean up only this operation's private temporary file. */ } }
   }
 }

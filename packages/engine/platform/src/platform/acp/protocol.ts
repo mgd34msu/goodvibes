@@ -182,7 +182,8 @@ export function withTimeout<T>(promise: Promise<T>, ms: number, label: string): 
  */
 export function readNdJsonMessages(input: ReadableStream<Uint8Array>): ReadableStream<unknown> {
   const decoder = new TextDecoder();
-  let pending = '';
+  // The line not yet ended, as the pieces it arrived in: each chunk is scanned once, and a long line is joined once.
+  let pending: string[] = [];
   const emitLine = (line: string, controller: TransformStreamDefaultController<unknown>): void => {
     const trimmed = line.trim();
     if (!trimmed) return;
@@ -191,15 +192,27 @@ export function readNdJsonMessages(input: ReadableStream<Uint8Array>): ReadableS
   };
   return input.pipeThrough(new TransformStream<Uint8Array, unknown>({
     transform(chunk, controller) {
-      pending += decoder.decode(chunk, { stream: true });
-      const lines = pending.split('\n');
-      pending = lines.pop() ?? '';
-      for (const line of lines) emitLine(line, controller);
+      const text = decoder.decode(chunk, { stream: true });
+      let start = 0;
+      let end = text.indexOf('\n');
+      if (end < 0) {
+        if (text) pending.push(text);
+        return;
+      }
+      pending.push(text.slice(0, end));
+      emitLine(pending.join(''), controller);
+      pending = [];
+      start = end + 1;
+      while ((end = text.indexOf('\n', start)) >= 0) {
+        emitLine(text.slice(start, end), controller);
+        start = end + 1;
+      }
+      if (start < text.length) pending.push(text.slice(start));
     },
     flush(controller) {
-      pending += decoder.decode();
-      emitLine(pending, controller);
-      pending = '';
+      pending.push(decoder.decode());
+      emitLine(pending.join(''), controller);
+      pending = [];
     },
   }));
 }
@@ -244,28 +257,3 @@ export async function stopAcpChild(child: AcpChildProcess, options: {
   }
 }
 
-/**
- * Read a child's piped stderr to the end, keeping only the last `maxChars`.
- * An unread pipe fills the OS buffer and blocks the child on its next stderr
- * write; the retained tail also explains a failed handshake.
- */
-export function drainStderrTail(stream: unknown, maxChars = 2000): { tail(): string } {
-  let tail = '';
-  const readable = stream as ReadableStream<Uint8Array> | null | undefined;
-  if (readable && typeof readable.getReader === 'function') {
-    const decoder = new TextDecoder();
-    const reader = readable.getReader();
-    void (async () => {
-      try {
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          tail = (tail + decoder.decode(value, { stream: true })).slice(-maxChars);
-        }
-      } catch {
-        // The child is gone; whatever was read stays as the tail.
-      }
-    })();
-  }
-  return { tail: () => tail.trim() };
-}

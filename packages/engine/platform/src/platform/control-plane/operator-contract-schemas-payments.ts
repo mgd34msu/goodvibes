@@ -3,11 +3,13 @@
  *
  * Input/output JSON schemas for the `payments.*` operator methods.
  *
- * Note what is absent and must stay absent: no schema here carries a card
- * number, an expiry, a CVV or a cardholder name, in EITHER direction. Card
- * material goes to the daemon secret store through `payments.cards.create` and
- * nothing reads it back out over the control plane. `last4` is the only thing
- * about the instrument a surface ever sees. See docs/payments.md §3.1 and §9.5.
+ * Where card material may appear, and where it must stay absent: only the
+ * input of `payments.cards.create` carries it (number, expiry month and year,
+ * CVV, cardholder name), on its way to the daemon secret store. No output
+ * schema returns the card number, the CVV or the cardholder name; the card
+ * metadata a surface sees is label, brand, last4, kind and expiry month/year.
+ * The checkout targets name card fields by name only, never their values. See
+ * docs/payments.md §3.1 and §9.5.
  *
  * No verb types a card: the purchase the daemon runs
  * (`payments.checkout.begin`) reads the material in-process and types it.
@@ -25,13 +27,13 @@ import {
 } from './operator-contract-schemas-shared.js';
 import { PAYMENT_OPERATION_STATES } from '../payments/operation-view.js';
 
-/** One daily pool: its limit, what today has spent, what is held, what is left. */
 /** A payment store that stopped itself, and what to do. Present only while one has. */
 const PAYMENT_HOST_STOP_SCHEMA = objectSchema({
   store: STRING_SCHEMA, reason: STRING_SCHEMA, path: STRING_SCHEMA,
   message: { ...STRING_SCHEMA, description: 'Which store stopped, why, that nothing recorded was lost, and the step: restart the daemon.' },
 }, ['store', 'reason', 'message']);
 
+/** One daily pool: its limit, what today has spent, what is held, what is left. */
 const POOL_SCHEMA = objectSchema(
   {
     limit: NUMBER_SCHEMA,

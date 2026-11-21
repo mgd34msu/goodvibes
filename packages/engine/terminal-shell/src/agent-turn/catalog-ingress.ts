@@ -13,6 +13,7 @@
  * call made without one is admitted on the research owner and its own checks.
  */
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { assertCurrentToolExecution, assertCurrentToolInvocation, assertCurrentToolEffect, ToolInputProjectionError, type ToolInputProjector, type ToolRegistry, type ToolExecutionEffect } from '@goodvibes/engine/platform/platform/tools';
 import { agentResearchSourceOwner } from './protected-research-report.js';
 import { captureModelReadingInput, assertModelReadingInputCurrent } from './model-reading.js';
@@ -237,17 +238,31 @@ export function harnessCatalogInvocationAuthority(args: Record<string, unknown>,
  * the call's options, never re-proven per argument object.
  */
 export async function forwardHarnessCatalogCall(tool: Tool, original: Record<string, unknown>, forwarded: Record<string, unknown>, options?: ToolExecuteOptions,
-  additionalGuard?: () => void) {
+  additionalGuard?: () => void): Promise<ToolResult> {
+  return (await forwardCatalogCall(tool, original, forwarded, options, additionalGuard)).result;
+}
+
+type ToolResult = Awaited<ReturnType<Tool['execute']>>;
+
+/**
+ * The forwarded call and whether it admitted an effect. A result whose effect
+ * was admitted is the outcome as it stands: a check that fails after the tool
+ * acted would report an applied effect as a failure. A read-only result is
+ * checked once more, so a stale read is not returned.
+ */
+async function forwardCatalogCall(tool: Tool, original: Record<string, unknown>, forwarded: Record<string, unknown>, options?: ToolExecuteOptions,
+  additionalGuard?: () => void): Promise<{ readonly result: ToolResult; readonly effectAdmitted: boolean }> {
   const originalGuard = harnessCatalogExecutionGuard(original, options);
   const inherited = admissionOf(options);
   const originalInvocation = inherited ? inherited.assertInvocation : () => assertCurrentToolInvocation(original, options);
   const originalEffect = inherited ? inherited.assertEffect : (effect: ToolExecutionEffect) => assertCurrentToolEffect(original, options, effect);
   const assertCurrent = () => { originalGuard(); additionalGuard?.(); };
   assertCurrent(); publicationGuards.set(forwarded, retainedGuards(original));
+  let effectAdmitted = false;
   const admission: CallAdmission = {
     assertCurrent,
     assertInvocation: () => { assertCurrent(); return originalInvocation(); },
-    assertEffect: (effect) => { assertCurrent(); return originalEffect(effect); },
+    assertEffect: (effect) => { assertCurrent(); effectAdmitted = true; return originalEffect(effect); },
   };
   // Without options there is no engine admission to carry: the forwarded body's
   // own checks find none, as the original call's would.
@@ -257,8 +272,11 @@ export async function forwardHarnessCatalogCall(tool: Tool, original: Record<str
     if (!active) { active = []; callAdmissions.set(options, active); }
     active.push(admission);
   }
-  try { const result = await tool.execute(forwarded, options); assertCurrent(); return result; }
-  finally {
+  try {
+    const result = await tool.execute(forwarded, options);
+    if (!effectAdmitted) assertCurrent();
+    return { result, effectAdmitted };
+  } finally {
     const index = active?.lastIndexOf(admission) ?? -1;
     if (active && index >= 0) active.splice(index, 1);
   }
@@ -290,9 +308,21 @@ export function protectCatalogTool(tool: Tool, registry: ToolRegistry, selected 
     }
     const projected = await projector.project({ callId: 'catalog-direct', name: tool.definition.name, args: input,
       signal: options?.signal, assertCurrent });
+    let outcome: { readonly result: ToolResult; readonly effectAdmitted: boolean } | undefined;
     try {
       if (projected.status !== 'projected') throw new ToolInputProjectionError('held');
-      return await forwardHarnessCatalogCall(tool, input, projected.args, options, projected.assertCurrent);
-    } finally { await projected.release?.(); assertCurrent(); }
+      outcome = await forwardCatalogCall(tool, input, projected.args, options, projected.assertCurrent);
+    } finally {
+      // Release always runs; its checks never replace the result of a call whose effect was admitted.
+      try { await projected.release?.(); }
+      catch (error) {
+        if (!outcome?.effectAdmitted) throw error;
+        logger.warn('A catalog call applied its effect, then a release-time check failed; the applied result is returned', {
+          tool: tool.definition.name, error: summarizeError(error),
+        });
+      }
+    }
+    if (!outcome.effectAdmitted) assertCurrent();
+    return outcome.result;
   } };
 }

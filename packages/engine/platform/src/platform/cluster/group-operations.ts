@@ -229,7 +229,7 @@ export function groupStatus(context: GroupOperationsContext): GroupOperationResu
   const advice = !context.settings.enabled
     ? 'sharing inbound work with your other machines is switched off here, turn it on with `config set cluster.enabled true`'
     : membership === 'no-group' && removedFrom
-      ? `this machine was removed from the group${removedFrom.groupName ? ` "${removedFrom.groupName}"` : ''} [${removedFrom.groupId}] by another member; to put it back, run \`cluster key\` on a machine in that group, then \`cluster join --group ${removedFrom.groupId} --key <key>\` here`
+      ? `this machine was removed from the group${removedFrom.groupName ? ` "${removedFrom.groupName}"` : ''} [${removedFrom.groupId}] by another member; to put it back, run \`cluster key\` on a machine in that group, then \`cluster join --group ${removedFrom.groupId}\` here and give it that key`
     : membership === 'no-group'
       ? 'this machine is not in a group yet, run `cluster create` here, or `cluster join` to join one that already exists'
       : membership === 'unreadable-key-material'
@@ -925,7 +925,7 @@ async function rejoinGroupOwned(context: GroupOperationsContext, owner: ClusterM
     context.runtime.noteRemovedFromGroup({ groupId: material.groupId, groupName, at: context.now(), reason: outcome.reason });
     return failed(
       `this machine was removed from the group${groupName ? ` "${groupName}"` : ''} by another member, so it no longer holds the group's keys`,
-      `to put it back, run \`cluster key\` on a machine in the group, then \`cluster join --group ${material.groupId} --key <key>\` here`,
+      `to put it back, run \`cluster key\` on a machine in the group, then \`cluster join --group ${material.groupId}\` here and give it that key`,
       { terminal: true, failure: 'removed' },
     );
   }

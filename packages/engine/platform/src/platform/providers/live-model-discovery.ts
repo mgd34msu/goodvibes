@@ -52,7 +52,20 @@ export interface LiveModelDiscoveryResult {
   /** What the listing does not establish, shown with the report (for example a list read from a related account). */
   readonly note?: string | undefined;
   readonly skippedReason?: 'local-endpoint-unavailable' | undefined;
+  /**
+   * Per-model max output tokens the listing itself reported, by model id, for a provider whose
+   * listing carries them (Anthropic). The same on a live, cached or lent listing; absent when the
+   * listing reported none or came from a cache file written before this field existed.
+   */
+  readonly maxOutputTokens?: Readonly<Record<string, number>> | undefined;
 }
+
+/** What a provider's live fetch returns: the ids, or the ids with what the listing also said about them. */
+export type LiveModelListing = string[] | {
+  readonly models: string[];
+  readonly unclassifiedModels?: string[] | undefined;
+  readonly maxOutputTokens?: Readonly<Record<string, number>> | undefined;
+};
 
 interface ModelListCacheFile {
   version: 1;
@@ -62,6 +75,18 @@ interface ModelListCacheFile {
   unclassifiedModels?: string[];
   /** Whose list this is (a sign-in's identity); a different one makes the file stale. */
   key?: string;
+  /** Per-model max output tokens the listing reported; absent in files older releases wrote. */
+  maxOutputTokens?: Record<string, number>;
+}
+
+/** The well-formed entries of a stored output-limit record, or undefined when it holds none. */
+function storedMaxOutputTokens(value: unknown): Readonly<Record<string, number>> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const limits: Record<string, number> = {};
+  for (const [id, limit] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof limit === 'number' && Number.isFinite(limit) && limit > 0) limits[id] = Math.floor(limit);
+  }
+  return Object.keys(limits).length > 0 ? limits : undefined;
 }
 
 /** Cache file path for a provider's live-discovered model list. */
@@ -88,7 +113,13 @@ function loadModelListCache(cachePath: string): ModelListCacheFile | null {
   }
 }
 
-function saveModelListCache(models: readonly string[], cachePath: string, unclassifiedModels: readonly string[] = [], key?: string): void {
+function saveModelListCache(
+  models: readonly string[],
+  cachePath: string,
+  unclassifiedModels: readonly string[] = [],
+  key?: string,
+  maxOutputTokens?: Readonly<Record<string, number>>,
+): void {
   try {
     fs.mkdirSync(dirname(cachePath), { recursive: true });
     const payload: ModelListCacheFile = {
@@ -98,6 +129,7 @@ function saveModelListCache(models: readonly string[], cachePath: string, unclas
       models: [...models],
       ...(unclassifiedModels.length ? { unclassifiedModels: [...unclassifiedModels] } : {}),
       ...(key ? { key } : {}),
+      ...(maxOutputTokens ? { maxOutputTokens: { ...maxOutputTokens } } : {}),
     };
     // A unique temporary file per write: the TUI and the daemon may refresh the same cache at once.
     writeJsonFileAtomic(cachePath, payload);
@@ -157,7 +189,7 @@ export interface LiveModelRefreshOptions {
   /** Whether the provider has credentials configured. When false, live fetch is skipped entirely. */
   readonly isConfigured: boolean;
   /** Performs the live fetch. Should reject on any failure (network, auth, parse). */
-  readonly fetchLive: () => Promise<string[] | { models: string[]; unclassifiedModels: string[] }>;
+  readonly fetchLive: () => Promise<LiveModelListing>;
   /**
    * Bypass the TTL cache and always re-check live. Set this for an explicit
    * user-triggered refresh or a picker-open re-check; leave false for
@@ -253,15 +285,17 @@ async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: 
   // A list another sign-in read is not this one's.
   const cache = stored && (opts.cacheKey === undefined || stored.key === opts.cacheKey) ? stored : null;
   const baseline = cache?.models ?? [];
+  const cachedLimits = storedMaxOutputTokens(cache?.maxOutputTokens);
+  const cachedFacts = cachedLimits ? { maxOutputTokens: cachedLimits } : {};
   assertCurrent();
 
   if (cache && !opts.force && !isTtlCacheStale(cache)) {
-    return listed({ models: cache.models, source: 'cache', added: [], removed: [], listedAt: cache.fetchedAt }, cache.fetchedAt);
+    return listed({ models: cache.models, source: 'cache', added: [], removed: [], listedAt: cache.fetchedAt, ...cachedFacts }, cache.fetchedAt);
   }
 
   if (!opts.isConfigured) {
     // No fetch is made without credentials, so this answer is current at any age of the file.
-    if (cache) return listed({ models: cache.models, source: 'cache', added: [], removed: [], listedAt: cache.fetchedAt });
+    if (cache) return listed({ models: cache.models, source: 'cache', added: [], removed: [], listedAt: cache.fetchedAt, ...cachedFacts });
     return listed({ models: [], source: 'catalog', added: [], removed: [] });
   }
 
@@ -269,15 +303,17 @@ async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: 
     const listing = await opts.fetchLive();
     assertCurrent();
     const fetched = Array.isArray(listing) ? listing : listing.models;
-    const unclassifiedModels = Array.isArray(listing) ? [] : listing.unclassifiedModels;
+    const unclassifiedModels = Array.isArray(listing) ? [] : listing.unclassifiedModels ?? [];
+    const maxOutputTokens = Array.isArray(listing) ? undefined : storedMaxOutputTokens(listing.maxOutputTokens);
     if (fetched.length === 0) {
       throw new Error('live model list was empty');
     }
     const { added, removed } = diffModelIds(baseline, fetched);
-    if (opts.cachePath) saveModelListCache(fetched, opts.cachePath, unclassifiedModels, opts.cacheKey);
+    if (opts.cachePath) saveModelListCache(fetched, opts.cachePath, unclassifiedModels, opts.cacheKey, maxOutputTokens);
     assertCurrent();
     return listed({ models: fetched, source: 'live', added, removed, listedAt: Date.now(),
-      ...(unclassifiedModels.length ? { unclassifiedModels } : {}) });
+      ...(unclassifiedModels.length ? { unclassifiedModels } : {}),
+      ...(maxOutputTokens ? { maxOutputTokens } : {}) });
   } catch (err) {
     assertCurrent();
     const code = err instanceof Error && 'code' in err ? err.code : undefined;
@@ -287,7 +323,7 @@ async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: 
     const message = summarizeError(err);
     logger.warn('[provider-models] Live model discovery failed', { provider: opts.providerName, error: message });
     if (cache) {
-      return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message, listedAt: cache.fetchedAt }, cache.fetchedAt);
+      return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message, listedAt: cache.fetchedAt, ...cachedFacts }, cache.fetchedAt);
     }
     return listed({ models: [], source: 'catalog', added: [], removed: [], error: message });
   }

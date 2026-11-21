@@ -88,6 +88,8 @@ const HOSTED_SESSION_HISTORY_SCHEMA = arraySchema(objectSchema({
   }, ['id', 'name', 'arguments'])),
   /** The call a tool row answers. */
   callId: STRING_SCHEMA,
+  /** A user or assistant row's request: the correlation id its turn was submitted with. */
+  correlationId: STRING_SCHEMA,
 }, ['role', 'content']));
 
 export const builtinGatewayHostedSessionMethodDescriptors: readonly GatewayMethodDescriptor[] = [

@@ -143,6 +143,8 @@ export class WakeListener {
   #engine: WakeWordEngine | null = null;
   #recorder: VoiceInputRecorder | null = null;
   #recordingFor: WakeDetection | null = null;
+  /** The capture generation a device re-check found the pin back in while an utterance was recording; capture moves when it is handed off. */
+  #rebindAfterRecording: number | null = null;
   #queued = 0;
   #chain: Promise<void> = Promise.resolve();
   /** When the frame being scored now was handed to the engine; null while none is. */
@@ -280,6 +282,7 @@ export class WakeListener {
   async stop(): Promise<void> {
     this.#stopping = true;
     const generation = ++this.#captureGeneration;
+    this.#rebindAfterRecording = null;
     this.#resetScoring();
     // A later start() must not take the quiet device wait this listener was in before it was stopped.
     this.#waitingForDevice = false;
@@ -662,8 +665,22 @@ export class WakeListener {
       this.#armDeviceRecheck();
       return;
     }
-    // The pin is back (or the host lost its microphone entirely). Reopen on the
-    // newly resolved device; #open re-resolves and re-announces.
+    if (this.#recorder !== null) {
+      // A wake came in while the devices were read: the binding is already
+      // recorded as moved, so capture moves once that utterance is handed off.
+      this.#rebindAfterRecording = generation;
+      return;
+    }
+    await this.#rebindCapture();
+  }
+
+  /**
+   * Stop the current stream and reopen capture; #open re-resolves the device
+   * and re-announces it.
+   */
+  async #rebindCapture(): Promise<void> {
+    this.#rebindAfterRecording = null;
+    if (this.#stopping || this.#stream === null) return;
     const stream = this.#stream;
     this.#stream = null;
     this.#engine = null;
@@ -857,6 +874,16 @@ export class WakeListener {
     this.#engine?.reset();
     if (this.#stream !== null) this.#setPhase('listening');
     this.#options.handlers?.onUtterance?.(utterance, detection);
+    this.#rebindIfDeferred();
+  }
+
+  /** Move capture to the device a re-check found during the utterance just handed off, when that stream is still the current one. */
+  #rebindIfDeferred(): void {
+    const deferredAt = this.#rebindAfterRecording;
+    if (deferredAt === null) return;
+    this.#rebindAfterRecording = null;
+    if (deferredAt !== this.#captureGeneration || this.#stopping || this.#stream === null) return;
+    void this.#rebindCapture();
   }
 
   /**
@@ -899,11 +926,14 @@ export class WakeListener {
   #discardRecording(): void {
     this.#recorder = null;
     this.#recordingFor = null;
+    this.#rebindIfDeferred();
   }
 
   #onStreamStopped(reason: 'requested' | 'stream-ended' | 'failed', error?: AudioCaptureError): void {
     if (this.#stopping || reason === 'requested') return;
     const generation = ++this.#captureGeneration;
+    // The restart below re-resolves the device itself.
+    this.#rebindAfterRecording = null;
     this.#resetScoring();
     const retiredStream = this.#stream;
     // Retire in-flight diagnostic readings even when a watchdog initiated this

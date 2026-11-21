@@ -19,22 +19,60 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** The ids this module registered per auditor, so a revoked device can be removed again. */
 const registered = new WeakMap<ApiTokenAuditor, Set<string>>();
 
+/** The `security.tokenAudit.*` settings as both the auditor and the pairing store read them. */
+interface TokenAuditSettings {
+  /** `security.tokenAudit.managed`. */
+  readonly managed: boolean;
+  /** Managed and the token audit feature enabled: the pairing store refuses a token past the cadence. */
+  readonly enforced: boolean;
+  /** The rotation cadence in ms; undefined when the setting is not a positive number. */
+  readonly cadenceMs: number | undefined;
+  /** The warning lead time in ms; undefined when the setting is not a positive number. */
+  readonly warningMs: number | undefined;
+}
+
+function positiveDaysMs(value: unknown): number | undefined {
+  const days = Number(value);
+  return Number.isFinite(days) && days > 0 ? days * DAY_MS : undefined;
+}
+
+/** Read the token audit settings now; the one reader for the auditor and the pairing store. */
+function readTokenAuditSettings(
+  configManager: Pick<ConfigManager, 'get'>,
+  featureFlags: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined,
+): TokenAuditSettings {
+  const managed = configManager.get('security.tokenAudit.managed') === true;
+  return {
+    managed,
+    enforced: managed && isFeatureGateEnabled(featureFlags, 'token-scope-rotation-audit'),
+    cadenceMs: positiveDaysMs(configManager.get('security.tokenAudit.rotationCadenceDays')),
+    warningMs: positiveDaysMs(configManager.get('security.tokenAudit.rotationWarningDays')),
+  };
+}
+
 /**
  * The token auditor every product builds the same way: managed mode and the
- * rotation cadence from the `security.tokenAudit.*` settings, findings on the
- * runtime bus's security domain when a bus is given.
+ * rotation cadence from the `security.tokenAudit.*` settings, read on every
+ * audit so a change applies at once, findings on the runtime bus's security
+ * domain when a bus is given.
  */
 export function createConfiguredTokenAuditor(options: {
   readonly configManager: Pick<ConfigManager, 'get'>;
   readonly featureFlags?: Pick<FeatureFlagManager, 'isEnabled'> | null | undefined;
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
 }): ApiTokenAuditor {
-  const { configManager } = options;
+  const { configManager, featureFlags } = options;
   return new ApiTokenAuditor({
-    managed: configManager.get('security.tokenAudit.managed') === true,
-    ...(options.featureFlags ? { featureFlags: options.featureFlags } : {}),
-    defaultRotationCadenceMs: Number(configManager.get('security.tokenAudit.rotationCadenceDays')) * DAY_MS,
-    defaultRotationWarningThresholdMs: Number(configManager.get('security.tokenAudit.rotationWarningDays')) * DAY_MS,
+    managed: false,
+    ...(featureFlags ? { featureFlags } : {}),
+    read: () => {
+      const settings = readTokenAuditSettings(configManager, featureFlags);
+      return {
+        managed: settings.managed,
+        ...(settings.cadenceMs !== undefined ? { defaultRotationCadenceMs: settings.cadenceMs } : {}),
+        ...(settings.warningMs !== undefined ? { defaultRotationWarningThresholdMs: settings.warningMs } : {}),
+      };
+    },
   }, options.runtimeBus ? { emitter: createTokenAuditBusEmitter(options.runtimeBus) } : undefined);
 }
 
@@ -53,10 +91,8 @@ export function bindPairingRotationLimit(
   },
 ): () => void {
   pairingTokens.setRotationLimit(() => {
-    if (options.configManager.get('security.tokenAudit.managed') !== true) return null;
-    if (!isFeatureGateEnabled(options.featureFlags, 'token-scope-rotation-audit')) return null;
-    const days = Number(options.configManager.get('security.tokenAudit.rotationCadenceDays'));
-    return Number.isFinite(days) && days > 0 ? days * DAY_MS : null;
+    const settings = readTokenAuditSettings(options.configManager, options.featureFlags);
+    return settings.enforced ? settings.cadenceMs ?? null : null;
   });
   return () => pairingTokens.setRotationLimit(undefined);
 }

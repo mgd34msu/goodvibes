@@ -510,16 +510,17 @@ export class MemoryStore {
     }
 
     if (filter.query) {
-      const escaped = filter.query.replace(/%/g, '\\%').replace(/_/g, '\\_');
+      const escaped = escapeLike(filter.query);
       conditions.push("(summary LIKE ? ESCAPE '\\' OR detail LIKE ? ESCAPE '\\')");
       params.push(`%${escaped}%`, `%${escaped}%`);
     }
 
     if (filter.tags?.length) {
       for (const tag of filter.tags) {
-        const escapedTag = tag.replace(/%/g, '\\%').replace(/_/g, '\\_');
+        // The column holds the tags as a JSON array, so the tag is matched in
+        // its stored form: quoted, with JSON's own escapes.
         conditions.push("tags LIKE ? ESCAPE '\\'");
-        params.push(`%"${escapedTag}"%`);
+        params.push(`%${escapeLike(JSON.stringify(tag))}%`);
       }
     }
 
@@ -1341,6 +1342,11 @@ export class MemoryStore {
       logger.warn('MemoryStore: could not withdraw an add whose save failed', { id, error: summarizeError(error) });
     }
   }
+}
+
+/** Text for a LIKE pattern with ESCAPE '\': the escape character itself, `%` and `_` match only themselves. */
+function escapeLike(text: string): string {
+  return text.replace(/[\\%_]/g, '\\$&');
 }
 
 function usageFromRow(row: readonly unknown[]): MemoryUsageEntry {

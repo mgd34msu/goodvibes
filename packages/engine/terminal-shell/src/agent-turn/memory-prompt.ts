@@ -29,7 +29,9 @@ function formatMemoryLine(record: MemoryRecord): string {
   const provenance = record.provenance.length > 0
     ? ` source=${record.provenance.slice(0, 2).map((entry) => `${entry.kind}:${entry.ref}`).join(',')}`
     : '';
-  return `- [${record.scope}/${record.cls} ${record.confidence}% ${record.reviewState}${tags}${provenance}] ${record.summary}`;
+  // A stored review the model made is labelled as the model's, so the prompt never presents it as the owner's.
+  const review = record.reviewState === 'reviewed' && record.reviewedBy === 'agent' ? 'reviewed by agent' : record.reviewState;
+  return `- [${record.scope}/${record.cls} ${record.confidence}% ${review}${tags}${provenance}] ${record.summary}`;
 }
 
 /**

@@ -154,7 +154,7 @@ function openTtsVoiceArgs(args: AgentDeviceToolArgs): Record<string, unknown> {
   return compactArgs({
     mode: 'open_ui_surface',
     surfaceId: 'tts-voice-picker',
-    target: readString(args.providerId) || readString(args.mediaProviderId) || args.target,
+    target: providerLookup(args) || args.target,
     ...confirmedArgs(args),
   });
 }

@@ -271,6 +271,9 @@ export async function runCapturedCommand(
   let killed = false;
   let timedOut = false;
   let untilMatched = false;
+  // Why the until watcher stopped the command (its pattern test or the authority check
+  // failed), so the run is reported as held for that cause instead of as a cancel.
+  const untilFailures: unknown[] = [];
   let stop = (): void => {};
   let childCompletion: Promise<number | null> | undefined;
   let checkInputs = async (): Promise<void> => {};
@@ -469,7 +472,7 @@ export async function runCapturedCommand(
                 observer.onUntilMatched?.();
               }
             }
-          } catch { stop(); }
+          } catch (error) { untilFailures.push(error); stop(); }
           finally { checkingUntil = false; }
         })();
       };
@@ -482,6 +485,9 @@ export async function runCapturedCommand(
       exitCode = await childCompletion;
       await untilCompletion;
       clearTimeout(timer); executionSignal.removeEventListener('abort', onAbort);
+      // A timeout or a cancel stays reported as such. Otherwise the handler below logs the
+      // watcher's failure and reports the refusal or the hold, with whether the command wrote.
+      if (untilFailures.length > 0 && !timedOut && !executionSignal.aborted) throw untilFailures[0];
     }
     if (killed) {
       return { cmd: command, cwd, exit_code: null, stdout: '', stderr: timedOut ? timedOutNote(timeoutMs, wrote) : cancelledNote(wrote), success: false, timed_out: timedOut,

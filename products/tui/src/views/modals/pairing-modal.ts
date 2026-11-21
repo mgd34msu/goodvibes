@@ -100,7 +100,7 @@ export interface PairingModalDeps {
   /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
   readonly copyToClipboard?: (text: string) => boolean | void;
   /**
-   * Probe tailscale (tailscale.get) once on open. Absent dep, a null result, or
+   * Probe tailscale (tailscale.get) on each open. Absent dep, a null result, or
    * `available:false` all keep the tailscale affordance QUIET, never a nag.
    * Present + available ⇒ the surface offers the one-action serve.
    */
@@ -173,13 +173,26 @@ class PairingModalSurface implements ConfigModalSurface {
 
   onOpen(requestRender: () => void): void {
     this.requestRender = requestRender;
-    // Probe tailscale once on open; the affordance stays quiet until (and unless)
-    // this resolves to an available status. Tailscale being absent stays quiet;
-    // a probe that failed says why in one dim row.
-    if (this.deps.probeTailscale && this.tailscale === undefined) {
+    // Probe tailscale on each open, so a daemon that came up since, or a serve
+    // started or stopped elsewhere, is seen. The last known status stays on
+    // screen until the new one lands. Tailscale being absent stays quiet; a
+    // probe that failed says why in one dim row. While a serve or stop is in
+    // flight its own result decides, so the probe's answer is not applied.
+    if (this.deps.probeTailscale && !this.serving) {
       this.deps.probeTailscale()
-        .then((status) => { this.tailscale = status ?? null; this.activeServe = status?.activeServe ?? null; this.tailscaleError = null; this.requestRender(); })
-        .catch((error: unknown) => { this.tailscale = null; this.tailscaleError = summarizeError(error); this.requestRender(); });
+        .then((status) => {
+          if (this.serving) return;
+          this.tailscale = status ?? null;
+          this.activeServe = status?.activeServe ?? null;
+          this.tailscaleError = null;
+          this.requestRender();
+        })
+        .catch((error: unknown) => {
+          if (this.serving) return;
+          // The last known status stays; the row says this check did not confirm it.
+          this.tailscaleError = summarizeError(error);
+          this.requestRender();
+        });
     }
   }
 

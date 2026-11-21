@@ -53,7 +53,11 @@ export interface ReviewerReadinessChecklist {
     readonly hiddenJudgments: number;
     /** Revealed judgments, whether or not a route decision was recorded for them. */
     readonly revealedJudgments: number;
-    /** Revealed judgments that still lack an apply or leave-unchanged route decision. */
+    /**
+     * Judgments, blind or revealed, that still lack an apply or leave-unchanged
+     * route decision (apply reads the winner from the judged comparison, so a
+     * blind one waits on the same decision).
+     */
     readonly judgmentsAwaitingRouteDecision: number;
     readonly handoffsMissingRelatedArtifacts: number;
   };

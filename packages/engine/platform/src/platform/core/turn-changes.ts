@@ -16,19 +16,24 @@ export class TurnChangeRecord {
   #unknown = 0;
 
   /**
-   * Record a settled batch: a successful call to a tool that writes files adds
-   * the paths it names; a command counts as run; a call that reaches another
-   * service with an effect there (state and network: a message, an MCP call)
-   * counts as sent; a call to a tool that declares nothing counts as unknown.
-   * Reads, fetches and GoodVibes' own bookkeeping (plans, tasks) change nothing
-   * the person has to look at.
+   * Record a settled batch. A call the gate let through counts whether or not
+   * it succeeded, since a failed, timed-out or cancelled one may have changed
+   * things before it stopped; only a call that never reached its tool is left
+   * out (refused, held or skipped at the gate, arguments that could not be
+   * read, no such tool, or an edit its matcher refused before writing).
+   * A call to a tool that writes files adds the paths it names; a command
+   * counts as run; a call that reaches another service with an effect there
+   * (state and network: a message, an MCP call) counts as sent when it
+   * succeeded and as unknown when it failed; a call to a tool that declares
+   * nothing counts as unknown. Reads, fetches and GoodVibes' own bookkeeping
+   * (plans, tasks) change nothing the person has to look at.
    */
   note(calls: readonly ToolCall[], results: readonly ToolResult[], definitionOf: (name: string) => ToolDefinition | undefined): void {
     for (const result of results) {
-      if (!result.success) continue;
       const call = calls.find((candidate) => candidate.id === result.callId);
       if (!call) continue;
       const definition = definitionOf(call.name);
+      if (!result.success && neverRan(result, call, definition)) continue;
       const effects = definition?.sideEffects;
       if (effects === undefined) { this.#unknown += 1; continue; }
       if (effects.includes('exec')) { this.#commands += 1; continue; }
@@ -38,13 +43,27 @@ export class TurnChangeRecord {
         else this.#unknown += 1;
         continue;
       }
-      if (effects.includes('network') && effects.includes('state')) this.#messages += 1;
+      if (effects.includes('network') && effects.includes('state')) {
+        if (result.success) this.#messages += 1;
+        else this.#unknown += 1;
+      }
     }
   }
 
   get changes(): TurnChanges {
     return { files: [...this.#files], commands: this.#commands, messages: this.#messages, unknown: this.#unknown };
   }
+}
+
+const NOT_RUN_DECISIONS: ReadonlySet<string> = new Set(['refused', 'queued-for-owner', 'skipped']);
+const NOT_WRITTEN_EDITS: ReadonlySet<string> = new Set(['not_found', 'ambiguous', 'conflict']);
+
+/** Whether a failed call never reached its tool, so it cannot have changed anything. */
+function neverRan(result: ToolResult, call: ToolCall, definition: ToolDefinition | undefined): boolean {
+  if (definition === undefined || call.argumentError !== undefined) return true;
+  if (result.decision !== undefined && NOT_RUN_DECISIONS.has(result.decision.state)) return true;
+  const edit = result.hostEvidence?.editStatus;
+  return edit !== undefined && NOT_WRITTEN_EDITS.has(edit);
 }
 
 /**

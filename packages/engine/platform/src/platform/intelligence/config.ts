@@ -47,6 +47,9 @@ export type IntelligenceRoots = Pick<ShellPathService, 'workingDirectory' | 'hom
 /** Fields a project languages file may not set: each names a program to run. */
 const PROGRAM_FIELDS = ['lsp', 'formatter', 'linter'] as const;
 
+/** The grammars built into the product; a language file's `treeSitter` must name one of them. */
+const EMBEDDED_GRAMMARS = new Set(LANGUAGES.flatMap((entry) => (entry.grammar ? [entry.grammar] : [])));
+
 // ---------------------------------------------------------------------------
 // Default configurations
 // ---------------------------------------------------------------------------
@@ -134,6 +137,16 @@ function readConfigFile(filePath: string): LanguageConfig | null {
     return null;
   }
   const config = parsed as LanguageConfig;
+  if (config.treeSitter !== undefined && !EMBEDDED_GRAMMARS.has(config.treeSitter)) {
+    // The rest of the file still loads; the language is parsed with its
+    // built-in grammar, if it has one.
+    logger.warn('config: ignoring a treeSitter grammar that is not built in', {
+      filePath,
+      treeSitter: config.treeSitter,
+      embeddedGrammars: [...EMBEDDED_GRAMMARS].join(', '),
+    });
+    delete config.treeSitter;
+  }
   if (config.extensions) {
     config.extensions = config.extensions.map((ext) => ext.replace(/^\./, '').trim().toLowerCase());
   }
@@ -223,8 +236,6 @@ export interface ResolvedLanguages {
   /** The formatter or linter a language file set for the language. */
   tool(langId: string, kind: 'formatter' | 'linter'): CommandSpec | undefined;
 }
-
-const EMBEDDED_GRAMMARS = new Set(LANGUAGES.flatMap((entry) => (entry.grammar ? [entry.grammar] : [])));
 
 /** Build the language facts from loaded configs (no file reads). */
 export function resolveLanguagesFrom(configs: ReadonlyMap<string, LanguageConfig>): ResolvedLanguages {

@@ -1,25 +1,28 @@
 import { RefusalError, refusal } from '@goodvibes/engine/errors';
 
 /**
- * Who may mark a persona, skill, skill bundle or routine reviewed, and who may
- * enable one that is not. "Reviewed" is the one flag that lets the record's
- * text into every later prompt, so it is the owner's decision: a model may
- * propose (create, edit, disable) but marking reviewed, and enabling a record
- * nobody reviewed, count only from the owner's own keystrokes. Every route that
- * reaches these registry methods (slash commands, the registry tool, the
- * workspace actions, the VIBE.md import) calls the same two checks with the
- * actor it is acting for, so the answer does not depend on the route.
+ * Who may mark a memory record, note, persona, skill, skill bundle or routine
+ * reviewed, and who may enable one that is not. "Reviewed" is the flag that
+ * lets the record's text into later prompts as something the owner checked, so
+ * it is the owner's decision: a model may propose (create, edit, disable, mark
+ * stale) but marking reviewed, and enabling a record nobody reviewed, count
+ * only from the owner's own keystrokes. Every route that reaches these registry
+ * methods (slash commands, the registry tool, the workspace actions, the
+ * VIBE.md import) calls the same two checks with the actor it is acting for, so
+ * the answer does not depend on the route.
  */
 export type RegistryActor = 'owner' | 'model';
 
-export type ReviewedKind = 'persona' | 'skill' | 'skill bundle' | 'routine';
+export type ReviewedKind = 'memory' | 'note' | 'persona' | 'skill' | 'skill bundle' | 'routine';
 
 /** The command the owner types to review a record of each kind. */
-const OWNER_REVIEW_COMMAND: Readonly<Record<ReviewedKind, string>> = {
-  persona: '/personas review',
-  skill: '/my-skills review',
-  'skill bundle': '/my-skills bundle-review',
-  routine: '/routines review',
+const OWNER_REVIEW_COMMAND: Readonly<Record<ReviewedKind, (id: string) => string>> = {
+  memory: (id) => `/memory review ${id} reviewed`,
+  note: (id) => `/notes review ${id}`,
+  persona: (id) => `/personas review ${id}`,
+  skill: (id) => `/my-skills review ${id}`,
+  'skill bundle': (id) => `/my-skills bundle-review ${id}`,
+  routine: (id) => `/routines review ${id}`,
 };
 
 function ownerOnly(kind: ReviewedKind, id: string, reason: string): RefusalError {
@@ -27,7 +30,7 @@ function ownerOnly(kind: ReviewedKind, id: string, reason: string): RefusalError
     code: 'OWNER_REVIEW_REQUIRED',
     state: `Agent ${kind} ${id} is unchanged`,
     reason,
-    next: [`Ask the owner to run ${OWNER_REVIEW_COMMAND[kind]} ${id}`],
+    next: [`Ask the owner to run ${OWNER_REVIEW_COMMAND[kind](id)}`],
     status: 403,
   }));
 }

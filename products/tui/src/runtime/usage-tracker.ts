@@ -211,7 +211,10 @@ export class UsageTracker {
     });
     this.prevCumulative = cu;
     if (this.turnsList.length > MAX_TURNS) this.turnsList.shift();
-    this.recordCostPoint();
+    // Each model response already added its point; a point here only for spend
+    // that landed after the last response (helper calls), never a zero.
+    if (this.sessionCost().usd > this.lastSessionCost) this.recordCostPoint();
+    else this.emit();
   }
 
   private recordCostPoint(): void {

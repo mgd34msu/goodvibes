@@ -194,7 +194,7 @@ export class AutomationDeliveryManager {
   }
 
   private isTargetEnabled(target: AutomationDeliveryTarget): boolean {
-    return isSurfaceFeatureGateEnabled(this.featureFlags, target.surfaceKind ?? (target.kind === 'link' ? 'web' : 'webhook'));
+    return isSurfaceFeatureGateEnabled(this.featureFlags, toDeliverySurfaceKind(target));
   }
 
   setControlPlaneGateway(gateway: import('../control-plane/gateway.js').ControlPlaneGateway | null): void {

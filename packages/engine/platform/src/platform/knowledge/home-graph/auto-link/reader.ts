@@ -29,7 +29,7 @@ export type AutoLinkRelation = 'has_receipt' | 'has_warranty' | 'has_manual' | '
 export type AutoLinkReading =
   | { readonly status: 'linked'; readonly reference: string; readonly relation: AutoLinkRelation; readonly provenance: AutoLinkProvenance }
   | { readonly status: 'none' | 'ambiguous' }
-  | { readonly status: 'unread'; readonly reason: 'uncertain' | 'unavailable' | 'budget' | 'deadline' | 'off' };
+  | { readonly status: 'unread'; readonly reason: 'uncertain' | 'unavailable' | 'budget' | 'deadline' | 'off' | 'stale' };
 export interface AutoLinkProvenance { readonly judgmentDecisionIds: readonly string[]; readonly requestedModel: string; readonly model: string }
 
 /**
@@ -38,13 +38,17 @@ export interface AutoLinkProvenance { readonly judgmentDecisionIds: readonly str
  */
 export function createHomeGraphAutoLinkReader() {
   let installation: ReturnType<typeof captureJudgmentPort> | undefined;
+  // Decision models fell back to classic operation: every reading is off, the same as a fallback during a reading.
+  let off = false;
   try { installation = captureJudgmentPort('engine.knowledge.homegraph-document-subject', { prepareResultCapture: prepareJudgmentResult }); } catch (error) {
-    if (activateClassicFallback(error) || !(error instanceof JudgmentPortMissingError)) throw error;
+    if (activateClassicFallback(error)) off = true;
+    else if (!(error instanceof JudgmentPortMissingError)) throw error;
   }
   return { available: installation !== undefined, async read(input: AutoLinkReadingInput, options: {
     readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void;
   }): Promise<AutoLinkReading> {
     if (!input.candidates.length) return { status: 'none' };
+    if (off) return { status: 'unread', reason: 'off' };
     if (!installation) return { status: 'unread', reason: 'unavailable' };
     const candidates = input.candidates.slice(0, MAX_AUTO_LINK_CANDIDATES);
     const state = toJson({ source: input.source, candidates: candidates.map(({ subject, entities }) => ({ subject, entities })) }) as Record<string, JsonValue>;

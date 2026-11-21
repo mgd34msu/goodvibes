@@ -18,6 +18,7 @@
  * null the same way when there is no live registration to mint against.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
 import {
   arraySchema,
   NUMBER_SCHEMA,
@@ -59,6 +60,12 @@ const RELAY_CODE_SCHEMA = objectSchema({
   lastSeenAt: NUMBER_SCHEMA,
 }, ['id', 'name', 'createdAt']);
 
+const RELAY_CODE_LIMIT: ContractErrorCode = { code: 'RELAY_CODE_LIMIT', status: 409, meaning: 'The daemon already holds 64 relay codes, so no new device can pair; revoke the ones no device uses (relay.codes.list, relay.codes.revoke), then pair again.' };
+const RELAY_CODE_NOT_FOUND: ContractErrorCode = { code: 'RELAY_CODE_NOT_FOUND', status: 404, meaning: 'No relay code has that id; list the codes with relay.codes.list and revoke an id it shows.' };
+const AUTHORITY_RECORD_UNAVAILABLE: ContractErrorCode = { code: 'AUTHORITY_RECORD_UNAVAILABLE', status: 503, meaning: 'The authority record could not be read, so no relay code was issued and nothing was paired; check the record file, then pair again.' };
+const RELAY_CODE_REVOKE_FAILED: ContractErrorCode = { code: 'RELAY_CODE_REVOKE_FAILED', status: 503, meaning: 'The revocation could not be written to the authority record, so nothing was revoked and the device keeps relay access; try again.' };
+const RELAY_CODE_REVOKE_NOT_SAVED: ContractErrorCode = { code: 'RELAY_CODE_REVOKE_NOT_SAVED', status: 500, meaning: 'The code is revoked and refused, and its connections were closed, but it could not be removed from the relay codes file; revoke the same id again to retry the removal.' };
+
 export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'relay.reachability.get',
@@ -92,6 +99,7 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
       codeId: STRING_SCHEMA,
       codeName: STRING_SCHEMA,
     }, ['pairing', 'status']),
+    errorCodes: [RELAY_CODE_LIMIT, AUTHORITY_RECORD_UNAVAILABLE],
   }),
   methodDescriptor({
     id: 'relay.codes.list',
@@ -114,5 +122,6 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
     transport: ['ws'],
     inputSchema: objectSchema({ id: STRING_SCHEMA }, ['id']),
     outputSchema: objectSchema({ id: STRING_SCHEMA, revoked: { type: 'boolean' }, closedConnections: NUMBER_SCHEMA }, ['id', 'revoked', 'closedConnections']),
+    errorCodes: [RELAY_CODE_NOT_FOUND, RELAY_CODE_REVOKE_FAILED, RELAY_CODE_REVOKE_NOT_SAVED],
   }),
 ];

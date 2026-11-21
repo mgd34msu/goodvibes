@@ -5,7 +5,7 @@ import { writeCrashSnapshotIfChanged } from '../runtime/recovery-autosave.ts';
 import { markConversationDurable } from './session-resume-core.ts';
 import { buildCompactionReceiptBlock } from './compaction-receipt.ts';
 import { workstreamFailureNotification } from './workstream-notification.ts';
-import { captureTurnAnchor, persistTurnAnchors, recordTurnAnchor } from '@goodvibes/engine/platform/platform/rewind';
+import { recordCompletedTurnAnchor } from '@goodvibes/engine/terminal-shell/turn-anchor-recording';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { HookDispatcher, HookPhase, HookCategory, HookEventPath } from '@goodvibes/engine/platform/platform/hooks';
@@ -432,15 +432,17 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
       // the live conversation message count and a key of the turn's last
       // message, so a later message-anchored /checkpoint rewind cuts the conversation at
       // exactly this boundary, or says the turn was compacted away, never at an
-      // unrelated message (see platform/rewind/turn-anchors.ts).
-      try {
-        recordTurnAnchor(runtime.sessionId, captureTurnAnchor(evt.turnId, conversation, _clock()));
-        // Mirror the anchors to the session's sidecar so message-anchored /checkpoint rewind
-        // survives a resume (the in-memory registry alone is process-local).
-        persistTurnAnchors(runtime.sessionId, surface);
-      } catch {
-        /* best-effort; a rewind-anchor miss must never break the turn */
-      }
+      // unrelated message (see platform/rewind/turn-anchors.ts). The anchors are
+      // mirrored to the session's sidecar so it survives a resume; a failure
+      // never breaks the turn and is said once per failure streak.
+      recordCompletedTurnAnchor({
+        sessionId: runtime.sessionId,
+        turnId: evt.turnId,
+        conversation,
+        surface,
+        at: _clock(),
+        warn: (message) => systemMessageRouter.high(`[Warning] ${message}`),
+      });
       // Auto-compaction is owned by the platform Orchestrator's post-turn maintenance
       // (handlePostTurnContextMaintenance), which runs on every turn against the
       // resolved context window (getContextWindowForModel) via the platform's

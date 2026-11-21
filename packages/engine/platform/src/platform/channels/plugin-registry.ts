@@ -3,6 +3,7 @@ import type { SharedApprovalRecord } from '../control-plane/index.js';
 import { ingressOutcome, type ChannelIngressAlarm } from './ingress-alarm.js';
 import { outcomeFromLegacyValue, unknownChannelAction, type ChannelActionOutcome } from './action-outcome.js';
 import { summarizeError } from '../utils/error-display.js';
+import { conversationKindOfDirectoryEntry, pickDirectoryEntry } from './directory-match.js';
 import type { Tool } from '../types/tools.js';
 import type {
   ChannelAdapterDescriptor,
@@ -117,6 +118,9 @@ export class ChannelPluginRegistry {
 
   register(plugin: ChannelPlugin): void {
     const existingById = this.plugins.get(plugin.id);
+    // Outcome handlers belong to the plugin object they were set for: a
+    // different plugin under the same id runs its own tools and actions.
+    if (existingById && existingById !== plugin) this.outcomeHandlers.delete(plugin.id);
     if (existingById?.webhookPath) {
       this.pluginsByPath.delete(existingById.webhookPath);
     }
@@ -126,6 +130,7 @@ export class ChannelPluginRegistry {
     const existingBySurface = this.pluginsBySurface.get(plugin.surface);
     if (existingBySurface && existingBySurface.id !== plugin.id) {
       this.plugins.delete(existingBySurface.id);
+      this.outcomeHandlers.delete(existingBySurface.id);
       if (existingBySurface.webhookPath) this.pluginsByPath.delete(existingBySurface.webhookPath);
     }
     this.plugins.set(plugin.id, plugin);
@@ -141,6 +146,7 @@ export class ChannelPluginRegistry {
     const plugin = this.plugins.get(pluginId);
     if (!plugin || (expected !== undefined && plugin !== expected)) return false;
     this.plugins.delete(pluginId);
+    this.outcomeHandlers.delete(pluginId);
     if (this.pluginsBySurface.get(plugin.surface)?.id === pluginId) {
       this.pluginsBySurface.delete(plugin.surface);
     }
@@ -552,18 +558,13 @@ export class ChannelPluginRegistry {
       ...(options.preferredKind === 'group' || options.preferredKind === 'channel' ? { scope: 'groups' as const } : {}),
       ...(options.threadId ? { scope: 'threads' as const } : {}),
     });
-    // A directory search is a fuzzy match; a send goes only to an entry the input names exactly.
-    const entry = directory.find((candidate) => directoryEntryNamedBy(candidate, input));
+    // A directory search is a fuzzy match; a send goes only to an entry the
+    // input names exactly, and a name several conversations share names none.
+    const picked = pickDirectoryEntry(directory, input);
+    const ambiguous = picked !== null && 'ambiguous' in picked ? picked.ambiguous : undefined;
+    const entry = picked !== null && 'entry' in picked ? picked.entry : undefined;
     if (entry) {
-      const kind = entry.kind === 'user' || entry.kind === 'self' || entry.kind === 'member'
-        ? 'direct'
-        : entry.kind === 'thread'
-          ? 'thread'
-          : entry.kind === 'channel'
-            ? 'channel'
-            : entry.kind === 'group'
-              ? 'group'
-              : 'service';
+      const kind = conversationKindOfDirectoryEntry(entry);
       const target: ChannelResolvedTarget = {
         surface,
         input: options.input,
@@ -599,7 +600,7 @@ export class ChannelPluginRegistry {
         threadId: options.threadId,
         sessionTarget: `channel:${surface}:${input.toLowerCase()}`,
         source: 'miss',
-        metadata: { fallback: true },
+        metadata: { fallback: true, ...(ambiguous ? { ambiguous } : {}) },
       };
     }
     return {
@@ -612,7 +613,7 @@ export class ChannelPluginRegistry {
       threadId: options.threadId,
       sessionTarget: `channel:${surface}:${input.toLowerCase()}`,
       source: 'synthetic',
-      metadata: { fallback: true },
+      metadata: { fallback: true, ...(ambiguous ? { ambiguous } : {}) },
     };
   }
 
@@ -682,10 +683,4 @@ export class ChannelPluginRegistry {
     }
     return [];
   }
-}
-
-function directoryEntryNamedBy(entry: ChannelDirectoryEntry, input: string): boolean {
-  const wanted = input.replace(/^[@#]/, '').toLowerCase();
-  const names = [entry.id, entry.handle, entry.label, entry.groupId, entry.threadId, ...(entry.aliases ?? [])];
-  return names.some((name) => name !== undefined && name.replace(/^[@#]/, '').toLowerCase() === wanted);
 }

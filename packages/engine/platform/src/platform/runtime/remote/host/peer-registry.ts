@@ -38,7 +38,11 @@ export interface SshBackendConfig {
 export interface CloudTerminalBackendConfig {
   provider: CloudProvider;
   projectId?: string;
-  /** goodvibes://secrets/ reference to the provider credential. */
+  /**
+   * goodvibes://secrets/ reference to the provider credential: for gcp a
+   * credential file, for aws a shared credentials file, for azure a service
+   * principal (see {@link parseAzureServicePrincipalCredential}).
+   */
   credentialRef: string;
   /** Optional zone/region/location passed to the provider CLI. */
   location?: string;
@@ -175,6 +179,41 @@ function assertDockerHostSafe(value: string | undefined, field: string): void {
       `Field '${field}' points at a TLS Docker daemon; pass a goodvibes://secrets/ reference instead of a raw URL.`,
     );
   }
+}
+
+/** The service principal an azure cloud-terminal backend signs in as. */
+export interface AzureServicePrincipalCredential {
+  readonly clientId: string;
+  readonly tenantId: string;
+  /** PEM holding the principal's certificate and its private key. */
+  readonly certificate: string;
+}
+
+/** The sentence naming the stored shape an azure credential must have. */
+export const AZURE_CREDENTIAL_SHAPE = 'an azure credential is a JSON object {"clientId", "tenantId", "certificate"}: the service principal\'s application id, its tenant id, and a PEM holding its certificate and private key';
+
+/**
+ * Read a stored azure credential as a service principal, or throw a
+ * validation error naming the shape it must have. The Azure CLI is signed in
+ * with it into a private config directory for each dispatch, so the daemon
+ * user's own `az login` is never used.
+ */
+export function parseAzureServicePrincipalCredential(value: string): AzureServicePrincipalCredential {
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); } catch { parsed = null; }
+  const field = (name: string): string | undefined => {
+    const item = isPlainObject(parsed) ? parsed[name] : undefined;
+    return typeof item === 'string' && item.trim().length > 0 ? item.trim() : undefined;
+  };
+  const clientId = field('clientId');
+  const tenantId = field('tenantId');
+  const certificate = field('certificate');
+  if (clientId === undefined || tenantId === undefined || certificate === undefined
+    || clientId.startsWith('-') || tenantId.startsWith('-')
+    || !certificate.includes('-----BEGIN') || !/PRIVATE KEY-----/.test(certificate)) {
+    throw new PeerRegistryValidationError(`The stored credential does not have the azure shape: ${AZURE_CREDENTIAL_SHAPE}.`);
+  }
+  return { clientId, tenantId, certificate: `${certificate}\n` };
 }
 
 /** Normalize + validate raw backendConfig into a typed, ref-only BackendConfig. */

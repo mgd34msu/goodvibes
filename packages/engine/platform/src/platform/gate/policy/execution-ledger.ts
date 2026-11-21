@@ -151,15 +151,15 @@ interface ToolFacts {
   readonly commands?: readonly ToolArgumentPath[] | undefined;
 }
 
-/** The engine's own tools, facts of their definitions. */
-const ENGINE_TOOL_ROUTES: Readonly<Record<string, ToolFacts>> = {
-  read: { kind: 'read', targets: ['files[].path'] }, find: { kind: 'read' }, inspect: { kind: 'read', targets: ['file', 'projectRoot'] },
-  repo_map: { kind: 'read' }, context_accounting: { kind: 'read' }, goodvibes_context: { kind: 'read' }, analyze: { kind: 'read' },
-  write: { kind: 'write', targets: ['files[].path'] }, edit: { kind: 'write', targets: ['edits[].path'] }, goodvibes_settings: { kind: 'write', targets: ['key'] },
-  exec: { kind: 'shell' },
-  fetch: { kind: 'network', targets: ['urls[].url', 'url'] }, web_search: { kind: 'network', targets: ['query'] },
-  agent: { kind: 'delegation', targets: ['task'] }, delegate: { kind: 'delegation', targets: ['task'] }, workflow: { kind: 'delegation', targets: ['workflowId'] },
-};
+/** The engine's own tools, facts of their definitions. A map, so only these names are code-known (`constructor` is not). */
+const ENGINE_TOOL_ROUTES: ReadonlyMap<string, ToolFacts> = new Map<string, ToolFacts>([
+  ['read', { kind: 'read', targets: ['files[].path'] }], ['find', { kind: 'read' }], ['inspect', { kind: 'read', targets: ['file', 'projectRoot'] }],
+  ['repo_map', { kind: 'read' }], ['context_accounting', { kind: 'read' }], ['goodvibes_context', { kind: 'read' }], ['analyze', { kind: 'read' }],
+  ['write', { kind: 'write', targets: ['files[].path'] }], ['edit', { kind: 'write', targets: ['edits[].path'] }], ['goodvibes_settings', { kind: 'write', targets: ['key'] }],
+  ['exec', { kind: 'shell' }],
+  ['fetch', { kind: 'network', targets: ['urls[].url', 'url'] }], ['web_search', { kind: 'network', targets: ['query'] }],
+  ['agent', { kind: 'delegation', targets: ['task'] }], ['delegate', { kind: 'delegation', targets: ['task'] }], ['workflow', { kind: 'delegation', targets: ['workflowId'] }],
+]);
 
 /**
  * A registered tool's facts from its declared effects or category; undefined
@@ -433,7 +433,7 @@ export class AgentExecutionLedger {
   }
 
   private toolFacts(tool: string): ToolFacts | undefined {
-    const known = ENGINE_TOOL_ROUTES[tool];
+    const known = ENGINE_TOOL_ROUTES.get(tool);
     if (known) return known;
     try { return definitionFacts(this.options.describeTool?.(tool)); }
     catch { return undefined; }

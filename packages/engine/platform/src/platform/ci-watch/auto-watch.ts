@@ -20,6 +20,7 @@ import type { ExternalOperationSource } from '../permissions/external-request.js
  * The scripted path (/ci watch → ci.watches.create) is untouched.
  */
 import { execFile } from 'node:child_process';
+import { isAbsolute, join, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { CiWatchSubscription } from './types.js';
@@ -33,6 +34,12 @@ export interface DetectedCiPush {
   readonly kind: 'push' | 'pr';
   /** The pushed branch when the command names one (else the current branch is resolved). */
   readonly branch?: string | undefined;
+  /**
+   * The repository directory the push ran in, from `git -C <dir>` and a `cd <dir>`
+   * earlier on the line: absolute, or relative to the command's working directory.
+   * Undefined when the push ran in the working directory itself.
+   */
+  readonly dir?: string | undefined;
 }
 
 /** Push flags after which there is no branch worth a CI watch: a delete, tags only, or a dry run that pushes nothing. */
@@ -43,34 +50,79 @@ const PUSH_FLAG_WITH_VALUE = new Set(['-o', '--push-option', '--receive-pack', '
 /** git's global options (before the subcommand) that take their value as the next word. */
 const GIT_GLOBAL_WITH_VALUE = new Set(['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--super-prefix']);
 
-/** The index of git's subcommand: the first word after `git` that is not a global option or its value. */
-function gitSubcommandIndex(tokens: readonly string[]): number {
+/** git's global options that move the repository somewhere this parser does not follow. */
+const GIT_GLOBAL_ELSEWHERE = /^--(?:git-dir|work-tree)(?:=|$)/;
+
+/** A directory word read as written: no expansion, quoting or substitution the shell would change. */
+function literalDirectory(word: string | undefined): string | null {
+  if (!word) return null;
+  const unquoted = /^'[^']*'$|^"[^"$`\\]*"$/.test(word) ? word.slice(1, -1) : word;
+  return unquoted && !unquoted.startsWith('-') && /^[A-Za-z0-9._/+@:,=-]+$/.test(unquoted) ? unquoted : null;
+}
+
+/** `next` taken from `dir`, as a shell or `git -C` would. */
+function enterDirectory(dir: string | undefined, next: string): string {
+  return dir === undefined || isAbsolute(next) ? next : join(dir, next);
+}
+
+/**
+ * Where git's subcommand is (the first word after `git` that is not a global
+ * option or its value) and the directory the `-C` options lead to, each
+ * relative to the one before; null when the repository is moved by
+ * `--git-dir`/`--work-tree` or a `-C` this parser cannot read.
+ */
+function gitSubcommand(tokens: readonly string[], dir: string | undefined): { readonly index: number; readonly dir: string | undefined } | null {
+  let current = dir;
   for (let i = 1; i < tokens.length; i++) {
     const token = tokens[i]!;
-    if (!token.startsWith('-')) return i;
+    if (!token.startsWith('-')) return { index: i, dir: current };
+    if (GIT_GLOBAL_ELSEWHERE.test(token)) return null;
+    if (token === '-C') {
+      const target = literalDirectory(tokens[i + 1]);
+      if (target === null) return null;
+      current = enterDirectory(current, target);
+    }
     if (GIT_GLOBAL_WITH_VALUE.has(token)) i += 1;
   }
-  return -1;
+  return { index: -1, dir: current };
 }
 
 /**
  * Detect a CI-relevant push in one exec command line: `git push ...` or
  * `gh pr create ...`. Only simple top-level forms are matched, a compound
- * line still matches when a segment starts with the command.
+ * line still matches when a segment starts with the command. The push's
+ * directory follows `git -C` and a `cd` earlier on the line; a push whose
+ * directory cannot be read literally detects nothing, so no watch is minted
+ * for a guessed repository.
  */
 export function detectCiPushInCommand(command: string): DetectedCiPush | null {
+  let dir: string | undefined;
+  let dirUnknown = false;
   // Split compound shells and pipelines; each segment is inspected alone.
   for (const segment of command.split(/&&|\|\||[;|\n]/)) {
     const tokens = segment.trim().split(/\s+/).filter(Boolean);
     if (tokens.length === 0) continue;
+    if (tokens[0] === 'cd' || tokens[0] === 'pushd') {
+      const target = tokens.length === 2 ? literalDirectory(tokens[1]) : null;
+      if (target === null) dirUnknown = true;
+      else if (isAbsolute(target)) { dir = target; dirUnknown = false; }
+      else dir = enterDirectory(dir, target);
+      continue;
+    }
+    // A subshell's directory change is not followed.
+    if (/^\(+(?:cd|pushd)$/.test(tokens[0]!)) { dirUnknown = true; continue; }
     if (tokens[0] === 'gh' && tokens[1] === 'pr' && tokens[2] === 'create') {
-      return { kind: 'pr' };
+      return dirUnknown ? null : { kind: 'pr', ...(dir !== undefined ? { dir } : {}) };
     }
     if (tokens[0] !== 'git') continue;
     // `push` must be git's subcommand, not a word later on the line
     // (`git stash push`, `git log --grep push`).
-    const pushIndex = gitSubcommandIndex(tokens);
-    if (pushIndex === -1 || tokens[pushIndex] !== 'push') continue;
+    const subcommand = gitSubcommand(tokens, dir);
+    if (subcommand === null || subcommand.index === -1 || tokens[subcommand.index] !== 'push') {
+      if (subcommand === null && tokens.includes('push')) return null;
+      continue;
+    }
+    const pushIndex = subcommand.index;
     // Positional args after `push`, skipping flags (and their values where known):
     // the first positional is the remote, the second the refspec/branch.
     const positionals: string[] = [];
@@ -88,7 +140,8 @@ export function detectCiPushInCommand(command: string): DetectedCiPush | null {
     if (skipped) continue;
     const branch = branchFromRefspec(positionals[1]);
     if (branch === null) continue;
-    return { kind: 'push', branch };
+    if (dirUnknown) return null;
+    return { kind: 'push', branch, ...(subcommand.dir !== undefined ? { dir: subcommand.dir } : {}) };
   }
   return null;
 }
@@ -175,9 +228,11 @@ export class CiWatchAutoMinter {
     for (const command of execCommandsFromArgs(args)) {
       const detected = detectCiPushInCommand(command);
       if (!detected) continue;
-      const cwd = typeof args.working_dir === 'string' && args.working_dir.trim()
+      const execCwd = typeof args.working_dir === 'string' && args.working_dir.trim()
         ? args.working_dir
         : this.deps.workingDirectory;
+      // The push's own directory (`git -C`, a `cd` before it) names the repository, not the exec's.
+      const cwd = detected.dir !== undefined ? resolve(execCwd, detected.dir) : execCwd;
       try {
         void this.mint(cwd, detected, captureCiWatchOwner(currentExternalOperationSource())).catch((error) => {
           logger.warn('[ci-watch] auto-mint failed', { command, error: summarizeError(error) });

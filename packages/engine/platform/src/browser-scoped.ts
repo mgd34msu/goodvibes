@@ -28,6 +28,7 @@ import type {
 } from './auth.js';
 import {
   createGoodVibesAuthClient,
+  createMemoryTokenStore,
 } from './auth.js';
 import type { PlatformObserver } from './observer/index.js';
 import { parseDaemonOrigin } from './platform/config/control-plane-base-url.js';
@@ -80,6 +81,8 @@ type EventStreamOpenInput = {
   readonly pathOrUrl: string;
   readonly handlers: ServerSentEventHandlers;
   readonly options?: ScopedEventStreamOptions | undefined;
+  /** The id the stream resumes after; the realtime feed carries it across a reopen. */
+  readonly lastEventId?: string | null | undefined;
 };
 
 export interface ScopedInvokeOptions {
@@ -185,20 +188,20 @@ function buildRouteError(methodId: string): ContractError {
 function createScopedOperatorClient<TMethodId extends OperatorTypedMethodId>(
   routes: Record<TMethodId, BrowserScopedRouteDefinition>,
   options: ScopedBrowserPlatformOptions,
+  tokenStore: GoodVibesTokenStore | null,
 ): {
   readonly operator: ScopedOperatorClient<TMethodId>;
   readonly requestJson: <T>(pathOrUrl: string, requestOptions?: Parameters<ReturnType<typeof createHttpTransport>['requestJson']>[1]) => Promise<T>;
   readonly openEventStream: (input: EventStreamOpenInput) => Promise<() => void>;
-  readonly getAuthToken: () => Promise<string | null>;
   readonly use: (middleware: TransportMiddleware) => void;
 } {
   const baseUrl = resolveBrowserBaseUrl(options.baseUrl);
   const fetchImpl = resolveFetch(options.fetch);
   const transport = createHttpTransport({
     baseUrl,
-    authToken: options.authToken ?? null,
-    getAuthToken: options.tokenStore
-      ? () => options.tokenStore!.getToken()
+    // One token source: the store platform.auth reads and writes, or the caller's resolver.
+    getAuthToken: tokenStore
+      ? () => tokenStore.getToken()
       : options.getAuthToken,
     fetch: fetchImpl,
     headers: options.headers,
@@ -241,7 +244,7 @@ function createScopedOperatorClient<TMethodId extends OperatorTypedMethodId>(
   return {
     operator,
     requestJson: (pathOrUrl, requestOptions) => transport.requestJson(pathOrUrl, requestOptions),
-    openEventStream: async ({ pathOrUrl, handlers, options: streamOptions = {} }) => {
+    openEventStream: async ({ pathOrUrl, handlers, options: streamOptions = {}, lastEventId }) => {
       const url = pathOrUrl.startsWith('http://') || pathOrUrl.startsWith('https://')
         ? pathOrUrl
         : buildUrl(baseUrl, pathOrUrl);
@@ -257,6 +260,7 @@ function createScopedOperatorClient<TMethodId extends OperatorTypedMethodId>(
         signal: streamOptions.signal,
         headers: streamOptions.headers,
         reconnect: streamOptions.reconnect,
+        lastEventId: lastEventId ?? null,
         // The bearer is released only for this daemon's origin (daemon-target.ts).
         getAuthToken: async () => {
           const token = await transport.getAuthToken();
@@ -264,7 +268,6 @@ function createScopedOperatorClient<TMethodId extends OperatorTypedMethodId>(
         },
       });
     },
-    getAuthToken: () => transport.getAuthToken(),
     use: (middleware) => transport.use(middleware),
   };
 }
@@ -325,13 +328,14 @@ function buildEventUrl(baseUrl: string, domain: string): string {
 function createScopedRealtime<TDomain extends string>(
   domains: readonly TDomain[],
   options: ScopedBrowserPlatformOptions,
-  getAuthToken: () => Promise<string | null>,
+  // The scoped client's opener: the transport's headers, getHeaders, middleware,
+  // daemon-origin check and origin-bound bearer apply to every domain stream.
+  openEventStream: (input: EventStreamOpenInput) => Promise<() => void>,
 ): { viaSse(options?: ScopedRealtimeSubscriptionOptions): ScopedRuntimeEvents<TDomain> } {
   return {
     viaSse(subscriptionOptions?: ScopedRealtimeSubscriptionOptions): ScopedRuntimeEvents<TDomain> {
       const callerSignal = subscriptionOptions?.signal;
       const baseUrl = resolveBrowserBaseUrl(options.baseUrl);
-      const fetchImpl = resolveFetch(options.fetch);
       const feeds = new Map<TDomain, ScopedRuntimeEventFeed>();
       const activeByDomain = new Map<TDomain, {
         listenersByType: Map<string, Set<Listener<ScopedRuntimeEventEnvelope>>>;
@@ -393,10 +397,9 @@ function createScopedRealtime<TDomain extends string>(
           const isCurrent = () => !active.closed
             && !own.signal.aborted
             && activeByDomain.get(domain) === active;
-          void openRawServerSentEventStream(
-            fetchImpl,
-            buildEventUrl(baseUrl, domain),
-            {
+          void openEventStream({
+            pathOrUrl: buildEventUrl(baseUrl, domain),
+            handlers: {
               onEventId: (id) => {
                 if (isCurrent()) resumePositions.set(domain, id);
               },
@@ -444,13 +447,12 @@ function createScopedRealtime<TDomain extends string>(
                   : new Error(end.complete ? 'The event stream ended.' : `The event stream ended after ${end.dropped} chunk(s) were lost.`));
               },
             },
-            {
+            options: {
               signal: own.signal,
               reconnect: options.realtime?.sseReconnect,
-              getAuthToken,
-              lastEventId: resumePositions.get(domain) ?? null,
             },
-          ).then((disconnect) => {
+            lastEventId: resumePositions.get(domain) ?? null,
+          }).then((disconnect) => {
             if (!isCurrent()) {
               disconnect();
               return;
@@ -534,10 +536,15 @@ export function createScopedBrowserPlatform<TMethodId extends OperatorTypedMetho
   domains: readonly TDomain[],
   options: ScopedBrowserPlatformOptions = {},
 ): ScopedBrowserPlatform<TMethodId, TDomain> {
-  const scoped = createScopedOperatorClient(routes, options);
+  // One token source for the transport, its streams and platform.auth: the
+  // caller's store, else the caller's resolver, else a memory store holding
+  // the static authToken (so login and setToken persist into what calls send).
+  const tokenStore = options.tokenStore
+    ?? (options.getAuthToken ? null : createMemoryTokenStore(options.authToken ?? null));
+  const scoped = createScopedOperatorClient(routes, options, tokenStore);
   const auth = createGoodVibesAuthClient(
     createAuthOperatorShim(scoped.operator) as never,
-    options.tokenStore ?? null,
+    tokenStore,
     options.getAuthToken,
     options.observer,
     undefined,
@@ -546,7 +553,7 @@ export function createScopedBrowserPlatform<TMethodId extends OperatorTypedMetho
   return {
     operator: scoped.operator,
     auth,
-    realtime: createScopedRealtime(domains, options, scoped.getAuthToken),
+    realtime: createScopedRealtime(domains, options, scoped.openEventStream),
     streams: {
       open: (pathOrUrl, handlers, streamOptions) => scoped.openEventStream({ pathOrUrl, handlers, options: streamOptions }),
     },

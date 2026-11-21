@@ -6,6 +6,7 @@ import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { isPathWithinRoot } from '../../runtime/shell-paths.js';
 import { walkDir, type WalkDirOptions } from '../../utils/walk-dir.js';
 import type { AnalyzeInput, JsonObject, DiffStatFile } from './types.js';
+import type { SecretScanFinding, SecurityScanResult } from './scan-findings.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { DEFAULT_CEILING_TOKENS, capToolText } from '../../runtime/tools/output-policy.js';
 
@@ -204,19 +205,19 @@ function summarizeAnalyzeDetails(mode: AnalyzeInput['mode'], result: Record<stri
         ...(result.unverified_count !== undefined ? { unverified_count: result.unverified_count } : {}),
       };
     case 'security': {
-      const secrets = (result.secrets as Record<string, unknown> | undefined) ?? {};
-      const env = (result.env as Record<string, unknown> | undefined) ?? {};
-      const permissions = (result.permissions as Record<string, unknown> | undefined) ?? {};
+      // The security mode's result is runSecurity's typed SecurityScanResult.
+      const security = result as SecurityScanResult;
       return {
         mode,
-        secretFindingCount: Array.isArray(secrets.findings) ? secrets.findings.length : 0,
-        envFileCount: Array.isArray(env.files_found) ? env.files_found.length : 0,
-        permissionFindingCount: Array.isArray(permissions.findings) ? permissions.findings.length : 0,
-        topSecretFindings: sampleArray<Record<string, unknown>>(secrets.findings).map((finding) => ({
-          file: finding.file ?? null,
-          line: finding.line ?? null,
-          reading: finding.reading ?? null,
+        secretFindingCount: security.secrets?.findings.length ?? 0,
+        envFileCount: security.env?.files_found.length ?? 0,
+        permissionFindingCount: security.permissions?.world_writable.length ?? 0,
+        topSecretFindings: sampleArray<SecretScanFinding>(security.secrets?.findings).map((finding) => ({
+          file: finding.file,
+          line: finding.line,
+          reading: finding.reading,
         })),
+        worldWritable: sampleArray<string>(security.permissions?.world_writable),
       };
     }
     case 'surface':

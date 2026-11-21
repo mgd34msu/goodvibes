@@ -532,7 +532,7 @@ Wildcards are supported: `Pre:tool:*` matches all pre-tool events. `/hooks contr
 
 A hook fires on the key it is listed under in `hooks.json`. A key that is not exactly `Phase:Category:Specific`, or that no hook point matches (segments are case-sensitive, so `pre:tool:exec` never fires), is not loaded: the reason is logged as a warning and shown in the hook activity list, and `goodvibes hooks validate` reports it.
 
-Tool hooks fire for every tool call: the conversation's own, and those of spawned agents, background workers and contract units. A `Pre:tool:*` hook runs before the call is admitted (in `yolo` mode it does not run). It can refuse the call (`decision: "deny"`), rewrite its arguments (`updatedInput`, which is what the permission check sees and what runs), or add a note (`additionalContext`) that the model reads with that call's result. A `Pre:tool:*` hook that fails (an error, a timeout, a non-zero exit) refuses the call and says which hook failed. `Post:tool:*`, `Fail:tool:*` and the file hooks observe: they run beside the turn, so the next call does not wait for them.
+Tool hooks fire for every tool call: the conversation's own, and those of spawned agents, background workers and contract units. A `Pre:tool:*` hook runs before the call is admitted, in every permission mode (`yolo` included). It can refuse the call (`decision: "deny"`), put it to you (`decision: "ask"`), rewrite its arguments (`updatedInput`, which is what the permission check sees and what runs), or add a note (`additionalContext`) that the model reads with that call's result. When several hooks answer, a deny outranks an ask and an ask outranks an allow, so one hook's `allow` never cancels another's `ask`. A `Pre:tool:*` hook that fails (an error, a timeout, a non-zero exit) refuses the call and says which hook failed. `Post:tool:*`, `Fail:tool:*` and the file hooks observe: they run beside the turn, so the next call does not wait for them.
 
 ### Hook types
 
@@ -594,6 +594,8 @@ Chains trigger an action only after a sequence of events occurs, with optional t
 }
 ```
 
+A step's `within` and `debounce` are a number with `ms`, `s`, `m` or `h` (`500ms`, `30s`, `5m`, `1h`); a chain with any other value is not registered, and the reason is logged. An optional step is skipped when an event for the next step arrives, and that event also ends an optional step's `debounce` wait early. A chain cannot be switched on or off: `/hooks enable` and `/hooks disable` act on hooks, and `/hooks remove` takes out a hook or a chain.
+
 A hook definition supports these properties:
 
 | Property | Meaning |
@@ -606,8 +608,8 @@ A hook definition supports these properties:
 | `model` | The LLM model for `prompt`/`agent` hooks |
 | `timeout` | Timeout in seconds (default 30; 60 for `agent` hooks) |
 | `statusMessage` | Custom status text shown while the hook runs |
-| `async` | Run in the background without blocking |
-| `once` | Run once, then auto-remove |
+| `async` | Run in the background without blocking; its answer is discarded, so it is refused under a point that waits for its hooks to deny, ask or rewrite the call (a `Pre` point): an observer belongs under a `Post` or `Fail` point |
+| `once` | Runs once per daemon or app run, then is removed; a restart or an edit to the entry arms it again |
 | `description` | Documentation text |
 | `name` | Optional name for programmatic enable/disable/remove |
 | `enabled` | Whether the hook is active (default `true`) |

@@ -485,9 +485,9 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
           approval.id + ' · ' + approval.status + ' · ' + (approval.request && approval.request.analysis ? approval.request.analysis.summary : ''),
         ]);
         appendActions(item, [
-          makeButton('Claim', { 'data-approval-action': 'claim', 'data-approval-id': approval.id }, 'secondary'),
-          makeButton('Approve', { 'data-approval-action': 'approve', 'data-approval-id': approval.id }),
-          makeButton('Deny', { 'data-approval-action': 'deny', 'data-approval-id': approval.id }, 'secondary'),
+          makeButton('Claim', { 'data-approval-action': 'claim', 'data-approval-id': approval.id, 'data-approval-revision': String(approval.revision) }, 'secondary'),
+          makeButton('Approve', { 'data-approval-action': 'approve', 'data-approval-id': approval.id, 'data-approval-revision': String(approval.revision) }),
+          makeButton('Deny', { 'data-approval-action': 'deny', 'data-approval-id': approval.id, 'data-approval-revision': String(approval.revision) }, 'secondary'),
         ]);
         els.approvals.appendChild(item);
       }
@@ -641,7 +641,12 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
         body: body ? JSON.stringify(body) : undefined,
       });
       const payload = await res.json().catch(() => ({}));
-      appendEvent(url + ' ' + JSON.stringify(payload), res.ok ? 'ok' : 'warn');
+      // A 200 that did not apply (a stale revision, a raced action) is a refusal, not a success.
+      if (res.ok && payload && payload.applied === false) {
+        appendEvent(url + ' refused: ' + (payload.refusal && payload.refusal.reason ? payload.refusal.reason : JSON.stringify(payload)), 'warn');
+      } else {
+        appendEvent(url + ' ' + JSON.stringify(payload), res.ok ? 'ok' : 'warn');
+      }
       await loadSnapshot();
       return payload;
     }
@@ -781,8 +786,9 @@ export function renderControlPlaneGatewayWebUi(authTokenHint = ''): Response {
       if (!(target instanceof HTMLElement)) return;
       const action = target.getAttribute('data-approval-action');
       const approvalId = target.getAttribute('data-approval-id');
+      const revision = target.getAttribute('data-approval-revision');
       if (!action || !approvalId) return;
-      await postJson('/api/approvals/' + encodeURIComponent(approvalId) + '/' + action, {});
+      await postJson('/api/approvals/' + encodeURIComponent(approvalId) + '/' + action, { expectedRevision: Number(revision) });
     });
 
     els.sessions.addEventListener('click', async (event) => {

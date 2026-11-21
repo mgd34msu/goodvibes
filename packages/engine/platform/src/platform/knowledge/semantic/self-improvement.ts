@@ -713,7 +713,7 @@ async function applyGapRepairEvidence(input: {
 
   if (input.shouldStop()) return emptyRepairOutcome({ skippedGaps: 1 });
   const evidenceSufficient = result?.evidenceSufficient !== false && acceptedSourceIds.length > 0 && repairComplete;
-  await markGapRepairAttempt(context.store, gap, spaceId, {
+  const recordAttempt = () => markGapRepairAttempt(context.store, gap, spaceId, {
     status: evidenceSufficient ? 'repaired' : acceptedSourceIds.length ? 'deferred' : 'searched_no_sources',
     reason: result?.reason,
     query: result?.query,
@@ -722,11 +722,14 @@ async function applyGapRepairEvidence(input: {
   });
 
   if (evidenceSufficient) {
+    // The task closes before the gap retires: a stop between the two leaves a
+    // closed task over an active gap, which the next run retires.
     await updateRefinementTask(context.store, task, 'closed', 'Repair sources were accepted and linked to the gap.', {
       acceptedSourceIds,
       ingestedSourceIds,
       promotedFactCount,
     });
+    await recordAttempt();
     return emptyRepairOutcome({
       repairableGaps: 1,
       queuedTasks: 1,
@@ -739,6 +742,7 @@ async function applyGapRepairEvidence(input: {
       closedGaps: 1,
     });
   }
+  await recordAttempt();
 
   if (acceptedSourceIds.length > 0) {
     const nextRepairAttemptAt = Date.now() + SELF_IMPROVEMENT_RETRY_DELAY_MS;

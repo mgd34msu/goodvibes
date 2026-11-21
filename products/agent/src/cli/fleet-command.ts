@@ -9,7 +9,7 @@ import type {
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { formatUsd } from '@goodvibes/engine/terminal-shell/format';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
-import { createAgentDaemonVerbCaller, ConnectedHostVerbError } from '../runtime/client/daemon-verbs.ts';
+import { createAgentDaemonVerbCaller, ConnectedHostVerbError, isDefiniteHostRefusal } from '../runtime/client/daemon-verbs.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -36,14 +36,39 @@ function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutp
 
 const HOST_NEXT = 'Start the GoodVibes daemon (goodvibes-daemon) or check controlPlane.host and controlPlane.port; groups held by an open Agent are reviewed in that Agent.';
 
-function errorFailure(runtime: CliCommandRuntime, error: unknown): CliCommandOutput {
+/** Error codes of a connection that was never made, so no request reached the host. */
+const NOT_CONNECTED_CODES = new Set(['ECONNREFUSED', 'ConnectionRefused', 'ENOTFOUND', 'EHOSTUNREACH', 'ENETUNREACH', 'EAI_AGAIN', 'FailedToOpenSocket']);
+
+/** Whether the call failed before any request reached the host: no connection could be resolved, or the host refused the connection. */
+function neverReachedHost(error: unknown): boolean {
+  if (!(error instanceof Error) || error instanceof ConnectedHostVerbError || error.name === 'TimeoutError') return false;
+  if (error.message.startsWith('cannot invoke ')) return true;
+  const code = (error as { readonly code?: unknown }).code ?? (error.cause as { readonly code?: unknown } | undefined)?.code;
+  return typeof code === 'string' && NOT_CONNECTED_CODES.has(code);
+}
+
+/**
+ * The failure of one `fleet attempts` call. A host refusal (a 4xx) and a call
+ * that never reached the host are definite; anything else (a timeout, a 5xx, a
+ * dropped connection) leaves it unknown whether the host acted, which for a pick
+ * means the winner may already be merged.
+ */
+function errorFailure(runtime: CliCommandRuntime, error: unknown, action: 'list' | 'pick' | 'judge'): CliCommandOutput {
   const message = summarizeError(error);
   const status = error instanceof ConnectedHostVerbError ? error.status : undefined;
-  const kind = status === undefined ? 'connected_host_unavailable' : status === 404 ? 'connected_host_incompatible' : 'fleet_attempts_error';
-  const next = status === undefined ? HOST_NEXT
-    : status === 404 ? 'The connected host does not run best-of-N contracts; update GoodVibes on the host.'
-      : status === 409 ? 'List the groups again (fleet attempts list) and use an id it shows.'
-        : undefined;
+  const unavailable = neverReachedHost(error);
+  const unknownOutcome = !unavailable && !isDefiniteHostRefusal(error);
+  const kind = unavailable ? 'connected_host_unavailable'
+    : unknownOutcome ? (action === 'pick' ? 'fleet_attempts_outcome_unknown' : 'fleet_attempts_error')
+      : status === 404 ? 'connected_host_incompatible' : 'fleet_attempts_error';
+  const next = unavailable ? HOST_NEXT
+    : unknownOutcome
+      ? (action === 'pick'
+        ? 'Run fleet attempts list: a group that is no longer listed was picked; one still listed can be picked again.'
+        : 'The host did not answer this call cleanly; retry it, and read the daemon log if it keeps failing.')
+      : status === 404 ? 'The connected host does not run best-of-N contracts; update GoodVibes on the host.'
+        : status === 409 ? 'List the groups again (fleet attempts list) and use an id it shows.'
+          : undefined;
   return {
     output: jsonOrText(runtime, { ok: false, kind, error: message, ...(status === undefined ? {} : { status }), ...(next ? { next: [next] } : {}) },
       next ? `${message}\n  next ${next}` : message),
@@ -136,7 +161,7 @@ async function handleFleetAttemptsList(runtime: CliCommandRuntime, args: readonl
     );
     return { output: jsonOrText(runtime, { ok: true, groups }, renderGroupList(groups)), exitCode: 0 };
   } catch (error) {
-    return errorFailure(runtime, error);
+    return errorFailure(runtime, error, 'list');
   }
 }
 
@@ -161,7 +186,7 @@ async function handleFleetAttemptsPick(runtime: CliCommandRuntime, args: readonl
     const failed = result.losers.some((loser) => loser.outcome.state === 'failed' || loser.outcome.state === 'unknown');
     return { output: jsonOrText(runtime, { ok: !failed, ...result }, renderPickResult(result)), exitCode: failed ? 1 : 0 };
   } catch (error) {
-    return errorFailure(runtime, error);
+    return errorFailure(runtime, error, 'pick');
   }
 }
 
@@ -173,7 +198,7 @@ async function handleFleetAttemptsJudge(runtime: CliCommandRuntime, args: readon
     const judgment = await hostVerbs(runtime).invoke<AttemptJudgment>('fleet.attempts.judge', { groupId });
     return { output: jsonOrText(runtime, { ok: true, judgment }, renderJudgeProposal(groupId, judgment)), exitCode: 0 };
   } catch (error) {
-    return errorFailure(runtime, error);
+    return errorFailure(runtime, error, 'judge');
   }
 }
 

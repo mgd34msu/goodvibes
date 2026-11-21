@@ -386,6 +386,7 @@ async function applyStale(
     createdAt: new Date().toISOString(),
     domain,
     candidateId: candidate.id,
+    judgmentDecisionIds: candidate.judgmentDecisionIds,
     phase: 'stale',
     explicitUserRequest,
     survivorId: plan.survivorId,
@@ -398,7 +399,7 @@ async function applyStale(
   try {
     for (const id of plan.duplicateIds) {
       beforeWrite();
-      afterDuplicates.push(await markDuplicateStale(shellPaths, memory, domain, id, plan.survivorId));
+      afterDuplicates.push(await markDuplicateStale(shellPaths, memory, domain, id, plan.survivorId, candidate.judgmentDecisionIds));
       staled.push(id);
     }
   } catch (error) { throw stoppedPhase('stale', receipt.id, error, staled); }

@@ -150,7 +150,9 @@ export async function runKnowledgeServiceJobByKind(
       });
       return { reportId: report.id, metrics: report.metrics };
     }
-    default:
-      return {};
+    default: {
+      const unhandled: never = kind;
+      throw new KnowledgeJobFailedError(`Knowledge job kind ${String(unhandled)} has no runner.`);
+    }
   }
 }

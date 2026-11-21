@@ -146,13 +146,15 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
 
   async saveForm(): Promise<void> {
     if (!this.context) return;
+    this.lastError = null;
     try {
       const server = formToServerConfig(this.form);
       this.setStatus(`Saving ${server.name} to ${this.form.scope} MCP config and reloading runtime...`);
+      const api = requireMcpApi(this.context);
+      // The form stays open with what was typed until the write succeeds, so a failed save can be corrected and retried.
+      const result = await api.upsertServerConfig(requireShellPaths(this.context), this.form.scope, server);
       this.mode = 'browse';
       this.editingServerName = null;
-      const api = requireMcpApi(this.context);
-      const result = await api.upsertServerConfig(requireShellPaths(this.context), this.form.scope, server);
       this.refreshSnapshot();
       this.setStatus(
         `Saved ${server.name} to ${result.path}. Reload result: +${result.reload.added} ~${result.reload.changed} -${result.reload.removed}, unchanged ${result.reload.unchanged}.`,
@@ -161,7 +163,8 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
     } catch (error) {
       this.lastError = summarizeError(error);
       this.setStatus(`Save failed: ${this.lastError}`, 'error');
-      this.context.renderRequest();
+    } finally {
+      this.context?.renderRequest();
     }
   }
 

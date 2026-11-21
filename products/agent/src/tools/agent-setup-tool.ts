@@ -171,7 +171,7 @@ export function createAgentSetupTool(deps: AgentSetupToolDeps): Tool {
         const result = await runSetupInstallSmoke(deps.commandContext, compactArgs({
           setupItemId, includeParameters: args.includeParameters, explicitUserRequest: args.explicitUserRequest,
         }), ownership, options?.signal);
-        ownership.assertCurrent();
+        // The run checks currency itself up to the save; after a save the answer carries the artifact id.
         // The evidence snapshot is the effect: a blocked plan is still a saved result (done says whether it was saved).
         return effectOutput(result);
       }

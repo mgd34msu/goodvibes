@@ -79,8 +79,8 @@ export interface ContractSessionDriver {
 /** The live runner, opened by the bin over the project. */
 export interface OpenedContractRunner {
   readonly runner: ContractCliRunner;
-  /** The composition's own startup resume of the contracts on disk; null when it failed (logged). */
-  resumed(): Promise<ResumeReport | null>;
+  /** The composition's own startup resume of the contracts on disk; `{ failed }` with the reason when it failed as a whole. */
+  resumed(): Promise<ResumeReport | { readonly failed: string }>;
   readonly sessions: ContractSessionDriver;
   dispose(): Promise<void>;
 }
@@ -313,15 +313,22 @@ async function runCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedCon
   return exitCodeOf(await follower.follow([contractId]));
 }
 
-function resumeFailedLine(projectRoot: string): string {
-  return `Resuming the contracts in ${projectRoot} failed; the log under .goodvibes/logs says why.`;
+/** The reason resuming failed as a whole, or null when it ran (each contract it could not take up is in the report). */
+async function resumeFailure(opened: OpenedContractRunner): Promise<string | null> {
+  const report = await opened.resumed();
+  return 'failed' in report ? report.failed : null;
+}
+
+function resumeFailedLine(projectRoot: string, reason: string): string {
+  return `Resuming the contracts in ${projectRoot} failed: ${reason}. They are still on disk; run the command again to retry.`;
 }
 
 async function cancelCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
   const id = args.positionals[0]!;
   // The contracts on disk are held by the runner once its startup resume has read them.
-  if (await opened.resumed() === null) {
-    io.err(resumeFailedLine(args.projectRoot));
+  const failed = await resumeFailure(opened);
+  if (failed !== null) {
+    io.err(resumeFailedLine(args.projectRoot, failed));
     return EXIT_FAILED;
   }
   if (!opened.runner.cancel(id, CLI_CANCEL_REASON)) {
@@ -334,8 +341,9 @@ async function cancelCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
 
 async function removeCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
   const id = args.positionals[0]!;
-  if (await opened.resumed() === null) {
-    io.err(resumeFailedLine(args.projectRoot));
+  const failed = await resumeFailure(opened);
+  if (failed !== null) {
+    io.err(resumeFailedLine(args.projectRoot, failed));
     return EXIT_FAILED;
   }
   const outcome = opened.runner.remove?.(id) ?? 'not-found';
@@ -358,9 +366,10 @@ async function removeCommand(args: ParsedArgs, io: ContractCliIo, opened: Opened
 async function replyCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
   const [id, text] = args.positionals as [string, string];
   const follower = args.follow ? createFollower(io, opened, args.json, args.projectRoot) : null;
-  if (await opened.resumed() === null) {
+  const failed = await resumeFailure(opened);
+  if (failed !== null) {
     follower?.stop();
-    io.err(resumeFailedLine(args.projectRoot));
+    io.err(resumeFailedLine(args.projectRoot, failed));
     return EXIT_FAILED;
   }
   const contract = opened.runner.get(id);
@@ -401,12 +410,13 @@ function resumeCommandLine(projectRoot: string): string {
 async function resumeCommand(args: ParsedArgs, io: ContractCliIo, opened: OpenedContractRunner): Promise<number> {
   const follower = createFollower(io, opened, args.json, args.projectRoot);
   const report = await opened.resumed();
-  if (report === null) {
+  if ('failed' in report) {
     follower.stop();
-    io.err(resumeFailedLine(args.projectRoot));
+    io.err(resumeFailedLine(args.projectRoot, report.failed));
     return EXIT_FAILED;
   }
   for (const reaped of report.reaped) io.err(`Contract ${reaped.contractId} could not resume and was failed: ${reaped.reason}`);
+  for (const { contractId, refusal } of report.refused) io.err(`Contract ${contractId} was not resumed: ${refusal.reason} Now: ${refusal.state}. Next: ${refusal.next.join(' ')}`);
   // A skipped contract is only held by the store: it has no run, never emits an event, and following it would hang or report an old outcome.
   for (const skippedId of report.skipped) io.err(`Contract ${skippedId} was not resumed: it is held by this runner policy or is already live.`);
   const ids = [...new Set([...report.resumed.map((entry) => entry.contractId), ...report.queued])];

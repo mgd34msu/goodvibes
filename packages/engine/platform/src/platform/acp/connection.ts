@@ -24,13 +24,13 @@ import {
   ACP_CHILD_FORCED_EXIT_MS,
   ACP_CHILD_GRACE_MS,
   ACP_HANDSHAKE_TIMEOUT_MS,
-  drainStderrTail,
   messageChunkText,
   permissionOutcomeFor,
   readNdJsonMessages,
   wellFormedPermissionOptions,
   withTimeout,
 } from './protocol.js';
+import { drainStderrTail } from '../utils/stderr-tail.js';
 import { OwnedScope, type CloseReport } from '../utils/owned-work.js';
 import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
@@ -481,7 +481,7 @@ export class AcpConnection {
           const assertCurrent = () => { signal.throwIfAborted(); wire.assertCurrent(); operation.assertCurrent(); };
           assertCurrent();
           // Capture the actual originating goal, never the child tool title or generated task prose.
-          admission = await admitExternalRequest(host, { connectionId: this.id, destination: this.spawnCmd[0] ?? '', signal, assertCurrent },
+          admission = await admitExternalRequest(host, { connectionId: this.id, destination: this.spawnCmd[0] ?? '', signal, assertCurrent, sessionId: this.task.sessionId },
             { ...operation, assertCurrent: () => {} }, {
               tool: owned.toolCall.title ?? 'ACP action', protocolSubject,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)

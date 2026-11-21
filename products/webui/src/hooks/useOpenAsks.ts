@@ -8,10 +8,11 @@
  * event stream is not live. The sidebar badge, Work and the chat's inline card
  * read the same cached answers, so a chat opening adds no request.
  */
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { OperatorMethodInput } from '@goodvibes/engine/contracts';
 import { client as platformClient } from '../lib/goodvibes';
+import { formatError } from '../lib/errors';
 import { useEventStreamState } from '../lib/event-stream';
 import { queryKeys } from '../lib/queries';
 import { INBOX_ASK_KINDS, openAsks, readInboxAskItems, type OpenAsk } from '../lib/asks';
@@ -45,7 +46,17 @@ async function readOpenInboxAsks(): Promise<ReturnType<typeof readInboxAskItems>
   return readInboxAskItems({ items });
 }
 
-export function useOpenAsks(enabled = true): { asks: OpenAsk[]; isPending: boolean } {
+export interface OpenAsksRead {
+  /** The open asks; after a failed inbox read, the inbox part is the last good read. */
+  asks: OpenAsk[];
+  isPending: boolean;
+  /** Why the latest inbox read failed, or null when it did not. */
+  inboxError: string | null;
+  /** Reads the inbox again. */
+  retryInbox: () => void;
+}
+
+export function useOpenAsks(enabled = true): OpenAsksRead {
   const streamLive = useEventStreamState('app').status === 'live';
   const approvals = useQuery({
     queryKey: queryKeys.approvals,
@@ -61,8 +72,15 @@ export function useOpenAsks(enabled = true): { asks: OpenAsk[]; isPending: boole
     retry: false,
   });
   const asks = useMemo(
-    () => openAsks(approvals.data?.approvals ?? [], inbox.isError ? [] : inbox.data ?? []),
-    [approvals.data, inbox.data, inbox.isError],
+    () => openAsks(approvals.data?.approvals ?? [], inbox.data ?? []),
+    [approvals.data, inbox.data],
   );
-  return { asks, isPending: approvals.isPending };
+  const { refetch } = inbox;
+  const retryInbox = useCallback(() => { void refetch(); }, [refetch]);
+  return {
+    asks,
+    isPending: approvals.isPending,
+    inboxError: inbox.isError ? formatError(inbox.error) : null,
+    retryInbox,
+  };
 }

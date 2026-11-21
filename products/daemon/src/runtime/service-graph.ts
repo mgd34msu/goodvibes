@@ -28,11 +28,6 @@ import { createDaemonNativeWorkExecutionActivation } from './native-work-executi
 import { createBrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 import { createDevicePostureServices } from './device-posture-composition.js';
 import { composeUnattendedRunTools } from './unattended-run-tools.js';
-// Re-exported so the daemon entrypoint reaches the housekeeping sweep through
-// the same module it already imports the runtime graph from. `installDevicePosture`
-// is deliberately NOT re-exported: it registers the phone TOOL into a tool
-// registry, and the daemon registers no tools, the sweep is the half it needs.
-export { startDeviceHousekeeping } from './device-posture-composition.js';
 import { createClusterServices, startClusterServices } from './cluster-group-composition.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { resolveNodeIdentity } from '@goodvibes/engine/platform/platform/cluster';
@@ -414,7 +409,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     registerNativeConversationIntakeGatewayMethods(gatewayMethods, nativeIntake);
     const removeHostedOwner = installNativeHostedConversationOwner(gatewayMethods, { projectId: projectPlanningProjectId,
       projectRoot: workingDirectory, intake: nativeIntake, checkpoints: workspaceCheckpointManager, journalPath: shellPaths.resolveUserPath('native-hosted-turns.json'),
-      installContinuationOwner: owner => { nativeContinuationOwner = owner; } });
+      installContinuationOwner: owner => { nativeContinuationOwner = owner; },
+      // One journal serves every paired principal: a revoked or replaced pairing's finished turns are dropped from it.
+      principalCanAct: principalId => pairingTokens.nativePrincipalCurrent(principalId) });
     disposalScope.registry.add('native hosted conversation binding', removeHostedOwner);
     const nativeWork = createDaemonNativeWorkExecutionActivation({
       nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(),

@@ -1,8 +1,7 @@
 import type { AgentWorkspaceActionResult } from './agent-workspace-types.ts';
 import type { OnboardingShellPaths } from '../runtime/onboarding/types.ts';
 import type { AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
-import { writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';
-import { computeOnboardingStateFromSnapshot, deriveOnboardingEntry } from './agent-workspace-onboarding-state.ts';
+import { writeOnboardingCheckMarker, writeOnboardingCompletionMarker } from '../runtime/onboarding/index.ts';import { computeOnboardingStateFromSnapshot, deriveOnboardingEntry } from './agent-workspace-onboarding-state.ts';
 import type { OnboardingState } from '../runtime/onboarding/onboarding-state.ts';
 
 export interface CompleteOnboardingParams {
@@ -56,6 +55,9 @@ export function completeOnboardingAction(params: CompleteOnboardingParams): Comp
     };
   }
 
+  // How far the marker writes got, so a failure says whether setup is now done.
+  let completionWritten = false;
+  let checkWritten = false;
   try {
     const marker = { scope: 'user', source: 'wizard', mode: 'new', workspaceRoot: shellPaths.workingDirectory } as const;
     // The same route check the ready view runs: setup is marked complete only
@@ -80,8 +82,13 @@ export function completeOnboardingAction(params: CompleteOnboardingParams): Comp
         },
       };
     }
-    writeOnboardingCheckMarker(shellPaths, marker);
+    // The completion marker decides (completion.ts), so it is written first: a
+    // failure here leaves nothing that reads as done, and a failure of the check
+    // marker after it leaves setup done, as the route check allowed.
     writeOnboardingCompletionMarker(shellPaths, marker);
+    completionWritten = true;
+    writeOnboardingCheckMarker(shellPaths, marker);
+    checkWritten = true;
     const obs = computeOnboardingStateFromSnapshot(runtimeSnapshot, shellPaths);
     const headline = obs?.recap.headline ?? 'Onboarding complete';
     const lines: readonly string[] = obs?.recap.lines ?? [];
@@ -99,6 +106,20 @@ export function completeOnboardingAction(params: CompleteOnboardingParams): Comp
     };
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
+    if (completionWritten) {
+      const what = checkWritten ? 'the setup recap could not be built' : 'the compatibility check marker could not be written';
+      return {
+        dismissed: false,
+        awaitingRecapDismiss: false,
+        status: `Setup is marked complete; ${what}.`,
+        lastActionResult: {
+          kind: 'error',
+          title: 'Setup marked complete',
+          detail: `Setup was marked complete, so later starts open the conversation, but ${what}: ${detail}`,
+          safety: 'safe',
+        },
+      };
+    }
     return {
       dismissed: false,
       awaitingRecapDismiss: false,

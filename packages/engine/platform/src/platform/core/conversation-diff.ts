@@ -12,9 +12,14 @@ export interface DiffParseResult {
 
 const HUNK_HEADER = /^@@ -\d+(?:,(\d+))? \+\d+(?:,(\d+))? @@/;
 
-/** A header path is applied relative to the project, so it must stay inside it. */
+/**
+ * A header path is applied relative to the project, so it must stay inside it.
+ * `diff -u` and git put a timestamp or marker after a tab, so the name is what
+ * comes before the first tab, spaces kept, without a leading `a/` or `b/`.
+ */
 function safeRelativePath(raw: string): string | undefined {
-  const path = raw.startsWith('b/') ? raw.slice(2) : raw.split(' ')[0];
+  const name = raw.split('\t')[0]!.trim();
+  const path = name.startsWith('a/') || name.startsWith('b/') ? name.slice(2) : name;
   if (!path || path === '/dev/null' || path.includes('\0')) return undefined;
   if (path.startsWith('/') || path.startsWith('\\') || /^[A-Za-z]:/.test(path)) return undefined;
   if (path.split(/[\\/]/).includes('..')) return undefined;

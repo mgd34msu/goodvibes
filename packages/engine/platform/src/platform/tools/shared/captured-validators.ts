@@ -6,7 +6,7 @@ import { capturedToolPublicationContext } from './captured-input-tools.js';
 import { executePolicyCheck } from '../../gate/execute-policy-check.js';
 import { brokerSandboxEscalation, resolveRuntimeSandboxPlan, type ExecSandboxRuntime } from '../exec/sandbox.js';
 import { resolveCredentialEnvScrub, scrubCredentialEnv, type CredentialEnvScrubConfig } from '../exec/credential-env.js';
-import { validatorCommand, type ValidatorRunner } from './validators.js';
+import { DEFAULT_VALIDATOR_TIMEOUT_MS, validatorCommand, type ValidatorRunner } from './validators.js';
 
 export function createCapturedValidatorRunner(binding: CapturedExecAuthority, options: {
   readonly sandbox?: ExecSandboxRuntime | null | undefined;
@@ -52,7 +52,9 @@ export function createCapturedValidatorRunner(binding: CapturedExecAuthority, op
       const scrub = fixedScrub ?? resolveCredentialEnvScrub(typeof scrubConfig === 'function' ? scrubConfig() : scrubConfig);
       const environment = await executePolicyCheck(() => scrubCredentialEnv(ambient, scrub), signal);
       const network = !plan || plan.network === 'enabled' ? 'enabled' : 'disabled';
-      const result = await runCapturedCommand(executionBinding, command, {}, cwd, 30_000, signal, network, environment.env, {
+      // The same limit the ordinary validator runner honours: the caller's, else the validator default.
+      const timeoutMs = execution?.timeoutMs ?? DEFAULT_VALIDATOR_TIMEOUT_MS;
+      const result = await runCapturedCommand(executionBinding, command, {}, cwd, timeoutMs, signal, network, environment.env, {
         publicationLease: context.lease, beforeSpawn: () => { signal?.throwIfAborted(); execution?.assertCurrent(); admission?.claim(); execution?.assertCurrent(); },
       });
       return {
@@ -60,7 +62,7 @@ export function createCapturedValidatorRunner(binding: CapturedExecAuthority, op
         passed: result.success,
         exitCode: result.exit_code ?? -1,
         stdout: result.stdout,
-        stderr: result.timed_out ? `Validator '${name}' timed out after 30000ms` : (result.stderr ?? ''),
+        stderr: result.timed_out ? `Validator '${name}' timed out after ${timeoutMs}ms and was killed` : (result.stderr ?? ''),
       };
     } finally { admission?.close(); }
   };

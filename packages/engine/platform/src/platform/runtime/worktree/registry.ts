@@ -1005,8 +1005,9 @@ export class WorktreeRegistry {
         kind: existing?.kind ?? classified.kind,
         state: existing?.state ?? 'active',
         ...(existing?.ownerId ?? classified.ownerId ? { ownerId: existing?.ownerId ?? classified.ownerId } : {}),
-        ...(target.sessionId ? { sessionId: target.sessionId } : {}),
-        ...(target.taskId ? { taskId: target.taskId } : {}),
+        // Attaching one kind of link keeps the other: a session and a task can both hold the worktree.
+        ...(target.sessionId || existing?.sessionId ? { sessionId: target.sessionId || existing?.sessionId } : {}),
+        ...(target.taskId || existing?.taskId ? { taskId: target.taskId || existing?.taskId } : {}),
         ...(existing?.setup ? { setup: existing.setup } : {}),
         updatedAt: Date.now(),
       };

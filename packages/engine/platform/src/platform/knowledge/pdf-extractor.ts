@@ -224,11 +224,7 @@ async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly st
   const texts: string[] = [];
   const seenHex = new Set<string>();
   const diagnostics: RawPdfExtractionDiagnostics = { failedFlateDecodeStreams: 0 };
-  const streamRe = /(<<[\s\S]{0,4096}?>>)\s*stream\r?\n([\s\S]*?)\r?\nendstream/g;
-  let match: RegExpExecArray | null;
-  while ((match = streamRe.exec(body)) !== null) {
-    const dictionary = match[1]! ?? '';
-    const rawChunk = match[2]! ?? '';
+  for (const { dictionary, rawChunk } of rawPdfStreams(body)) {
     const chunk = decodePdfStreamChunk(dictionary, rawChunk, diagnostics);
     texts.push(...extractLiteralStrings(chunk), ...extractHexStrings(chunk, seenHex));
     if (texts.length >= MAX_RAW_PDF_TEXT_CANDIDATES) break;
@@ -270,6 +266,58 @@ async function extractPdfRawStreams(buffer: Buffer, initialWarnings: readonly st
       ...(diagnostics.failedFlateDecodeStreams > 0 ? { failedFlateDecodeStreamCount: diagnostics.failedFlateDecodeStreams } : {}),
     },
   };
+}
+
+/** Longest dictionary body (between `<<` and `>>`) read as a stream's dictionary. */
+const MAX_PDF_STREAM_DICTIONARY_CHARS = 4096;
+const PDF_END_STREAM = '\nendstream';
+
+/**
+ * Every `<<dictionary>> stream ... endstream` in a PDF body, in one forward
+ * pass: `<<` and `>>` are paired as they nest, and a dictionary whose `>>` is
+ * followed by the `stream` keyword and a line end starts a stream that runs to
+ * the next line that begins with `endstream`. When no `endstream` follows, no
+ * later stream can close either, so the walk ends. Untrusted bytes cost time
+ * in proportion to their length, never more.
+ */
+function* rawPdfStreams(body: string): Generator<{ readonly dictionary: string; readonly rawChunk: string }> {
+  const opens: number[] = [];
+  let index = 0;
+  while (index < body.length - 1) {
+    const code = body.charCodeAt(index);
+    const next = body.charCodeAt(index + 1);
+    if (code === 0x3c && next === 0x3c) {
+      opens.push(index);
+      index += 2;
+      continue;
+    }
+    if (code !== 0x3e || next !== 0x3e) {
+      index += 1;
+      continue;
+    }
+    const start = opens.pop();
+    const end = index + 2;
+    index = end;
+    if (start === undefined || end - start - 4 > MAX_PDF_STREAM_DICTIONARY_CHARS) continue;
+    const dataStart = pdfStreamDataStart(body, end);
+    if (dataStart === undefined) continue;
+    const close = body.indexOf(PDF_END_STREAM, dataStart);
+    if (close === -1) return;
+    const chunkEnd = close > dataStart && body.charCodeAt(close - 1) === 0x0d ? close - 1 : close;
+    yield { dictionary: body.slice(start, end), rawChunk: body.slice(dataStart, chunkEnd) };
+    opens.length = 0;
+    index = close + PDF_END_STREAM.length;
+  }
+}
+
+/** Where a stream's data begins when `stream` and a line end follow `from` (after any whitespace). */
+function pdfStreamDataStart(body: string, from: number): number | undefined {
+  let index = from;
+  while (index < body.length && /\s/.test(body[index]!)) index += 1;
+  if (!body.startsWith('stream', index)) return undefined;
+  index += 'stream'.length;
+  if (body.charCodeAt(index) === 0x0d) index += 1;
+  return body.charCodeAt(index) === 0x0a ? index + 1 : undefined;
 }
 
 function decodePdfStreamChunk(

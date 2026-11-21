@@ -74,22 +74,33 @@ export function reasoningOptionsForModel(
   return null;
 }
 
+/**
+ * The model's registry key under `providerId`. A model id may itself hold a colon
+ * (`llama3:latest`), and so may a discovered provider's name
+ * (`local-192.168.1.50:8080`), so an id counts as qualified only when it starts
+ * with this provider's own prefix.
+ */
 function providerQualifiedKey(providerId: string, modelId: string, registryKey: string): string {
-  if (registryKey.includes(':')) return registryKey;
-  if (modelId.includes(':')) return modelId;
-  return providerId && modelId ? `${providerId}:${modelId}` : '';
+  if (registryKey) return registryKey;
+  if (!providerId || !modelId) return '';
+  return modelId.startsWith(`${providerId}:`) ? modelId : `${providerId}:${modelId}`;
+}
+
+/** `value` without this provider's `provider:` prefix, when it has one. */
+function withoutProviderPrefix(providerId: string, value: string): string {
+  return providerId && value.startsWith(`${providerId}:`) ? value.slice(providerId.length + 1) : value;
 }
 
 function normalizeModel(providerId: string, model: unknown): ModelOption | null {
   if (typeof model === 'string') {
-    const rawModelId = model.trim();
+    const rawModelId = withoutProviderPrefix(providerId, model.trim());
     const registryKey = providerQualifiedKey(providerId, rawModelId, '');
     return registryKey ? { id: registryKey, label: rawModelId, value: model, providerId, rawModelId, registryKey } : null;
   }
 
   const explicitRegistryKey = firstString(model, ['registryKey', 'key']);
   const rawModelId = firstString(model, ['modelId', 'id', 'model', 'modelName', 'value', 'name'])
-    || explicitRegistryKey.split(':').slice(1).join(':');
+    || withoutProviderPrefix(providerId, explicitRegistryKey);
   const registryKey = providerQualifiedKey(providerId, rawModelId, explicitRegistryKey);
   if (!registryKey || !rawModelId) return null;
   return {

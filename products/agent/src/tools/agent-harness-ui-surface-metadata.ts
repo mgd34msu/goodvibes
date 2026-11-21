@@ -192,8 +192,9 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
       }
       const url = typeof route.url === 'string' ? route.url : '';
       assertCurrent?.();
+      // No check after the launch: the browser is open, and a source change from here on is
+      // answered by the caller with the opened result, never a failure that invites a second open.
       const browserOpened = url ? await openExternalUrl(url) : false;
-      assertCurrent?.();
       return browserOpened
         ? opened(surface, { url, route, browserOpened })
         : {

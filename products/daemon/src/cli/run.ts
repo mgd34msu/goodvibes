@@ -240,8 +240,12 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
           cli.commandArgs.includes('--json') ? stdout : undefined);
       }
       case 'cluster': {
-        const { runClusterCommand } = await import('@goodvibes/engine/terminal-shell/cluster-commands');
-        const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: remote.fetchImpl, readToken: remote.readToken });
+        const [{ runClusterCommand }, { readAllStdin }] = await Promise.all([
+          import('@goodvibes/engine/terminal-shell/cluster-commands'),
+          import('../daemon/send/stdin.js'),
+        ]);
+        const answer = await runClusterCommand({ argv: cli.commandArgs, configManager: config, daemonHomeDir: daemonHomeDirectory, fetchImpl: remote.fetchImpl, readToken: remote.readToken,
+          readStdin: readAllStdin, stdinIsTty: process.stdin.isTTY === true });
         if (answer.rawOutput) stdout(answer.rawOutput);
         return result(answer);
       }

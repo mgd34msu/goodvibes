@@ -39,6 +39,7 @@ import { defineCommand, type DescribedCommand } from './command-actions/define.j
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
 import { VALID_CLASSES, VALID_REVIEW_STATES, VALID_SCOPES, resolveConfinedBundlePath, temporalStatusLabel } from './recall-shared.js';
+import { assertActorMayMarkReviewed } from './agent-turn/review-authority.js';
 
 type CaptureExtensions = {
   readonly forensicsRegistry?: {
@@ -142,12 +143,20 @@ const MEMORY_PROPOSALS = defineList<MemoryCommandContext>({
       ...(proposals.length > 1 ? [{ value: 'all', label: 'Every proposal', state: `${proposals.length}` }] : []),
       ...proposals.map((proposal): ListRow => ({
         value: proposal.id, label: proposal.id, detail: proposal.reason,
-        state: proposal.kind === 'delete' ? 'deletes the record' : `changes ${(proposal.changedFields ?? []).join(', ')}`,
+        state: proposal.kind === 'delete' ? 'deletes the record' : describeFileChange(proposal),
       })),
     ];
   },
   operator: { terminalOnly: 'Memory files live in the terminal app\'s project.' },
 });
+
+/** What an edited file's proposal would change, and which edited fields memory changed too (never taken). */
+function describeFileChange(proposal: MemoryProjectionProposal): string {
+  const parts: string[] = [];
+  if (proposal.changedFields?.length) parts.push(`changes ${proposal.changedFields.join(', ')}`);
+  if (proposal.conflictFields?.length) parts.push(`${proposal.conflictFields.join(', ')} also changed in memory, so not taken (use /memory edit for the file's value)`);
+  return parts.join('; ');
+}
 
 /** The folder given, else the memory files folder setting (`memory.projection.dir`), relative to the project. */
 function projectionDirFor(ctx: MemoryCommandContext, given: string): string {
@@ -435,6 +444,7 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
         example: { record: 'mem-1', state: 'stale' },
         async run(values, ctx) {
           if (values.confidence && !/^(100|[1-9]?\d)$/.test(values.confidence)) throw commandRefusal(`Confidence takes a whole number from 0 to 100, not "${values.confidence}". Nothing was changed.`);
+          if (values.state === 'reviewed') assertActorMayMarkReviewed(ctx.invokedByModel === true ? 'model' : 'owner', 'memory', values.record!);
           const record = await spineOf(ctx).updateReview(values.record!, {
             state: values.state as MemoryReviewState,
             ...(values.confidence ? { confidence: Number(values.confidence) } : {}),
@@ -565,7 +575,7 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
             ...(complete ? [] : [`The store holds more than ${PROJECTION_LIST_LIMIT} records; files of records past that were not compared.`]),
             ...(unreadable.length ? [`${unreadable.length} file${unreadable.length === 1 ? '' : 's'} cannot be read as memory (the lines at the top were changed): ${unreadable.join(', ')}. Fix them by hand; they are not taken as deletions.`] : []),
             ...(orphans.length ? [`${orphans.length} file${orphans.length === 1 ? '' : 's'} whose record no longer exists: ${orphans.map((orphan) => orphan.id).join(', ')}. An edit to one cannot reach memory.`] : []),
-            ...(proposals.length ? [`${proposals.length} change${proposals.length === 1 ? '' : 's'} from your edits:`, ...proposals.map((proposal) => `  ${proposal.id}  ${proposal.kind === 'delete' ? 'deletes the record (its file was deleted)' : `changes ${(proposal.changedFields ?? []).join(', ')}`}`), 'Nothing has been applied: /memory apply-files <id> or all.'] : []),
+            ...(proposals.length ? [`${proposals.length} change${proposals.length === 1 ? '' : 's'} from your edits:`, ...proposals.map((proposal) => `  ${proposal.id}  ${proposal.kind === 'delete' ? 'deletes the record (its file was deleted)' : describeFileChange(proposal)}`), 'Nothing has been applied: /memory apply-files <id> or all.'] : []),
           ];
           return lines.length ? lines.join('\n') : `The files in ${dir} match memory.`;
         },
@@ -596,6 +606,10 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
               if (proposal.kind === 'delete') {
                 if (await spine.delete(proposal.id)) applied.push(proposal);
                 else failed.push(`${proposal.id}: the record was already gone`);
+                continue;
+              }
+              if (!proposal.changedFields?.length) {
+                failed.push(`${proposal.id}: memory also changed ${(proposal.conflictFields ?? []).join(', ')} since the files were written, so nothing was taken from the file; use /memory edit for the file's value`);
                 continue;
               }
               const desired = proposal.desired ?? {};
@@ -665,7 +679,7 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
       },
       {
         id: 'restore', label: 'Replace all memory with a copy', word: 'restore',
-        inputs: [{ id: 'copy', label: 'Copy', help: 'The copies of memory, newest first', kind: 'choice', choices: { list: MEMORY_COPIES, allowOther: { reason: 'latest, or a date such as 2026-11-19' } }, required: true, typed: { position: 1 } }],
+        inputs: [{ id: 'copy', label: 'Copy', help: 'The copies of memory, newest first', kind: 'choice', choices: { list: MEMORY_COPIES, allowOther: { reason: 'latest (the newest copy not taken by a restore), or a date such as 2026-11-19' } }, required: true, typed: { position: 1 } }],
         sentence: 'Every memory record, link and waiting proposal will be replaced by those in {copy}, until you change it; the records you have now are copied first, so restoring that copy puts them back.',
         done: '',
         touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'restore',

@@ -79,11 +79,18 @@ export interface SessionBrokerStorage {
   loadSession(sessionId: string): { readonly messages: SharedSessionMessage[]; readonly inputs: SharedSessionInputRecord[] };
   /**
    * Write what changed. `changed` names the sessions whose record, messages or
-   * inputs moved since the last write; each id is removed once it is written,
-   * so a failed write leaves it for the next one.
+   * inputs moved since the last write; each id is removed once its lines are
+   * appended. A sync of those lines that fails rejects this write, and the
+   * next write or `synced()` syncs that log again before it resolves (or
+   * rejects again), so lines that never reached the disk are never reported
+   * as written.
    */
   write(state: SessionBrokerStateView, changed: Set<string>, durable: boolean): Promise<void>;
-  /** Resolves once every write started so far has landed (on the daemon's store: synced). Starts no write. */
+  /**
+   * Resolves once every write started so far has landed (on the daemon's
+   * store: synced). Appends nothing; a log whose earlier sync failed is synced
+   * again here, and a failure rejects.
+   */
   synced(): Promise<void>;
   /** Forget a session's loaded history; the next `loadSession` reads it again. */
   unload(sessionId: string): void;
@@ -227,6 +234,12 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
    * change is on disk while the sync carrying it is still running.
    */
   #syncing: Promise<void> | null = null;
+  /**
+   * Logs whose sync failed. Their lines are counted as written, so no later
+   * write appends them again; the next write or `synced()` syncs each of these
+   * logs again (a log that cannot sync rejects again) before it resolves.
+   */
+  readonly #unsyncedLogs = new Set<RecordLog<unknown>>();
 
   constructor(path: string) {
     this.path = path;
@@ -383,8 +396,14 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     return this.#track([]);
   }
 
-  /** Waits for `syncs` and for every sync already in flight; adds no sync of its own. */
-  #track(syncs: readonly Promise<void>[]): Promise<void> {
+  /**
+   * Waits for `syncs` and for every sync already in flight. Adds a sync only
+   * for a log whose earlier sync failed, so its lines are synced (or the
+   * failure is reported again) before anyone is told they are on disk.
+   */
+  #track(pending: readonly Promise<void>[]): Promise<void> {
+    const syncs = [...pending];
+    for (const log of this.#unsyncedLogs) syncs.push(log.flush().then(() => { this.#unsyncedLogs.delete(log); }));
     const inFlight = this.#syncing;
     if (syncs.length === 0) return inFlight ?? Promise.resolve();
     const all = Promise.all(inFlight ? [inFlight, ...syncs] : syncs).then(() => undefined);
@@ -456,10 +475,15 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
     }
     const tracked = entry;
     const live = () => tracked.messagesWritten + tracked.inputs.size;
+    // A failed sync is remembered against its log, so the next write or synced() syncs it again.
+    const flushed = log.flush().catch((error: unknown) => {
+      this.#unsyncedLogs.add(log);
+      throw error;
+    });
     // Superseded input versions are dropped once they outnumber the live rows;
     // compaction itself runs without yielding, so no append can fall between its read and its rename.
     if (entry.lines - live() > Math.max(256, live())) {
-      return log.flush().then(() => {
+      return flushed.then(() => {
         if (this.#logs.get(sessionId) !== tracked || tracked.log !== log) return;
         return log.compact((line) => {
           if (!isRecord(line) || !('i' in line)) return true;
@@ -469,7 +493,7 @@ export class SessionBrokerFileStorage implements SessionBrokerStorage {
         }).then(() => { tracked.lines = live(); });
       });
     }
-    return log.flush();
+    return flushed;
   }
 
   #dropSession(sessionId: string): void {

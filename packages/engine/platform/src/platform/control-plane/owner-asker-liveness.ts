@@ -238,6 +238,16 @@ export function isTakerGone(storePath: string, token: string): boolean {
   return !settleAskerLock(path, () => true);
 }
 
+/**
+ * True when the process holding a decision claim (`<taker>:<uuid>`, its taker
+ * token and the claim's own id) is gone; never for this process's own claims.
+ * The taker part names the lock; the whole token names no file.
+ */
+export function isClaimGone(storePath: string, claimToken: string): boolean {
+  const separator = claimToken.indexOf(':');
+  return isTakerGone(storePath, separator < 0 ? claimToken : claimToken.slice(0, separator));
+}
+
 const takers = new Map<string, { readonly token: string; readonly lock: HeldProcessLock | null }>();
 
 function takerLockPath(storePath: string, token: string): string {

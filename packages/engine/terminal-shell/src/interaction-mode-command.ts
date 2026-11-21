@@ -70,6 +70,8 @@ export function registerInteractionModeCommand<Context extends InteractionModeCo
         async run(values, ctx) {
           const mgr = managerOf(ctx);
           const level = values.level as 'quiet' | 'balanced' | 'operator';
+          // Setting the level clears the per-domain levels; the reply names the ones that went.
+          const clearedDomains = Object.keys(mgr.getDomainOverrides());
           mgr.setHITLMode(level);
           let saveFailure: string | null = null;
           try {
@@ -80,9 +82,12 @@ export function registerInteractionModeCommand<Context extends InteractionModeCo
           }
           const preset = mgr.getHITLPreset();
           ctx.renderRequest();
+          const cleared = clearedDomains.length > 0
+            ? `\nCleared the per-domain levels for: ${clearedDomains.join(', ')} (set them again with /verbosity set-domain).`
+            : '';
           return saveFailure === null
-            ? `Print level set to: ${preset.name}\n${preset.description}`
-            : `Print level set to: ${preset.name} for this session only. It could not be saved (${saveFailure}), so it reverts on restart.\n${preset.description}`;
+            ? `Print level set to: ${preset.name}\n${preset.description}${cleared}`
+            : `Print level set to: ${preset.name} for this session only. It could not be saved (${saveFailure}), so it reverts on restart.\n${preset.description}${cleared}`;
         },
       },
       {
@@ -97,7 +102,7 @@ export function registerInteractionModeCommand<Context extends InteractionModeCo
         operator: { terminalOnly: 'It is how this terminal app prints.' }, example: { domain: 'agents', verbosity: 'minimal' },
         async run(values, ctx) {
           managerOf(ctx).setDomainVerbosity(values.domain!, values.verbosity as 'minimal' | 'normal' | 'verbose');
-          return `Domain "${values.domain}" verbosity set to: ${values.verbosity}`;
+          return `Domain "${values.domain}" verbosity set to: ${values.verbosity}; it applies to notifications of that domain as they arrive.`;
         },
       },
     ],

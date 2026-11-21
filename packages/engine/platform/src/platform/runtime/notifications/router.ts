@@ -65,7 +65,9 @@ export class NotificationRouter {
       return { presence: 'history', ...group, suppressed: quietReason, reasonCode: 'quiet_while_typing' };
     }
 
-    return { presence, ...group, reasonCode: 'allowed' };
+    // Held by the domain's verbosity: the same level would toast at the most verbose setting.
+    const heldByVerbosity = presence === 'history' && applyDefaultPolicy(notification.level, 'verbose') === 'toast';
+    return { presence, ...group, reasonCode: heldByVerbosity ? 'domain_verbosity_low' : 'allowed' };
   }
 
   setDomainVerbosity(domain: string, verbosity: DomainVerbosity): void {

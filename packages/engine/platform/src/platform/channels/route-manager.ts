@@ -511,7 +511,13 @@ export class RouteBindingManager {
     await this.commit(bindingId, updated);
     this.runtimeDispatch?.syncRouteBinding(updated, 'routes.patch');
 
-    const eventSurfaceKind = toEventSurfaceKind(updated.surfaceKind);
+    // The fields this patch actually changed, diffed as an upsert diffs them;
+    // an explicit metadata edit also counts a key whose value it changed.
+    const changedFields = changedBindingFields(binding, updated);
+    if (!changedFields.includes('metadata') && Object.entries(patch.metadata ?? {}).some(([key, value]) =>
+      !Object.hasOwn(binding.metadata, key) || JSON.stringify(binding.metadata[key]) !== JSON.stringify(value))) {
+      changedFields.push('metadata');
+    }
     if (this.runtimeBus) {
       emitRouteBindingUpdated(this.runtimeBus, {
         sessionId: updated.sessionId ?? 'routes',
@@ -519,15 +525,7 @@ export class RouteBindingManager {
         traceId: updated.id,
       }, {
         bindingId: updated.id,
-        changedFields: [
-          ...(patch.threadId !== undefined ? ['threadId'] : []),
-          ...(patch.channelId !== undefined ? ['channelId'] : []),
-          ...(patch.sessionId !== undefined ? ['sessionId'] : []),
-          ...(patch.jobId !== undefined ? ['jobId'] : []),
-          ...(patch.runId !== undefined ? ['runId'] : []),
-          ...(patch.title !== undefined ? ['title'] : []),
-          ...(patch.metadata ? ['metadata'] : []),
-        ],
+        changedFields,
       });
     }
 

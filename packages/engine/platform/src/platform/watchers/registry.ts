@@ -953,12 +953,14 @@ export class WatcherRegistry {
     this.inFlight.set(id, fence.epoch);
     // A manual run of a stopped watcher records its result but does not start it: no timer would drive it.
     // The same holds for a timer-driven watcher whose manual run failed first (stopped, then failed): with no timer it is not running.
-    const undriven = watcher.record.state === 'stopped'
-      || (watcher.record.state === 'failed' && !this.timers.has(id) && watcher.record.kind !== 'manual');
+    // Read when the outcome is applied, so a watcher started while this run was in flight is recorded as running.
+    const undrivenNow = (record: WatcherRecord): boolean => record.state === 'stopped'
+      || (record.state === 'failed' && !this.timers.has(id) && record.kind !== 'manual');
     try {
       const checkpoint = await run(fence.signal);
-      // Re-read: the watcher may have been stopped, removed or re-registered while it ran.
+      // Re-read: the watcher may have been stopped, started, removed or re-registered while it ran.
       const current = this.watchers.get(id);
+      const undriven = current !== undefined && undrivenNow(current.record);
       const successState: WatcherState = undriven ? 'stopped' : 'running';
       if (!current || !runOutcomeApplies(fence, current.record.state, successState)) return;
       const updated: WatcherRecord = this.normalizeRecord({
@@ -1006,6 +1008,7 @@ export class WatcherRegistry {
       }
     } catch (error) {
       const current = this.watchers.get(id);
+      const undriven = current !== undefined && undrivenNow(current.record);
       // A driven watcher stays live (degraded, with the error) and its timer runs it again;
       // only one that nothing drives is recorded as failed.
       const failureState: WatcherState = undriven ? 'failed' : 'degraded';

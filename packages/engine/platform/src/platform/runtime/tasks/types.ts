@@ -2,7 +2,7 @@
  * Task manager types, public interfaces for creating, updating, and
  * managing RuntimeTask lifecycle through the UnifiedTaskManager.
  */
-import type { TaskKind, TaskLifecycleState, TaskRetryPolicy, RuntimeTask } from '../store/domains/tasks.js';
+import type { TaskKind, TaskLifecycleState, RuntimeTask } from '../store/domains/tasks.js';
 
 // ---------------------------------------------------------------------------
 // Task creation params
@@ -27,8 +27,6 @@ export interface TaskCreateParams {
   parentTaskId?: string | undefined;
   /** Whether this task can be cancelled by the user. Defaults to `true`. */
   cancellable?: boolean | undefined;
-  /** Retry policy (undefined = no retries). */
-  retryPolicy?: TaskRetryPolicy | undefined;
   /** Correlation ID for distributed tracing. */
   correlationId?: string | undefined;
   /** Turn ID this task was spawned within. */

@@ -112,16 +112,40 @@ async function fetchOpenRouterModels(): Promise<Map<string, OpenRouterModelData>
     throw new Error(`OpenRouter API returned ${response.status}`);
   }
 
-  const json = await response.json() as OpenRouterResponse;
+  const json = await response.json() as Partial<OpenRouterResponse> | null;
+  if (!json || !Array.isArray(json.data)) {
+    throw new Error('OpenRouter /models answered without a model list');
+  }
   const map = new Map<string, OpenRouterModelData>();
-  if (Array.isArray(json.data)) {
-    for (const model of json.data) {
-      if (typeof model.id === 'string') {
-        map.set(model.id, model);
-      }
+  for (const model of json.data) {
+    if (model && typeof model.id === 'string') {
+      map.set(model.id, model);
     }
   }
   return map;
+}
+
+/** A per-token USD rate: finite and not negative, else undefined (OpenRouter lists variable-price routers as -1). */
+function parseRate(value: string | number | null | undefined): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  const rate = typeof value === 'number' ? value : parseFloat(value);
+  return Number.isFinite(rate) && rate >= 0 ? rate : undefined;
+}
+
+/** The provider-served price of one model, or undefined when its prompt or completion rate is not a valid rate. */
+function parsePricing(pricing: OpenRouterModelData['pricing']): ProviderModelPricing | undefined {
+  if (!pricing) return undefined;
+  const prompt = parseRate(pricing.prompt);
+  const completion = parseRate(pricing.completion);
+  if (prompt === undefined || completion === undefined) return undefined;
+  const cacheRead = parseRate(pricing.input_cache_read);
+  const cacheWrite = parseRate(pricing.input_cache_write);
+  return {
+    prompt,
+    completion,
+    ...(cacheRead === undefined ? {} : { cacheRead }),
+    ...(cacheWrite === undefined ? {} : { cacheWrite }),
+  };
 }
 
 /** Exact OpenRouter ID or its documented provider/model format; otherwise unknown. */
@@ -207,18 +231,7 @@ export class ModelLimitsService {
     const orMap = this.ensureOpenRouterMap();
     if (!orMap) return null;
     const match = findOpenRouterMatch(modelId, provider, orMap);
-    if (!match?.pricing) return null;
-    const prompt = parseFloat(match.pricing.prompt);
-    const completion = parseFloat(match.pricing.completion);
-    if (Number.isNaN(prompt) || Number.isNaN(completion)) return null;
-    const cacheRead = match.pricing.input_cache_read === undefined ? Number.NaN : parseFloat(match.pricing.input_cache_read);
-    const cacheWrite = match.pricing.input_cache_write === undefined ? Number.NaN : parseFloat(match.pricing.input_cache_write);
-    return {
-      prompt,
-      completion,
-      ...(Number.isNaN(cacheRead) ? {} : { cacheRead }),
-      ...(Number.isNaN(cacheWrite) ? {} : { cacheWrite }),
-    };
+    return parsePricing(match?.pricing) ?? null;
   }
 
   /** Epoch ms of the fetch behind the current pricing/limits cache, or null when no cache is loaded. */
@@ -306,28 +319,17 @@ export class ModelLimitsService {
 
   async refresh(): Promise<number> {
     const orModels = await fetchOpenRouterModels();
+    if (orModels.size === 0) {
+      // An empty answer would replace a good cache with nothing for a whole TTL; keep the one held.
+      throw new Error('OpenRouter /models answered with an empty model list; the existing model limits are kept');
+    }
     const models: ModelLimitsCache['models'] = {};
     for (const [id, model] of orModels) {
-      let pricing: ModelLimitsCache['models'][string]['pricing'];
-      if (model.pricing?.prompt != null && model.pricing?.completion != null) {
-        const prompt = parseFloat(model.pricing.prompt);
-        const completion = parseFloat(model.pricing.completion);
-        if (!Number.isNaN(prompt) && !Number.isNaN(completion)) {
-          const cacheRead = model.pricing.input_cache_read === undefined ? Number.NaN : parseFloat(model.pricing.input_cache_read);
-          const cacheWrite = model.pricing.input_cache_write === undefined ? Number.NaN : parseFloat(model.pricing.input_cache_write);
-          pricing = {
-            prompt,
-            completion,
-            ...(Number.isNaN(cacheRead) ? {} : { cacheRead }),
-            ...(Number.isNaN(cacheWrite) ? {} : { cacheWrite }),
-          };
-        }
-      }
       models[id] = {
         contextLength: model.context_length ?? 0,
         maxOutputTokens: model.top_provider?.max_completion_tokens ?? null,
         supportedParameters: model.supported_parameters ?? [],
-        pricing,
+        pricing: parsePricing(model.pricing),
       };
     }
 

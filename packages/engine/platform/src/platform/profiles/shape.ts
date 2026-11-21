@@ -24,24 +24,30 @@ function getNestedValue(source: unknown, path: readonly string[]): unknown {
 }
 
 /**
- * Settings a profile never carries, in either direction. They decide what runs
- * without asking (approval behaviour), where the agent's instructions come from
- * and where its requests are routed, so applying a profile made on another host
- * or by someone else must not change them. Profiles are host display, model and
- * behaviour preferences only.
+ * Approval behaviour decides what runs without asking, so applying a profile
+ * made on another host or by someone else must not change it.
  */
-const KEYS_NEVER_IN_A_PROFILE: ReadonlySet<string> = new Set([
-  'behavior.autoApprove',
-  'behavior.hitlMode',
-  'provider.systemPromptFile',
-  'provider.decisionRouter',
-]);
+const APPROVAL_KEYS: ReadonlySet<string> = new Set(['behavior.autoApprove', 'behavior.hitlMode']);
+
+/**
+ * The settings a profile carries, in both directions (saving, loading, export
+ * and import): every `display.<name>` and `behavior.<name>` setting except the
+ * approval ones, plus the model and its reasoning effort. Where the agent's
+ * instructions come from and where its requests are routed never travel in a
+ * profile. Profiles are host display, model and behaviour preferences only.
+ */
+export const PROFILE_SETTING_KEYS: readonly ConfigKey[] = CONFIG_SCHEMA
+  .map((entry) => entry.key)
+  .filter((key) => {
+    const [section, , nested] = key.split('.');
+    return ((section === 'display' || section === 'behavior') && nested === undefined && !APPROVAL_KEYS.has(key))
+      || key === 'provider.model' || key === 'provider.reasoningEffort';
+  });
+
+const PROFILE_SETTINGS: ReadonlySet<string> = new Set(PROFILE_SETTING_KEYS);
 
 function isProfileEntry(entry: (typeof CONFIG_SCHEMA)[number]): boolean {
-  return (
-    (entry.key.startsWith('display.') || entry.key.startsWith('provider.') || entry.key.startsWith('behavior.'))
-    && !KEYS_NEVER_IN_A_PROFILE.has(entry.key)
-  );
+  return PROFILE_SETTINGS.has(entry.key);
 }
 
 /** Whether a value read from a profile file is the kind of value the setting accepts. */

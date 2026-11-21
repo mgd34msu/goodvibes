@@ -87,6 +87,8 @@ interface EditExecutionContext {
   fileUndoManager?: FileUndoManager | undefined;
   /** This call's undo token: every file it changes is one undo entry. */
   undoCall?: number | undefined;
+  /** The id of the tool call being run, stored on its undo entry. */
+  toolCallId?: string | undefined;
   configManager?: Pick<ConfigManager, 'get' | 'getWorkingDirectory'> | undefined;
   toolLLM?: Pick<ToolLLM, 'chat'> | undefined;
   changeTracker?: Pick<SessionChangeTracker, 'recordChange'> | undefined;
@@ -348,6 +350,8 @@ async function repairAfterValidationFailure(
   let healed = false;
   const healedPaths = new Set<string>();
   const warnings: string[] = [];
+  // Repair switched off: nothing is attempted and nothing is said about it.
+  if (!env.configManager?.get('tools.autoHeal')) return { healed, healedPaths, warnings };
   for (const [resolvedPath, originalContent] of fileContents) {
     if (hasCapturedToolInvocation() && !env.capturedWritten.has(resolvedPath)) continue;
     if (env.authenticated && !env.ownedRevisions.has(resolvedPath)) continue;
@@ -811,7 +815,7 @@ async function executeTextEdits(
       for (const { path, content, revision } of admitted) {
         try {
           assertCapturedToolWriteRevision(path, revision);
-          env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent: content, tool: 'edit', call: env.undoCall });
+          env.fileUndoManager.snapshot({ path, beforeContent: fileContents.get(path) ?? null, afterContent: content, tool: 'edit', call: env.undoCall, toolCallId: env.toolCallId });
         } catch {
           // Bookkeeping must not hide the edit result or bypass a held revision.
         }
@@ -887,6 +891,7 @@ export function createEditTool(fileCache: FileStateCache, options?: EditToolOpti
         cwd,
         fileUndoManager: options?.fileUndoManager,
         undoCall: options?.fileUndoManager?.beginCall(),
+        toolCallId: executeOptions?.callId,
         configManager: options?.configManager,
         toolLLM: options?.toolLLM,
         changeTracker: options?.changeTracker,

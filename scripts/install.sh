@@ -322,11 +322,15 @@ ensure_path_on_shell_rc() {
     return 0
   fi
   mkdir -p "$(dirname "$rc_file")" 2>/dev/null || true
-  printf '\n# %s\n%s\n' "$INSTALLER_MARKER" "$(path_export_line)" >> "$rc_file"
-  PATH_LINE_ADDED=1
-  RC_FILE_USED="$rc_file"
   say ""
-  say "Added $INSTALL_DIR to PATH in $rc_file (installer-managed; uninstall removes it)."
+  if printf '\n# %s\n%s\n' "$INSTALLER_MARKER" "$(path_export_line)" 2>/dev/null >> "$rc_file"; then
+    PATH_LINE_ADDED=1
+    RC_FILE_USED="$rc_file"
+    say "Added $INSTALL_DIR to PATH in $rc_file (installer-managed; uninstall removes it)."
+  else
+    say "NOTE: could not write $rc_file; add this line to your shell startup file yourself:"
+    say "    $(path_export_line)"
+  fi
 }
 
 # Uninstall-side removal of the PATH line: only the marker comment line and
@@ -336,15 +340,29 @@ ensure_path_on_shell_rc() {
 uninstall_shell_rc_path_line() {
   rc_file=$(resolve_shell_rc)
   rc_has_path_line "$rc_file" || return 0
-  tmp_file="$rc_file.goodvibes-uninstall-tmp"
-  awk -v marker="$INSTALLER_MARKER" -v line="$(path_export_line)" '
-    held != "" { if ($0 == line) { held = ""; next } print held; held = "" }
-    index($0, marker) > 0 { held = $0; next }
-    { print }
-    END { if (held != "") print held }
-  ' "$rc_file" > "$tmp_file" && mv "$tmp_file" "$rc_file"
-  say "  removed    PATH line from $rc_file"
-  record_removed "PATH line in $rc_file (installer-managed)"
+  # The filtered text is written back through the file (as install appended
+  # to it), so a symlinked rc keeps its link and its target keeps inode, mode
+  # and owner.
+  _usr_written=0
+  if tmp_file=$(mktemp "${TMPDIR:-/tmp}/goodvibes-uninstall-rc.XXXXXX" 2>/dev/null); then
+    if awk -v marker="$INSTALLER_MARKER" -v line="$(path_export_line)" '
+      held != "" { if ($0 == line) { held = ""; next } print held; held = "" }
+      index($0, marker) > 0 { held = $0; next }
+      { print }
+      END { if (held != "") print held }
+    ' "$rc_file" 2>/dev/null > "$tmp_file" && cat "$tmp_file" 2>/dev/null > "$rc_file"; then
+      _usr_written=1
+    fi
+    rm -f "$tmp_file"
+  fi
+  if [ "$_usr_written" = 1 ]; then
+    say "  removed    PATH line from $rc_file"
+    record_removed "PATH line in $rc_file (installer-managed)"
+  else
+    say "  NOTE: could not rewrite $rc_file; delete these two lines from it yourself:"
+    say "    # $INSTALLER_MARKER"
+    say "    $(path_export_line)"
+  fi
 }
 
 # --- platform detection (release asset naming: goodvibes[-daemon]-{linux|macos}-{x64|arm64}) ---
@@ -1615,11 +1633,26 @@ restart_systemd_unit() {
 
   say ""
   say "Restarting the running ${unit%.service} (systemd user service) ..."
-  _rsu_state=''
+  # The unit is Type=simple, so systemctl returns once the process is forked.
+  # Restarted only once the daemon's runtime record (written after its listener
+  # is bound, in the daemon home that process runs with) names the unit's new
+  # main pid while that pid is alive; a daemon that dies during startup is not.
+  _rsu_restarted=0
+  _rsu_serving=0
   if systemctl --user restart "$unit" 2>/dev/null; then
-    _rsu_state=$(systemctl --user show "$unit" --property=ActiveState --value 2>/dev/null || :)
+    _rsu_restarted=1
+    _rsu_pid=$(systemctl --user show "$unit" --property=MainPID --value 2>/dev/null || :)
+    case "$_rsu_pid" in ''|0|*[!0-9]*) _rsu_pid='' ;; esac
+    if [ -n "$_rsu_pid" ]; then
+      while pid_alive "$_rsu_pid" && ! daemon_record_names_pid "$_rsu_pid" "$(daemon_record_of_process "$_rsu_pid")"; do
+        sleep 1
+      done
+      if daemon_record_names_pid "$_rsu_pid" "$(daemon_record_of_process "$_rsu_pid")" && pid_alive "$_rsu_pid"; then
+        _rsu_serving=1
+      fi
+    fi
   fi
-  if [ "$_rsu_state" = active ]; then
+  if [ "$_rsu_serving" = 1 ]; then
     say "  restarted  $unit"
     case "$exec_bin" in
       ""|*"$expected_bin"*) : ;;
@@ -1631,11 +1664,15 @@ restart_systemd_unit() {
     esac
   else
     DAEMON_RESTART_FAILED=1
-    if [ -n "$_rsu_state" ]; then
-      say "  NOTE: $unit was restarted but is $_rsu_state, not active. Inspect it with:"
+    if [ "$_rsu_restarted" = 1 ]; then
+      _rsu_state=$(systemctl --user show "$unit" --property=ActiveState --value 2>/dev/null || :)
+      say "  NOTE: $unit was restarted but its daemon exited before it was serving (the unit is ${_rsu_state:-in an unknown state}). See why with:"
       say "    systemctl --user status $unit"
+      say "    journalctl --user -u $unit"
     else
-      say "  NOTE: restart failed; restart it yourself with:"
+      say "  NOTE: restart failed; see why, then restart it yourself:"
+      say "    systemctl --user status $unit"
+      say "    journalctl --user -u $unit"
       say "    systemctl --user restart $unit"
     fi
   fi
@@ -1652,9 +1689,33 @@ pid_alive() {
 
 # Whether the daemon's runtime record names a pid. The daemon writes the record
 # (detached-daemon.json in its daemon home) only once its listener is bound.
+# daemon_record_names_pid <pid> [<record path>]: without a path, the record in
+# the daemon home this installer's own environment selects.
 daemon_record_names_pid() {
-  _drn_record="${GOODVIBES_DAEMON_HOME:-${GOODVIBES_HOME:-$HOME}/.goodvibes/daemon}/detached-daemon.json"
+  _drn_record="${2:-${GOODVIBES_DAEMON_HOME:-${GOODVIBES_HOME:-$HOME}/.goodvibes/daemon}/detached-daemon.json}"
   [ -f "$_drn_record" ] && grep -Eq '"pid": *'"$1"'([^0-9]|$)' "$_drn_record"
+}
+
+# The runtime record path of the daemon running as <pid>, from that process's
+# own arguments and environment, resolved as the daemon resolves its home:
+# --daemon-home, else GOODVIBES_DAEMON_HOME, else .goodvibes/daemon under
+# GOODVIBES_HOME, else under its HOME. A unit for a second daemon carries its
+# home in its own definition, which this installer's environment does not.
+daemon_record_of_process() {
+  _drp_home=$(tr '\0' '\n' 2>/dev/null < "/proc/$1/cmdline" | awk '
+    take { print; exit }
+    $0 == "--daemon-home" { take = 1; next }
+    index($0, "--daemon-home=") == 1 { print substr($0, 15); exit }' || :)
+  if [ -z "$_drp_home" ]; then
+    _drp_env=$(tr '\0' '\n' 2>/dev/null < "/proc/$1/environ" || :)
+    _drp_home=$(printf '%s\n' "$_drp_env" | sed -n 's/^GOODVIBES_DAEMON_HOME=//p' | head -n 1)
+    if [ -z "$_drp_home" ]; then
+      _drp_tree=$(printf '%s\n' "$_drp_env" | sed -n 's/^GOODVIBES_HOME=//p' | head -n 1)
+      [ -n "$_drp_tree" ] || _drp_tree=$(printf '%s\n' "$_drp_env" | sed -n 's/^HOME=//p' | head -n 1)
+      _drp_home="${_drp_tree:-$HOME}/.goodvibes/daemon"
+    fi
+  fi
+  printf '%s/detached-daemon.json' "$_drp_home"
 }
 
 restart_bare_processes() {
@@ -3825,8 +3886,6 @@ main() {
   # and before the web UI (which this binary configures).
   install_daemon
 
-  ensure_path_on_shell_rc
-
   # Smoke test: the installed binary must at least report its version.
   # (doctor is a next-step suggestion, not an install gate: a healthy install
   # exits 0 — advisory findings render as notes, not failures — so there is
@@ -3856,6 +3915,10 @@ main() {
   mark_install_swap_committed || fail INSTALL_E124 "Every program was replaced, but the swap journal in $INSTALL_CLAIM_OWNER could not be marked finished, so the previous programs are being put back."
   commit_install_journal
   release_install_claims || fail INSTALL_E116 "Suite files were installed, but this run's transaction claims in $INSTALL_CLAIM_DIR changed, so services were not started. Re-run the installer once no other goodvibes install or update is running; it releases claims whose process is gone."
+
+  # After the swap is committed: a PATH line is a convenience and never fails or
+  # undoes an install. It precedes resolve_path_shadows, which reads PATH_LINE_ADDED.
+  ensure_path_on_shell_rc
 
   apply_decision_policy
   apply_update_choice

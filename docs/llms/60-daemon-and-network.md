@@ -230,7 +230,8 @@ Errors these commands print, and what to do:
 | `could not reach the daemon on this machine` | Nothing answers at that host and port. | `goodvibes-daemon service-status`; check `--port`. |
 | `'<host>' is another machine, and its connection type was not stated` | `--host` named another machine without a scheme. | Use `--host https://<host>:<port>` or `--host http://<host>:<port>`; without a port the URL means 443 or 80. |
 | `'10.0.0.7:3422' is not a usable --host: the port goes in --port` (exit `1`) | A bare `host:port` without a scheme. | `--host 10.0.0.7 --port 3422`, or the URL form `--host http://10.0.0.7:3422`. |
-| `<where> refused the operator token` | Wrong token for that daemon. | Pass the right one with `--token`. |
+| `<where> refused this machine's operator token` (or `the token given with --token`, or `the sign-in stored for <origin>`) | Wrong or stale credential for that daemon; the message names the one that was sent. | Pass the right one with `--token`; for a stored sign-in, sign in again. |
+| `<where> refused the request: <the daemon's reason>` (for example `Admin role required`, code `ADMIN_REQUIRED`) | The daemon accepted the credential but refused it for this command. | Follow the fix the daemon names, such as signing in as an admin. |
 | `<where> does not know this command` | That daemon runs an older build, or it is not a GoodVibes daemon. | Update it. |
 
 ### `status`
@@ -465,14 +466,16 @@ The flags `cluster` accepts, after the subcommand, in any order. A value can be 
 | Flag | Used by | Effect |
 | --- | --- | --- |
 | `--name <name>` | `create`, `rename` | The group name. `rename` also takes it as its one argument. |
-| `--passphrase <phrase>` | `create` | Use this phrase (at least 12 characters) as the join key instead of a generated one. |
+| `--passphrase <phrase>` | `create` | Use this phrase (at least 12 characters) as the join key instead of a generated one. `--passphrase -` reads it from the first line of standard input. |
 | `--group <id>` | `join` | The group to join. |
-| `--key <join key>` | `join` | The join key. |
+| `--key <join key>` | `join` | The join key. `--key -` reads it from the first line of standard input; with `--group` and no `--key`, a key piped in is read the same way. |
 | `--qr` | `key` | Also print the join key as a QR code. |
 | `--now` | `rotate` | Stop accepting the old key at once, and replace the signing key and the join key too. |
 | `-y`, `--yes` | `leave`, `forget`, `rotate --now`, `publish`, `accept` | Confirm without the interactive question. |
 | `--json` | all | Print one JSON document: `{"ok":true,"data":...}` or `{"ok":false,"code":...,"error":...,"fix":...}`. |
-| `--host <name>`, `--port <n>`, `--token <t>` | all | Talk to another daemon, as for `status` (including the `daemon.connectedHost.url` rule when `--host` is absent). |
+| `--host <name>`, `--port <n>`, `--token <t>` | all | Talk to another daemon, as for `status` (including the `daemon.connectedHost.url` rule when `--host` is absent). `--token -` reads the token from the first line of standard input. |
+
+A secret given on the command line shows in the process list to other users of the machine and stays in shell history, so in a script pipe it in with `-`. Only one of `--key`, `--passphrase` and `--token` can be `-` in one run; `-` with nothing piped in is refused (exit `1`), and the `/cluster` command in the terminal apps asks for these values hidden instead.
 
 `forget <machine>`, `publish <setting>` and `accept <setting>` each take one argument.
 
@@ -880,7 +883,7 @@ Do all of these that apply, on the daemon's machine or from another signed-in de
 | The shared operator token (paired with `goodvibes-daemon pair`, local form) | `pairing.tokens.revokeShared` (see below). |
 | A sign-in session | Rotate that user's password: `goodvibes auth rotate-password <username> --password-stdin` ends that user's sessions on a running daemon within a few seconds, with no restart. Or end one session at once with `goodvibes auth revoke-session <id>` (ids from `goodvibes auth sessions`), or all of one user's with `goodvibes auth revoke-sessions <username>`; both act on the running daemon, through `local_auth.sessions.delete` (`GET /api/local-auth` lists the sessions). |
 | A passkey (accepted the Passkey offer) | `GET /api/stepup/credentials` lists passkeys (`credentialId`, label, creation time); `DELETE /api/stepup/credentials/{credentialId}` removes one (admin, from the daemon's own machine; over the relay it needs a step-up itself). Removing the last passkey leaves nothing to confirm relay actions until a new one is registered. In a group, a passkey removed on one machine confirms nothing on any machine. |
-| A relay pairing code (`gvrelay1.…`) | Each pairing carries a relay code for that one device, listed and revoked like a device token: `/devices relay-codes` in the terminal app, `goodvibes-agent relay codes`, the operator method `relay.codes.list` or the web UI's Settings, "Relay devices", show each code's id, name, creation and last use (never the code); `/devices relay-revoke <code>`, `goodvibes-agent relay revoke <id>`, `relay.codes.revoke` (admin) or the web UI's Revoke button revoke one. Every relay connection the code opened ends at once (its open event streams are closed, its requests stopped), and from its next request the phone is refused through the relay (`401` `RELAY_CODE_REVOKED`); every other device keeps working, and the phone still connects directly on the home network with a valid token. A relay code the phone asked for with its own device token is also revoked when that device token is revoked, on any machine of the group. To cut every device off at once, switch the relay off: `goodvibes-daemon config set relay.enabled false` refuses relayed requests at once (`503` `RELAY_DISABLED`). |
+| A relay pairing code (`gvrelay1.…`) | Each pairing carries a relay code for that one device, listed and revoked like a device token: `/devices relay-codes` in the terminal app, `goodvibes-agent relay codes`, the operator method `relay.codes.list` or the web UI's Settings, "Relay devices", show each code's id, name, creation and last use (never the code); `/devices relay-revoke <code>`, `goodvibes-agent relay revoke <id>`, `relay.codes.revoke` (admin) or the web UI's Revoke button revoke one. Every relay connection the code opened ends at once (its open event streams are closed, its requests stopped), and from its next request the phone is refused through the relay (`401` `RELAY_CODE_REVOKED`); every other device keeps working, and the phone still connects directly on the home network with a valid token. A relay code the phone asked for with its own device token is also revoked when that device token is revoked, on any machine of the group. The revocation is written to the authority record first: when that write fails nothing is revoked (`503` `RELAY_CODE_REVOKE_FAILED`, try again); when the record holds it but the relay codes file cannot be saved, the code is refused from then on, its connections are still closed, and the answer is `500` `RELAY_CODE_REVOKE_NOT_SAVED` (revoke the same id again to retry the save). To cut every device off at once, switch the relay off: `goodvibes-daemon config set relay.enabled false` refuses relayed requests at once (`503` `RELAY_DISABLED`). |
 | Web push (accepted Notifications) | Revoking the phone's device token also ends the push subscription the phone registered with it, on every machine of the group: no machine pushes to it again. A subscription the push service reports gone is removed by the daemon too. |
 
 ### Revoking the shared operator token
@@ -919,7 +922,7 @@ Manage users with the terminal app (`goodvibes auth ...`, described in "The term
 
 The last user with the `admin` role cannot be deleted. Five sign-in attempts per minute are allowed from one address; past that the daemon answers `429` with code `RATE_LIMITED`. A sign-in whose password was changed (or whose user was deleted) while the password check ran is refused with `401` `PASSWORD_CHANGED_DURING_SIGN_IN`: the newer password decides, so sign in with it.
 
-Roles: `admin` is the only role with a meaning; any other role name (the terminal app's `goodvibes auth add-user` uses `user` by default) gives the non-admin set: every read scope except the owner's private ones, and no writes. Through the API, `local_auth.users.create` without `roles` creates an **admin**; pass `"roles":["user"]` for a read-only user.
+Roles: `admin` is the only role with a meaning; any other role name (the terminal app's `goodvibes auth add-user` uses `user` by default) gives the non-admin set: every read scope except the owner's private ones, and no writes. Through the API, `local_auth.users.create` without `roles` creates an **admin**; pass `"roles":["user"]` for a read-only user. A user name is that user's principal id, so a name another kind of credential signs in as is refused, on every path that adds a user: `shared-token`, `local`, `unknown`, and any name starting `pairing:`, `channel:`, `peer:` or `system:` (`Username <name> has the reserved form "<form>", which another kind of credential signs in as; choose another name.`).
 
 ### The bootstrap file
 
@@ -1043,7 +1046,7 @@ Setting it up, end to end:
    ```
 
 4. Check the registration with `relay.reachability.get` (API, scope `read:control-plane`). Its `status` is `disabled` (one of the three gates is off), `failed` (the daemon could not start the registration, for example its relay identity could not be read; `lastRefusal` has code `relay-start-failed`, the reason and the next step, and the daemon tries again when `relay.url`, `relay.enabled` or the `relay-connect` flag changes), `idle`, `connecting`, `registered` (the relay answered within the last two pings), `reconnecting`, `refused` (the relay refused the registration; the reason and next step are in `lastRefusal`) or `stopped`. The daemon records its rendezvous id in `relay.rendezvousId`; setting that key does nothing.
-5. Pair a device for the relay while it is on the local network: run `/devices pair relay [--name <name>]` in the terminal app or `goodvibes-agent relay pair [name]`, or call `relay.pairing.mint` (admin, optional `name`), and give the device the code it returns (`gvrelay1.…`, or a link with `#relay=<code>`). Each call issues a relay code for one device, carried inside the pairing and sent by the device on every relayed request; the daemon keeps only its hash and refuses a request whose code it did not issue or has revoked (`401` `RELAY_CODE_REVOKED`). Pair each device separately, so each can be revoked alone (see "A lost phone"). `relay.pairing.mint` returns `pairing: null`, and keeps no code, until the daemon has registered; it refuses with `409` `RELAY_CODE_LIMIT` once 64 codes are held. Treat the code like a credential: it routes a device to the daemon until it is revoked.
+5. Pair a device for the relay while it is on the local network: run `/devices pair relay [--name <name>]` in the terminal app or `goodvibes-agent relay pair [name]`, or call `relay.pairing.mint` (admin, optional `name`), and give the device the code it returns (`gvrelay1.…`, or a link with `#relay=<code>`). Each call issues a relay code for one device, carried inside the pairing and sent by the device on every relayed request; the daemon keeps only its hash and refuses a request whose code it did not issue or has revoked (`401` `RELAY_CODE_REVOKED`). Pair each device separately, so each can be revoked alone (see "A lost phone"). `relay.pairing.mint` returns `pairing: null`, and keeps no code, until the daemon has registered; it refuses with `409` `RELAY_CODE_LIMIT` once 64 codes are held, and with `503` `AUTHORITY_RECORD_UNAVAILABLE` when the authority record cannot be read (the code's link to the device that asked for it is written there before the code is issued, so nothing is paired then). A code minted for a pairing that is not handed out (no live registration, or the payload could not be built) is withdrawn at once. Treat the code like a credential: it routes a device to the daemon until it is revoked.
 6. Off the network, the web UI uses the relay automatically when the daemon's direct address does not answer. A token is still required to sign in. The relay pairing and a sign-in made over the relay are held in the page's memory only: after a reload the page asks for the relay code and a sign-in again (see "Signing in to the web UI").
 
 `relay.requireStepUpForMutations` (default `false`) makes every state-changing operator call that arrives through the relay require a recent passkey confirmation. `relay.label` is a name shown in relay pairing payloads.
@@ -1096,13 +1099,13 @@ A remote node is another program (a runner on another machine, or a device app) 
 | `pair.verify` | `POST /api/remote/pair/verify` with `requestId`, `challenge` | none |
 | `peer.heartbeat` | `POST /api/remote/heartbeat` | peer token |
 | `work.pull` | `POST /api/remote/work/pull` with optional `maxItems`, `leaseMs` | peer token |
-| `work.complete` | `POST /api/remote/work/{workId}/complete` with `status`, `result` or `error` | peer token |
+| `work.complete` | `POST /api/remote/work/{workId}/complete` with `status`, `result` or `error`; without `status`, the work is recorded as `failed` when `error` is set and `completed` otherwise, so send `status: failed` or `cancelled` for work that did not finish | peer token |
 
 Pairing a remote node:
 
 1. The node calls `pair.request` and receives a `request` and a `challenge`.
 2. The owner approves it: in the web UI's Settings, Devices and pairing ("Waiting to pair", updated as requests arrive), with `/devices requests`, `/devices approve <request> [--replace]` and `/devices reject <request>` in the terminal app or the Agent, or with `POST /api/remote/pair/requests/{requestId}/approve` (admin; rejects with `.../reject`). `GET /api/remote/pair/requests` lists the requests. A request naming a node id that is already paired is refused with `409` `REMOTE_PAIR_REPLACES_PEER` until it is approved again with `confirmReplace: true` (`--replace`).
-3. The node polls `pair.verify`. It answers `404` while the request is pending, then returns `peer` and a scoped peer `token` (scopes `remote:heartbeat`, `remote:pull`, `remote:complete`). A rejected, expired or already-verified request answers `410` `REMOTE_PAIR_REQUEST_SETTLED`; the node must request again. A verify sent again with the same challenge before the request expires, while the token the first verify issued has never been used, returns a new token and revokes the unused one; this recovers a verify whose answer was lost.
+3. The node polls `pair.verify`. It answers `404` while the request is pending, then returns `peer` and a scoped peer `token` (scopes `remote:heartbeat`, `remote:pull`, `remote:complete`). A rejected, expired or already-verified request answers `410` `REMOTE_PAIR_REQUEST_SETTLED`; the node must request again. When another device verified as the same node id after this request was approved, the verify answers `409` `REMOTE_PAIR_REPLACES_PEER` and changes nothing; the node requests again, and the owner is asked to confirm the replace. A verify sent again with the same challenge before the request expires, while the token the first verify issued has never been used, returns a new token and revokes the unused one; this recovers a verify whose answer was lost.
 4. The node sends `peer.heartbeat` about every 30 seconds and `work.pull` about every 2 seconds.
 
 A peer token is on the authority record: a peer paired with one machine of a group is accepted by every machine (the first call to another machine takes the peer in there), and a token rotated or revoked on any machine is refused on all of them.
@@ -1235,7 +1238,8 @@ On the machine to add:
 
    (not a terminal, so no clipboard copy was attempted)
 
-   to add a machine: run  cluster join --group gG9JJ1P6CHMSME4AK --key <the key above>
+   to add a machine: run  cluster join --group gG9JJ1P6CHMSME4AK  on it and give the key above when asked
+   (in a script, pipe it in: echo "$JOIN_KEY" | cluster join --group gG9JJ1P6CHMSME4AK --key -)
    ```
 
    On an interactive terminal it tries to copy the key to the clipboard instead of printing the note. On a machine in no group it answers `this machine is not in a group, so it has no join key to show` and exits `1`.
@@ -1245,7 +1249,10 @@ On the machine to add:
    # Interactive: lists the groups advertising on this network, asks which, then asks for the key without echoing it.
    goodvibes-daemon cluster join
 
-   # Scriptable:
+   # Scriptable, with the key piped in so it never shows in the process list or shell history:
+   echo "$JOIN_KEY" | goodvibes-daemon cluster join --group g7BXD4Z810PV93J4J --key -
+
+   # Also accepted, though the key is then visible to other users of this machine:
    goodvibes-daemon cluster join --group g7BXD4Z810PV93J4J --key gvj1-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX
    ```
 
@@ -1260,7 +1267,8 @@ Join failures:
 | `this machine is already in a group` | The machine is in a different group. (Joining the group it already belongs to, with that group's current key, is allowed: that is how a machine is put back.) | `cluster leave` first. |
 | `a machine in that group answered and the join key did not match` | A member was reached and refused the key: a mistyped key, or a key that was replaced (by `rotate --now` or `forget`). Exit `1`. | Get the current key with `cluster key` on a member and join again. |
 | `no machine in that group accepted the join key, either the join key is wrong, or no machine in that group is reachable on this network` | Nothing answered within 15 seconds. | Check that a member is running, that both machines are on the same network and UDP 61860 is open, and set `cluster.peers` if multicast is dropped; then check the key. |
-| `a group and a join key are both needed, and this is not an interactive terminal` | Script without `--group` and `--key`. | Pass both. |
+| `a group and a join key are both needed, and this is not an interactive terminal` | Script without `--group`, or without a key given or piped in. | Pass `--group` and pipe the key in with `--key -`. |
+| `no join key was given and standard input held none` | `--group` without `--key`, and nothing was piped in. | Pipe the key in: `echo "$JOIN_KEY" \| cluster join --group <id> --key -`. |
 | `no goodvibes groups are advertising themselves on this network` | Nothing heard. | Check the other machine is on with clustering enabled, or join by id. |
 
 `cluster groups` lists the groups advertising on this network that this machine is not in. A machine advertises every `cluster.beaconSeconds` (default 15); the advertisement carries the group id, name, member count and version only.
@@ -1276,7 +1284,7 @@ With nothing heard it prints `no goodvibes groups are advertising themselves on 
 Successful joins print:
 
 ```text
-$ goodvibes-daemon cluster join --group gG9JJ1P6CHMSME4AK --key gvj1-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX
+$ echo "$JOIN_KEY" | goodvibes-daemon cluster join --group gG9JJ1P6CHMSME4AK --key -
 joined "home"  [gG9JJ1P6CHMSME4AK]
 the group now has 2 machines.
 ```
@@ -1377,10 +1385,10 @@ this machine is not in a group: another member told it the group removed it 2m a
 machine: charlie (79584424-1e8b-48d1-b084-fb381beb3016)
 version: 3.4.1
 
-this machine was removed from the group "home" [gVSTYHAVRJB7QSPEN] by another member; to put it back, run `cluster key` on a machine in that group, then `cluster join --group gVSTYHAVRJB7QSPEN --key <key>` here
+this machine was removed from the group "home" [gVSTYHAVRJB7QSPEN] by another member; to put it back, run `cluster key` on a machine in that group, then `cluster join --group gVSTYHAVRJB7QSPEN` here and give it that key
 ```
 
-To bring it back on purpose, run `cluster join --group <id> --key <current join key>` on it; no `cluster leave` is needed, before or after it has found out. The old join key is refused (`a machine in that group answered and the join key did not match`); the current one admits it again, under its same node id.
+To bring it back on purpose, run `cluster join --group <id>` on it and give the current join key when asked (or pipe it in with `--key -`); no `cluster leave` is needed, before or after it has found out. The old join key is refused (`a machine in that group answered and the join key did not match`); the current one admits it again, under its same node id.
 
 `forget` may follow `rotate --now` (or the other way round) at any spacing. Removing a machine is one change to the group's record that does two things at once: it revokes the machine's membership, a revocation no member that missed it can undo, and it adds a new group key generation that replaces the group key, the group signing key and the join key immediately, with no grace period. The removed machine's keys stop being accepted as each member takes the new generation. Add a machine later with the new join key from `cluster key`. If the new key cannot be saved, nothing is changed and the command says so; run `cluster forget` again.
 
@@ -1450,8 +1458,8 @@ These commands were run on three daemons on one machine, inside a network namesp
 goodvibes-daemon cluster create --name home --json --port 39431                    # on alpha
 goodvibes-daemon cluster key --port 39431                                          # on alpha
 goodvibes-daemon cluster groups --port 39432                                       # on bravo: lists "home"
-goodvibes-daemon cluster join --group <id> --key <join key> --port 39432           # on bravo: joined, 2 machines
-goodvibes-daemon cluster join --group <id> --key <join key> --port 39433           # on charlie: joined, 3 machines
+echo "$JOIN_KEY" | goodvibes-daemon cluster join --group <id> --key - --port 39432           # on bravo: joined, 2 machines
+echo "$JOIN_KEY" | goodvibes-daemon cluster join --group <id> --key - --port 39433           # on charlie: joined, 3 machines
 goodvibes-daemon cluster nodes --port 39431                                        # alpha, bravo, charlie
 goodvibes-daemon cluster rename "the workshop" --port 39431
 goodvibes-daemon cluster rotate --port 39431                                       # generation 1, old key still accepted
@@ -1460,7 +1468,7 @@ goodvibes-daemon cluster status --port 39432                                    
 goodvibes-daemon cluster key --port 39431                                          # the new join key
 goodvibes-daemon cluster forget charlie --yes --port 39431                         # removed; group key and join key replaced again
 goodvibes-daemon cluster leave --yes --port 39432                                  # bravo leaves
-goodvibes-daemon cluster join --group <id> --key <current join key> --port 39432   # bravo is admitted again
+echo "$JOIN_KEY" | goodvibes-daemon cluster join --group <id> --key - --port 39432           # bravo is admitted again, with the current key
 ```
 
 The outputs are the ones shown in the sections above. A wrong key (`gvj1-AAAA-...`) was refused at once with `a machine in that group answered and the join key did not match`.
@@ -1500,7 +1508,7 @@ A procedure, run in this order:
 2. On a healthy member: `goodvibes-daemon cluster nodes`. Note the suspect's `LAST SEEN`.
 3. On every node: `goodvibes-daemon cluster status`. Compare `group key: generation`, `version`, the `shared settings` revision, and the `traffic:` line.
 4. If the suspect's `received` count does not grow: check that UDP 61860 is allowed in and out on both machines, that every node has the same `cluster.port` and `cluster.multicastGroup`, and that multicast crosses the network; if it does not, set `cluster.peers` on every node (`goodvibes-daemon config set cluster.peers '["10.0.0.2","10.0.0.3"]'`) and restart them.
-5. If the suspect's key generation is lower than the others' while its `received` count grows, it catches up by itself within about a minute of hearing the group. If it stays lower, its `cluster status` will say whether the group removed it; to put it back, `cluster join --group <id> --key <current join key>` on it (no `leave` needed).
+5. If the suspect's key generation is lower than the others' while its `received` count grows, it catches up by itself within about a minute of hearing the group. If it stays lower, its `cluster status` will say whether the group removed it; to put it back, `cluster join --group <id>` on it with the current join key, given when asked or piped in with `--key -` (no `leave` needed).
 6. Read its log for `cluster:` lines: `grep "cluster:" <working dir>/.goodvibes/logs/activity.md | tail -30`. `took authority record changes from the group` followed by `adopted a replacement group key` is a member catching up; `this machine was removed from its group by another member` means it was removed; `dropped a reply to this machine's return that it could not authenticate` means a machine whose own record no longer lists it could not be re-keyed.
 
 ### Which node holds a channel

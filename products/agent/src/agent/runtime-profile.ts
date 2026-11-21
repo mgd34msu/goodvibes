@@ -54,10 +54,13 @@ export interface AgentRuntimeProfileTemplateApplication {
   readonly skillIds: readonly string[];
   readonly routineIds: readonly string[];
   readonly vibePath?: string;
+  /** True when `vibePath` is `VIBE.md.pending`, held for review: nothing reads it until it is renamed to VIBE.md. */
+  readonly vibePending?: boolean;
   /**
    * A built-in starter's records are written reviewed (the text ships in this
    * build). A local or discovered template's records start fresh; these are
-   * the commands that review each one. Empty when nothing waits for review.
+   * the steps that review each one, its VIBE.md included. Empty when nothing
+   * waits for review.
    */
   readonly reviewCommands: readonly string[];
 }
@@ -752,10 +755,15 @@ function createMissingRoutine(registry: AgentRoutineRegistry, template: AgentRun
   }, { reviewed }).id;
 }
 
-function writeTemplateVibe(homeDirectory: string, template: AgentRuntimeProfileStarterTemplate): string | undefined {
+/**
+ * Write the template's VIBE text. A reviewed (built-in) template's goes live as
+ * VIBE.md; any other is written beside it as VIBE.md.pending, which no prompt
+ * reads, until the person reviews it and renames it.
+ */
+function writeTemplateVibe(homeDirectory: string, template: AgentRuntimeProfileStarterTemplate, reviewed: boolean): string | undefined {
   if (!template.vibe?.body.trim()) return undefined;
   assertNoSecretLikeText([template.vibe.body], 'Agent starter VIBE.md');
-  const path = join(homeDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'VIBE.md');
+  const path = join(homeDirectory, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, reviewed ? 'VIBE.md' : 'VIBE.md.pending');
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${template.vibe.body.trimEnd()}\n`, 'utf-8');
   return path;
@@ -781,12 +789,14 @@ export function applyAgentRuntimeProfileTemplate(homeDirectory: string, template
   personaRegistry.setActive(persona.id);
   const skillIds = template.skills.map((skill) => createMissingSkill(skillRegistry, skill, reviewed));
   const routineIds = template.routines.map((routine) => createMissingRoutine(routineRegistry, routine, reviewed));
-  const vibePath = writeTemplateVibe(homeDirectory, template);
+  const vibePath = writeTemplateVibe(homeDirectory, template, reviewed);
+  const vibePending = vibePath !== undefined && !reviewed;
   const profile = `goodvibes-agent --agent-profile ${basename(homeDirectory)}`;
   const reviewCommands = [
     ...(personaRegistry.get(persona.id)?.reviewState === 'reviewed' ? [] : [`${profile} personas review ${persona.id}`]),
     ...skillIds.filter((id) => skillRegistry.get(id)?.reviewState !== 'reviewed').map((id) => `${profile} skills review ${id}`),
     ...routineIds.filter((id) => routineRegistry.get(id)?.reviewState !== 'reviewed').map((id) => `${profile} routines review ${id}`),
+    ...(vibePending ? [`read ${vibePath}, then rename it to VIBE.md in the same folder to apply it`] : []),
   ];
   return {
     id: template.id,
@@ -797,6 +807,7 @@ export function applyAgentRuntimeProfileTemplate(homeDirectory: string, template
     skillIds,
     routineIds,
     ...(vibePath ? { vibePath } : {}),
+    ...(vibePending ? { vibePending } : {}),
     reviewCommands,
   };
 }

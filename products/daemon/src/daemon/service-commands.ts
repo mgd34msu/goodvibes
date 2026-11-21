@@ -174,7 +174,8 @@ function statusLines(status: ManagedServiceStatus): string[] {
 export function buildInstallResultLines(status: ManagedServiceStatus): string[] {
   const lines = [`installed the ${status.platform} service at ${status.path}`];
   if (status.running) {
-    lines.push('service is enabled and running');
+    // "Enabled" means it starts at login; the status reads that from the platform.
+    lines.push(status.autostart ? 'service is enabled and running' : 'service is running; it does not start at login');
   } else {
     lines.push('suggested follow-ups if it did not start automatically:');
     for (const cmd of status.suggestedCommands) lines.push(`  ${cmd}`);
@@ -490,22 +491,28 @@ async function runServiceVerb(input: DaemonServiceCliInput): Promise<DaemonServi
       // definition is written, since a LaunchAgent's RunAtLoad and the start's
       // `enable` are read from it, and put back when the install fails.
       const autostartBefore = input.configManager?.get('service.autostart') === true;
-      if (!autostartBefore) setServiceKey(input, 'service.autostart', true);
+      const autostartUnsaved = autostartBefore ? undefined : setServiceKey(input, 'service.autostart', true);
       const installed = manager.install();
       if (installed.actionError) {
         if (!autostartBefore) setServiceKey(input, 'service.autostart', false);
         return failed('install', installed);
       }
-      recordServiceChoice(input, true);
+      const choiceUnsaved = recordServiceChoice(input, true);
       const started = manager.start();
       // A failed start does not undo the write. The unit is installed, but a
       // script must not treat a daemon that is down as installed and started:
       // exit 3 is the same "installed, not running" answer service-status gives.
       // Whether lingering was enabled decides "starts at boot" versus "at login"; the install says which.
       const linger = installed.lingerNote === undefined ? [] : [installed.lingerNote];
+      // A setting that could not be saved is said, with what it means: the
+      // service is installed and running, but the settings do not hold it.
+      const unsaved = [...new Set([autostartUnsaved, choiceUnsaved].filter((reason): reason is string => reason !== undefined))]
+        .map((reason) => reason.startsWith('service.autostart')
+          ? `${reason}; the service will not start at login`
+          : `${reason}; the daemon does not record that this machine has its service`);
       const result = started.actionError
-        ? ok('install', { ...started, running: false }, [`could not start it automatically: ${started.actionError}`, ...linger])
-        : ok('install', started, linger);
+        ? ok('install', { ...started, running: false }, [`could not start it automatically: ${started.actionError}`, ...unsaved, ...linger])
+        : ok('install', started, [...unsaved, ...linger]);
       return result.status.running ? result : { ...result, ok: false, exitCode: SERVICE_STATUS_EXIT_INSTALLED_NOT_RUNNING };
     }
     case 'refresh-service':

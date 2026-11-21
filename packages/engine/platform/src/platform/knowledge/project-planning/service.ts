@@ -276,7 +276,13 @@ export class ProjectPlanningService {
     const key = planKey(space.knowledgeSpaceId, workPlanId);
     if (this.movedPlans.has(key)) return;
     const source = this.store.storagePath;
-    if (this.rows.moved(source, space.knowledgeSpaceId, workPlanId)) { this.movedPlans.add(key); return; }
+    if (this.rows.moved(source, space.knowledgeSpaceId, workPlanId)) {
+      this.movedPlans.add(key);
+      // A copy whose removal failed when the plan moved is removed now, once per program.
+      const leftover = this.store.readWorkPlanNow(space.knowledgeSpaceId, workPlanId, (view) => view.tasks().map((row) => row.taskId));
+      if (leftover.length > 0) this.removeEarlierCopy(space, workPlanId, leftover, Date.now());
+      return;
+    }
     const earlier = this.store.readWorkPlanNow(space.knowledgeSpaceId, workPlanId, (view) => {
       const recordIds = new Map(view.tasks().map((row) => [row.taskId, row.recordId] as const));
       return workPlanEditView(space, workPlanId, view).tasks().map((task) => ({ task, recordId: recordIds.get(task.taskId) }));
@@ -296,8 +302,13 @@ export class ProjectPlanningService {
     this.movedPlans.add(key);
     if (!moved || earlier.length === 0) return;
     logger.info('Work plan moved into the shared plan file', { from: source, to: this.rows.path, tasks: earlier.length });
-    const ids = earlier.map(({ task }) => task.taskId);
-    void this.store.commitWorkPlan(space.knowledgeSpaceId, workPlanId, () => ({ value: undefined, put: [], remove: ids, at }))
+    this.removeEarlierCopy(space, workPlanId, earlier.map(({ task }) => task.taskId), at);
+  }
+
+  /** Remove a moved plan's earlier copy from the knowledge database, without waiting; a failure is retried on the next program's first open. */
+  private removeEarlierCopy(space: WorkPlanSpace, workPlanId: string, taskIds: readonly string[], at: number): void {
+    const remove = [...taskIds];
+    void this.store.commitWorkPlan(space.knowledgeSpaceId, workPlanId, () => ({ value: undefined, put: [], remove, at }))
       .catch((error: unknown) => logger.warn('The earlier copy of the work plan could not be removed from the knowledge database; it is no longer read', { error: summarizeError(error) }));
   }
 
@@ -315,10 +326,16 @@ export class ProjectPlanningService {
     const space = this.resolveSpace(input);
     this.movePlanIn(space, 'current');
     const sources = this.sourcesForSpace(space.knowledgeSpaceId);
-    // Plans in the plan file, plus any copy in this program's knowledge database not yet moved in.
+    // Plans in the plan file, plus any copy in this program's knowledge database
+    // not yet moved in. A copy left behind after its plan moved (its removal
+    // failed) is no longer read, so it is not counted either.
     const shared = this.rows.count(space.knowledgeSpaceId);
-    const local = await this.store.countWorkPlanTasks(space.knowledgeSpaceId);
-    const rows = { workPlans: shared.workPlans + local.workPlans, tasks: shared.tasks + local.tasks };
+    const rows = { workPlans: shared.workPlans, tasks: shared.tasks };
+    for (const [workPlanId, tasks] of await this.store.countWorkPlanTasks(space.knowledgeSpaceId)) {
+      if (this.rows.moved(this.store.storagePath, space.knowledgeSpaceId, workPlanId)) continue;
+      rows.workPlans += 1;
+      rows.tasks += tasks;
+    }
     const legacyPlans = sources.filter((source) => artifactKind(source) === 'work-plan');
     return {
       ok: true,

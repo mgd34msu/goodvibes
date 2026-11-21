@@ -98,15 +98,16 @@ export function agentOwnerQuestions(services: OwnerQuestionServices, options: Co
   const daemon = connectedHostOwnerInbox(options, host);
   const home = homeOwnerInbox(services.shellPaths);
   const daemonReachable = (): boolean => hostReachable(host);
+  const daemonAddress = (): string | undefined => host.connection().baseUrl;
   const inbox = withAnswerDelivery(
-    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'agent'), daemonReachable,
-      daemonAddress: () => host.connection().baseUrl }),
+    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'agent'), daemonReachable, daemonAddress }),
     {
       home,
       sessionWatch: () => sessionWatches.get(services),
       // The session's identity (app, project store and id), and what any process reads to tell a closed session from a deleted one.
       askerFacts: (id) => ({ [OWNER_ASKER_SESSION_FILE_METADATA]: sessionIdentityFile(services.surface, id) }),
       daemonReachable,
+      daemonAddress,
       daemon,
       // Only for a question a host on another machine holds: its update stream while one is open.
       watch: async (onItem, onEnd) => {

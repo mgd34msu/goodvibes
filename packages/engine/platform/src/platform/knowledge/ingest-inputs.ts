@@ -380,10 +380,12 @@ export async function ingestKnowledgeBookmarkSeeds(
         metadata: metadata || seed.metadata ? { ...seed.metadata, ...metadata } : undefined,
       });
       sources.push(result.source);
-      if (result.source.status === 'failed' || result.source.metadata.ingestHold !== undefined && result.source.status === 'pending') {
+      const reason = ingestFailureReason(result.source);
+      if (reason === undefined) imported += 1;
+      else {
         failed += 1;
-        if (result.source.status === 'pending') errors.push(`${seed.url}: ${result.source.crawlError ?? 'held'}`);
-      } else imported += 1;
+        errors.push(`${seed.url}: ${reason}`);
+      }
     } catch (error) {
       failed += 1;
       errors.push(`${seed.url}: ${summarizeError(error)}`);
@@ -466,7 +468,8 @@ export async function refreshKnowledgeSources(context: KnowledgeIngestContext, s
         },
       });
       // A failed refresh keeps an indexed source indexed but records crawlError.
-      if (result.source.crawlError) failed.push({ sourceId: source.id, reason: result.source.crawlError });
+      const reason = ingestFailureReason(result.source);
+      if (reason !== undefined) failed.push({ sourceId: source.id, reason });
       else if (result.source.status === 'indexed') refreshed += 1;
     } catch (error) {
       // One held or failing source must not stop the rest of the refresh or discard the count.
@@ -611,6 +614,20 @@ function ingestOwnerCheck(ownership: KnowledgeIngestOwnership, signal: AbortSign
       throw new KnowledgeIngestStoppedError('changed', undefined, { cause: error });
     }
   };
+}
+
+/**
+ * Why an ingest of this source did not succeed, or undefined when it did: the
+ * crawl error (a failed fetch or a hold, recorded even on a source that stays
+ * indexed with its earlier content), `held` for a hold without one, or a
+ * generic line for a failed source. A successful indexed write clears the
+ * crawl error, so both batch paths count by this one rule.
+ */
+function ingestFailureReason(source: KnowledgeSourceRecord): string | undefined {
+  if (source.crawlError) return source.crawlError;
+  if (isHeldIngest(source)) return 'held';
+  if (source.status === 'failed') return 'Knowledge ingest failed.';
+  return undefined;
 }
 
 /** A held ingest: the source kept pending with why, so a refresh reads it again. */

@@ -629,7 +629,7 @@ async function executeToolCallsInMode(
           let permittedRevisionIds: readonly string[] | undefined;
           while (true) {
             const currentPrepared = prepared;
-            admission = await owner.admit(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, ...(ownerAsk !== undefined ? { ownerAsk } : {}), consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
+            admission = await owner.admit(sourceId, currentPrepared.name, currentPrepared.args, { sourceOf: sourceOf!, decoratePort: deps.autonomousPort, signal: admissionSignal, hookOwner: deps.hookOwner, sessionId: deps.sessionId, ...(ownerAsk !== undefined ? { ownerAsk } : {}), consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}), ...(choiceProjection ? { choiceProjection } : {}), schemaRevision: currentPrepared.schemaRevision, preparationDecisionIds: currentPrepared.judgmentDecisionIds, preparedCall: { registry: deps.toolRegistry, call: currentPrepared }, assertPrepared: () => deps.toolRegistry.assertPrepared(currentPrepared) });
             assertTurnActive();
             permittedRevisionIds ??= admission.revisionIds;
             checkResult = admission.result;
@@ -750,9 +750,9 @@ async function executeToolCallsInMode(
         } : undefined, () => withCostOriginAsync(
           { tool: call.name, callId: call.id, mcpServer: mcpServerOfToolName(call.name) },
           () => {
-            const progress = deps.onProgress ? { onProgress: deps.onProgress } : {};
-            const executeOptions = callerCurrent ? { signal: callSignal, assertCurrent: assertTurnActive, ...progress }
-              : callSignal ? { signal: callSignal, ...progress } : deps.onProgress ? progress : undefined;
+            const shared = { callId: call.id, ...(deps.onProgress ? { onProgress: deps.onProgress } : {}) };
+            const executeOptions = callerCurrent ? { signal: callSignal, assertCurrent: assertTurnActive, ...shared }
+              : callSignal ? { signal: callSignal, ...shared } : shared;
             if (!prepared || !admission) return deps.toolRegistry.execute(call.id, call.name,
               checkResult.modifiedArgs ?? call.arguments, executeOptions);
             // Older embedding managers own a callback-only admission contract.

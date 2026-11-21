@@ -34,7 +34,6 @@ export { createInitialPermissionsState } from './permissions.js';
 export type {
   TaskLifecycleState,
   TaskKind,
-  TaskRetryPolicy,
   RuntimeTask,
   TaskDomainState,
 } from './tasks.js';

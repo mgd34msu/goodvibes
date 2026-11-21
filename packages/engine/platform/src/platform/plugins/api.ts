@@ -574,7 +574,20 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
             // An event reaching a quiescing plugin is not delivered: the instance
             // it would run on is about to be unloaded.
             if (tracker?.isQuiescing(ctx.pluginName) || ctx.registrations?.isClosed(ctx.pluginName)) return;
-            track(() => handler(envelope.payload as RuntimeEventPayload<typeof eventName>));
+            // A failing hook is logged, never thrown into the bus: other subscribers still run.
+            const failed = (error: unknown): void => {
+              logger.warn(`[plugin:${ctx.pluginName}] event hook ${String(eventName)} failed: ${summarizeError(error)}`);
+            };
+            let result: unknown;
+            try {
+              result = track(() => handler(envelope.payload as RuntimeEventPayload<typeof eventName>));
+            } catch (error) {
+              failed(error);
+              return;
+            }
+            if (result !== null && typeof result === 'object' && typeof (result as PromiseLike<unknown>).then === 'function') {
+              (result as PromiseLike<unknown>).then(undefined, failed);
+            }
           },
         );
         ctx.cleanup.push(unsub);

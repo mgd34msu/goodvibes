@@ -78,7 +78,7 @@ function NativeHunkComment({ binding, selection, filePath, hunk, capturedLabel, 
     {error?.selection === selection ? <p role="alert">Selected change unavailable: {error.message} Nothing was sent.</p> : prepared?.selection === selection ? <>
       <pre className="hunk-sheet__excerpt" aria-label="Selected change">{prepared.preview}</pre>
       <NativeIntakeForm lifetime={binding.lifetime} continuationSessionId={binding.sessionId}
-        projectId={binding.projectId} selectedDiff={prepared.selector} closed={closed} />
+        projectId={binding.projectId} selectedDiff={prepared.selector} closed={closed} initialText={binding.draft} />
     </> : <p role="status">Preparing the selected change…</p>}
   </CommentDialog>;
 }

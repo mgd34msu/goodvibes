@@ -1507,10 +1507,15 @@ export class SecretsManager {
 
   }
 
+  /**
+   * The stores a write locks: its target first, then the optional other store
+   * of the same scope it may touch (the plaintext fallback of a secure write,
+   * or the secure store a plaintext write removes an older copy from).
+   */
   private writeStorePaths(scope: SecretScope, medium: SecretStorageMedium, policy: SecretStorageMode): string[] {
     const target = this.resolveWriteTarget(scope, medium);
-    return [target.path, ...(target.secure && policy === 'preferred_secure'
-      ? [this.resolveWriteTarget(scope, 'plaintext').path] : [])];
+    if (!target.secure) return [target.path, this.resolveWriteTarget(scope, 'secure').path];
+    return [target.path, ...(policy === 'preferred_secure' ? [this.resolveWriteTarget(scope, 'plaintext').path] : [])];
   }
 
   /** Lock actual whole-file mutation targets; independent homes may share a tier. */
@@ -1568,6 +1573,10 @@ export class SecretsManager {
     // running a password-manager command; `goodvibes://secrets/…` stays a pointer.
     const stored = shouldStoreAsLiteral(value) ? encodeLiteralSecret(value) : value;
     existing[key] = stored;
+    // Reads consult a scope's secure store before its plaintext one, so a
+    // plaintext write removes this key's secure copy in the same scope, or is
+    // refused before anything is written when that copy cannot be removed.
+    const secureCopy = target.secure ? null : this.#secureCopyToRemove(key, scope);
 
     try {
       effect?.beforeWrite();
@@ -1575,6 +1584,14 @@ export class SecretsManager {
         this.writeEncryptedFile(target.path, existing);
       } else {
         this.writePlaintextFile(target.path, existing);
+      }
+      if (secureCopy) {
+        try { this.writeEncryptedFile(secureCopy.path, secureCopy.values); } catch (error) {
+          throw new Error(
+            `Secret ${key} was written to ${target.path}, but its old secure copy in ${secureCopy.path} could not be removed (${summarizeError(error)}), so the old value is still the one read. Fix the secure store and set ${key} again.`,
+            { cause: error },
+          );
+        }
       }
       effect?.committed();
       logger.debug('SecretsManager: stored secret', { key, source: target.source });
@@ -1610,6 +1627,29 @@ export class SecretsManager {
       }
       throw error;
     }
+  }
+
+  /**
+   * For a plaintext write of `key` in `scope`: the same scope's secure store
+   * without `key` when it holds a copy (to be written after the plaintext one),
+   * or null when it holds none. Throws, before anything is written, when that
+   * store cannot be read or was not locked for this write, since its copy would
+   * still be read in place of the new value.
+   */
+  #secureCopyToRemove(key: string, scope: SecretScope): { readonly path: string; readonly values: Record<string, string> } | null {
+    const secure = this.resolveWriteTarget(scope, 'secure');
+    const refuse = (why: string, cause?: unknown): Error => new Error(
+      `Secret ${key} was not changed: ${why}, and a secure copy there is read before the plaintext one. Fix the secure store and retry.`,
+      cause === undefined ? undefined : { cause },
+    );
+    let values: Record<string, string>;
+    try { values = this.readStoreForWrite(secure); } catch (error) {
+      throw refuse(`the secure store at ${secure.path} cannot be read (${summarizeError(error)})`, error);
+    }
+    if (!Object.hasOwn(values, key)) return null;
+    if (!this.ownedMutationPaths.has(secure.path)) throw refuse(`the secure store at ${secure.path} could not be locked to remove the old secure copy`);
+    delete values[key];
+    return { path: secure.path, values };
   }
 
   /**

@@ -72,6 +72,9 @@ export function wrapAgentContextToolForAgentPolicy(tool: Tool, registry?: ToolRe
   tool.execute = async (rawArgs, options) => {
     const args = rawArgs as AgentContextArgs;
     const mode = readAgentContextMode(args.mode);
+    if (mode === null) {
+      return { success: false, error: `Unknown goodvibes_context mode. Use one of: ${AGENT_CONTEXT_TOOL_MODES.join(', ')}.` };
+    }
     if (mode === 'capabilities') return ok(await buildAgentCapabilities(registry, options));
 
     const harnessMode = agentContextModeToHarnessMode(mode);
@@ -114,10 +117,12 @@ export function wrapAgentContextToolForAgentPolicy(tool: Tool, registry?: ToolRe
 
 export const AGENT_CONTEXT_TOOL_COMPATIBILITY_MODES = AGENT_CONTEXT_TOOL_MODES;
 
-function readAgentContextMode(value: unknown): AgentContextMode {
+/** The requested mode; `summary` when none is given, null for a mode this tool does not have. */
+function readAgentContextMode(value: unknown): AgentContextMode | null {
+  if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) return 'summary';
   return typeof value === 'string' && AGENT_CONTEXT_TOOL_MODES.includes(value as AgentContextMode)
     ? value as AgentContextMode
-    : 'summary';
+    : null;
 }
 
 function agentContextModeToHarnessMode(mode: AgentContextMode): string {

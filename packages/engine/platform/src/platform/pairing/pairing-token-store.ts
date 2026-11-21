@@ -482,6 +482,11 @@ function hashToken(token: string): string {
   return createHash('sha256').update(token).digest('hex');
 }
 
+/** When a device token on the authority record was issued, for its rotation age: its rotation stamp, or its creation when an older write left none. */
+function recordIssuedAt(entry: { readonly createdAt: number; readonly rotationIssuedAt?: unknown }): number {
+  return typeof entry.rotationIssuedAt === 'number' && Number.isFinite(entry.rotationIssuedAt) ? entry.rotationIssuedAt : entry.createdAt;
+}
+
 /**
  * What grants or limits access. A last-seen stamp is telemetry and changes no
  * access; an absent and a false legacy revocation, or an absent and an empty
@@ -853,13 +858,23 @@ export class PairingTokenManager {
       const atCap = this.capAtClaim(record, this.snapshot.tokens);
       return 'refused' in atCap ? atCap.refused : null;
     }
+    return this.#rotationRefusal(record.name, record.createdAt, now);
+  }
+
+  /**
+   * The managed-rotation refusal for a device token issued at `issuedAt`, or
+   * null while it is inside the age `security.tokenAudit.managed` allows (or
+   * no limit is set). The same rule for a token known here and one known only
+   * from the authority record, so every machine of the group refuses alike.
+   */
+  #rotationRefusal(name: string, issuedAt: number, now: number): CredentialRefusal | null {
     let limit: number | null = null;
     try { limit = this.#rotationLimit?.() ?? null; } catch { limit = null; }
-    if (limit === null || !Number.isFinite(limit) || limit <= 0 || now - record.createdAt <= limit) return null;
-    const ageDays = Math.floor((now - record.createdAt) / DAY_MS);
+    if (limit === null || !Number.isFinite(limit) || limit <= 0 || now - issuedAt <= limit) return null;
+    const ageDays = Math.floor((now - issuedAt) / DAY_MS);
     return {
       code: 'PAIRING_TOKEN_ROTATION_DUE',
-      state: `the token of "${record.name}" is ${ageDays} days old and managed token rotation (security.tokenAudit.managed) allows ${Math.floor(limit / DAY_MS)} days`,
+      state: `the token of "${name}" is ${ageDays} days old and managed token rotation (security.tokenAudit.managed) allows ${Math.floor(limit / DAY_MS)} days`,
       reason: 'This device token is past its rotation age and no longer authenticates',
       next: ["Pair this device again from the owner's machine to get a new token, then revoke the old one"],
     };
@@ -867,14 +882,19 @@ export class PairingTokenManager {
 
   /**
    * Why a token this store knows does not authenticate (an offer that expired
-   * unused, or a device token past the managed rotation age), or null. For the
-   * refusal a caller answers after authentication failed; never grants access.
+   * unused, or a device token past the managed rotation age), or null. A token
+   * known only from the authority record (paired on another machine of the
+   * group) is checked against the same rotation rule. For the refusal a caller
+   * answers after authentication failed; never grants access.
    */
   describeRefusal(token: string): CredentialRefusal | null {
     const normalized = token.trim();
     if (!normalized.startsWith(TOKEN_PREFIX)) return null;
-    const record = this.index.get(hashToken(normalized));
-    return record ? this.refusalOf(record, Date.now()) : null;
+    const hash = hashToken(normalized);
+    const record = this.index.get(hash);
+    if (record) return this.refusalOf(record, Date.now());
+    const entry = this.authority?.view()?.deviceTokenByHash(hash);
+    return entry ? this.#rotationRefusal(entry.public.name, recordIssuedAt(entry.public), Date.now()) : null;
   }
 
   /**
@@ -1294,6 +1314,20 @@ export class PairingTokenManager {
   }
 
   /**
+   * Whether a native principal can still act here: the owner's own machine
+   * always can (its principal id outlives a replaced shared token), and a
+   * pairing's principal can while its pairing is listed. A pairing that was
+   * revoked or replaced by a re-pair is gone for good, since a new pairing
+   * gets a new principal. A snapshot that cannot be read answers true, so
+   * nothing is treated as gone on missing evidence. Never writes.
+   */
+  nativePrincipalCurrent(principalId: string): boolean {
+    if (principalId === LOCAL_OWNER_PRINCIPAL) return true;
+    if (this.nativePersistenceFailed || !this.#nativeSnapshotCurrent()) return true;
+    return this.snapshot.tokens.some(token => pairingPrincipalId(token.id) === principalId);
+  }
+
+  /**
    * The owner's own machine's native identity, made the first time one of its
    * apps uses native work (one durable write, once) and read after that. A
    * revocation of the shared token ends it, and the next use after the
@@ -1682,6 +1716,15 @@ export class PairingTokenManager {
       // Paired on another machine of the group: the record says it is live.
       const entry = view?.deviceTokenByHash(hash);
       if (!entry) return null;
+      // The managed rotation age holds on every machine of the group, not only the one that paired it.
+      const rotation = this.#rotationRefusal(entry.public.name, recordIssuedAt(entry.public), Date.now());
+      if (rotation) {
+        if (!this.#rotationRefusalsLogged.has(entry.id)) {
+          this.#rotationRefusalsLogged.add(entry.id);
+          logger.warn('A paired device token past its rotation age was refused', { tokenId: entry.id, state: rotation.state, next: rotation.next[0] });
+        }
+        return null;
+      }
       const extra = entry.public as Record<string, unknown>;
       return { id: entry.id, name: entry.public.name, principalId: pairingPrincipalId(entry.id),
         ...(entry.public.client === 'agent' ? { client: 'agent' as const } : {}),
@@ -1851,15 +1894,13 @@ export class PairingTokenManager {
     }).catch((error: unknown) => logger.warn('A paired device could not be written to the authority record; it works on this machine only until it is', { tokenId: record.id, error: String(error) }));
   }
 
-  /** Revoke one pairing and every pairing it minted. A persistence failure throws instead of reporting success. */
-  revoke(id: string): boolean {
-    return this.revokeWithMinted(id).revoked;
-  }
-
   /**
    * Revoke one pairing and, with it, every pairing minted by it (directly or
-   * through another). `alsoRevoked` names the minted ones, so the caller can
-   * say what else stopped working.
+   * through another), in this file only. `alsoRevoked` names the minted ones,
+   * so the caller can say what else stopped working. An owner's revoke is
+   * {@link revokeEverywhere}: a device left on the authority record keeps
+   * authenticating; this is its local half and the control plane's fallback.
+   * A persistence failure throws instead of reporting success.
    */
   revokeWithMinted(id: string): { readonly revoked: boolean; readonly alsoRevoked: readonly string[] } {
     return this.mutate<{ readonly revoked: boolean; readonly alsoRevoked: readonly string[] }>(snapshot => {

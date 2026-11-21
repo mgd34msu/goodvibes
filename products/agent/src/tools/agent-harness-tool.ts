@@ -543,8 +543,8 @@ function buildAgentHarnessTool(deps: AgentHarnessToolDeps): Tool {
           const confirmationError = requireConfirmedAction(rawArgs, options, 'Save setup evidence');
           if (confirmationError) return error(confirmationError);
           const ownership = resolveSetupSmokeNativeEvidence(rawArgs, options, deps.commandContext);
+          // The run checks currency itself up to the save; after a save the answer carries the artifact id.
           const result = await runSetupInstallSmoke(deps.commandContext, args, ownership, signal);
-          ownership.assertCurrent();
           // The evidence snapshot is the effect: a blocked plan is still a saved result (done says whether it was saved).
           return effectOutput(result);
         }

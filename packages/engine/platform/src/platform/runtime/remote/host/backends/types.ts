@@ -59,6 +59,12 @@ export interface Backend {
    * that write nothing to disk omit it.
    */
   teardown?(): Promise<void>;
+  /**
+   * Remove what the backend holds for one peer (a pooled key file and its
+   * connection), when that peer is removed or replaced. Optional: backends
+   * that keep nothing per peer omit it.
+   */
+  forget?(peerId: string): Promise<void>;
 }
 
 export const DEFAULT_SYNC_TIMEOUT_MS = 120_000;

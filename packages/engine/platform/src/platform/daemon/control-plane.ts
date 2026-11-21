@@ -38,6 +38,7 @@ import { browserOriginAllowed, originNotAllowedResponse } from './http/browser-o
 import { createAuthFailureAudit, type AuthFailureAudit } from './auth-failure-audit.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { summarizeError } from '../utils/error-display.js';
+import { logger } from '../utils/logger.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import { validateInvocationInput } from '../control-plane/invoke-input-validation.js';
 import { readGatewayVerbRefusal } from '../control-plane/routes/gateway-verb-error.js';
@@ -1067,7 +1068,11 @@ export class DaemonControlPlaneHelper {
         return;
       }
       const methodId = typeof frame.methodId === 'string' ? frame.methodId : undefined;
-      const response = methodId
+      let response: { readonly status: number; readonly ok: boolean; readonly body: unknown };
+      // Every call frame is answered by its id: a call that throws gets a 500
+      // answer rather than leaving the client waiting.
+      try {
+        response = methodId
         ? await this.invokeGatewayMethodCall({
             authToken: ws.data.authToken,
             ...(ws.data.principal ? { principal: ws.data.principal } : {}),
@@ -1106,6 +1111,14 @@ export class DaemonControlPlaneHelper {
             ...(ws.data.principal ? { principal: ws.data.principal } : {}),
             caller: callerKey(ws.data.clientId, ws.data.principalId ?? undefined),
           });
+      } catch (error: unknown) {
+        logger.error('[control-plane] websocket call failed', { id, ...(methodId ? { methodId } : { path: typeof frame.path === 'string' ? frame.path : undefined }), error: summarizeError(error) });
+        response = {
+          status: 500,
+          ok: false,
+          body: refusalBody('The daemon could not complete this call. The failure is in the daemon log; retrying the same call is unlikely to help.', 'INTERNAL_ERROR', 500),
+        };
+      }
       this.sendFrame(ws, JSON.stringify({
         type: 'response',
         id,
@@ -1190,15 +1203,26 @@ export class DaemonControlPlaneHelper {
     const abort = new AbortController();
     const signal = input.signal ? AbortSignal.any([abort.signal, input.signal]) : abort.signal;
     try {
-      const request = new Request(url.toString(), {
-        method: input.method,
-        headers: {
-          Authorization: `Bearer ${input.authToken}`,
-          ...(input.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-        },
-        ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
-        signal,
-      });
+      let request: Request;
+      try {
+        request = new Request(url.toString(), {
+          method: input.method,
+          headers: {
+            Authorization: `Bearer ${input.authToken}`,
+            ...(input.body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+          },
+          ...(input.body !== undefined ? { body: JSON.stringify(input.body) } : {}),
+          signal,
+        });
+      } catch (error: unknown) {
+        // An HTTP method that is not a token, or a body on GET or HEAD, cannot form a request.
+        if (!(error instanceof TypeError)) throw error;
+        return {
+          status: 400,
+          ok: false,
+          body: refusalBody(`The call cannot be made as ${input.method} ${url.pathname}: the method must be an HTTP method name, and a GET or HEAD call carries no body (send its fields as query).`, 'INVALID_ARGUMENT', 400),
+        };
+      }
       const bound = input.principal;
       if (bound && bound.actor === input.context?.actor && isPrincipalCurrent(bound, this.authRevision())) {
         const gateway = this.context.controlPlaneGateway;

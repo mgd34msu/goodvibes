@@ -671,10 +671,9 @@ export class Orchestrator {
     // A batch holds the work of one turn (orchestrator-follow-up-runtime.ts takeBatch).
     const turnId = items[0]?.turnId;
     const request = turnId === undefined ? undefined : this.turnRequests.get(turnId);
-    const evidence = '[Background work evidence] ' + JSON.stringify(items.map(({ turnId: _turn, ...item }) => item))
-      + '\nReconcile these outcomes with the original request. Recover unfinished authorized work using tools and deliver all requested output. An internal failure does not cancel the request.';
-    // Shown here; the recovery turn below carries the same evidence to the model.
-    this.conversation.addNotice(evidence, { level: 'info', kind: 'operational' });
+    const outcomes = '[Background work evidence] ' + JSON.stringify(items.map(({ turnId: _turn, ...item }) => item));
+    // The person sees the outcomes; only the recovery turn below carries the instruction to the model.
+    this.conversation.addNotice(outcomes, { level: 'info', kind: 'operational' });
     const present = request !== undefined && this.conversation.getMessageSnapshot().some((message) => message.role === 'user'
       && !message.cancelled && sameRequestContent(message.content, request));
     if (!present) {
@@ -687,7 +686,14 @@ export class Orchestrator {
     }
     // Native execution still requires its owning host's live permit; a background
     // notice can never manufacture a fresh native grant.
-    if (this.nativeConversationProjectId) { this.requestRender(); return; }
+    if (this.nativeConversationProjectId) {
+      this.conversation.addNotice('[Background work] This work was not continued automatically: this conversation\'s turns run only on its host\'s permit. Send the request again from the host to continue it.',
+        { level: 'info', kind: 'operational' });
+      this.requestRender();
+      return;
+    }
+    const evidence = outcomes
+      + '\nReconcile these outcomes with the original request. Recover unfinished authorized work using tools and deliver all requested output. An internal failure does not cancel the request.';
     // The recovery turn continues that request, under that request's own input surface and authority.
     try { await this.runScopedTurn(request.text, request.content, request.origin ? { origin: request.origin, ...(request.ownerRequest ? { ownerRequest: true } : {}) } : (request.ownerRequest ? { ownerRequest: true } : undefined), undefined, evidence, request.guest); }
     finally {
@@ -1020,10 +1026,9 @@ export class Orchestrator {
     const origin = options?.origin;
     // A guest's message is never the owner's request, whatever its origin says.
     const ownerRequest = guest === undefined && (options?.ownerRequest === true || inputOriginIsOwnerDirect(origin));
-    if (!resume) {
-      this.turnRequests.set(turnId, Object.freeze({ text, ...(content ? { content } : {}), origin, ownerRequest, ...(guest ? { guest } : {}) }));
-      while (this.turnRequests.size > MAX_TURN_REQUESTS) this.turnRequests.delete(this.turnRequests.keys().next().value!);
-    }
+    // A recovery turn continues the same request, so work it starts is recovered against that request too.
+    this.turnRequests.set(turnId, Object.freeze({ text, ...(content ? { content } : {}), origin, ownerRequest, ...(guest ? { guest } : {}) }));
+    while (this.turnRequests.size > MAX_TURN_REQUESTS) this.turnRequests.delete(this.turnRequests.keys().next().value!);
     return withTurn({
       turnId,
       sessionId: this.currentSessionId || null,
@@ -1153,6 +1158,9 @@ export class Orchestrator {
     // completion is registered. From then on the turn's outcome is that
     // answer; an abort stops only the maintenance that follows it.
     const terminal: { publish?: () => void; answered?: boolean } = {};
+    // The request and the replies this turn appends name the request it was submitted as.
+    const correlationId = options?.origin?.metadata?.['correlationId'];
+    this.conversation.setTurnCorrelation(typeof correlationId === 'string' && correlationId ? correlationId : undefined);
 
     // Transcript preparation shares the same cancellation and cleanup as streaming.
     try {
@@ -1205,6 +1213,7 @@ export class Orchestrator {
       if (nativeTurn) failNativeConversationTurn(nativeTurn, err instanceof ProviderError && !this.abortController?.signal.aborted && nativeConversationTurnCanRetry());
       await this.handleTurnError(err, turnId, providerRegistry);
     } finally {
+      this.conversation.setTurnCorrelation(undefined);
       this.turnHookOwner = null;
       this.turnFailureFacts?.stop();
       this.turnFailureFacts = null;

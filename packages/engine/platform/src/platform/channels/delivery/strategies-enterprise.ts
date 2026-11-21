@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { ArtifactStore } from '../../artifacts/index.js';
 import { ConfigManager } from '../../config/manager.js';
 import { ServiceRegistry } from '../../config/service-registry.js';
@@ -147,9 +148,10 @@ export function createMatrixDeliveryStrategy(
     supportsGuardedDelivery: true,
     supportsPublication: true,
     supportsAttachments: true,
-    // Every send carries a stable transaction id, which the homeserver drops when repeated.
-    repeatSafe() {
-      return true;
+    // Every send carries a stable transaction id, which the homeserver drops when
+    // repeated; an explicit duplicate send carries a fresh one, so it is not.
+    repeatSafe(request) {
+      return request.allowDuplicate !== true;
     },
     canHandle(request) {
       return resolveChannelDeliverySurfaceKind(request.target) === 'matrix';
@@ -173,8 +175,12 @@ export function createMatrixDeliveryStrategy(
       if (!roomId) throw new Error('Missing Matrix room id');
       const fitted = fitForSurface(request.body, attachments, 8_000);
       // Matrix drops a repeated transaction id as a duplicate, so a retried send is
-      // not delivered twice; the id covers the text so a different message is not dropped.
-      const txnId = stableSendId(request.runId, roomId, fitted.text);
+      // not delivered twice. The id is keyed on what the message announces (each
+      // part of a split message announces its own part), else the run, plus the
+      // room and text, so a different announcement with the same words is sent;
+      // an explicit duplicate send adds a fresh id so it is sent again.
+      const sendId = stableSendId(request.announces ?? request.runId, roomId, fitted.text);
+      const txnId = request.allowDuplicate === true ? `${sendId}.${randomUUID()}` : sendId;
       const threadId = request.binding?.threadId;
       const response = await deliveryFetch(request, `${normalizeBaseUrl(homeserverUrl)}/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}/send/m.room.message/${encodeURIComponent(txnId)}`, {
         method: 'POST',

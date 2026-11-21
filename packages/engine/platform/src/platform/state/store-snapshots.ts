@@ -90,20 +90,63 @@ function vacuumInto(dbPath: string, snapshotPath: string): boolean {
   const Ctor = bunDatabase();
   if (!Ctor) return false;
   let db: Database | undefined;
+  // Filled under the staged name and renamed once VACUUM INTO returns, so a
+  // process killed mid-copy never leaves an incomplete file under a snapshot's name.
+  const staged = stagedSnapshotPath(snapshotPath);
   try {
     // The copy keeps the source's mode (stores are private to their owner);
     // VACUUM INTO accepts an existing empty file.
-    closeSync(openSync(snapshotPath, 'wx', statSync(dbPath).mode & 0o777));
+    closeSync(openSync(staged, 'wx', statSync(dbPath).mode & 0o777));
     // Read-only: never creates the store, and never checkpoints it on close.
     db = new Ctor(dbPath, { readonly: true });
     db.run('PRAGMA busy_timeout = 5000');
-    db.run('VACUUM INTO ?', [snapshotPath]);
+    db.run('VACUUM INTO ?', [staged]);
+    db.close();
+    db = undefined;
+    publishStagedSnapshot(staged, snapshotPath);
     return true;
   } catch (error) {
-    try { unlinkSync(snapshotPath); } catch { /* nothing was written */ }
+    discardStagedSnapshot(staged);
     logger.debug('store snapshot falls back to a file copy', { store: basename(dbPath), error: summarizeError(error) });
     return false;
   } finally { db?.close(); }
+}
+
+/** The name a snapshot is written under until it is complete; it carries the writing process's id. */
+function stagedSnapshotPath(snapshotPath: string): string {
+  return `${snapshotPath}${STAGED_SUFFIX}${process.pid}`;
+}
+
+const STAGED_SUFFIX = '.partial-';
+/** A staged snapshot or one of its sidecars: `<snapshot>.partial-<pid>`, `-wal`/`-shm` after it. Without a pid: left by an earlier release. */
+const STAGED_SNAPSHOT_NAME = /\.snapshot\.partial(?:-(\d+))?(?:-wal|-shm)?$/;
+
+/** `<db>.restore-<pid>.tmp` and its sidecars, the staged copy a restore writes beside the store. */
+function restoreStagingName(dbFileName: string): RegExp {
+  const literal = dbFileName.replace(/[.*+?^$()|[\]{}\\]/g, '\\$&');
+  return new RegExp(`^${literal}\\.restore-(\\d+)\\.tmp(?:-wal|-shm)?$`);
+}
+
+/** Whether the process that owns a staged file has ended (so the file can never be finished). */
+function stagingOwnerGone(pid: number): boolean {
+  if (pid === process.pid) return false;
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    // EPERM: the process exists under another user.
+    return (error as NodeJS.ErrnoException).code === 'ESRCH';
+  }
+}
+
+/** Remove the staged files in `dir` matching `pattern` whose owning process (group 1) has ended; no pid means an earlier release left it. */
+function reapAbandonedStaging(dir: string, names: readonly string[], pattern: RegExp): void {
+  for (const name of names) {
+    const match = pattern.exec(name);
+    if (!match) continue;
+    if (match[1] !== undefined && !stagingOwnerGone(Number(match[1]))) continue;
+    try { unlinkSync(join(dir, name)); } catch { /* removed by another sweep */ }
+  }
 }
 
 /** The `-wal`/`-shm` files a file-copied snapshot carries, as they exist now. */
@@ -214,7 +257,7 @@ function discardStagedSnapshot(staged: string): void {
 }
 
 function publishCopiedSnapshot(dbPath: string, snapshotPath: string): void {
-  const staged = `${snapshotPath}.partial`;
+  const staged = stagedSnapshotPath(snapshotPath);
   try {
     copyFileSync(dbPath, staged);
     assertCopyComplete(dbPath, staged);
@@ -236,13 +279,19 @@ export interface StoreSnapshotInfo {
   readonly sidecars: readonly string[];
 }
 
-/** All snapshots for a store, newest first. Sidecars whose snapshot is gone are removed. */
+/**
+ * All snapshots for a store, newest first. Sidecars whose snapshot is gone are
+ * removed, and so are staged copies whose writing process has ended (killed
+ * mid-copy, they can never be finished). A snapshot another process removes
+ * while this one reads the directory is left out.
+ */
 export function listStoreSnapshots(dbPath: string): StoreSnapshotInfo[] {
   if (!isRealDbPath(dbPath)) return [];
   const dir = storeSnapshotDir(dbPath);
   if (!existsSync(dir)) return [];
   const entries: StoreSnapshotInfo[] = [];
   const names = readdirSync(dir);
+  reapAbandonedStaging(dir, names, STAGED_SNAPSHOT_NAME);
   const snapshots = new Set(names.filter(name => name.endsWith(SNAPSHOT_SUFFIX)));
   for (const name of names) {
     const sidecar = SIDECARS.find(suffix => name.endsWith(`${SNAPSHOT_SUFFIX}${suffix}`));
@@ -250,15 +299,25 @@ export function listStoreSnapshots(dbPath: string): StoreSnapshotInfo[] {
       try { unlinkSync(join(dir, name)); } catch { /* removed by another sweep */ }
     }
   }
+  const sizeOf = (path: string): number | null => {
+    try { return statSync(path).size; } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+      throw error;
+    }
+  };
   for (const name of snapshots) {
     const path = join(dir, name);
-    const stat = statSync(path);
+    let stat;
+    try { stat = statSync(path); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw error;
+    }
     const reasonMatch = name.match(/\.([^.]+)\.snapshot$/);
     const sidecars = snapshotSidecars(path);
     entries.push({
       path,
       createdAt: stat.mtimeMs,
-      sizeBytes: stat.size + sidecars.reduce((total, sidecar) => total + statSync(sidecar).size, 0),
+      sizeBytes: stat.size + sidecars.reduce((total, sidecar) => total + (sizeOf(sidecar) ?? 0), 0),
       reason: reasonMatch?.[1] ?? 'unknown',
       sidecars,
     });
@@ -311,6 +370,8 @@ export function restoreStoreSnapshot(dbPath: string, snapshotPath?: string): Res
     renameSync(parking, keptCurrentAt);
   }
   mkdirSync(dirname(dbPath), { recursive: true });
+  // A restore a killed process left half-copied beside the store can never be finished.
+  reapAbandonedStaging(dirname(dbPath), readdirSync(dirname(dbPath)), restoreStagingName(basename(dbPath)));
   // Written beside the target and renamed, so a crash leaves the old file or the whole snapshot, never half of one.
   const pending = `${dbPath}.restore-${process.pid}.tmp`;
   try {
@@ -426,7 +487,7 @@ export async function snapshotStoreFileAsync(
   try {
     const walPath = `${dbPath}-wal`;
     const pinnedWal = release !== null && existsSync(walPath);
-    const staged = `${snapshotPath}.partial`;
+    const staged = stagedSnapshotPath(snapshotPath);
     try {
       await copyFile(dbPath, staged);
       // Under a held snapshot a checkpoint may still write frames the WAL copy

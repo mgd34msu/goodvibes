@@ -20,7 +20,7 @@ export interface BuiltinMediaProviderOptions {
 
 export function ensureBuiltinMediaProviders(
   registry: MediaProviderRegistry,
-  artifactStore: Pick<ArtifactStore, 'readContent'> & Partial<Pick<ArtifactStore, 'createFromStream'>>,
+  artifactStore: Pick<ArtifactStore, 'readContent'> & Partial<Pick<ArtifactStore, 'createFromStream' | 'delete'>>,
   providerRegistry: Pick<ProviderRegistry, 'describeRuntime' | 'getCurrentModel' | 'getForModel' | 'listModels' | 'tryGet' | 'resolveProviderReference' | 'fallbackOrder'>,
   options: BuiltinMediaProviderOptions = {},
 ): void {
@@ -33,7 +33,9 @@ export function ensureBuiltinMediaProviders(
   registry.register(createAnthropicImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
   registry.register(createLocalImageUnderstandingProvider(providerRegistry, artifactStore), { replace: true });
   // Generated outputs are streamed into the same store the products read artifacts from.
-  const generationStore = artifactStore.createFromStream ? { createFromStream: artifactStore.createFromStream.bind(artifactStore) } : undefined;
+  const generationStore = artifactStore.createFromStream && artifactStore.delete
+    ? { createFromStream: artifactStore.createFromStream.bind(artifactStore), delete: artifactStore.delete.bind(artifactStore) }
+    : undefined;
   for (const provider of builtinGenerationProviders({ secrets: options.secrets, artifactStore: generationStore })) {
     registry.register(provider, { replace: true });
   }

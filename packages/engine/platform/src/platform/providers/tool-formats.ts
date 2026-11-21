@@ -337,8 +337,8 @@ export function toGeminiContents(
           if (part.type === 'text') return { text: part.text };
           return { inlineData: { mimeType: part.mediaType, data: part.data } };
         });
-        contents.push({ role: 'user', parts });
-      } else {
+        if (parts.length > 0) contents.push({ role: 'user', parts });
+      } else if (msg.content) {
         contents.push({ role: 'user', parts: [{ text: msg.content }] });
       }
     } else if (msg.role === 'assistant') {
@@ -351,7 +351,8 @@ export function toGeminiContents(
           parts.push({ functionCall: { name: tc.name, args: tc.arguments }, ...(signature === undefined ? {} : { thoughtSignature: signature }) });
         }
       }
-      contents.push({ role: 'model', parts });
+      // Gemini refuses a content with no parts, so an answer that came back empty is left out.
+      if (parts.length > 0) contents.push({ role: 'model', parts });
     } else if (msg.role === 'tool') {
       const signature = signatureFor?.(msg.callId);
       pendingFunctionResponses.push({

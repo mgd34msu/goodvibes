@@ -93,7 +93,8 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
     };
     // A new identity must not keep a request in flight. Leaving this composer is
     // different: a POST already sent may have reached the daemon, so it is left to
-    // finish (bounded by its own deadline) and only refreshes the session lists.
+    // finish (bounded by its own deadline): its answer still settles the held entry
+    // and refreshes the session lists, and only this pane's rows stop updating.
     const retire = () => {
       for (const abort of aborts) abort.abort();
       aborts.clear();
@@ -167,8 +168,14 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
             abort.signal.addEventListener('abort', () => { clearTimeout(wait); resolve(); }, { once: true });
           });
         }
-        if (!owned()) abort.abort();
         if (abort.signal.aborted) return;
+        if (!owned()) {
+          // The pane was left between attempts: no further attempt is made, and the
+          // held entry says so, so reopening the session offers Retry.
+          if (current()) held.unknown(messageId, 'no answer before this view was left');
+          abort.abort();
+          return;
+        }
         const attemptAbort = new AbortController();
         const stop = () => attemptAbort.abort();
         abort.signal.addEventListener('abort', stop, { once: true });
@@ -178,33 +185,25 @@ export function useSessionDispatches(lifetime: ClientLifetime, sessionId: string
             ? platformClient.operator.sessions.steer(sessionId, { body, messageId }, attemptAbort.signal)
             : platformClient.operator.sessions.followUp(sessionId, { body, messageId }, attemptAbort.signal));
           if (abort.signal.aborted) return;
-          if (!owned()) {
-            if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
-            return;
-          }
           const receipt: unknown = data?.input;
           if (validReceipt(receipt, sessionId)) {
             settle((entry) => adopt(entry, receipt));
-            void client.invalidateQueries({ queryKey: queryKeys.sessions });
+            if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
             return;
           }
           lastError = 'the daemon answered without an input receipt';
         } catch (error) {
           if (abort.signal.aborted) return;
-          if (!owned()) {
-            if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
-            return;
-          }
           const serialized = serializeError(error);
           const input = asRecord(serialized.body ?? asRecord(serialized.transport).body).input;
           if (validReceipt(input, sessionId)) {
             settle((entry) => adopt(entry, input));
-            void client.invalidateQueries({ queryKey: queryKeys.sessions });
+            if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
             return;
           }
           if (isSessionClosedError(error)) {
             settle({ state: 'failed', error: 'This session is closed. Reopen it to continue.' });
-            void client.invalidateQueries({ queryKey: queryKeys.sessions });
+            if (current()) void client.invalidateQueries({ queryKey: queryKeys.sessions });
             return;
           }
           if (isDefiniteRefusal(error)) {

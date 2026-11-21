@@ -1,6 +1,7 @@
 import { modelFamilyReadings, type ModelFamily } from './model-family.js';
 import { getQualityTier, getQualityTierFromScore, type BenchmarkStore, type QualityTier } from './model-benchmarks.js';
-import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps } from './interface.js';
+import type { ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps } from './interface.js';
+import { isProviderAuthRouteUsable } from './runtime-metadata.js';
 import type { ModelDefinition, ProviderRegistry } from './registry.js';
 import type { LLMProvider } from './interface.js';
 
@@ -125,15 +126,6 @@ function toModelSnapshot(
         }
       : {}),
   };
-}
-
-/** A route a request can be sent over now: set up, not refused, not expired or pending. */
-export function isProviderAuthRouteUsable(route: ProviderAuthRouteDescriptor): boolean {
-  return route.configured
-    && route.usable !== false
-    && route.freshness !== 'expired'
-    && route.freshness !== 'pending'
-    && route.freshness !== 'unconfigured';
 }
 
 /**

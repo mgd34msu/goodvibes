@@ -183,7 +183,15 @@ export function createSharedRegexTester(options: {
     if (response!.error) item.reject(new RegexAdmissionError(operation, 'the pattern could not run'));
     else item.resolve(response!.result === true);
   };
-  const port = () => worker ??= createWorker(receive, () => reset('isolated worker stopped')).then(started => { started.detach(); return started; });
+  // A failure or exit counts only from the worker that is current: a stopped or
+  // replaced worker's late 'exit' must not stop its successor's tests.
+  const port = (): Promise<WorkerPort> => {
+    if (worker) return worker;
+    const created: Promise<WorkerPort> = createWorker(receive, () => { if (worker === created) reset('isolated worker stopped'); })
+      .then(started => { started.detach(); return started; });
+    worker = created;
+    return created;
+  };
   return Object.freeze({
     async test(source: string, input: string, signal?: AbortSignal, flags = ''): Promise<boolean> {
       if (disposed) throw new RegexAdmissionError(operation, 'executor is closed');

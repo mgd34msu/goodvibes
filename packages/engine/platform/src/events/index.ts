@@ -10,6 +10,7 @@
 export type { SessionEvent, SessionEventType } from './session.js';
 export type { TurnEvent, TurnEventType, TurnInputOrigin, TurnStopReason, PartialToolCall } from './turn.js';
 export type { ProviderEvent, ProviderEventType } from './providers.js';
+export type { ConfigEvent, ConfigEventType, ConfigEventScope, ConfigEventValue } from './config.js';
 export type { ToolEvent, ToolEventType, ToolResultSummary } from './tools.js';
 export type { TaskEvent, TaskEventType } from './tasks.js';
 export type { AgentEvent, AgentEventType, AgentTaskContract, AgentUsage } from './agents.js';

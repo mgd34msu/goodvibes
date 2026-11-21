@@ -28,7 +28,7 @@ import { cleanupKnowledgeArtifact, retireKnowledgeArtifactCleanup, type Artifact
 import type { KnowledgeArtifactReferenceOwner } from './artifact-reference-owner.js';
 import { KnowledgeSourcePublicationHeldError, knowledgeSourceSnapshotFromRows, planningSourceSnapshotFromRows, readPlanningSourceSnapshot, readKnowledgeSourceSnapshot, type KnowledgeSourceSnapshot, type KnowledgeSourceWriteResult } from './store-source-generation.js';
 import type { PlanningSourceIdentity } from './store-planning-source-selector.js';
-import { countWorkPlanTasksInSpace, listWorkPlanTaskRecordIds, readWorkPlanStatusCounts, readWorkPlanTaskImportRecord, workPlanTaskView, writeWorkPlanCommit, type WorkPlanTaskCommit, type WorkPlanTaskCommitResult, type WorkPlanTaskView } from './store-work-plan-tasks.js';
+import { countWorkPlanTasksByPlanInSpace, listWorkPlanTaskRecordIds, readWorkPlanStatusCounts, readWorkPlanTaskImportRecord, workPlanTaskView, writeWorkPlanCommit, type WorkPlanTaskCommit, type WorkPlanTaskCommitResult, type WorkPlanTaskView } from './store-work-plan-tasks.js';
 import { applyKnowledgeImport, assertKnowledgeImportRecordSizes, type KnowledgeImportInput, type KnowledgeImportReceipt, type PrepareKnowledgeImportGraph } from './store-import.js';
 import { prepareKnowledgeEdgeRecord, writeKnowledgeEdgeRow, findKnowledgeEdge } from './store-edge-writes.js';
 import { createKnowledgeTables } from './store-table-specs.js';
@@ -613,6 +613,11 @@ export class KnowledgeStore {
     return listKnowledgeEdges(this.asReadView());
   }
 
+  /** The edge with these endpoints and relation, if one is held (an indexed in-memory lookup). */
+  findEdge(endpoints: Pick<KnowledgeEdgeUpsertInput, 'fromKind' | 'fromId' | 'toKind' | 'toId' | 'relation'>): KnowledgeEdgeRecord | undefined {
+    return findKnowledgeEdge(this.edges, endpoints);
+  }
+
   listIssues(limit = 100): KnowledgeIssueRecord[] {
     return listKnowledgeIssues(this.asReadView(), limit);
   }
@@ -798,10 +803,10 @@ export class KnowledgeStore {
     return result.value;
   }
 
-  /** Live work-plan task rows and the plans that hold them, in one space. */
-  async countWorkPlanTasks(spaceId: string): Promise<{ readonly workPlans: number; readonly tasks: number }> {
+  /** Live work-plan task rows in one space, counted per plan and keyed by work plan id. */
+  async countWorkPlanTasks(spaceId: string): Promise<ReadonlyMap<string, number>> {
     await this.init();
-    return countWorkPlanTasksInSpace(this.sqlite, spaceId);
+    return countWorkPlanTasksByPlanInSpace(this.sqlite, spaceId);
   }
 
   /** The legacy-import record ids of a project's work-plan tasks. */

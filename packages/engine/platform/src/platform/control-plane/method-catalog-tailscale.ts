@@ -12,6 +12,7 @@
  * `/api/control-plane/methods/{id}/invoke` endpoint.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
 import {
   BOOLEAN_SCHEMA,
   NUMBER_SCHEMA,
@@ -32,6 +33,8 @@ const TAILSCALE_SERVE_RECEIPT_SCHEMA = objectSchema({
   enableUrl: STRING_SCHEMA,
   detail: STRING_SCHEMA,
 }, ['at', 'command', 'ok', 'detail']);
+
+const WEB_UI_NOT_SERVED: ContractErrorCode = { code: 'WEB_UI_NOT_SERVED', status: 409, meaning: 'No web UI is served on this machine, so tailscale serve would front nothing and nothing ran; serve it first with goodvibes-daemon webui enable --bundle-dir <dir>.' };
 
 export const builtinGatewayTailscaleMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -69,6 +72,7 @@ export const builtinGatewayTailscaleMethodDescriptors: readonly GatewayMethodDes
       publicBaseUrlUpdated: BOOLEAN_SCHEMA,
       receiptRecorded: BOOLEAN_SCHEMA,
     }, ['receipt', 'publicBaseUrlUpdated', 'receiptRecorded']),
+    errorCodes: [WEB_UI_NOT_SERVED],
   }),
   methodDescriptor({
     id: 'tailscale.serve.stop',

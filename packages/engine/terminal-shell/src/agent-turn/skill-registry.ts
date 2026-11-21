@@ -14,6 +14,7 @@ import type {
   AgentSkillBundleRecord,
   AgentSkillBundleUpdateInput,
   AgentSkillCreateInput,
+  AgentSkillDeleteResult,
   AgentSkillReadiness,
   AgentSkillRecord,
   AgentSkillRequirement,
@@ -22,6 +23,7 @@ import type {
   AgentSkillUpdateInput,
 } from './skill-registry-types.js';
 export type {
+  AgentSkillDeleteResult,
   AgentSkillBundleCreateInput,
   AgentSkillBundleReadiness,
   AgentSkillBundleRecord,
@@ -242,25 +244,42 @@ export class AgentSkillRegistry {
     return new AgentSkillRegistry(skillStorePath(shellPaths), effects);
   }
 
+  /**
+   * The store, with the one rule for what a turn applies: a bundle is active when
+   * it is enabled, reviewed, setup-ready and every member is reviewed; a skill is
+   * active when it is enabled or in an active bundle, and is itself reviewed and
+   * setup-ready. The prompt, its receipts and every "active" listing read these two lists.
+   */
   public snapshot(): AgentSkillSnapshot {
     const store = this.readStore();
+    const enabledSkills = store.skills.filter((skill) => skill.enabled);
     const enabledBundles = store.bundles.filter((bundle) => bundle.enabled);
-    const activeSkillIds = new Set<string>(store.skills.filter((skill) => skill.enabled).map((skill) => skill.id));
-    for (const bundle of enabledBundles) {
-      for (const skillId of bundle.skillIds) activeSkillIds.add(skillId);
-    }
+    const activeBundles = enabledBundles.filter((bundle) => {
+      if (bundle.reviewState !== 'reviewed') return false;
+      const readiness = evaluateAgentSkillBundleReadiness(bundle, store.skills);
+      return readiness.ready && readiness.includedSkills.every((skill) => skill.reviewState === 'reviewed');
+    });
+    const appliedSkillIds = new Set<string>([
+      ...enabledSkills.map((skill) => skill.id),
+      ...activeBundles.flatMap((bundle) => bundle.skillIds),
+    ]);
     return {
       path: this.storePath,
       skills: [...store.skills],
-      enabledSkills: store.skills.filter((skill) => skill.enabled),
+      enabledSkills,
       bundles: [...store.bundles],
       enabledBundles,
-      activeSkills: store.skills.filter((skill) => activeSkillIds.has(skill.id)),
+      activeBundles,
+      activeSkills: store.skills.filter((skill) => (
+        appliedSkillIds.has(skill.id)
+        && skill.reviewState === 'reviewed'
+        && evaluateAgentSkillReadiness(skill).ready
+      )),
     };
   }
 
   public list(): readonly AgentSkillRecord[] {
-    return this.snapshot().skills;
+    return [...this.readStore().skills];
   }
 
   public search(query: string): readonly AgentSkillRecord[] {
@@ -277,7 +296,7 @@ export class AgentSkillRegistry {
   }
 
   public listBundles(): readonly AgentSkillBundleRecord[] {
-    return this.snapshot().bundles;
+    return [...this.readStore().bundles];
   }
 
   public searchBundles(query: string): readonly AgentSkillBundleRecord[] {
@@ -531,19 +550,45 @@ export class AgentSkillRegistry {
     });
   }
 
-  public deleteSkill(idOrName: string): AgentSkillRecord {
+  /**
+   * Deletes a skill and takes it out of every bundle in the same write. A bundle
+   * left with no member is removed; a bundle that keeps other members goes back
+   * to stale review, so it applies again only after someone reviews the new set.
+   */
+  public deleteSkill(idOrName: string): AgentSkillDeleteResult {
     return this.locked(() => {
       const store = this.readStore();
       const existing = this.findInStore(store, idOrName);
       if (!existing) throw new Error(`Unknown skill ${idOrName}`);
+      const removedBundles: AgentSkillBundleRecord[] = [];
+      const changedBundles: AgentSkillBundleRecord[] = [];
+      const bundles: AgentSkillBundleRecord[] = [];
+      const timestamp = nowIso();
+      for (const bundle of store.bundles) {
+        if (!bundle.skillIds.includes(existing.id)) {
+          bundles.push(bundle);
+          continue;
+        }
+        const skillIds = bundle.skillIds.filter((skillId) => skillId !== existing.id);
+        if (skillIds.length === 0) {
+          removedBundles.push(bundle);
+          continue;
+        }
+        const changed: AgentSkillBundleRecord = {
+          ...bundle,
+          skillIds,
+          ...staleReviewPatch(`member skill ${existing.id} was deleted`),
+          updatedAt: timestamp,
+        };
+        changedBundles.push(changed);
+        bundles.push(changed);
+      }
       this.writeStore({
         ...store,
         skills: store.skills.filter((skill) => skill.id !== existing.id),
-        bundles: store.bundles
-          .map((bundle) => ({ ...bundle, skillIds: bundle.skillIds.filter((skillId) => skillId !== existing.id) }))
-          .filter((bundle) => bundle.skillIds.length > 0),
+        bundles,
       });
-      return existing;
+      return { skill: existing, removedBundles, changedBundles };
     });
   }
 
@@ -680,6 +725,14 @@ export class AgentSkillRegistry {
   }
 }
 
+/** The receipt lines that say which bundles a skill deletion removed or sent back to review; none when no bundle held it. */
+export function formatSkillDeleteBundleLines(result: Pick<AgentSkillDeleteResult, 'removedBundles' | 'changedBundles'>): string[] {
+  return [
+    ...(result.removedBundles.length > 0 ? [`  removed bundles (no skill left): ${result.removedBundles.map((bundle) => bundle.id).join(', ')}`] : []),
+    ...(result.changedBundles.length > 0 ? [`  bundles now pending review: ${result.changedBundles.map((bundle) => bundle.id).join(', ')}`] : []),
+  ];
+}
+
 export function buildAgentSkillRequirements(input: {
   readonly env?: readonly string[] | undefined;
   readonly commands?: readonly string[] | undefined;
@@ -800,20 +853,8 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
     });
     return skillStoreUnreadableNotice(skillStorePath(shellPaths), error);
   }
-  const enabledBundles = snapshot.enabledBundles.filter((bundle) => {
-    if (bundle.reviewState !== 'reviewed') return false;
-    const readiness = evaluateAgentSkillBundleReadiness(bundle, snapshot.skills);
-    return readiness.ready && readiness.includedSkills.every((skill) => skill.reviewState === 'reviewed');
-  });
-  const activeSkillIds = new Set([
-    ...snapshot.enabledSkills.map((skill) => skill.id),
-    ...enabledBundles.flatMap((bundle) => bundle.skillIds),
-  ]);
-  const active = snapshot.skills.filter((skill) => (
-    activeSkillIds.has(skill.id)
-    && skill.reviewState === 'reviewed'
-    && evaluateAgentSkillReadiness(skill).ready
-  ));
+  const activeBundles = snapshot.activeBundles;
+  const active = snapshot.activeSkills;
   const candidateSkillIds = new Set([
     ...snapshot.enabledSkills.map((skill) => skill.id),
     ...snapshot.enabledBundles.flatMap((bundle) => bundle.skillIds),
@@ -828,7 +869,7 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
       return `- ${skill.name}: ${[review, setup].filter(Boolean).join('; ')}`;
     });
   const suppressedBundles = snapshot.enabledBundles
-    .filter((bundle) => !enabledBundles.some((activeBundle) => activeBundle.id === bundle.id))
+    .filter((bundle) => !activeBundles.some((activeBundle) => activeBundle.id === bundle.id))
     .slice(0, 4)
     .map((bundle) => {
       const readiness = evaluateAgentSkillBundleReadiness(bundle, snapshot.skills);
@@ -843,13 +884,13 @@ export function buildEnabledSkillsPrompt(shellPaths: ShellPathService, preread?:
       const memberReview = unreviewedSkills.length === 0 ? '' : `member-review=${unreviewedSkills.join(', ')}`;
       return `- ${bundle.name}: ${[review, setup, memberReview].filter(Boolean).join('; ')}`;
     });
-  if (active.length === 0 && enabledBundles.length === 0 && suppressedSkills.length === 0 && suppressedBundles.length === 0) return null;
-  const beyondLimit = skillsBeyondPromptLimitLine(active, enabledBundles);
+  if (active.length === 0 && activeBundles.length === 0 && suppressedSkills.length === 0 && suppressedBundles.length === 0) return null;
+  const beyondLimit = skillsBeyondPromptLimitLine(active, activeBundles);
   return [
     '## Enabled GoodVibes Agent Skills',
     'Use only reviewed, setup-ready local reusable procedures inside the same serial assistant conversation when they fit the user request.',
     '',
-    ...enabledBundles.slice(0, ENABLED_SKILL_BUNDLES_PROMPT_LIMIT).flatMap((bundle) => {
+    ...activeBundles.slice(0, ENABLED_SKILL_BUNDLES_PROMPT_LIMIT).flatMap((bundle) => {
       const readiness = evaluateAgentSkillBundleReadiness(bundle, snapshot.skills);
       const missing = [
         ...readiness.missingRequirements.map(formatAgentSkillRequirement),

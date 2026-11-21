@@ -334,7 +334,7 @@ export function useVoiceInput(onTranscript: (text: string) => void): UseVoiceInp
         if (leaseRef.current === lease) leaseRef.current = null;
         await lease();
       };
-      const session = new PushToTalkSession({
+      const session: PushToTalkSession = new PushToTalkSession({
         openCapture: micArbiter.openCapture,
         capture: {
           device: captureOptions.device,
@@ -349,6 +349,18 @@ export function useVoiceInput(onTranscript: (text: string) => void): UseVoiceInp
         onAutoStop: (utterance) => {
           sessionRef.current = null;
           void releaseOwn().then(() => transcribe(utterance));
+        },
+        // The capture died while recording (device unplugged, permission revoked):
+        // the dictation ends with its error and the device goes back to wake.
+        // A failure while starting is handled where start() is awaited, and a
+        // device that did not release cleanly during a stop or cancel leaves the
+        // session out of the error phase, so neither is taken here.
+        onError: (error) => {
+          if (sessionRef.current !== session || session.phase !== 'error') return;
+          sessionRef.current = null;
+          void releaseOwn();
+          setError({ reason: error.reason, message: error.message });
+          setPhase('error');
         },
       });
       try {

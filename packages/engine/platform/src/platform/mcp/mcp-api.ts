@@ -112,10 +112,15 @@ export interface McpApi {
    * Keep a server's trust mode or role with its entry in its MCP config file
    * and apply it, past a restart. A looser trust mode is the owner's act only.
    */
-  storeServerPolicy?(serverName: string, policy: { readonly trustMode: NonNullable<McpServerConfig['trustMode']> } | { readonly role: NonNullable<McpServerConfig['role']> }, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
+  storeServerPolicy?(serverName: string, policy: McpStoredServerPolicy, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
+
+/** A trust mode or a role kept with a server's entry in its MCP config file. */
+export type McpStoredServerPolicy =
+  | { readonly trustMode: NonNullable<McpServerConfig['trustMode']> }
+  | { readonly role: NonNullable<McpServerConfig['role']> };
 
 export interface McpApiRegistry {
   callTool?(qualifiedName: string, args: Readonly<Record<string, unknown>>, options?: McpToolCallOptions): Promise<unknown>;
@@ -153,6 +158,11 @@ export interface McpApiRegistry {
    * config file, or drop it, and apply it. An exemption is the owner's act only.
    */
   storeServerToolRule?(serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
+  /**
+   * Keep a server's trust mode or role with its entry in its MCP config file
+   * and apply it, past a restart. A looser trust mode is the owner's act only.
+   */
+  storeServerPolicy?(serverName: string, policy: McpStoredServerPolicy, roots?: McpConfigRoots): Promise<McpStoredToolRuleResult>;
   quarantineSchema(serverName: string, reason: QuarantineReason, detail?: string): void;
   approveSchemaQuarantine(serverName: string, operatorId: string): void;
 }
@@ -212,6 +222,9 @@ export function createMcpApi(registry: McpApiRegistry): McpApi {
       : {}),
     ...(registry.storeServerToolRule
       ? { storeServerToolRule: (serverName: string, toolName: string, rule: McpToolRule, roots?: McpConfigRoots) => registry.storeServerToolRule!(serverName, toolName, rule, roots) }
+      : {}),
+    ...(registry.storeServerPolicy
+      ? { storeServerPolicy: (serverName: string, policy: McpStoredServerPolicy, roots?: McpConfigRoots) => registry.storeServerPolicy!(serverName, policy, roots) }
       : {}),
     quarantineSchema(serverName, reason, detail) {
       registry.quarantineSchema(serverName, reason, detail);

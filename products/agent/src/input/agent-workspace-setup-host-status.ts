@@ -29,8 +29,12 @@ export type AgentWorkspaceHostSetupReading =
     readonly checkedAt: number;
     /** The host answered (any HTTP answer, including a refusal of the credential). */
     readonly reachable: boolean;
-    /** The host accepted this Agent's credential for a scoped read. */
-    readonly credentialAccepted: boolean;
+    /**
+     * The host accepted this Agent's credential for a scoped read (true), refused
+     * it (false), or answered with something that does not decide it (null: a
+     * version mismatch, a server error, a cancelled read).
+     */
+    readonly credentialAccepted: boolean | null;
     /** A credential file exists for this host. */
     readonly credentialPresent: boolean;
     readonly detail: string;
@@ -101,11 +105,14 @@ function probeWithCredential(context: CommandContext, baseUrl: string): Promise<
     if (result.kind === 'auth_required') {
       return { state: 'checked', checkedAt, reachable: true, credentialAccepted: false, credentialPresent: true, detail: `The host at ${baseUrl} refused this Agent's credential (${result.message}).` };
     }
+    // Only an answer or a refusal of the credential decides it. Nothing answering at
+    // the address (or something other than a GoodVibes host answering) is unreachable;
+    // any other failure is a host that answered without deciding the credential.
     return {
       state: 'checked',
       checkedAt,
-      reachable: result.kind !== 'connected_host_unavailable',
-      credentialAccepted: false,
+      reachable: result.kind !== 'connected_host_unavailable' && result.kind !== 'connected_host_route_unavailable',
+      credentialAccepted: null,
       credentialPresent: true,
       detail: `The host at ${baseUrl} did not answer the status read: ${result.message}.`,
     };

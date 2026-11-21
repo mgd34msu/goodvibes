@@ -268,7 +268,7 @@ export const builtinGatewayChannelMethodDescriptors: readonly GatewayMethodDescr
     id: 'channels.targets.resolve',
     repeat: 'safe',
     title: 'Resolve Channel Target',
-    description: 'Resolve a typed channel target for outbound delivery or routing.',
+    description: 'Resolve a typed channel target for outbound delivery or routing. A plain name resolves only when it names exactly one conversation; a name several conversations share (a person and a channel both called ops) returns the unresolved fallback target with metadata.ambiguous listing each candidate\'s id, kind and label, so the caller passes #name, @name or a typed id.',
     category: 'channels',
     effects: ['channels.administer'],
     http: { method: 'POST', path: '/api/channels/targets/{surface}/resolve' },

@@ -16,6 +16,7 @@ import { captureNativeConversationInput } from './native/native-conversation-inp
 import { commandHistoryLine } from './command-registry.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { splitSlashCommand } from './slash-command-parser.js';
+import { commandFailureMessage } from './command-mode-route.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
 export interface FeedCommandContext {
   readonly print: (message: string) => void;
@@ -219,8 +220,12 @@ export function createFeedTokenRoutes<
     // command and no paste marker (the submit path does not expand markers).
     const concealed = state.isConcealedInput?.() ?? false;
     if (!concealed && token.value === '?' && state.prompt === '' && !state.commandMode) {
-      if (state.commandContext?.openSelection) {
-        state.commandRegistry?.execute('help', [], state.commandContext);
+      const helpContext = state.commandContext;
+      if (helpContext?.openSelection && state.commandRegistry) {
+        void state.commandRegistry.execute('help', [], helpContext).catch((error: unknown) => {
+          helpContext.print(commandFailureMessage('help', error));
+          state.requestRender();
+        });
       }
       state.requestRender();
       return { handled: true, prompt: state.prompt, cursorPos: state.cursorPos, commandMode: state.commandMode };
@@ -380,6 +385,9 @@ export function createFeedTokenRoutes<
               if (!handled) {
                 state.commandContext?.submitInput?.(text, undefined, { source: originalInput });
               }
+              state.requestRender();
+            }).catch((error: unknown) => {
+              state.commandContext?.print(commandFailureMessage(name, error));
               state.requestRender();
             });
           }

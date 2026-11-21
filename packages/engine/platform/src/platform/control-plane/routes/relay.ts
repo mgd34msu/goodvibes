@@ -13,6 +13,9 @@ import type { GatewayMethodCatalog } from '../method-catalog.js';
 import type { GatewayMethodHandler } from '../method-catalog-shared.js';
 import type { RelayCodeStore } from '../../relay/relay-codes.js';
 import { pairingTokenIdOfPrincipal } from '../../pairing/principal-ids.js';
+import { AuthorityRecordUnavailableError } from '../../cluster/authority-record-file.js';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
@@ -90,18 +93,33 @@ export function createRelayPairingMintHandler(accessor: RelayReachabilityAccesso
     // access can be revoked without touching any other's.
     // A paired device asking for its own relay code: revoking that device revokes the code with it.
     const deviceTokenId = pairingTokenIdOfPrincipal(invocation.context.principalId);
-    let minted: ReturnType<RelayCodes['mint']>;
-    try { minted = codes.mint(name, deviceTokenId); }
+    let minted: Awaited<ReturnType<RelayCodes['mint']>>;
+    try { minted = await codes.mint(name, deviceTokenId); }
     catch (error) {
       const status = (error as { status?: unknown }).status;
       if (status === 409) throw new GatewayVerbError((error as Error).message, 'RELAY_CODE_LIMIT', 409);
+      if (error instanceof AuthorityRecordUnavailableError) {
+        throw new GatewayVerbError(`The authority record could not be read, so no relay code was issued and nothing was paired. ${error.message}`, 'AUTHORITY_RECORD_UNAVAILABLE', 503);
+      }
       throw error;
     }
-    const pairing = (await service.mintPairing(minted.code)) ?? null;
-    // No live registration to pair against: the code is withdrawn, so no unused code is left listed.
-    if (pairing === null) codes.revoke(minted.id);
+    // The code is withdrawn on every path that does not hand it to the caller, so no unused code is left listed.
+    let pairing: unknown;
+    try { pairing = (await service.mintPairing(minted.code)) ?? null; }
+    catch (error) {
+      await withdrawMinted(codes, minted.id);
+      throw error;
+    }
+    // No live registration to pair against.
+    if (pairing === null) await withdrawMinted(codes, minted.id);
     return { pairing, status: statusOf(service), ...(pairing !== null ? { codeId: minted.id, codeName: minted.name } : {}) };
   };
+}
+
+/** Withdraw a code minted for a pairing that was not handed out; a failed withdrawal is logged, the code was never seen. */
+async function withdrawMinted(codes: RelayCodes, id: string): Promise<void> {
+  try { await codes.revoke(id); }
+  catch (error) { logger.warn('A relay code minted for a pairing that was not handed out could not be withdrawn', { id, error: summarizeError(error) }); }
 }
 
 export function createRelayCodesListHandler(codes: RelayCodes): GatewayMethodHandler {
@@ -111,9 +129,19 @@ export function createRelayCodesListHandler(codes: RelayCodes): GatewayMethodHan
 export function createRelayCodeRevokeHandler(codes: RelayCodes, accessor?: RelayReachabilityAccessor): GatewayMethodHandler {
   return async (invocation) => {
     const id = requireStringValue(readInvocationParams(invocation).id, 'id');
-    if (!codes.revoke(id)) throw new GatewayVerbError('Unknown relay code', 'RELAY_CODE_NOT_FOUND', 404);
-    // Every connection the code opened ends now: its streams get their close, its requests stop.
+    let revoked = false;
+    let failure: unknown;
+    try { revoked = await codes.revoke(id); }
+    catch (error) { failure = error; }
+    // Every connection a code no longer held opened ends now, even when the revoke's save failed:
+    // its streams get their close, its requests stop.
     const closedConnections = await accessor?.()?.closeConnectionsPresenting?.((code) => !codes.holds(code), 'relay-code-revoked') ?? 0;
+    if (failure !== undefined) {
+      const coded = failure as { code?: unknown; status?: unknown };
+      throw new GatewayVerbError(`${failure instanceof Error ? failure.message : String(failure)} ${closedConnections} relay connection(s) were closed.`,
+        typeof coded.code === 'string' ? coded.code : 'RELAY_CODE_REVOKE_FAILED', typeof coded.status === 'number' ? coded.status : 500);
+    }
+    if (!revoked) throw new GatewayVerbError('Unknown relay code', 'RELAY_CODE_NOT_FOUND', 404);
     return { id, revoked: true, closedConnections };
   };
 }

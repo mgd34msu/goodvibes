@@ -262,14 +262,30 @@ function normalizeReviewFacts(input: HomeGraphReviewInput): Record<string, unkno
         reason: `Home Graph review value "${key}" must be a ${kind === 'string-list' ? 'list of strings' : kind}, got ${value === null ? 'null' : Array.isArray(value) ? 'array' : typeof value}`,
         next: [`Send ${key} as a ${kind === 'string-list' ? 'list of strings' : kind} and review again`] }), { category: 'bad_request', source: 'runtime' });
     }
-    allowed[key] = key === 'shareWith' ? [...new Set((value as string[]).map((entry) => entry.trim().toLowerCase()).filter(Boolean))] : value;
+    if (key === 'shareWith') {
+      const labels = [...new Set((value as string[]).map((entry) => entry.trim().toLowerCase()).filter(Boolean))];
+      const unread = labels.find((label) => !SHARE_WITH_LABELS.includes(label));
+      if (unread !== undefined) {
+        throw new RefusalError(refusal({ code: 'HOMEGRAPH_REVIEW_SHARE_WITH', status: 400,
+          state: 'nothing was changed',
+          reason: `Home Graph review value "shareWith" may name only ${SHARE_WITH_LABELS.join(' or ')}; "${unread}" is not read by any packet`,
+          next: ['Use shareWith: ["guest"] or ["all"]; other sharing profiles show every device and are limited by section'] }),
+        { category: 'bad_request', source: 'runtime' });
+      }
+      allowed[key] = labels;
+      continue;
+    }
+    allowed[key] = value;
   }
   return allowed;
 }
 
+/** The `shareWith` labels a packet reads: a guest packet lists the devices shared with `guest` or `all`. */
+const SHARE_WITH_LABELS: readonly string[] = ['guest', 'all'];
+
 // Later quality and passport readers treat these as typed declarations and
 // hold the whole space when one is malformed, so a bad value stops here.
-// `shareWith` names the sharing profiles a device appears in (for example guest).
+// `shareWith` chooses which devices a guest packet lists (`guest` or `all`).
 const FACT_VALUE_KINDS: Record<string, 'boolean' | 'string' | 'string-list' | undefined> = {
   batteryPowered: 'boolean',
   manualRequired: 'boolean',

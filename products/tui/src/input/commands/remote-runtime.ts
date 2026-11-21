@@ -568,12 +568,13 @@ const REMOTE_COMMAND = defineCommand<CommandContext>({
     },
     {
       id: 'import', label: 'Bring in an artifact from a file', word: 'import', inputs: [PATH('An artifact file written by /remote export')],
-      sentence: 'The artifact in {path} is added for review, until you change it; a file that would replace a known runner\'s tools is refused.',
-      done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
+      sentence: 'The artifact in {path} is added for review, replacing a different artifact held here with the same id; a file that would replace a known runner\'s tools is refused.',
+      done: '', touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
       operator: { terminalOnly: 'The file is read from this project.' }, example: { path: 'remote/art-31c.json' },
       async run(values, ctx) {
         try {
-          const artifact = await runnersOf(ctx).importArtifact(requireShellPaths(ctx).resolveWorkspacePath(values.path!));
+          // Reached only once the person confirmed the replacement the sentence names.
+          const artifact = await runnersOf(ctx).importArtifact(requireShellPaths(ctx).resolveWorkspacePath(values.path!), { replace: true });
           return `Imported remote review artifact ${artifact.id} for runner ${artifact.runnerId}. Review it with /remote review ${artifact.id}; /remote rerun-local ${artifact.id} asks before anything starts.`;
         } catch (error) {
           throw commandRefusal(`Remote import refused: ${summarizeError(error)}`);

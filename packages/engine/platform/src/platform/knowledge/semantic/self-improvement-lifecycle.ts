@@ -1,22 +1,35 @@
 import type { KnowledgeStore } from '../store.js';
 import type { KnowledgeNodeRecord } from '../types.js';
 import { isTerminalRefinementState } from '../store-lifecycle-authority.js';
+import { GAP_REPAIR_RESOLVER } from './self-improvement-gap-state.js';
 
-/** Capture before yielding; a review/reopen of the same id is a new decision. */
+/**
+ * Capture before yielding; a review/reopen of the same id is a new decision.
+ * An issue the repair itself resolved on an earlier attempt is not a decision
+ * against repairing the reopened gap; any other resolution, a changed decision
+ * on a captured issue, a new issue that arrives resolved, or a deleted issue stops it.
+ */
 export function captureGapRepairLifecycle(store: KnowledgeStore, gap: KnowledgeNodeRecord): (taskId: string) => boolean {
   const snapshot = gapLifecycle(gap);
   const issues = store.listIssues(Number.MAX_SAFE_INTEGER).filter((issue) => issue.nodeId === gap.id);
   const decisions = new Map(issues.map((issue) => [issue.id, issueDecision(issue)]));
-  const resolved = issues.some((issue) => issue.status === 'resolved');
+  const resolved = issues.some((issue) => issue.status === 'resolved' && !resolvedByRepair(issue));
   return (taskId) => {
     const task = store.getRefinementTask(taskId);
     if (!task || isTerminalRefinementState(task.state) || resolved) return true;
     if (gapLifecycle(store.getNode(gap.id)) !== snapshot) return true;
     const currentIssues = store.listIssues(Number.MAX_SAFE_INTEGER).filter((issue) => issue.nodeId === gap.id);
-    return currentIssues.some((issue) => issue.status === 'resolved'
-      || (decisions.has(issue.id) && decisions.get(issue.id) !== issueDecision(issue)))
+    return currentIssues.some((issue) => decisions.has(issue.id)
+      ? decisions.get(issue.id) !== issueDecision(issue)
+      : issue.status === 'resolved')
       || issues.some((issue) => !store.getIssue(issue.id));
   };
+}
+
+function resolvedByRepair(issue: { readonly metadata: Record<string, unknown> }): boolean {
+  const resolution = issue.metadata.resolution;
+  return resolution !== null && typeof resolution === 'object' && !Array.isArray(resolution)
+    && (resolution as Record<string, unknown>).resolvedBy === GAP_REPAIR_RESOLVER;
 }
 
 function issueDecision(issue: { readonly status: string; readonly metadata: Record<string, unknown> }): string {

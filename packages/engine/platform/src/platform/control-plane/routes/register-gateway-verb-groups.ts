@@ -34,6 +34,7 @@ import { registerPrincipalsGatewayMethods } from './principals.js';
 import { composeOwnerProfile } from './owner-profile-composition.js';
 import { PrincipalRegistry, PrincipalStore } from '../../principals/index.js';
 import { registerChannelProfilesGatewayMethods } from './channel-profiles.js';
+import { effectivePermissionMode } from '../../gate/presets.js';
 import { registerChannelTestGatewayMethods } from './channel-test.js';
 import { registerWorktreeSetupGatewayMethods } from './worktree-setup.js';
 import { WorktreeRegistry } from '../../runtime/worktree/registry.js';
@@ -581,7 +582,11 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   const channelProfileRegistry = new ChannelProfileRegistry(
     new ChannelProfileStore(controlPlaneStorePath(deps.shellPaths, deps.surfaceRoot, 'channel-profiles.json')),
   );
-  registerChannelProfilesGatewayMethods(catalog, channelProfileRegistry);
+  // A binding that loosens the mode a channel's sessions run under is the owner's act, put to him from anyone else.
+  registerChannelProfilesGatewayMethods(catalog, channelProfileRegistry, {
+    hostMode: () => effectivePermissionMode(deps.configManager.get('permissions.mode'), deps.configManager.get('behavior.autoApprove') === true),
+    ownerApprovals: deps.approvalRaise,
+  });
 
   // `channels.routing.*` and `channels.drafts.*` are NOT served from here. The
   // daemon host attaches them (channels/host-routing, channels/host-drafts) over
@@ -907,7 +912,9 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
   });
   // rewind.undo: a surface-hosted conversation keeps its undo snapshot in that
   // surface; one this daemon holds itself is restored through its own port.
-  registerRewindGatewayMethods(catalog, rewindService, { hosts: conversationHosts, local: deps.conversationRewindPort ?? null });
+  // A conversation rewind is its session's owners' act: the same owners source session-runtime and fleet search read.
+  registerRewindGatewayMethods(catalog, rewindService, (sessionId) => liveTurnHolder?.ownersOf(sessionId) ?? [],
+    { hosts: conversationHosts, local: deps.conversationRewindPort ?? null });
 
   if (deps.runtimeBus) {
     // LLM + metered-voice usage -> the attribution ledger (see attribution-ingest.ts).

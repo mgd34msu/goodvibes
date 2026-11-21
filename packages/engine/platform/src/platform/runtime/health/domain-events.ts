@@ -28,6 +28,12 @@ interface EntityHealthEvent {
   /** What the entities are called in a failure reason. */
   readonly noun: string;
   readonly entity: (payload: Record<string, unknown>, envelope: { readonly sessionId?: string | undefined }) => string | undefined;
+  /**
+   * The event also ends its entity: the domain is evaluated with the entity's
+   * status for this one event, then the entity is dropped, so a finished entity
+   * never lingers in the domain (a failed agent does not run again).
+   */
+  readonly terminal?: true;
 }
 
 const text = (value: unknown): string | undefined => (typeof value === 'string' && value.length > 0 ? value : undefined);
@@ -58,7 +64,7 @@ const ENTITY_HEALTH_EVENTS: Readonly<Partial<Record<AnyRuntimeEvent['type'], Ent
   TURN_ERROR: turn('failed'),
   AGENT_COMPLETED: agent('ended'),
   AGENT_CANCELLED: agent('ended'),
-  AGENT_FAILED: agent('failed'),
+  AGENT_FAILED: { ...agent('failed'), terminal: true },
   SESSION_STARTED: session('healthy'),
   SESSION_READY: session('healthy'),
   SESSION_RECOVERY_FAILED: session('failed'),
@@ -114,15 +120,21 @@ export function bindHealthDomainEvents(bus: RuntimeEventBus, wiring: HealthStore
         entities = new DomainEntities();
         domains.set(rule.domain, entities);
       }
-      entities.set(entity, typeof rule.status === 'function' ? rule.status(payload) : rule.status);
+      const status = typeof rule.status === 'function' ? rule.status(payload) : rule.status;
+      entities.set(entity, status);
       const summary = entities.summarize(rule.noun);
+      if (rule.terminal) entities.set(entity, 'ended');
       const sessionId = sessionOf(payload, envelope);
-      wiring.evaluateDomain(rule.domain, summary.status, {
-        entity,
-        ...(rule.domain === 'mcp' ? { serverId: entity } : {}),
-        ...(rule.domain === 'agents' ? { agentId: entity } : {}),
-        ...(sessionId ? { sessionId } : {}),
-      }, summary.reason);
+      // The event's entity is named only when it is itself failing, so a cascade never names one that succeeded or ended.
+      const failing = status === 'failed' || status === 'degraded';
+      wiring.evaluateDomain(rule.domain, summary.status, failing
+        ? {
+            entity,
+            ...(rule.domain === 'mcp' ? { serverId: entity } : {}),
+            ...(rule.domain === 'agents' ? { agentId: entity } : {}),
+            ...(sessionId ? { sessionId } : {}),
+          }
+        : {}, summary.reason);
     });
   });
   return () => {

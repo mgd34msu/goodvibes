@@ -220,14 +220,18 @@ async function attachSession(
   context.openAgents?.({ hosted: true });
 }
 
-/** Turn `attach 2` into the id the user just read off `/hosted list`; only a plain number is a list number. */
+/**
+ * Turn `attach 2` into the id the user just read off the printed `/hosted list`;
+ * only a plain number is a list number, and one that is not a row of that list
+ * is refused rather than sent to the daemon as an id.
+ */
 function resolveIdArgument(argument: string): string {
   if (!/^\d+$/.test(argument)) return argument;
   const index = Number(argument);
   if (index >= 1 && index <= lastListedIds.length) {
     return lastListedIds[index - 1] as string;
   }
-  return argument;
+  throw commandRefusal(`There is no row ${argument} in the last /hosted list, so nothing was joined.`, 'run /hosted list, or give the session id');
 }
 
 const HOSTED_SESSIONS = defineList<CommandContext>({
@@ -235,8 +239,8 @@ const HOSTED_SESSIONS = defineList<CommandContext>({
   async read(ctx) {
     const seams = resolveSeams(ctx);
     if (!seams) return [];
+    // The picker's rows carry ids; only the printed /hosted list defines what a typed number means.
     const records = await seams.client.list({ includeTerminated: false });
-    lastListedIds = records.map((record) => record.id);
     return records.map((record): ListRow => ({
       value: record.id, label: hostedSessionLabel(record), detail: describeDetachEffect(record),
       state: `${record.status}, ${record.attachedClients.length > 0 ? `joined by ${record.attachedClients.join(', ')}` : 'nobody joined'}`,
@@ -361,7 +365,8 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
       operator: { method: 'sessions.hosted.attach', fields: { sessionId: 'session' } }, example: { session: 'hs-1' },
       async run(values, ctx) {
         const seams = resolveSeams(ctx)!;
-        await daemonCall(() => attachSession(seams, resolveIdArgument(values.session!), getSharedHostedSessionFeed(), ctx));
+        const sessionId = resolveIdArgument(values.session!);
+        await daemonCall(() => attachSession(seams, sessionId, getSharedHostedSessionFeed(), ctx));
       },
     },
     {

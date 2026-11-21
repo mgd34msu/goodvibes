@@ -10,7 +10,6 @@
  * `reading: 'unassessed'` or, where the report has no such value, as
  * uncertain with the result's `assessment_note` saying why.
  */
-import { judgeSome } from '../../runtime/judge.js';
 import {
   frontendFinding,
   frontendLineView,
@@ -39,6 +38,7 @@ type Question =
   | 'omits_dependency'
   | 'overflow_problem'
   | 'fixed_size_problem'
+  | 'server_only'
   | 'stacking_conflict';
 export type FindingReading = 'real' | 'uncertain' | 'unassessed';
 
@@ -268,29 +268,11 @@ export async function inspectStacking(content: string, file: string, signal?: Ab
 // ── Client boundary ───────────────────────────────────────────────────────────
 
 /**
- * Whether a module can only run on the server, read by its specifier alone and kept for the process
- * (a module's nature does not change); an unsure, late or unavailable reading lists it as uncertain.
- */
-async function readServerOnly(module: string, signal?: AbortSignal): Promise<CandidateReading> {
-  const { value } = await judgeSome<typeof frontendFinding.items, CandidateReading>({
-    site: SITE,
-    battery: frontendFinding,
-    only: ['server_only'],
-    state: { module },
-    cache: { key: module, scope: 'process' },
-    // An absent reading is unsure: the module is listed as uncertain.
-    settle: ({ server_only: reading }) => reading === undefined ? undefined : reading.verdict === 'yes' ? 'real' : reading.verdict === 'no' ? 'dismissed' : undefined,
-    fallback: (why) => why === 'off' ? 'unassessed' : 'uncertain',
-    describe: (reading) => `server_only: ${reading}`,
-    ...(signal === undefined ? {} : { signal }),
-  });
-  return value;
-}
-
-/**
  * The file's directive is its first statement, after any comments (React's
- * rule); its imports are listed from syntax and each module is read for
- * whether it can only run on the server.
+ * rule); its imports are listed from syntax and each module specifier is read
+ * for whether it can only run on the server, every import of the file riding
+ * the same per-file request as any other analyzer's candidates. A module is
+ * listed unless its reading is a no.
  */
 export async function inspectClientBoundary(content: string, file: string, signal?: AbortSignal): Promise<ClientBoundaryInfo & AssessmentNote> {
   const code = content.replace(/^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*/, '');
@@ -298,14 +280,14 @@ export async function inspectClientBoundary(content: string, file: string, signa
   const modules = [
     ...new Set([...content.matchAll(/import\s+(?:[\s\S]*?from\s+)?['"]([^'"]+)['"]/g)].map((m) => m[1]!)),
   ];
-  const readings = await Promise.all(modules.map((module) => readServerOnly(module, signal)));
-  const serverOnlyImports = modules.filter((_, i) => readings[i] !== 'dismissed');
-  const unassessed = readings.filter((reading) => reading === 'unassessed').length;
+  const { readings, note } = await readAll('server_only', file,
+    modules.map((module, i) => ({ id: `M${i + 1}`, view: { module } })), signal);
+  const serverOnlyImports = modules.filter((_, i) => readings.get(`M${i + 1}`) !== 'dismissed');
   return {
     file,
     directive: directive ? (`use ${directive[2]}` as ClientBoundaryInfo['directive']) : null,
     importsServerOnly: serverOnlyImports.length > 0,
     serverOnlyImports,
-    ...(unassessed > 0 ? { assessment_note: `Decision models are off, so ${unassessed} imports are listed as possibly server-only, unassessed.` } : {}),
+    ...note,
   };
 }

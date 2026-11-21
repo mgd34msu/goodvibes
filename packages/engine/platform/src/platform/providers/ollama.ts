@@ -22,6 +22,7 @@ import type {
 } from './interface.js';
 import { OpenAICompatProvider, type OpenAICompatOptions } from './openai-compat.js';
 import { LOCAL_SERVER_EFFORT } from './discovered-traits.js';
+import { getCacheCapability, type ProviderCacheCapability } from './cache-capability.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { toOpenAITools } from './tool-formats.js';
 import { isOtherApiFailure, normalizeProviderError } from './provider-error.js';
@@ -65,6 +66,8 @@ export class OllamaProvider implements LLMProvider {
   readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
   readonly models: string[];
   readonly capabilities?: Partial<ProviderCapability> | undefined;
+  /** How this server caches prompts; the capability registry reports it as this provider's caching. */
+  readonly cacheCapability: ProviderCacheCapability;
 
   private readonly baseURL: string;
   private readonly defaultModel: string;
@@ -80,6 +83,7 @@ export class OllamaProvider implements LLMProvider {
     this.name = opts.name;
     this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
+    this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
     this.baseURL = opts.baseURL;
     this.defaultModel = opts.defaultModel;
     this.nativeChatUrl = deriveOllamaChatUrl(opts.baseURL);

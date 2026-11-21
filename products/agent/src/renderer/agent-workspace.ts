@@ -45,7 +45,7 @@ function resultPalette(): { text: string; good: string; muted: string; dim: stri
 }
 import { actionResultColor, type AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';
 import { workspacePaneLines } from './agent-workspace-context-lines.ts';
-import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, ONBOARDING_CRITICAL_STEP_IDS } from '../input/agent-workspace-onboarding-finish.ts';
+import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION } from '../input/agent-workspace-onboarding-finish.ts';
 
 function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[] {
   const rows: WorkspaceRow[] = [];
@@ -155,11 +155,6 @@ function buildContextRows(workspace: AgentWorkspace, category: AgentWorkspaceCat
   });
 }
 
-function onboardingFinishPrerequisitesMet(workspace: AgentWorkspace): boolean {
-  const checklist = workspace.runtimeSnapshot?.setupChecklist ?? [];
-  return ONBOARDING_CRITICAL_STEP_IDS.every((id) => checklist.find((item) => item.id === id)?.status === 'ready');
-}
-
 function buildActionRows(workspace: AgentWorkspace, width: number, height: number): WorkspaceRow[] {
   const category = workspace.selectedActionCategory;
   const onboarding = isOnboardingCategory(category);
@@ -253,8 +248,10 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
     const marker = selected ? GLYPHS.navigation.selected : ' ';
 
     if (isFinishFooterRow) {
-      // Sticky Finish setup footer row
-      const prereqsMet = onboardingFinishPrerequisitesMet(workspace);
+      // Sticky Finish setup footer row. It is shown only when setup can finish or
+      // readiness is not known (shouldShowOnboardingFinishFooter): good colour when
+      // a model answers, the neutral colour when it is not known.
+      const ready = workspace.onboardingReadyToChat === true;
       const sep = `${GLYPHS.frame.horizontal.repeat(3)} Finish setup ${GLYPHS.frame.horizontal.repeat(3)}`;
       if (!selected) {
         rows.push({
@@ -264,23 +261,14 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
           dim: true,
         });
       }
-      const finishDetail = prereqsMet
-        ? actionCommand(action)
-        : (() => {
-          const checklist = workspace.runtimeSnapshot?.setupChecklist ?? [];
-          const unmet = [...ONBOARDING_CRITICAL_STEP_IDS]
-            .filter((id) => checklist.find((item) => item.id === id)?.status !== 'ready')
-            .map((id) => checklist.find((item) => item.id === id)?.label ?? id)
-            .join(', ');
-          return `Finish needs: ${unmet}`;
-        })();
+      const finishDetail = actionCommand(action);
       const text = settingTable
         ? `${marker} ${padDisplay('Finish setup', labelWidth)}  ${padDisplay(finishDetail, (valueWidth * 2) + 2)}`
         : `${marker} ${padDisplay('Finish setup', labelWidth)}  ${padDisplay(finishDetail, commandWidth)}`;
       rows.push({
         text,
         selected: selected && workspace.focusPane === 'actions',
-        fg: prereqsMet ? PALETTE.good : PALETTE.warn,
+        fg: ready ? PALETTE.good : selected ? PALETTE.text : PALETTE.info,
         bold: selected,
         kind: 'item',
       });

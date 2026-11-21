@@ -159,6 +159,7 @@ function wrapGoogleBrowser(browser: GoogleBrowserPort, owner: { readonly signal:
     click: (ref, ownership) => call(() => browser.click(ref, { signal: actionSignal(ownership?.signal), assertCurrent: () => { current(); ownership?.assertCurrent(); } })),
     type: (ref, text, options) => call(() => browser.type(ref, text, { ...options, signal: actionSignal(options?.signal), assertCurrent: () => { current(); options?.assertCurrent?.(); } })),
     readText: options => call(() => browser.readText(options)),
+    settle: options => call(() => browser.settle({ signal: actionSignal(options?.signal) })),
   };
   return { assertCurrent: current, consumeObservation: () => { current(); return owner.consumeObservation(); }, browser: wrapped };
 }

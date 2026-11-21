@@ -117,8 +117,11 @@ export type McpCapabilityClass =
 /** Runtime trust mode used by the hardened MCP policy layer. */
 // McpTrustMode is imported from events/mcp.ts (see top of file).
 
-/** Enforcement answers allow or deny; nothing at this layer asks. */
-export type McpCoherenceVerdict = 'allow' | 'deny';
+/**
+ * Enforcement answers allow or deny, or ask: an ask-on-risk server called
+ * outside its scope is put to the owner, whose answer the gate records.
+ */
+export type McpCoherenceVerdict = 'allow' | 'ask' | 'deny';
 export type McpRiskLevel = 'low' | 'medium' | 'high' | 'critical';
 
 export interface McpTrustProfile {

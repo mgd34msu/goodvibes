@@ -7,7 +7,7 @@ import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/m
 import { AgentPersonaRegistry, type AgentPersonaRecord } from './persona-registry.js';
 import { AgentNoteRegistry, type AgentNoteRecord } from './note-registry.js';
 import { AgentRoutineRegistry, type AgentRoutineRecord } from './routine-registry.js';
-import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from './skill-registry.js';
+import { AgentSkillRegistry, formatSkillDeleteBundleLines, type AgentSkillBundleRecord, type AgentSkillRecord } from './skill-registry.js';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from './record-labels.js';
 import { assertActorMayEnable, assertActorMayMarkReviewed } from './review-authority.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
@@ -124,11 +124,7 @@ function handleNote(shellPaths: ShellPathService, action: AgentLocalRegistryActi
     ].join('\n');
   }
   if (action === 'review') {
-    const note = registry.markReviewed(requireId(args));
-    return [
-      'Reviewed Agent-local note',
-      `  id ${note.id}`,
-    ].join('\n');
+    assertActorMayMarkReviewed('model', 'note', requireId(args));
   }
   if (action === 'stale') {
     const note = registry.markStale(requireId(args), readString(args.reason));
@@ -370,11 +366,12 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
     ].join('\n');
   }
   if (action === 'delete') {
-    const skill = registry.deleteSkill(requireId(args));
+    const deleted = registry.deleteSkill(requireId(args));
     return [
       'Deleted Agent-local skill',
-      `  id ${skill.id}`,
-      `  name ${skill.name}`,
+      `  id ${deleted.skill.id}`,
+      `  name ${deleted.skill.name}`,
+      ...formatSkillDeleteBundleLines(deleted),
     ].join('\n');
   }
   throw new Error(invalidAction(action, 'skills', 'skill'));
@@ -581,7 +578,7 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
           delete: { doing: 'Deleting from', did: 'deleted from', object: 'notes & routines' },
         },
       },
-      description: 'Inspect or update Agent-local records by domain. Actions per domain: memory, note: list, search, get, create, update, review, stale, delete. persona adds use and clear_active. skill and skill_bundle add enable and disable. routine adds enable, disable and start. Create needs: memory summary; note title and body; persona name, description and body; skill name, description and procedure; skill_bundle name, description and skillIds; routine name, description and steps. Writes need current recorded admission. Marking a persona, skill, skill bundle or routine reviewed, and enabling one nobody reviewed, are the owner\'s: refused here with the command the owner types.',
+      description: 'Inspect or update Agent-local records by domain. Actions per domain: memory, note: list, search, get, create, update, review, stale, delete. persona adds use and clear_active. skill and skill_bundle add enable and disable. routine adds enable, disable and start. Create needs: memory summary; note title and body; persona name, description and body; skill name, description and procedure; skill_bundle name, description and skillIds; routine name, description and steps. Writes need current recorded admission. Marking a memory record, note, persona, skill, skill bundle or routine reviewed, and enabling one nobody reviewed, are the owner\'s: refused here with the command the owner types.',
       parameters: {
         type: 'object',
         properties: {
@@ -595,7 +592,7 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
           scope: { type: 'string', enum: [...MEMORY_SCOPES], description: 'Memory scope when domain is memory.' },
           summary: { type: 'string', description: 'Memory summary when domain is memory.' },
           detail: { type: 'string', description: 'Memory detail when domain is memory.' },
-          confidence: { type: 'number', description: 'Memory review confidence from 0 to 100.' },
+          confidence: { type: 'number', description: 'Confidence from 0 to 100 for a memory record being created; changing it later is part of the owner\'s review.' },
           title: { type: 'string', description: 'Note title when domain is note.' },
           name: { type: 'string', description: 'Name of a persona, skill, skill_bundle or routine.' },
           description: { type: 'string', description: 'Description of a persona, skill, skill_bundle or routine.' },

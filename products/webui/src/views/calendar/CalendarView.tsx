@@ -535,13 +535,6 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         aria-label="Logical calendar id"
         list={calendarChoices.length ? calendarListId : undefined}
       />
-      {calendarChoices.length > 0 && (
-        <datalist id={calendarListId}>
-          {calendarChoices.map((choice) => (
-            <option key={choice.calendarId} value={choice.calendarId}>{choice.displayName}</option>
-          ))}
-        </datalist>
-      )}
       <div className="dv-filters__end">
         <IconButton label="Refresh events" icon={<RefreshCw />} onClick={() => void events.refetch()} />
         {moreMenu}
@@ -707,6 +700,14 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
       </Sheet>
 
       {confirm.element}
+      {/* One list of the daemon's calendars, read by the desktop filter and the phone sheet alike. */}
+      {calendarChoices.length > 0 && (
+        <datalist id={calendarListId}>
+          {calendarChoices.map((choice) => (
+            <option key={choice.calendarId} value={choice.calendarId}>{choice.displayName}</option>
+          ))}
+        </datalist>
+      )}
       <Dialog
         open={newOpen}
         onClose={closeEventForm}

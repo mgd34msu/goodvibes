@@ -180,7 +180,12 @@ function loadOrMintTokenRecord(
       // aside would rotate the token it just handed out. Judge the file as it is now.
       const current = readTokenRecord(tokenPath);
       if (current.record) return { record: current.record, created: false };
-      if (current.reason !== ABSENT) quarantined = quarantineTokenStore(tokenPath, current.reason, wording, options.receipts);
+      if (current.reason !== ABSENT) {
+        const moved = quarantineTokenStore(tokenPath, current.reason, wording, options.receipts);
+        // What was moved turned out to be a token another process published in the window: it is the token.
+        if ('adopted' in moved) return { record: moved.adopted, created: false };
+        quarantined = moved;
+      }
     }
   }
 
@@ -320,17 +325,55 @@ function readTokenRecord(tokenPath: string): { record: CompanionTokenRecord | nu
   };
 }
 
-/** Move an unreadable token store aside, loudly. Never throws. */
+/**
+ * A valid record that was moved aside by mistake (another process published it
+ * after this one judged the file unreadable), put back at `tokenPath`. Returns
+ * the record now at `tokenPath`: the moved one, or the one a third process
+ * published there meanwhile.
+ */
+function restoreMovedToken(tokenPath: string, destination: string, moved: CompanionTokenRecord): CompanionTokenRecord {
+  try {
+    linkSync(destination, tokenPath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'EEXIST') {
+      const there = readTokenRecord(tokenPath).record;
+      if (there) {
+        try { unlinkSync(destination); } catch { /* already gone */ }
+        return there;
+      }
+    } else if (code !== 'EPERM' && code !== 'ENOSYS' && code !== 'EOPNOTSUPP' && code !== 'EXDEV') {
+      throw error;
+    }
+    // No usable record is there now (or links are not supported): the moved token, which a caller already holds, goes back in place.
+    renameSync(destination, tokenPath);
+    confirmFileDurable(tokenPath);
+    return moved;
+  }
+  confirmFileDurable(tokenPath);
+  try { unlinkSync(destination); } catch { /* already gone */ }
+  return moved;
+}
+
+/**
+ * Move an unreadable token store aside, loudly. The file is judged again after
+ * the move: one that holds a valid record was published by another process in
+ * the window, so it is put back and returned as `adopted`, with no quarantine
+ * reported. Throws only when putting such a record back fails, so no second
+ * token is minted over one a caller already holds.
+ */
 function quarantineTokenStore(
   tokenPath: string,
   reason: string,
   wording: TokenStoreWording,
   receipts?: { record(text: string): unknown } | undefined,
-): CompanionTokenQuarantine {
+): CompanionTokenQuarantine | { readonly adopted: CompanionTokenRecord } {
   let destination = '';
+  let moved: CompanionTokenRecord | null = null;
   try {
     destination = nextUnrecognizedPath(tokenPath);
     renameSync(tokenPath, destination);
+    try { moved = readTokenRecord(destination).record; } catch { moved = null; }
   } catch (error) {
     destination = '';
     // Another process already moved it aside; nothing is about to be overwritten.
@@ -342,6 +385,7 @@ function quarantineTokenStore(
       });
     }
   }
+  if (moved && destination) return { adopted: restoreMovedToken(tokenPath, destination, moved) };
   logger.error(`The ${wording.name} was unreadable, a new token was issued and ${wording.consequence}`, {
     path: tokenPath,
     reason,

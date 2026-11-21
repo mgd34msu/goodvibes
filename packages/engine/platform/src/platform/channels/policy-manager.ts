@@ -42,6 +42,9 @@ const MAX_AUDIT_RECORDS = 500;
  */
 const AUDIT_FLUSH_INTERVAL_MS = 1_000;
 
+/** The fields a policy change sets; every field it leaves out keeps its value. */
+export type ChannelPolicyPatch = Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>;
+
 /** One frozen default per surface, so an unconfigured surface reads as the same record every time. */
 const defaultPolicies = new Map<ChannelSurface, ChannelPolicyRecord>();
 
@@ -565,21 +568,30 @@ export class ChannelPolicyManager {
     if (typeof surface !== 'string' || typeof userId !== 'string') return;
     const policy = this.getPolicy(surface as ChannelSurface);
     if (answer.option !== 'accept') {
-      const declined = Array.isArray(policy.metadata[DECLINED_CLAIMANTS_KEY])
-        ? (policy.metadata[DECLINED_CLAIMANTS_KEY] as unknown[]).filter((entry): entry is string => typeof entry === 'string')
+      const declinedIn = (metadata: Readonly<Record<string, unknown>>): string[] => Array.isArray(metadata[DECLINED_CLAIMANTS_KEY])
+        ? (metadata[DECLINED_CLAIMANTS_KEY] as unknown[]).filter((entry): entry is string => typeof entry === 'string')
         : [];
-      if (declined.includes(userId)) return;
-      await this.savePolicy(policy.surface, { metadata: { ...policy.metadata, [DECLINED_CLAIMANTS_KEY]: [...declined, userId].slice(-MAX_DECLINED_CLAIMANTS) } });
+      if (declinedIn(policy.metadata).includes(userId)) return;
+      await this.savePolicy(policy.surface, (current) => {
+        const declined = declinedIn(current.metadata);
+        return declined.includes(userId) ? {}
+          : { metadata: { ...current.metadata, [DECLINED_CLAIMANTS_KEY]: [...declined, userId].slice(-MAX_DECLINED_CLAIMANTS) } };
+      });
       return;
     }
-    const group = typeof groupPolicyId === 'string' ? policy.groupPolicies.find((entry) => entry.id === groupPolicyId) : undefined;
-    const owners = group ? group.allowlistUserIds ?? [] : policy.allowlistUserIds;
-    if (!owners.includes(userId)) {
-      const owner = policy.ownerId ? {} : { ownerId: userId, ownerSince: Date.now() };
-      await this.savePolicy(policy.surface, group
-        ? { groupPolicies: policy.groupPolicies.map((entry) => entry === group ? { ...entry, allowlistUserIds: [...owners, userId] } : entry), ...owner }
-        : { allowlistUserIds: [...owners, userId], ...owner });
-    }
+    const listedGroup = typeof groupPolicyId === 'string' ? policy.groupPolicies.find((entry) => entry.id === groupPolicyId) : undefined;
+    const listed = (listedGroup ? listedGroup.allowlistUserIds ?? [] : policy.allowlistUserIds).includes(userId);
+    // Computed from the policy as it stands when the write runs, so an
+    // allowlist edit that landed meanwhile is kept.
+    if (!listed) await this.savePolicy(policy.surface, (current) => {
+      const group = typeof groupPolicyId === 'string' ? current.groupPolicies.find((entry) => entry.id === groupPolicyId) : undefined;
+      const owners = group ? group.allowlistUserIds ?? [] : current.allowlistUserIds;
+      if (owners.includes(userId)) return {};
+      const owner = current.ownerId ? {} : { ownerId: userId, ownerSince: Date.now() };
+      return group
+        ? { groupPolicies: current.groupPolicies.map((entry) => entry === group ? { ...entry, allowlistUserIds: [...owners, userId] } : entry), ...owner }
+        : { allowlistUserIds: [...owners, userId], ...owner };
+    });
     logger.info('Channel owner claim accepted', { surface: policy.surface, userId });
     // A sender admitted to a surface that already had an owner leaves the other held senders waiting.
     if (policy.ownerId) return;
@@ -633,9 +645,16 @@ export class ChannelPolicyManager {
     }
   }
 
+  /**
+   * Change one surface's policy. `patch` may be a function of the policy as it
+   * stands when the write runs, after every earlier queued write has published,
+   * so an edit computed from what it read (an allowlist change) composes with a
+   * claim or another edit that landed meanwhile instead of replacing it. A
+   * function that throws refuses the change and nothing is written.
+   */
   async upsertPolicy(
     surface: ChannelSurface,
-    patch: Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>,
+    patch: ChannelPolicyPatch | ((current: ChannelPolicyRecord) => ChannelPolicyPatch),
   ): Promise<ChannelPolicyRecord> {
     await this.start();
     return await this.savePolicy(surface, patch);
@@ -649,10 +668,10 @@ export class ChannelPolicyManager {
    * record is computed inside the queued write, so two changes in flight
    * apply in order and neither loses the other's patch.
    */
-  private async savePolicy(surface: ChannelSurface, patch: Partial<Omit<ChannelPolicyRecord, 'surface' | 'updatedAt'>>): Promise<ChannelPolicyRecord> {
+  private async savePolicy(surface: ChannelSurface, patch: ChannelPolicyPatch | ((current: ChannelPolicyRecord) => ChannelPolicyPatch)): Promise<ChannelPolicyRecord> {
     let saved: ChannelPolicyRecord | undefined;
     await this.writes.run(async () => {
-      const next = this.nextPolicy(surface, patch);
+      const next = this.nextPolicy(surface, typeof patch === 'function' ? patch(this.getPolicy(surface)) : patch);
       const policies = [...this.policies.values()].filter((entry) => entry.surface !== surface);
       policies.push(next);
       policies.sort((a, b) => a.surface.localeCompare(b.surface));
@@ -936,8 +955,10 @@ export class ChannelPolicyManager {
   }
 
   /**
-   * Write the policies and audit trail as they stand at THIS call, after every
-   * write already queued has finished.
+   * Write the policies and audit trail as they stand when the write RUNS: after
+   * every earlier queued write has finished and published (a policy save sets
+   * the live policy only once its own write landed), so a flush queued behind a
+   * save writes the saved policy, never the one it replaced.
    *
    * Two paths write this file and they were ordered only against themselves:
    * `upsertPolicy` awaited its write, and the debounced audit flush ran on a
@@ -949,10 +970,12 @@ export class ChannelPolicyManager {
    * sender that speaks.
    */
   private async persist(): Promise<void> {
-    const snapshot: ChannelPolicySnapshot = {
-      policies: this.listPolicies(),
-      audit: [...this.audit],
-    };
-    await this.writes.run(() => this.store.persist(snapshot));
+    await this.writes.run(() => {
+      const snapshot: ChannelPolicySnapshot = {
+        policies: this.listPolicies(),
+        audit: [...this.audit],
+      };
+      return this.store.persist(snapshot);
+    });
   }
 }

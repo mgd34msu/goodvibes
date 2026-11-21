@@ -94,9 +94,93 @@ export async function extractReadableHtml(html: string, owner: KnowledgeExtracti
 export async function extractLightweightReadableHtml(html: string, owner: KnowledgeExtractionOwner = createKnowledgeExtractionOwner()): Promise<ReadableHtmlExtraction | null> {
   owner.assertCurrent();
   assertJudgmentInput(html);
-  const markup = truncateHtml(html).replace(/<(script|style|noscript|iframe|template|svg|canvas)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '');
+  const markup = stripRawTextElements(truncateHtml(html));
   const selected = await selectHtmlContent(markup, pageTitle(markup), [], owner);
   if (!selected) return null;
-  const links = uniqueText(Array.from(markup.matchAll(/<a\b[^>]*\bhref\s*=\s*["']([^"']+)["']/gi), (match) => decodeCharacterReferences(match[1] ?? '')), 80);
+  const links = uniqueText(anchorHrefs(markup).map(decodeCharacterReferences), 80);
   return { ...selected, length: selected.textContent.length, links };
+}
+
+/** Elements whose content is never page text. */
+const RAW_TEXT_ELEMENTS = ['script', 'style', 'noscript', 'iframe', 'template', 'svg', 'canvas'] as const;
+
+function isWordCharacter(character: string | undefined): boolean {
+  return character !== undefined && /\w/.test(character);
+}
+
+/** The raw-text element whose opening tag name starts at `index` (just after `<`), if any. */
+function rawTextElementAt(markup: string, index: number): string | undefined {
+  return RAW_TEXT_ELEMENTS.find((name) => markup.slice(index, index + name.length).toLowerCase() === name
+    && !isWordCharacter(markup[index + name.length]));
+}
+
+/** Index just past the `</name>` (case-insensitive, whitespace allowed before `>`) at or after `from`, or -1. */
+function closingTagEnd(markup: string, name: string, from: number): number {
+  let search = from;
+  for (;;) {
+    const close = markup.indexOf('</', search);
+    if (close === -1) return -1;
+    search = close + 2;
+    if (markup.slice(close + 2, close + 2 + name.length).toLowerCase() !== name) continue;
+    let index = close + 2 + name.length;
+    while (index < markup.length && /\s/.test(markup[index]!)) index += 1;
+    if (markup[index] === '>') return index + 1;
+  }
+}
+
+/**
+ * The markup without script, style and the other raw-text elements, in one
+ * forward walk. An element that is never closed takes the rest of the input
+ * with it, as a browser reads it as raw text to the end.
+ */
+function stripRawTextElements(markup: string): string {
+  let out = '';
+  let cursor = 0;
+  let search = 0;
+  for (;;) {
+    const open = markup.indexOf('<', search);
+    if (open === -1) break;
+    search = open + 1;
+    const name = rawTextElementAt(markup, open + 1);
+    if (name === undefined) continue;
+    out += markup.slice(cursor, open);
+    const tagEnd = markup.indexOf('>', open);
+    const end = tagEnd === -1 ? -1 : closingTagEnd(markup, name, tagEnd + 1);
+    if (end === -1) return out;
+    cursor = end;
+    search = end;
+  }
+  return out + markup.slice(cursor);
+}
+
+/**
+ * The quoted `href` of every `<a>` tag, in one forward walk. Each tag is
+ * bounded by its first `>` outside a quoted value before its attributes are
+ * read; a tag whose quote never closes ends the walk.
+ */
+function anchorHrefs(markup: string): string[] {
+  const hrefs: string[] = [];
+  let search = 0;
+  for (;;) {
+    const open = markup.indexOf('<', search);
+    if (open === -1) return hrefs;
+    search = open + 1;
+    if ((markup[open + 1] !== 'a' && markup[open + 1] !== 'A') || isWordCharacter(markup[open + 2])) continue;
+    let index = open + 2;
+    let quote: string | undefined;
+    // A quote opens a value only after `=`, as in an attribute.
+    let afterEquals = false;
+    while (index < markup.length) {
+      const character = markup[index]!;
+      if (quote !== undefined) { if (character === quote) quote = undefined; }
+      else if ((character === '"' || character === "'") && afterEquals) quote = character;
+      else if (character === '>') break;
+      if (quote === undefined && !/\s/.test(character)) afterEquals = character === '=';
+      index += 1;
+    }
+    if (quote !== undefined) return hrefs;
+    const href = markup.slice(open, index).match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1];
+    if (href !== undefined) hrefs.push(href);
+    search = index + 1;
+  }
 }

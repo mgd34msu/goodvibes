@@ -38,6 +38,7 @@
  */
 
 import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import { DaemonVerbNotSentError } from '../../runtime/client/operator-endpoint.ts';
 
 export type ConnectionSurface = 'mail' | 'calendar';
 
@@ -223,21 +224,42 @@ export const EXPLICIT_WRITE_INVOCATION_CONTEXT = {
  * A calendar event add carries no idempotency key on the wire, so a retry after
  * a timeout the server had already accepted would add it twice. This remembers,
  * per gateway, which exact adds this process has already attempted, whether or
- * not the attempt reported success. (A mail send carries its own `clientSendId`
- * instead; see mail-runtime.ts.)
+ * not the attempt reported success, unless the failure proves nothing was
+ * written (see {@link failureProvesNothingWritten}). (A mail send carries its
+ * own `clientSendId` instead; see mail-runtime.ts.)
  */
 const attemptedWrites = new WeakMap<object, Set<string>>();
 
-/** True when the write may proceed; false when this exact write was already attempted and `again` is not set. */
-export function claimIrreversibleWrite(gateway: object, fingerprint: string, again: boolean): boolean {
+/**
+ * Claims this exact write. Returns the release, to call when the attempt
+ * failed in a way that proves nothing was written; null when this exact write
+ * was already attempted and `again` is not set.
+ */
+export function claimIrreversibleWrite(gateway: object, fingerprint: string, again: boolean): (() => void) | null {
   let seen = attemptedWrites.get(gateway);
   if (!seen) {
     seen = new Set();
     attemptedWrites.set(gateway, seen);
   }
-  if (seen.has(fingerprint) && !again) return false;
+  if (seen.has(fingerprint) && !again) return null;
   seen.add(fingerprint);
-  return true;
+  const claimed = seen;
+  return () => { claimed.delete(fingerprint); };
+}
+
+/**
+ * True when a failed write certainly did nothing: the call never left this
+ * process (no daemon reachable), or the daemon answered with a 4xx refusal
+ * (not configured, invalid input, not confirmed, unknown or not-invokable
+ * method). A timeout, a dropped connection or a 5xx leaves the outcome
+ * unknown, and so does an error with no status: a code alone is no proof, as
+ * every engine error carries one inferred from its category.
+ */
+export function failureProvesNothingWritten(error: unknown): boolean {
+  if (error instanceof DaemonVerbNotSentError) return true;
+  if (typeof error !== 'object' || error === null) return false;
+  const status = (error as { readonly status?: unknown }).status;
+  return typeof status === 'number' && status >= 400 && status < 500;
 }
 
 /**

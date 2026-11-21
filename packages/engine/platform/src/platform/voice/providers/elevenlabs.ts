@@ -53,6 +53,15 @@ type ElevenLabsSingleUseTokenResponse = {
   readonly token?: string | undefined;
 };
 
+/**
+ * A voice id as one URL path segment. `/`, `?`, `#` and `%` are escaped; `.`
+ * and `..` are refused, since a URL resolves them as path steps even escaped.
+ */
+function voicePathSegment(voiceId: string): string {
+  if (voiceId === '.' || voiceId === '..') throw new Error(`ElevenLabs voice id '${voiceId}' is not a voice id`);
+  return encodeURIComponent(voiceId);
+}
+
 function normalizeBooleanString(value: unknown): string | undefined {
   return typeof value === 'boolean' ? String(value) : undefined;
 }
@@ -258,7 +267,7 @@ export function createElevenLabsProvider(): VoiceProvider {
       if (!apiKey) throw new Error('ElevenLabs API key missing');
       const baseUrl = normalizeBaseUrl(readFirstEnv(baseUrlEnvVars), 'https://api.elevenlabs.io');
       const voiceId = request.voiceId?.trim() || DEFAULT_ELEVENLABS_VOICE;
-      const response = await voiceFetch(`${baseUrl}/v1/text-to-speech/${voiceId}`, {
+      const response = await voiceFetch(`${baseUrl}/v1/text-to-speech/${voicePathSegment(voiceId)}`, {
         ...signalInit(request.signal),
         method: 'POST',
         headers: {
@@ -302,7 +311,7 @@ export function createElevenLabsProvider(): VoiceProvider {
       const outputFormat = resolveElevenLabsOutputFormat(request.format);
       const mimeType = mimeTypeForElevenLabsOutputFormat(outputFormat);
       const format = artifactFormatForElevenLabsOutputFormat(outputFormat);
-      const url = new URL(`${baseUrl}/v1/text-to-speech/${voiceId}/stream`);
+      const url = new URL(`${baseUrl}/v1/text-to-speech/${voicePathSegment(voiceId)}/stream`);
       url.searchParams.set('output_format', outputFormat);
       if (metadata?.['enableLogging'] === false) {
         url.searchParams.set('enable_logging', 'false');

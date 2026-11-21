@@ -502,9 +502,19 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   });
 
   const voiceProviders = new VoiceProviderRegistry();
+  // Moves on every write of a local engine row and nothing else, so saving an
+  // unrelated setting never stops a running local transcription or synthesis.
+  let localVoiceEngineRevision = 0;
+  for (const key of [
+    'voice.local.ttsEngine', 'voice.local.ttsBinary', 'voice.local.ttsModelPath',
+    'voice.local.sttEngine', 'voice.local.sttBinary', 'voice.local.sttModelPath',
+  ] as const) {
+    const stop = configManager.subscribe(key, () => { localVoiceEngineRevision += 1; });
+    scope.registry.add(`local voice engine setting ${key}`, () => stop());
+  }
   ensureBuiltinVoiceProviders(voiceProviders, {
     readConfig: (key) => configManager.get(key as never),
-    readConfigIncarnation: () => configManager.getConfigurationIncarnation(),
+    readEngineRevision: () => localVoiceEngineRevision,
     managedVoiceRoot: shellPaths.resolveUserPath('voice'),
   });
   // Metered voice spend goes to attribution; local engines emit nothing.

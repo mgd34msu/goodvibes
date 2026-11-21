@@ -64,6 +64,13 @@ export function choiceInput(fields: { id: string; label: string; help: string; c
   };
 }
 
+/** Whether a file write may replace a file already at its path: no by default; yes (`--replace`) asks first. */
+export const REPLACE_FILE_INPUT: InputDescription = choiceInput({
+  id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
+  choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+  optional: { default: 'no', means: 'keep it and stop' },
+});
+
 /** Typed text: free words, with the reason it has to be typed. */
 export function textInput(fields: { id: string; label: string; help: string; why: string; typed: InputDescription['typed']; kind?: InputDescription['kind']; optional?: { default: string; means: string }; step?: number }): InputDescription {
   return {

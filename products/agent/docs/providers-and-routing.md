@@ -27,7 +27,7 @@ Agent-owned provider definitions live under the Agent profile root when supporte
 ~/.goodvibes/agent/providers/*.json
 ```
 
-These files are local configuration. They are not Agent Knowledge records and should not be copied into knowledge search state.
+These files are local configuration. They are not Agent Knowledge records and should not be copied into knowledge search state. A definition's `name` is how its models are addressed (`name:model`), so it must not contain `:` or any space; a file whose name does is skipped with a warning naming the file.
 
 ## Local model cookbook
 

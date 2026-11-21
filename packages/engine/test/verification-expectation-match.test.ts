@@ -25,7 +25,7 @@ function mail(messageId: string, from: string, delivered: boolean): CandidateEma
 
 test('only one mail delivered to the alias from the service\'s domain matches; a forged, unrelated or racing one leaves the expectation open', () => {
   const book = new VerificationExpectationBook();
-  const expectation = book.openExpectation({ serviceDomain: 'service.example', recipientAddress: ALIAS, purpose: 'sign up at service.example', now });
+  const { expectation } = book.openExpectation({ serviceDomain: 'service.example', recipientAddress: ALIAS, purpose: 'sign up at service.example', now });
   const stillOpen = () => book.get(expectation.id, now) !== null;
 
   const genuine = mail('genuine', 'Service <no-reply@service.example>', true);

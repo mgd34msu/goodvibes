@@ -9,16 +9,16 @@ import type { SubagentTask } from './protocol.js';
  */
 
 /** The runner tool each ACP tool kind needs; `think` needs none. Any other kind is treated as a command. */
-const ACP_KIND_TOOLS: Readonly<Record<string, readonly string[]>> = {
-  read: ['read'],
-  search: ['find', 'read'],
-  fetch: ['fetch'],
-  edit: ['edit', 'write'],
-  delete: ['write', 'edit'],
-  move: ['write', 'edit'],
-  execute: ['exec'],
-  think: [],
-};
+const ACP_KIND_TOOLS: ReadonlyMap<string, readonly string[]> = new Map<string, readonly string[]>([
+  ['read', ['read']],
+  ['search', ['find', 'read']],
+  ['fetch', ['fetch']],
+  ['edit', ['edit', 'write']],
+  ['delete', ['write', 'edit']],
+  ['move', ['write', 'edit']],
+  ['execute', ['exec']],
+  ['think', []],
+]);
 
 const PATH_WRITING_KINDS: ReadonlySet<string> = new Set(['edit', 'delete', 'move']);
 
@@ -45,13 +45,14 @@ export function runnerCeilingRefusal(
 ): string | null {
   const kind = typeof toolCall.kind === 'string' && toolCall.kind ? toolCall.kind : 'other';
   const what = `this ${kind} call${toolCall.title ? ` (${toolCall.title})` : ''}`;
-  const needs = ACP_KIND_TOOLS[kind] ?? ['exec'];
+  const known = ACP_KIND_TOOLS.get(kind);
+  const needs = known ?? ['exec'];
   if (task.tools.length > 0 && needs.length > 0 && !needs.some((tool) => task.tools.includes(tool))) {
     return `the runner may use ${task.tools.join(', ')}; ${what} needs ${needs.join(' or ')}`;
   }
   const scope = (task.writeScope ?? []).map((path) => resolve(task.workingDirectory, path));
   if (scope.length === 0) return null;
-  if (kind === 'execute' || !(kind in ACP_KIND_TOOLS)) {
+  if (kind === 'execute' || known === undefined) {
     return `the runner may write only inside ${scope.join(', ')}, and ${what} could write anywhere`;
   }
   if (!PATH_WRITING_KINDS.has(kind)) return null;

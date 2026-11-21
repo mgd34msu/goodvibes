@@ -28,6 +28,16 @@
 import type { ConfigSettingRow } from './schema-types.js';
 import { intRange } from './schema-shared.js';
 import { moneyAmount } from './money-value.js';
+import { registrableMerchant } from '../payments/merchant-domain.js';
+
+const SHOP_DOMAIN_LIST_HINT = 'comma-separated shop domains, e.g. microcenter.com';
+
+/** A retailer list whose every entry names a shop: a domain, `www.` host or URL with a registrable domain. Empty is allowed. */
+function isShopDomainList(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  return value.split(',').map(entry => entry.trim()).filter(entry => entry.length > 0)
+    .every(entry => registrableMerchant(entry) !== null);
+}
 
 export const paymentsConfigDefaults = {
   payments: {
@@ -286,18 +296,18 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
     label: 'Shops to add to the trusted list',
     type: 'string',
     description:
-      "Comma-separated REGISTRABLE domains (eTLD+1, e.g. 'microcenter.com', not 'www.microcenter.com') to add to the recognised-retailer list. A purchase at a recognised retailer gets the veto window, you are told and it goes ahead unless you object. Everything else asks for your yes. The test is recourse: is there a real path to remedy if it goes wrong. Additions are yours alone, nothing is learned onto this list, inferred from a page, or added by an agent, because a page that could argue itself onto it could buy from itself unattended.",
-    validate: (value: unknown): boolean => typeof value === 'string',
-    validationHint: 'a comma-separated list of registrable domains',
+      "Comma-separated shop domains (e.g. 'microcenter.com'; a 'www.' host or a shop URL is read as its registrable domain) to add to the recognised-retailer list. A purchase at a recognised retailer gets the veto window, you are told and it goes ahead unless you object. Everything else asks for your yes. The test is recourse: is there a real path to remedy if it goes wrong. Additions are yours alone, nothing is learned onto this list, inferred from a page, or added by an agent, because a page that could argue itself onto it could buy from itself unattended.",
+    validate: isShopDomainList,
+    validationHint: SHOP_DOMAIN_LIST_HINT,
   },
   {
     key: 'payments.majorRetailersExcluded',
     label: 'Shops to remove from the trusted list',
     type: 'string',
     description:
-      'Comma-separated registrable domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.',
-    validate: (value: unknown): boolean => typeof value === 'string',
-    validationHint: 'a comma-separated list of registrable domains',
+      'Comma-separated shop domains to REMOVE from the shipped recognised-retailer list, so purchases there ask for your yes instead of proceeding on silence. A domain listed in both this and the additions is excluded (it asks for your yes), because on a spending path the stricter instruction wins.',
+    validate: isShopDomainList,
+    validationHint: SHOP_DOMAIN_LIST_HINT,
   },
   {
     key: 'payments.ebayMinSellerFeedbackCount',

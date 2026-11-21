@@ -255,7 +255,7 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       boundary: 'Connects the Google account that backs mail and calendar. /google connect runs the connection flow; /google adopt takes up credentials from files you point it at. Once connected, the google tool is the model route, no MCP server is involved. forget, adopt, account, calendar-address, client, client-file and approve store, adopt, remove or unlock credentials, so only the owner typing them counts; a model invocation is refused.',
     };
   }
-  if (root === 'email') {
+  if (root === 'mail') {
     return {
       confirmation,
       preferredModelTool: `${agentHarnessModes('run_command')} (use /mail set to configure, /mail settings to view them, /mail password to store the password)`,

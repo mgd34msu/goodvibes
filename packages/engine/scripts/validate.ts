@@ -47,11 +47,9 @@ const STEPS: readonly Step[] = [
   // gates: source only, no build.
   script('gates', 'error:check'),
   script('gates', 'products:check'),
-  // Also run by the pre-commit hook; here so a push that bypassed the hook
-  // still meets it.
   script('gates', 'credential-scope:check'),
   // No tracked file holds a literal in a real credential's shape (the
-  // repository is public); also run by the pre-commit hook on staged files.
+  // repository is public).
   script('gates', 'credential-literals:check'),
   // Every answer of every registered judgment decision has a fixture, and
   // engine source asks Jev only through registered decisions.

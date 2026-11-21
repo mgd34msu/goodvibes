@@ -8,6 +8,7 @@ import type { CheckoutJournal } from '../checkout-registry.js';
 import { PaymentOperationStoreError, type DurablePaymentOperations, type PaymentOperationWriter } from './operation-store.js';
 import { capturePaymentReconciliation, type PaymentReconciliationOutcome, type PaymentReconciliationCheckpoint } from './reconciliation-checkpoint.js';
 import type { DaemonPurchaseLedger } from './purchase-ledger.js';
+import { logger } from '../../utils/logger.js';
 
 interface ReconciliationDeps {
   readonly operations: DurablePaymentOperations;
@@ -168,8 +169,15 @@ export class PurchaseReconciliations {
             const current = () => { this.current(); writer.assertCurrent(); evidence.assertCurrent(); };
             await this.settle(writer, checkpoint, current, evidence);
           }
-        } catch { /* Keep the durable finding and original hold/evidence unresolved. */ }
-        finally { writer.release(); }
+        } catch (error) {
+          // The durable finding and the original hold and evidence stay as they are; the
+          // purchase's status tells the owner to repeat the same finding.
+          if (!(error instanceof CheckoutOwnershipError)) {
+            logger.warn('A saved owner finding for a purchase could not be settled at start; it stays pending', {
+              purchaseId: operation.purchaseId, operationId: operation.operationId,
+              error: error instanceof Error ? error.name : 'unknown', reason: error instanceof Error ? error.message : String(error) });
+          }
+        } finally { writer.release(); }
       });
     }
   }

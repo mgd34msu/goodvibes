@@ -528,6 +528,65 @@ export class ProcessManager {
     }
 
     entry.pid = proc.pid;
+    return this.trackChild({
+      id, entry, proc, cmd, stdout: proc.stdout as ReadableStream<Uint8Array>, stderr: proc.stderr as ReadableStream<Uint8Array>,
+      timeoutMs, sigtermGraceMs, killOnTimeout, killOnClose, ownsGroup, ownSession, outputObserver, inputPipe,
+    });
+  }
+
+  /**
+   * Take over a foreground command that is already running: the exec tool's
+   * `until` without `kill_after` hands its child here once the pattern
+   * matched. `stdout`/`stderr` carry what the child prints from now on; what
+   * it printed so far starts the output window. The child leads its own
+   * process group (spawned detached), so it is tracked as a runtime-owned job:
+   * `bg_status`, `bg_output` and `bg_stop` reach it, a stop ends its group and
+   * closing the runtime ends it. No timeout applies, as for any job started
+   * in the background. Throws when the manager is closed; the caller then
+   * still owns the child.
+   */
+  adoptRunning(input: {
+    readonly proc: ReturnType<typeof Bun.spawn>;
+    readonly cmd: string;
+    readonly stdout: ReadableStream<Uint8Array>;
+    readonly stderr: ReadableStream<Uint8Array>;
+    readonly stdoutSoFar: string;
+    readonly stderrSoFar: string;
+  }): BgCommandResult {
+    if (this._closed) throw new Error('ProcessManager is closed');
+    const id = this.newId();
+    const entry: BackgroundProcess = {
+      id, pid: input.proc.pid, cmd: input.cmd, startTime: Date.now(),
+      stdout: input.stdoutSoFar ? [input.stdoutSoFar] : [], stderr: input.stderrSoFar ? [input.stderrSoFar] : [],
+      exitCode: null, done: false, killDeadline: null, startedBy: callingAgentId(),
+    };
+    this.pruneCompletedProcesses();
+    this._processes.set(id, entry);
+    return this.trackChild({
+      id, entry, proc: input.proc, cmd: input.cmd, stdout: input.stdout, stderr: input.stderr,
+      timeoutMs: 0, sigtermGraceMs: 5_000, killOnTimeout: true, killOnClose: true,
+      ownsGroup: process.platform !== 'win32', ownSession: false, outputObserver: undefined, inputPipe: undefined,
+    });
+  }
+
+  /** Collects a spawned child's output, observes its exit, and owns its stop, timeout and close. */
+  private trackChild(child: {
+    readonly id: string;
+    readonly entry: BackgroundProcess;
+    readonly proc: ReturnType<typeof Bun.spawn>;
+    readonly cmd: string;
+    readonly stdout: ReadableStream<Uint8Array>;
+    readonly stderr: ReadableStream<Uint8Array>;
+    readonly timeoutMs: number;
+    readonly sigtermGraceMs: number;
+    readonly killOnTimeout: boolean;
+    readonly killOnClose: boolean;
+    readonly ownsGroup: boolean;
+    readonly ownSession: boolean;
+    readonly outputObserver: SpawnOptions['onOutput'];
+    readonly inputPipe: Bun.FileSink | undefined;
+  }): BgCommandResult {
+    const { id, entry, proc, cmd, timeoutMs, sigtermGraceMs, killOnTimeout, killOnClose, ownsGroup, ownSession, outputObserver, inputPipe } = child;
     if (this._lifecycleListeners.size > 0) {
       this._announced.set(id, proc.pid);
       this.announce({ kind: 'started', id, pid: proc.pid, cmd, startedBy: entry.startedBy });
@@ -555,14 +614,17 @@ export class ProcessManager {
     this._spills.set(id, spills);
     // A stream spills to a file exactly when it passes the in-memory window.
     let stdoutOverflowed = false, stderrOverflowed = false;
+    const spillFailed = (stream: 'stdout' | 'stderr') => (reason: string): void => {
+      logger.warn('Background process output could not be saved; later output is kept in memory only', { processId: id, stream, error: reason });
+    };
     const streams = Promise.allSettled([
-      readProcessStream(proc.stdout as ReadableStream<Uint8Array>, entry.stdout, drain.signal, publishOutput('stdout'), spills, undefined,
-        (path) => { stdoutOverflowed = true; this._spillFiles.set(id, { ...this._spillFiles.get(id), stdout: path }); }),
-      readProcessStream(proc.stderr as ReadableStream<Uint8Array>, entry.stderr, drain.signal, publishOutput('stderr'), spills, undefined,
-        (path) => { stderrOverflowed = true; this._spillFiles.set(id, { ...this._spillFiles.get(id), stderr: path }); }),
+      readProcessStream(child.stdout, entry.stdout, drain.signal, publishOutput('stdout'), spills, undefined,
+        (path) => { stdoutOverflowed = true; this._spillFiles.set(id, { ...this._spillFiles.get(id), stdout: path }); }, spillFailed('stdout')),
+      readProcessStream(child.stderr, entry.stderr, drain.signal, publishOutput('stderr'), spills, undefined,
+        (path) => { stderrOverflowed = true; this._spillFiles.set(id, { ...this._spillFiles.get(id), stderr: path }); }, spillFailed('stderr')),
     ]).then((results) => {
       for (const result of results) if (result.status === 'rejected') {
-        logger.debug('Background process output collection ended early', {
+        logger.warn('Background process output collection ended early', {
           processId: id, error: summarizeError(result.reason),
         });
       }
@@ -1198,6 +1260,7 @@ export async function readProcessStream(
   spillDirectories?: string[],
   limits: { readonly previewBytes: number; readonly spillBytes: number } = { previewBytes: MAX_PROCESS_OUTPUT_BYTES, spillBytes: MAX_PROCESS_SPILL_BYTES },
   onSpillFile?: (path: string) => void,
+  onSpillFailed?: (reason: string) => void,
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
@@ -1205,10 +1268,13 @@ export async function readProcessStream(
   let spill: FileHandle | undefined;
   let spilled = 0;
   let spillFull = false;
+  // Why saving the output stopped (the spill could not be created, opened or written), once it has.
+  let spillFailure: string | undefined;
   // The recent-output window: `held` bytes in sink chunks after the note, `dropped` bytes shifted out.
   let held = 0;
   let dropped = 0;
-  const limitNote = (): string => (spillFull ? ` [goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was not saved]` : '');
+  const limitNote = (): string => (spillFull ? ` [goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was not saved]` : '')
+    + (spillFailure !== undefined ? ` [goodvibes: output could not be saved past this point (${spillFailure}); later output is shown here only]` : '');
   const note = (): string => `[goodvibes: ${dropped} earlier bytes are not shown here; this is the most recent output.`
     + ' Read the saved output with "bg_output <id> from=<byte>" or "bg_output <id> tail=<bytes>".]' + limitNote() + '\n';
   const keep = (text: string): void => {
@@ -1227,19 +1293,38 @@ export async function readProcessStream(
     }
     if (dropped > 0) sink[0] = note();
   };
+  /**
+   * A spill that cannot be created, opened or written ends the saving, never
+   * the reading: the handle is closed, the window says so, and the pipe keeps
+   * being drained into the window so the child never blocks on a full pipe.
+   */
+  const stopSaving = async (error: unknown): Promise<void> => {
+    if (spillFailure !== undefined) return;
+    spillFailure = summarizeError(error);
+    const handle = spill;
+    spill = undefined;
+    try { await handle?.close(); } catch { /* The handle is already unusable; the saving has stopped either way. */ }
+    if (dropped > 0) sink[0] = note();
+    else sink.push(`${limitNote().trim()}\n`);
+    onSpillFailed?.(spillFailure);
+  };
   // Writes up to the spill cap, then stops keeping a copy; the window still shows the latest output.
   const writeSpill = async (text: string): Promise<void> => {
     if (!spill || spillFull || text.length === 0) return;
-    const bytes = Buffer.byteLength(text);
-    if (spilled + bytes > limits.spillBytes) {
-      spillFull = true;
-      await spill.writeFile(`\n[goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was not saved]\n`);
-      if (dropped > 0) sink[0] = note();
-      else sink.push(`${limitNote().trim()}\n`);
-      return;
+    try {
+      const bytes = Buffer.byteLength(text);
+      if (spilled + bytes > limits.spillBytes) {
+        spillFull = true;
+        await spill.writeFile(`\n[goodvibes: output limit of ${limits.spillBytes} bytes reached; later output was not saved]\n`);
+        if (dropped > 0) sink[0] = note();
+        else sink.push(`${limitNote().trim()}\n`);
+        return;
+      }
+      spilled += bytes;
+      await spill.writeFile(text);
+    } catch (error) {
+      await stopSaving(error);
     }
-    spilled += bytes;
-    await spill.writeFile(text);
   };
   let cancellation: Promise<void> | undefined;
 
@@ -1258,12 +1343,16 @@ export async function readProcessStream(
       const { done, value } = await reader.read();
       if (done) break;
       const decoded = decoder.decode(value, { stream: true });
-      if (!spill && total + value.byteLength > limits.previewBytes) {
-        const directory = await mkdtemp(join(tmpdir(), 'goodvibes-process-output-'));
-        spillDirectories?.push(directory);
-        const path = join(directory, 'output.log');
-        spill = await open(path, 'wx', 0o600);
-        onSpillFile?.(path);
+      if (!spill && spillFailure === undefined && total + value.byteLength > limits.previewBytes) {
+        try {
+          const directory = await mkdtemp(join(tmpdir(), 'goodvibes-process-output-'));
+          spillDirectories?.push(directory);
+          const path = join(directory, 'output.log');
+          spill = await open(path, 'wx', 0o600);
+          onSpillFile?.(path);
+        } catch (error) {
+          await stopSaving(error);
+        }
         // Nothing has been dropped yet, so the window is the whole stream so far.
         await writeSpill(sink.join(''));
       }

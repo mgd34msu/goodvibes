@@ -5,7 +5,10 @@
  *
  * Behavioral contract (owner-driven, from the live incident that produced
  * this item): a typed model reference resolves in this order,
- *   1. Already provider-qualified (`provider:model`), pass through unchanged.
+ *   1. Equal to a candidate's registryKey, pass through unchanged. A string
+ *      with a colon that is no candidate's bare id is taken as qualified and
+ *      passed through too; a colon string that IS some candidate's bare id
+ *      (Ollama's `llama3:8b`) goes on through the rules below like any bare id.
  *      Storage stays provider-qualified; this is an input-resolution layer only.
  *   2. Provider already known from context (e.g. the request already carries
  *      a provider field) and that provider has this bare id, qualify to it.
@@ -72,11 +75,13 @@ export function resolveModelReference(
 ): string {
   const trimmed = input.trim();
 
-  // Rule 1: already provider-qualified, pass through unchanged. Storage
-  // stays provider-qualified; downstream lookups report "not found" if the
-  // qualified key doesn't actually exist (unchanged behavior, this layer
-  // only resolves BARE ids).
-  if (trimmed.includes(':')) return trimmed;
+  // Rule 1: already a registryKey, pass through unchanged. A string with a
+  // colon that no candidate carries as its bare id (Ollama's `llama3:8b`,
+  // OpenRouter's `...:free`) is taken as a qualified key too, and downstream
+  // lookups report "not found" when it does not exist. A colon string that is
+  // some candidate's bare id goes on through the bare-id rules.
+  if (candidates.some(candidate => candidate.registryKey === trimmed)) return trimmed;
+  if (trimmed.includes(':') && !candidates.some(candidate => candidate.id === trimmed)) return trimmed;
 
   // Rule 2: provider already known from context.
   if (options.contextProviderId) {

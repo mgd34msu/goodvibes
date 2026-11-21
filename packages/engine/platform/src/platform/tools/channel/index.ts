@@ -2,7 +2,7 @@ import type { Tool } from '../../types/tools.js';
 import type { ChannelPluginRegistry } from '../../channels/index.js';
 import type { ChannelConversationKind } from '../../channels/index.js';
 import { CHANNEL_ACCOUNT_ACTION_EFFECTS, readAccountLifecycleAction } from '../../channels/builtin/account-action-effects.js';
-import { describeActionFailure } from '../../channels/action-outcome.js';
+import { describeActionFailure, outcomeOfActionResult } from '../../channels/action-outcome.js';
 
 function formatJson(value: unknown): string {
   return JSON.stringify(value, null, 2);
@@ -126,6 +126,9 @@ export function createChannelTool(registry: ChannelPluginRegistry | null): Tool 
           if (result === null) {
             return invalid(`Unknown channel account action '${action}' for surface '${surface}'.`);
           }
+          // A result that says ok: false did not complete, as for run_tool and run_action.
+          const outcome = outcomeOfActionResult(result);
+          if (outcome.status !== 'ok') return invalid(describeActionFailure(outcome));
           return {
             success: true,
             output: formatJson({ surface, accountId: args.accountId ?? null, action, result }),

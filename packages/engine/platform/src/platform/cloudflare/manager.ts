@@ -116,6 +116,33 @@ const DEFAULTS = DEFAULT_CONFIG.cloudflare;
 
 type ProvisionRecordDraft = { -readonly [K in keyof CloudflareProvisionedPatch]?: CloudflareProvisionedPatch[K] };
 
+/**
+ * What every manager for one control-plane directory shares in this process:
+ * the write chain that runs token creation, provision and disable one at a
+ * time (each reads records and settings and writes them back), and the one
+ * operation log over that directory's `operations.jsonl` (one fd, one
+ * in-memory view, a compaction seen by every user). Keyed by that path; ''
+ * when the daemon keeps no control-plane directory.
+ */
+interface CloudflareWriteState {
+  readonly path: string;
+  chain: Promise<unknown>;
+  /** Opened by the first token create; null when there is no directory. */
+  operations?: OperationLog<CloudflareTokenOperation> | null;
+}
+
+const writeStates = new Map<string, CloudflareWriteState>();
+
+function writeStateFor(directory: string | undefined): CloudflareWriteState {
+  const path = directory ? join(directory, 'operations.jsonl') : '';
+  let state = writeStates.get(path);
+  if (!state) {
+    state = { path, chain: Promise.resolve() };
+    writeStates.set(path, state);
+  }
+  return state;
+}
+
 function httpsOrigin(value: string): string | null {
   try {
     const url = new URL(value);
@@ -167,28 +194,40 @@ export class CloudflareControlPlaneManager {
     };
   }
 
-  /** One token provision at a time: two at once would read the same earlier record and each replace it. */
-  #tokenProvision: Promise<unknown> = Promise.resolve();
-  #operations: OperationLog<CloudflareTokenOperation> | null | undefined;
+  private writeState(): CloudflareWriteState {
+    const configManager = this.options.configManager;
+    return writeStateFor(typeof configManager.getControlPlaneConfigDir === 'function' ? configManager.getControlPlaneConfigDir() : undefined);
+  }
+
+  /**
+   * Token creation, provision and disable run one at a time per control-plane
+   * directory, across every manager in the process: each reads the token
+   * record, the provisioned record and the settings and writes them back, so
+   * two at once would overwrite each other, and a provision finishing inside a
+   * disable would switch the integration back on.
+   */
+  private serialized<T>(run: () => Promise<T>): Promise<T> {
+    const state = this.writeState();
+    const next = state.chain.then(run);
+    state.chain = next.catch(() => undefined);
+    return next;
+  }
 
   /**
    * The daemon's operation log (`operations.jsonl` beside the token record):
    * a token create is accepted there before it is sent, its id noted as soon as
    * Cloudflare returns it, and settled once its value is stored. Null when the
-   * daemon keeps no control-plane directory. Read once.
+   * daemon keeps no control-plane directory. Opened once per directory and
+   * shared by every manager.
    */
   private operations(): OperationLog<CloudflareTokenOperation> | null {
-    if (this.#operations !== undefined) return this.#operations;
-    const configManager = this.options.configManager;
-    const dir = typeof configManager.getControlPlaneConfigDir === 'function' ? configManager.getControlPlaneConfigDir() : undefined;
-    this.#operations = dir ? openOperationLog<CloudflareTokenOperation>(join(dir, 'operations.jsonl')) : null;
-    return this.#operations;
+    const state = this.writeState();
+    if (state.operations === undefined) state.operations = state.path ? openOperationLog<CloudflareTokenOperation>(state.path) : null;
+    return state.operations;
   }
 
   async createOperationalToken(input: CloudflareOperationalTokenInput): Promise<CloudflareOperationalTokenResult> {
-    const run = this.#tokenProvision.then(() => this.createOperationalTokenNow(input));
-    this.#tokenProvision = run.catch(() => undefined);
-    return run;
+    return this.serialized(() => this.createOperationalTokenNow(input));
   }
 
   /**
@@ -247,25 +286,29 @@ export class CloudflareControlPlaneManager {
     const components = resolveComponents(input.components);
     const requirements = buildTokenRequirements(components, false);
     const client = await this.createClient(bootstrapToken);
-    const explicitZoneId = clean(input.zoneId) || config.zoneId;
-    const explicitZoneName = clean(input.zoneName) || config.zoneName;
+    // A zone the request names is looked up as named (an id wins over a name)
+    // and never paired with the configured one; the configured id and name are
+    // used together only when the request names no zone.
+    const requestedZoneId = clean(input.zoneId);
+    const requestedZoneName = clean(input.zoneName);
     let zone: { readonly id: string; readonly name: string } | undefined;
-    if (explicitZoneId) {
-      zone = { id: explicitZoneId, name: explicitZoneName || explicitZoneId };
-    } else if (explicitZoneName) {
+    if (!requestedZoneId && !requestedZoneName && config.zoneId) {
+      zone = { id: config.zoneId, name: config.zoneName };
+    } else if (requestedZoneId || requestedZoneName || config.zoneName) {
+      const named = requestedZoneId || requestedZoneName || config.zoneName;
       zone = await resolveZone(client, {
         accountId,
-        zoneId: input.zoneId,
-        zoneName: input.zoneName,
-        configuredZoneId: config.zoneId,
+        zoneId: requestedZoneId,
+        zoneName: requestedZoneName,
+        configuredZoneId: '',
         configuredZoneName: config.zoneName,
-        required: components.dns,
+        required: true,
       });
       if (!zone) {
         // Without a zone the DNS permission falls back to every zone in the
         // account, which is never what a named zone asked for.
         throw new CloudflareControlPlaneError(
-          `No Cloudflare zone named ${explicitZoneName} was found in account ${accountId}. Check the spelling, or omit zoneName to create a token without a DNS component.`,
+          `No Cloudflare zone named ${named} was found in account ${accountId}. Check the spelling, or omit zoneName to create a token without a DNS component.`,
           'CLOUDFLARE_ZONE_NOT_FOUND',
           400,
         );
@@ -345,7 +388,7 @@ export class CloudflareControlPlaneManager {
         this.setConfig('cloudflare.accountId', accountId, persist);
         if (zone) {
           this.setConfig('cloudflare.zoneId', zone.id, persist);
-          this.setConfig('cloudflare.zoneName', zone.name, persist);
+          if (zone.name) this.setConfig('cloudflare.zoneName', zone.name, persist);
         }
       } catch (error: unknown) {
         throw new CloudflareControlPlaneError(
@@ -487,6 +530,10 @@ export class CloudflareControlPlaneManager {
   }
 
   async provision(input: CloudflareProvisionInput): Promise<CloudflareProvisionResult> {
+    return this.serialized(() => this.provisionNow(input));
+  }
+
+  private async provisionNow(input: CloudflareProvisionInput): Promise<CloudflareProvisionResult> {
     const steps: CloudflareProvisionStep[] = [];
     const record: ProvisionRecordDraft = {};
     try {
@@ -911,7 +958,8 @@ export class CloudflareControlPlaneManager {
     if (input.batchMode) this.setConfig('batch.mode', input.batchMode, persist);
 
     // The connector has to be up before the Worker is checked through the tunnel.
-    const connector = tunnel ? await this.startTunnelConnector(persist, steps) : undefined;
+    let connector = tunnel ? await this.startTunnelConnector(persist, steps) : undefined;
+    const startedConnector = tunnel && persist ? this.options.tunnelConnector : undefined;
 
     const verifyRequested = components.workers && input.verify !== false;
     const verification = verifyRequested && workerBaseUrl
@@ -941,6 +989,15 @@ export class CloudflareControlPlaneManager {
       steps.push({ name: 'switch-on', status: 'ok', message: components.queues && components.workers ? 'Turned the Cloudflare integration on and moved the batch queue backend to Cloudflare.' : 'Turned the Cloudflare integration on.' });
     } else {
       steps.push({ name: 'switch-on', status: 'warning', message: `The integration was not turned on and the batch queue backend was not changed, because: ${problems.join(' ')}` });
+      if (startedConnector) {
+        // The connector was started for the check regardless of the setting; now
+        // the setting decides: off, it stops; already on from an earlier run, it stays.
+        connector = await startedConnector.reconcile();
+        const step = this.tunnelConnectorStep(connector);
+        const at = steps.findIndex((entry) => entry.name === 'tunnel-connector');
+        if (at >= 0) steps[at] = step;
+        else steps.push(step);
+      }
     }
 
     const generatedSecrets = {
@@ -1013,12 +1070,16 @@ export class CloudflareControlPlaneManager {
     }
     await connector.reconcile({ force: true });
     const status = await connector.waitUntilSettled(TUNNEL_CONNECT_WAIT_MS);
-    steps.push({
+    steps.push(this.tunnelConnectorStep(status));
+    return status;
+  }
+
+  private tunnelConnectorStep(status: CloudflareTunnelConnectorStatus): CloudflareProvisionStep {
+    return {
       name: 'tunnel-connector',
       status: status.state === 'connected' ? 'ok' : 'warning',
       message: `Tunnel connector ${status.state}: ${status.detail}${status.next?.[0] ? ` Next: ${status.next[0]}.` : ''}`,
-    });
-    return status;
+    };
   }
 
   private async accessCredentialsFor(access: CloudflareAccessOutcome): Promise<CloudflareAccessCredentials | null> {
@@ -1078,6 +1139,10 @@ export class CloudflareControlPlaneManager {
   }
 
   async disable(input: CloudflareDisableInput = {}): Promise<CloudflareDisableResult> {
+    return this.serialized(() => this.disableNow(input));
+  }
+
+  private async disableNow(input: CloudflareDisableInput): Promise<CloudflareDisableResult> {
     const steps: CloudflareProvisionStep[] = [];
     const persist = input.persistConfig !== false;
     const config = this.readConfig();
@@ -1108,20 +1173,46 @@ export class CloudflareControlPlaneManager {
       };
       // Without the daemon credential the Worker cannot call the daemon at all,
       // whatever route or trigger still reaches it.
+      let storeUnchecked = false;
       credentialRemoved = await remoteStep('remove-worker-daemon-credential', async (client) => {
         const removed = await deleteWorkerSecret(client, accountId, workerName, WORKER_OPERATOR_TOKEN_SECRET);
-        const storeSecrets = sameAccount?.secretsStore;
-        const storeApi = client.secretsStore?.stores.secrets;
-        const stored = storeSecrets?.secrets.find((secret) => secret.name === this.secretsStoreSecretNames(workerName).operatorToken);
-        if (storeSecrets && stored && storeApi) await storeApi.delete(storeSecrets.storeId, stored.id, { account_id: accountId });
+        // The Secrets Store copy is found by its name, which is fixed by the
+        // Worker name, in the store the record names or else the configured
+        // one: the record's list of placed secrets can be incomplete.
+        const secretName = this.secretsStoreSecretNames(workerName).operatorToken;
+        const storeId = sameAccount?.secretsStore?.storeId || config.secretsStoreId;
+        let storeRemoved = 0;
+        if (storeId) {
+          const storeApi = client.secretsStore?.stores.secrets;
+          try {
+            if (!storeApi) throw new Error('this Cloudflare client has no Secrets Store API');
+            const found: string[] = [];
+            for await (const secret of storeApi.list(storeId, { account_id: accountId, search: secretName })) {
+              if (secret.name === secretName) found.push(secret.id);
+            }
+            for (const id of found) await storeApi.delete(storeId, id, { account_id: accountId });
+            storeRemoved = found.length;
+          } catch (error: unknown) {
+            storeUnchecked = true;
+            remote = 'not-disabled';
+            steps.push({
+              name: 'remove-worker-daemon-credential',
+              status: 'warning',
+              message: `Could not remove the daemon credential ${secretName} from Secrets Store ${storeId}: ${summarizeError(error)}. ${removed === 'deleted' ? 'Its copy on the Worker script was removed, but ' : ''}Worker ${workerName} may still read it from the store and call the daemon; delete ${secretName} in the Cloudflare dashboard (Secrets Store), or disable again.`,
+              resourceId: storeId,
+            });
+            return;
+          }
+        }
         steps.push({
           name: 'remove-worker-daemon-credential',
           status: 'ok',
-          message: removed === 'deleted' || stored
+          message: removed === 'deleted' || storeRemoved > 0
             ? `Removed the daemon credential from Worker ${workerName}; it can no longer call the daemon.`
             : `Worker ${workerName} held no daemon credential.`,
         });
       });
+      if (storeUnchecked) credentialRemoved = false;
       if (input.disableCron !== false) {
         cronRemoved = await remoteStep('disable-cron', (client) => disableWorkerSchedule(client, accountId, workerName, steps));
       }

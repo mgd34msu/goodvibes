@@ -7,6 +7,7 @@ import type {
   ChannelToolDescriptor,
 } from '../types.js';
 import { providerOperationsFor } from './provider-operations.js';
+import { CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS } from './account-action-effects.js';
 import {
   HOME_ASSISTANT_SURFACE,
   listHomeAssistantOperatorActions,
@@ -263,7 +264,7 @@ export function listBuiltinOperatorActions(surface: ChannelSurface): ChannelOper
         type: 'object',
         properties: {
           accountId: { type: 'string' },
-          action: { type: 'string', enum: ['inspect', 'setup', 'retest', 'connect', 'disconnect', 'start', 'stop', 'login', 'logout', 'wait_login'] },
+          action: { type: 'string', enum: [...CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS] },
         },
         required: ['action'],
       },
@@ -496,7 +497,7 @@ function listUnflaggedBuiltinTools(surface: ChannelSurface): ChannelToolDescript
         type: 'object',
         properties: {
           accountId: { type: 'string' },
-          action: { type: 'string', enum: ['inspect', 'setup', 'retest', 'connect', 'disconnect', 'start', 'stop', 'login', 'logout', 'wait_login'] },
+          action: { type: 'string', enum: [...CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS] },
         },
         required: ['action'],
         additionalProperties: true,

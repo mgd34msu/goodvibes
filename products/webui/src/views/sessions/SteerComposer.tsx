@@ -5,7 +5,7 @@
 
 import { useSyncExternalStore, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { SendHorizontal } from 'lucide-react';
-import { SessionContinuation } from './SessionContinuation';
+import { SessionContinuation, useContinuationDraft } from './SessionContinuation';
 import { getClientLifetime, subscribeClientLifetime, type ClientLifetime } from '../../lib/client-lifetime';
 import { useSessionDispatches, type DispatchMode } from '../../hooks/useSessionDispatches';
 import { shouldSubmitComposerKey } from '../../lib/composer-keys';
@@ -39,7 +39,8 @@ export function LegacySteerComposer(props: SteerComposerProps) {
 }
 
 function ScopedLegacySteerComposer({ sessionId, canSteer, closed, streamPaused = false, lifetime }: SteerComposerProps & { lifetime: ClientLifetime }) {
-  const [text, setText] = useState('');
+  const draft = useContinuationDraft();
+  const [text, setText] = useState(draft);
   const { dispatches, send, retry, refreshFailed, missingReceipt } = useSessionDispatches(lifetime, sessionId, streamPaused);
   const mode: DispatchMode = canSteer ? 'steer' : 'followUp';
 

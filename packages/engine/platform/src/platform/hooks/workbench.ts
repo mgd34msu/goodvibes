@@ -39,6 +39,16 @@ export interface HookConfigInspection {
   readonly patterns: readonly string[];
 }
 
+/** The hooks file the dispatcher loads, as a setup review reports it. */
+export interface HooksFileDescription {
+  readonly path: string;
+  readonly exists: boolean;
+  readonly hookCount: number;
+  readonly chainCount: number;
+  /** Why no hook from the file is active, or null when it loads. */
+  readonly problem: string | null;
+}
+
 /** What the workbench drives on the dispatcher; `setLoadedHooksCheck` is absent on a dispatcher that cannot hold a check. */
 export type WorkbenchHookDispatcher = Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'> & Partial<Pick<HookDispatcher, 'setLoadedHooksCheck'>>;
 
@@ -372,6 +382,30 @@ export class HookWorkbench {
     await this.saveManagedConfig(path);
     this.recordAction({ kind: 'export', target: path, timestamp: Date.now() });
     return path;
+  }
+
+  /**
+   * Reads the hooks file the dispatcher loads and says whether its hooks can be
+   * active: `exists` false when there is none, `problem` the reason the load
+   * path would refuse it (not JSON, unsafe permissions or owner, or held back
+   * until the workspace is trusted). Records no action and changes nothing.
+   */
+  describeHooksFile(path = this.getHooksFilePath()): HooksFileDescription {
+    if (!existsSync(path)) return { path, exists: false, hookCount: 0, chainCount: 0, problem: null };
+    let config: HooksConfig;
+    try {
+      config = ensureConfigShape(JSON.parse(readFileSync(path, 'utf-8')) as unknown);
+    } catch (error) {
+      return { path, exists: true, hookCount: 0, chainCount: 0, problem: `it could not be read as JSON (${summarizeError(error)})` };
+    }
+    const hookCount = Object.values(config.hooks ?? {}).reduce((sum, defs) => sum + (Array.isArray(defs) ? defs.length : 0), 0);
+    const chainCount = (config.chains ?? []).length;
+    const refusal = hooksFileRefusal(path);
+    if (refusal !== null) return { path, exists: true, hookCount, chainCount, problem: refusal };
+    if (this.awaitingTrust === path || (this.trustGate?.holds(path) ?? false)) {
+      return { path, exists: true, hookCount, chainCount, problem: 'it is in this workspace, which you have not trusted (run /security trust-folder to load it)' };
+    }
+    return { path, exists: true, hookCount, chainCount, problem: null };
   }
 
   inspectManagedConfig(path: string): HookConfigInspection {

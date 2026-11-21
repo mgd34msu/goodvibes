@@ -261,6 +261,9 @@ export async function processTelegramUpdate(
   const paymentSource = deps.acquirePaymentSourceAccount ?? deps.acquireSourceAccount;
   const acquireTelegramAccount = !delegated && context.hasPaymentReplyWindow?.() ? paymentSource?.bind(deps) : undefined;
   const replied = readRecord(message.reply_to_message);
+  // A private chat is the one-to-one conversation with the bot; a thread in it
+  // is a thread of a direct message, never of a group.
+  const direct = readString(chat?.type) === 'private';
   const policy = await context.authorizeSurfaceIngress({
     surface: 'telegram',
     userId: senderId,
@@ -269,6 +272,7 @@ export async function processTelegramUpdate(
     threadId,
     workspaceId: readString(chat?.username),
     conversationKind: telegramConversationKind(readString(chat?.type), threadId),
+    ...(direct ? { parentConversationKind: 'direct' as const } : {}),
     ...(delegated ? {} : { text: task || text }),
     mentioned,
     acquireTelegramAccount,

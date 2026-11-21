@@ -230,7 +230,7 @@ const CONSECUTIVE_FAILURE_LIMIT = 3;
 /** Breakers belong to an engine incarnation, not a reusable config string. */
 interface EngineIncarnation {
   readonly config: LocalEngineConfig | null;
-  readonly configIncarnation: number | undefined;
+  readonly engineRevision: number | undefined;
   readonly controller: AbortController;
   unavailable: string | null;
   consecutiveFailures: number;
@@ -240,8 +240,8 @@ function sameEngine(left: LocalEngineConfig | null, right: LocalEngineConfig | n
   return left === right || (left !== null && right !== null && left.engine === right.engine
     && left.binary === right.binary && left.modelPath === right.modelPath);
 }
-function newIncarnation(config: LocalEngineConfig | null, configIncarnation?: number): EngineIncarnation {
-  return { config: config ? Object.freeze({ ...config }) : null, configIncarnation, controller: new AbortController(), unavailable: null, consecutiveFailures: 0 };
+function newIncarnation(config: LocalEngineConfig | null, engineRevision?: number): EngineIncarnation {
+  return { config: config ? Object.freeze({ ...config }) : null, engineRevision, controller: new AbortController(), unavailable: null, consecutiveFailures: 0 };
 }
 function unavailableMessage(cfg: LocalEngineConfig, operation: 'TTS' | 'STT', failure: LocalEngineFailure, failures: number): string {
   const cause = failure.kind === 'model-load-incompatible'
@@ -257,8 +257,12 @@ function unavailableMessage(cfg: LocalEngineConfig, operation: 'TTS' | 'STT', fa
 
 export interface LocalVoiceProviderOptions {
   readonly readConfig: LocalVoiceConfigReader;
-  /** Monotonic source revision, including mutations that restore the same values. */
-  readonly readConfigIncarnation?: (() => number) | undefined;
+  /**
+   * A revision that moves only when a voice.local engine row (engine, binary or
+   * model path, for speech or transcription) is written, including a write that
+   * restores the same value.
+   */
+  readonly readEngineRevision?: (() => number) | undefined;
   /** Injectable engine runner (scripted fixtures in tests). */
   readonly runner?: LocalEngineRunner | undefined;
   /** Injectable existence check (tests). */
@@ -273,7 +277,7 @@ export interface LocalVoiceProviderOptions {
 /** Create the local (free, offline) voice provider. */
 export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): VoiceProvider {
   const read = options.readConfig;
-  const readConfigIncarnation = options.readConfigIncarnation;
+  const readEngineRevision = options.readEngineRevision;
   const runner = options.runner ?? runLocalEngine;
   const exists = options.fileExists ?? existsSync;
   const resolveManaged = options.resolveManaged;
@@ -281,15 +285,16 @@ export function createLocalVoiceProvider(options: LocalVoiceProviderOptions): Vo
     tts: newIncarnation(null), stt: newIncarnation(null),
   };
   // A transition (including configured -> absent -> configured), an explicit
-  // reset, or a newer configuration revision starts a new incarnation; a late
-  // failure from an older one cannot trip the newer one's breaker. The engine
-  // settings are read once per call.
+  // reset, or a write to an engine row starts a new incarnation; a late
+  // failure from an older one cannot trip the newer one's breaker. A write to
+  // any other setting leaves a running engine alone. The engine settings are
+  // read once per call.
   const observeEngine = (prefix: 'tts' | 'stt'): EngineIncarnation => {
-    const configIncarnation = readConfigIncarnation?.();
+    const engineRevision = readEngineRevision?.();
     const config = readEngine(read, prefix, resolveManaged);
     const previous = engines[prefix];
-    if (!sameEngine(previous.config, config) || previous.configIncarnation !== configIncarnation) {
-      engines[prefix] = newIncarnation(config, configIncarnation);
+    if (!sameEngine(previous.config, config) || previous.engineRevision !== engineRevision) {
+      engines[prefix] = newIncarnation(config, engineRevision);
       previous.controller.abort();
     }
     return engines[prefix];
@@ -374,8 +379,8 @@ return {
   billing: 'none',
   resetEngineFailureState(): void {
     const previous = [engines.tts, engines.stt];
-    engines.tts = newIncarnation(engines.tts.config, engines.tts.configIncarnation);
-    engines.stt = newIncarnation(engines.stt.config, engines.stt.configIncarnation);
+    engines.tts = newIncarnation(engines.tts.config, engines.tts.engineRevision);
+    engines.stt = newIncarnation(engines.stt.config, engines.stt.engineRevision);
     for (const incarnation of previous) incarnation.controller.abort();
   },
   status(): VoiceProviderStatus {

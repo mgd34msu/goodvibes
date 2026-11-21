@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { getPluginDirectories } from '@goodvibes/engine/platform/platform/plugins';
+import type { HookWorkbench } from '@goodvibes/engine/platform/platform/hooks';
 import {
   listBuiltinSubscriptionProviders,
   type ServiceRegistry,
@@ -79,6 +79,7 @@ export function createSetupReviewCollector<
     readonly requireProviderApi: (context: Context) => Pick<ProviderApi, 'listModels'>;
     readonly requireReadModels: (context: Context) => Pick<UiReadModels, 'security'>;
     readonly requireSubscriptionManager: (context: Context) => Pick<SubscriptionManager, 'list' | 'listPending'>;
+    readonly requireHookWorkbench: (context: Context) => Pick<HookWorkbench, 'describeHooksFile'>;
     readonly discoverSkills: (paths: ShellPathService) => Promise<readonly unknown[]>;
   },
   policy: {
@@ -89,8 +90,15 @@ export function createSetupReviewCollector<
     readonly extraChecks: (snapshot: Omit<TerminalSetupReviewSnapshot, 'issues'> & Extra) => readonly SetupReviewIssue[];
   },
 ) {
-  const { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, discoverSkills } =
-    bindings;
+  const {
+    requireShellPaths,
+    requireServiceRegistry,
+    requireProviderApi,
+    requireReadModels,
+    requireSubscriptionManager,
+    requireHookWorkbench,
+    discoverSkills,
+  } = bindings;
   async function buildSetupReviewSnapshot(ctx: Context) {
     const shellPaths = requireShellPaths(ctx);
     const serviceRegistry = requireServiceRegistry(ctx);
@@ -122,21 +130,10 @@ export function createSetupReviewCollector<
     const quarantinedPluginCount = plugins.filter((plugin) => plugin.quarantined).length;
     const quarantinedMcpCount = mcpServers.filter((server) => server.schemaFreshness === 'quarantined').length;
     const elevatedMcpCount = mcpServers.filter((server) => server.trustMode === 'allow-all').length;
-    const hooksPath = shellPaths.resolveProjectPath('hooks.managed.json');
-    let managedHookCount = 0;
-    let managedHookChainCount = 0;
-    if (existsSync(hooksPath)) {
-      try {
-        const parsed = JSON.parse(readFileSync(hooksPath, 'utf-8')) as {
-          hooks?: unknown[] | undefined;
-          chains?: unknown[] | undefined;
-        };
-        managedHookCount = parsed.hooks?.length ?? 0;
-        managedHookChainCount = parsed.chains?.length ?? 0;
-      } catch {
-        // Ignore malformed hook config during snapshot collection.
-      }
-    }
+    // The hooks file the dispatcher loads (`tools.hooksFile`), with the reason its hooks are not active when there is one.
+    const hooksFile = requireHookWorkbench(ctx).describeHooksFile();
+    const managedHookCount = hooksFile.hookCount;
+    const managedHookChainCount = hooksFile.chainCount;
     const checks: SetupReviewIssue[] = [
       {
         severity: providerCount > 0 ? 'pass' : 'fail',
@@ -172,6 +169,17 @@ export function createSetupReviewCollector<
           quarantinedMcpCount > 0 || elevatedMcpCount > 0
             ? `${quarantinedMcpCount} quarantined, ${elevatedMcpCount} elevated`
             : `${mcpServers.length} server(s) known`,
+      },
+      {
+        // Hooks are optional: no hooks file is information, a file whose hooks cannot load is an issue.
+        severity: hooksFile.problem !== null ? 'warn' : hooksFile.exists ? 'pass' : 'info',
+        area: 'hooks',
+        message:
+          hooksFile.problem !== null
+            ? `no hooks from ${hooksFile.path} are active: ${hooksFile.problem}`
+            : hooksFile.exists
+              ? `${managedHookCount} hook(s), ${managedHookChainCount} chain(s) in ${hooksFile.path}`
+              : `no hooks file (${hooksFile.path})`,
       },
     ];
     const snapshot = {

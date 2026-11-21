@@ -135,7 +135,8 @@ async function promoteRepairSourcesWithinBudget(
     const assertCurrent = () => { assertScopeCurrent(); assessment.assertCurrent(); };
     assertCurrent(); return { ...prepared, repairComplete: assessment.sufficient, assertCurrent };
   };
-  let completedLinkSourceIds: readonly string[] | undefined;
+  // Every source whose link pass completed in this repair, in the order linked.
+  const completedLinkSourceIds = new Set<string>();
   const sameSourceIds = (left: readonly string[], right: readonly string[]) => {
     if (left.length !== right.length) return false;
     for (let index = 0; index < left.length; index++) if (left[index] !== right[index]) return false;
@@ -147,7 +148,7 @@ async function promoteRepairSourcesWithinBudget(
     await linkPromotedFactsToRepairSubjects(context.store, spaceId, gap, ids,
       usefulness, signal, context.shouldStop, generatedClaims.relinking, context.objectProfiles ?? []);
     assertRequestCurrent();
-    completedLinkSourceIds = originalIds;
+    for (const id of originalIds) completedLinkSourceIds.add(id);
   };
   const promote = async (ids: readonly string[]) => {
     await beginNextPass();
@@ -213,11 +214,12 @@ async function promoteRepairSourcesWithinBudget(
   const promotionSourceIds = processedSourceIds.length > 0 ? exactKnowledgeIds(processedSourceIds) : sourceIds;
   if (processedSourceIds.length === 0) await promote(sourceIds);
   let finalUsefulness: Awaited<ReturnType<typeof countUsable>>;
-  if (completedCount && completedLinkSourceIds
-    && sameSourceIds(completedCount.sourceIds, promotionSourceIds)
-    && sameSourceIds(completedLinkSourceIds, promotionSourceIds)) {
-    // A complete false coverage reading also settled its link/count pass. Keep
-    // that original live evidence through task bookkeeping; a changed source
+  if (completedCount
+    && sameSourceIds(exactKnowledgeIds(completedCount.sourceIds), promotionSourceIds)
+    && sameSourceIds(exactKnowledgeIds([...completedLinkSourceIds]), promotionSourceIds)) {
+    // Each processed source ended with promote -> link -> count, so the last
+    // count read the final linked state of every source. Keep that original
+    // live evidence through task bookkeeping; a changed source
     // must hold, never trigger silent re-adoption or a duplicate publication.
     await beginNextPass();
     completedCount.prepared.assertCurrent();

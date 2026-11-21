@@ -21,13 +21,13 @@ import { stat } from 'node:fs/promises';
 import { relative } from 'node:path';
 import type { YesNoReading } from '@goodvibes/judgment';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
-import { scanCandidateView, secretFinding } from '../batteries/secret-finding.js';
+import { MAX_JUDGED_SCAN_LINE_CHARS, scanCandidateView, secretFinding } from '../batteries/secret-finding.js';
 import { dangerousCall, type DangerSeverity } from '../batteries/dangerous-call.js';
-import { assertJudgmentInput, JudgmentInputError } from '../../gate/judgment-input.js';
+import { assertJudgmentInput, judgmentInputRefusal, JudgmentInputError } from '../../gate/judgment-input.js';
 import type { AnalyzeInput } from './types.js';
 import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { judge } from '../../runtime/judge.js';
-import { containsIssuerCredential, findCredentialCandidates, redactIssuerCredentials } from '../../utils/redaction.js';
+import { containsIssuerCredential, findCredentialCandidates, firstIssuerCredentialIndex, redactIssuerCredentials } from '../../utils/redaction.js';
 import { MAX_SCAN_MS, collectExistingPaths, collectScanFiles, readTextFile } from './shared.js';
 
 const SECRET_SITE = 'tools.analyze.secret-finding';
@@ -56,6 +56,8 @@ interface ScanCandidate {
   readonly file: string;
   readonly lines: readonly string[];
   readonly index: number;
+  /** Where on the line the candidate was found: a long line is carried to the reading around it. */
+  readonly focus: number;
 }
 
 interface ScannedFile {
@@ -93,14 +95,18 @@ function namesSecret(name: string): boolean {
   return last === 'key' && parts.length > 1 && KEY_QUALIFIERS.has(parts[parts.length - 2]!);
 }
 
-/** A secret-named field assigned a literal: `apiKey = "…"`, `password: '…'`, `SECRET_TOKEN=a1b2…`. A bare value needs a letter and a digit (`undefined`, `string` are types and keywords). */
-function holdsSecretAssignment(line: string): boolean {
+/**
+ * Where the first secret-named field assigned a literal starts (`apiKey = "…"`, `password: '…'`,
+ * `SECRET_TOKEN=a1b2…`), or -1. A bare value needs a letter and a digit (`undefined`, `string`
+ * are types and keywords).
+ */
+function secretAssignmentIndex(line: string): number {
   for (const match of line.matchAll(LITERAL_ASSIGNMENT)) {
     const bare = match[4];
     if (bare !== undefined && !(/[A-Za-z]/.test(bare) && /\d/.test(bare))) continue;
-    if (namesSecret(match[1] ?? '')) return true;
+    if (namesSecret(match[1] ?? '')) return match.index ?? 0;
   }
-  return false;
+  return -1;
 }
 
 /** Whether code knows the line holds credential material (an issuer format or a credential-shaped value). */
@@ -108,8 +114,20 @@ function holdsLocalCredential(line: string): boolean {
   return containsIssuerCredential(line) || findCredentialCandidates(line).length > 0 || PRIVATE_KEY_BLOCK.test(line);
 }
 
-function isSecretCandidate(line: string): boolean {
-  return holdsLocalCredential(line) || holdsSecretAssignment(line);
+/** The smallest of the offsets that were found (-1 means not found), or -1 when none was. */
+function firstFound(...offsets: readonly number[]): number {
+  const found = offsets.filter((offset) => offset >= 0);
+  return found.length > 0 ? Math.min(...found) : -1;
+}
+
+/** Where on the line a secret candidate is (credential material or a secret-named literal), or -1 when it is none. */
+function secretCandidateIndex(line: string): number {
+  return firstFound(
+    firstIssuerCredentialIndex(line),
+    findCredentialCandidates(line)[0]?.start ?? -1,
+    line.search(PRIVATE_KEY_BLOCK),
+    secretAssignmentIndex(line),
+  );
 }
 
 /**
@@ -135,8 +153,9 @@ const DANGEROUS_CALL_SHAPES: readonly RegExp[] = [
   /\b(?:pickle\.loads|yaml\.load|unserialize)\s*\(/,
 ];
 
-function isDangerousCallCandidate(line: string): boolean {
-  return DANGEROUS_CALL_SHAPES.some((shape) => shape.test(line));
+/** Where on the line the first risky call shape is, or -1 when it has none. */
+function dangerousCallIndex(line: string): number {
+  return firstFound(...DANGEROUS_CALL_SHAPES.map((shape) => line.search(shape)));
 }
 
 /**
@@ -190,8 +209,13 @@ async function readScanFiles(input: AnalyzeInput, projectRoot: string, deadline:
   return { scanned, unreadable: unreadablePaths.map((file) => relative(projectRoot, file)), filesTotal: files.length, stopped: stopped || Date.now() > deadline };
 }
 
-function candidatesOf(scanned: readonly ScannedFile[], select: (line: string) => boolean): ScanCandidate[] {
-  return scanned.flatMap(({ file, lines }) => lines.flatMap((line, index) => (line.trim() !== '' && select(line) ? [{ file, lines, index }] : [])));
+/** The candidate lines, each with where on it `locate` found what made it one (-1: not a candidate). */
+function candidatesOf(scanned: readonly ScannedFile[], locate: (line: string) => number): ScanCandidate[] {
+  return scanned.flatMap(({ file, lines }) => lines.flatMap((line, index) => {
+    if (line.trim() === '') return [];
+    const focus = locate(line);
+    return focus >= 0 ? [{ file, lines, index, focus }] : [];
+  }));
 }
 
 /**
@@ -227,7 +251,7 @@ async function readCandidates<R>(
   const readings = new Array<R>(candidates.length);
   await mapWithConcurrency(order, SCAN_READ_CONCURRENCY, async (index): Promise<void> => {
     const candidate = candidates[index]!;
-    const view = scanCandidateView(candidate.file, candidate.lines, candidate.index);
+    const view = scanCandidateView(candidate.file, candidate.lines, candidate.index, undefined, candidate.focus);
     try { assertJudgmentInput(view); }
     catch (error) {
       if (error instanceof JudgmentInputError) { readings[index] = refused; return; }
@@ -249,23 +273,51 @@ async function readCandidates<R>(
   return { readings, requests, unassessedCount };
 }
 
-function coverageNote(coverage: ScanCoverage, unassessedCount: number): Record<string, unknown> {
+function coverageNote(coverage: ScanCoverage, unassessedCount: number): { scan_note?: string } {
   if (!coverage.stopped) return {};
   return {
     scan_note: `Stopped at the scan limit: covers ${coverage.scanned.length} of ${coverage.filesTotal} files${unassessedCount > 0 ? `, and ${unassessedCount} candidates are listed unassessed` : ''}. Narrow 'files' to see the rest.`,
   };
 }
 
-export async function runSecurity(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<Record<string, unknown>> {
+/** One finding of the secret scan. */
+export type SecretScanFinding = { file: string; line: number; match: string; reading: FindingReading };
+
+/**
+ * What `analyze mode:"security"` returns: the secret scan, the env files and
+ * the world-writable files, each present when its scope ran. The short form
+ * reads its counts from these fields, so a renamed field fails the type check.
+ */
+export type SecurityScanResult = {
+  provenance?: 'classic';
+  secrets?: {
+    findings: SecretScanFinding[];
+    count: number;
+    dismissed: number;
+    candidates: number;
+    requests_made: number;
+    files_scanned: number;
+    files_total: number;
+    assessment?: 'local-patterns-only';
+    semanticVerification?: false;
+    unreadable_files?: string[];
+    scan_note?: string;
+  };
+  env?: { files_found: string[] };
+  permissions?: { world_writable: string[]; count: number; unreadable_files?: string[] };
+  stopped_by_deadline: boolean;
+};
+
+export async function runSecurity(input: AnalyzeInput, projectRoot: string, walkOptions: WalkDirOptions = {}): Promise<SecurityScanResult> {
   const scope = input.securityScope ?? 'all';
   const deadline = Date.now() + MAX_SCAN_MS;
   const classic = isClassicOperation();
-  const results: Record<string, unknown> = classic ? { provenance: 'classic' } : {};
+  const results: Omit<SecurityScanResult, 'stopped_by_deadline'> = classic ? { provenance: 'classic' } : {};
   let stopped = false;
 
   if (scope === 'secrets' || scope === 'all') {
     const coverage = await readScanFiles(input, projectRoot, deadline, walkOptions);
-    const candidates = candidatesOf(coverage.scanned, isSecretCandidate);
+    const candidates = candidatesOf(coverage.scanned, secretCandidateIndex);
     const { readings, requests, unassessedCount } = await readCandidates(candidates, {
       deadline, coverage, signal: walkOptions.signal, classic,
       // Lines code already knows hold credential material are read before assignments.
@@ -278,12 +330,21 @@ export async function runSecurity(input: AnalyzeInput, projectRoot: string, walk
       fallback: () => 'unassessed',
       describe: (reading) => reading === 'dismissed' ? 'dismissed' : `reported as ${reading}`,
       ...(walkOptions.signal === undefined ? {} : { signal: walkOptions.signal }),
-    }), 'unassessed' as SecretRead, 'local-pattern' as SecretRead);
-    const findings = candidates.flatMap((candidate, index) => {
+    // A view the input check refuses (the line or a neighbour holds credential material) was not read: unassessed.
+    }), 'unassessed' as SecretRead, 'unassessed' as SecretRead);
+    const findings = candidates.flatMap((candidate, index): SecretScanFinding[] => {
       let reading = readings[index]!;
-      if (reading === 'dismissed') return [];
-      // A line code knows holds credential material stays reported however the reading went.
-      if (reading === 'unassessed' && holdsLocalCredential(candidate.lines[candidate.index] ?? '')) reading = 'local-pattern';
+      const line = candidate.lines[candidate.index] ?? '';
+      const localCredential = holdsLocalCredential(line);
+      // A dismissal of a line too long to carry whole judged part of it only: a line code
+      // knows holds credential material is not dropped on it.
+      if (reading === 'dismissed') {
+        if (!(localCredential && line.length > MAX_JUDGED_SCAN_LINE_CHARS)) return [];
+        reading = 'local-pattern';
+      }
+      // Code-detected credential material only when the candidate line itself holds it,
+      // never because a neighbouring line did.
+      if ((reading === 'unassessed' || reading === 'uncertain') && (localCredential || judgmentInputRefusal(line) !== undefined)) reading = 'local-pattern';
       return [{ file: candidate.file, line: candidate.index + 1, match: matchText(candidate, 60, true), reading }];
     });
     stopped ||= coverage.stopped;
@@ -291,7 +352,7 @@ export async function runSecurity(input: AnalyzeInput, projectRoot: string, walk
       findings, count: findings.length, dismissed: candidates.length - findings.length,
       candidates: candidates.length, requests_made: requests,
       files_scanned: coverage.scanned.length, files_total: coverage.filesTotal,
-      ...(classic ? { assessment: 'local-patterns-only', semanticVerification: false } : {}),
+      ...(classic ? { assessment: 'local-patterns-only' as const, semanticVerification: false as const } : {}),
       ...(coverage.unreadable.length > 0 ? { unreadable_files: coverage.unreadable } : {}),
       ...coverageNote(coverage, unassessedCount),
     };
@@ -332,7 +393,7 @@ export async function runPermissions(input: AnalyzeInput, projectRoot: string, w
   const deadline = Date.now() + MAX_SCAN_MS;
   const classic = isClassicOperation();
   const coverage = await readScanFiles(input, projectRoot, deadline, walkOptions);
-  const candidates = candidatesOf(coverage.scanned, isDangerousCallCandidate);
+  const candidates = candidatesOf(coverage.scanned, dangerousCallIndex);
   type Read = { reading: FindingReading | 'dismissed'; severity: DangerSeverity | 'unrated' };
   const unassessed: Read = { reading: 'unassessed', severity: 'unrated' };
   const { readings, requests, unassessedCount } = await readCandidates<Read>(candidates, {

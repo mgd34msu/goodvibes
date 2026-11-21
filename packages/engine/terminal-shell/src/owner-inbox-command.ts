@@ -347,7 +347,10 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           ownerOnly(ctx, 'questions', 'withdraws a request');
           const mine = await withdrawable(ctx);
           const wanted = values.request!.trim();
-          const item = mine.find((entry) => entry.id === wanted || shortId(entry.id) === wanted || entry.id.startsWith(wanted));
+          // One id rule for every inbox action: an exact id, or a prefix (a short id is one) naming exactly one request.
+          const resolved = resolveId(wanted, mine);
+          if ('error' in resolved) throw commandRefusal(`${resolved.error} Nothing was withdrawn.`, '/questions withdraw lists the ones you can.');
+          const item = mine.find((entry) => entry.id === resolved.id);
           if (!item || item.revision === undefined) throw commandRefusal(`No waiting request you raised is ${wanted}; nothing was withdrawn.`, '/questions withdraw lists the ones you can.');
           let outcome;
           // Sent at the revision shown: a request that moved meanwhile is refused with how it stands now.

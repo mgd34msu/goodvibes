@@ -76,10 +76,37 @@ function isRetiredRunReceiptId(id: string): boolean {
 export class FeatureAnnouncementStore {
   constructor(private readonly path: string) {}
 
+  /** A lock-free read for callers that write nothing back: a file that cannot be read reads as empty. */
   private read(): AnnouncementFileState {
-    const empty: AnnouncementFileState = { announced: {}, pending: [] };
     try {
-      return (
+      return this.readStored();
+    } catch {
+      return { announced: {}, pending: [] };
+    }
+  }
+
+  /**
+   * The read a writer uses. A missing or quarantined file is an empty state; any
+   * other read failure is logged and returns null, so the writer writes nothing
+   * rather than replacing the file with an empty state that drops every id and
+   * pending line it holds.
+   */
+  private readForWrite(context: string): AnnouncementFileState | null {
+    try {
+      return this.readStored();
+    } catch (err) {
+      logger.warn('[announcements] could not read announce-once state; nothing was written', {
+        context,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
+  }
+
+  /** Reads the file; a missing or quarantined file is empty, and any other read failure throws. */
+  private readStored(): AnnouncementFileState {
+    const empty: AnnouncementFileState = { announced: {}, pending: [] };
+    return (
         readJsonFileOrQuarantine<AnnouncementFileState>(this.path, {
           label: 'runtime/feature-announcements',
           recovery: 'Announce-once state is empty, so an already-seen announcement may be shown one more time; nothing else depends on this file.',
@@ -102,10 +129,7 @@ export class FeatureAnnouncementStore {
             return { announced: record as Record<string, number>, pending: [] };
           },
         }) ?? empty
-      );
-    } catch {
-      return empty;
-    }
+    );
   }
 
   /** Writes the store; returns whether the write landed (a failure is logged and said, never treated as saved). */
@@ -147,15 +171,16 @@ export class FeatureAnnouncementStore {
    * it is saved (the caller announces); `recorded-unsaved`: this call made it but
    * the save failed (the caller still announces; it will be announced again on
    * a later start, noisy but honest); `announced-before`: it was already made
-   * (stay silent); `busy`: another process held the store, nothing was written
-   * (try again later).
+   * (stay silent); `busy`: another process held the store, or the store could
+   * not be read, and nothing was written (try again later).
    * With `text`, the first record also enqueues the line for surface delivery
    * (see drainPending), so the announcement reaches a rendering surface, not
    * only the log.
    */
   recordOnce(id: string, text?: string): AnnouncementRecordOutcome {
     const attempt = this.locked((): AnnouncementRecordOutcome => {
-      const state = this.read();
+      const state = this.readForWrite(id);
+      if (state === null) return 'busy';
       if (id in state.announced) return 'announced-before';
       const at = Date.now();
       state.announced[id] = at;
@@ -176,13 +201,14 @@ export class FeatureAnnouncementStore {
   /**
    * Queue a recurring notice for surface delivery without an announce-once id
    * (a run receipt). The queue keeps the newest {@link PENDING_ANNOUNCEMENTS_KEPT}.
-   * Returns false when nothing was queued: another process held the store, or
-   * the write failed.
+   * Returns false when nothing was queued: another process held the store, the
+   * store could not be read, or the write failed.
    */
   notify(id: string, text: string): boolean {
     if (text.length === 0) return false;
     const attempt = this.locked(() => {
-      const state = this.read();
+      const state = this.readForWrite(id);
+      if (state === null) return false;
       state.pending.push({ id, text, at: Date.now() });
       return this.persist(state, id);
     });
@@ -193,12 +219,13 @@ export class FeatureAnnouncementStore {
    * The fired-but-undelivered announcements, cleared on read: exactly-once
    * delivery to the first draining reader (the daemon's explicitly-consuming
    * /status receipts read), mirroring the daemon receipt contract. Empty when
-   * another process holds the store; the lines stay queued for the next drain.
+   * another process holds the store or it cannot be read; the lines stay queued
+   * for the next drain.
    */
   drainPending(): PendingFeatureAnnouncement[] {
     const attempt = this.locked(() => {
-      const state = this.read();
-      if (state.pending.length === 0) return [];
+      const state = this.readForWrite('drain');
+      if (state === null || state.pending.length === 0) return [];
       const pending = state.pending;
       // Handed out only once cleared on disk: a failed clear keeps them queued for the next drain, never handed out twice.
       return this.persist({ announced: state.announced, pending: [] }, 'drain') ? pending : [];
@@ -216,13 +243,14 @@ export class FeatureAnnouncementStore {
    * Forgets every announced id the predicate selects (and any of them still
    * pending), so a condition that went away and comes back is announced again.
    * Reads without the lock first so a store with nothing to forget is not rewritten.
-   * Returns false when nothing was forgotten (another process held the store, or the write failed)
-   * (the callers run at every start or settings load, so the next one retries).
+   * Returns false when nothing was forgotten (another process held the store, the store could not be
+   * read, or the write failed) (the callers run at every start or settings load, so the next one retries).
    */
   forgetMatching(selects: (id: string) => boolean): boolean {
     if (!Object.keys(this.read().announced).some(selects)) return true;
     const attempt = this.locked(() => {
-      const state = this.read();
+      const state = this.readForWrite('forget');
+      if (state === null) return false;
       const announced: Record<string, number> = {};
       for (const [id, at] of Object.entries(state.announced)) if (!selects(id)) announced[id] = at;
       const pending = state.pending.filter((entry) => !selects(entry.id));
@@ -235,11 +263,13 @@ export class FeatureAnnouncementStore {
   /**
    * Removes the named announcements from the pending queue; ids not pending are
    * ignored. Returns false when nothing was removed (another process held the
-   * store, or the write failed): the caller keeps the acknowledgement and tries again.
+   * store, the store could not be read, or the write failed): the caller keeps
+   * the acknowledgement and tries again.
    */
   acknowledge(ids: ReadonlySet<string>): boolean {
     const attempt = this.locked(() => {
-      const state = this.read();
+      const state = this.readForWrite('acknowledge');
+      if (state === null) return false;
       const remaining = state.pending.filter((entry) => !ids.has(entry.id));
       if (remaining.length === state.pending.length) return true;
       return this.persist({ announced: state.announced, pending: remaining }, 'acknowledge');
@@ -356,7 +386,8 @@ export function createSandboxContainmentAnnouncer(
     const outcome = store.recordOnce(SANDBOX_CONTAINED_ANNOUNCEMENT_ID, SANDBOX_CONTAINED_ANNOUNCEMENT_TEXT);
     if (outcome === 'busy') return;
     settled = true;
-    if (outcome === 'recorded') {
+    // An unsaved record was still made by this call, so it is announced (and may be again on a later start).
+    if (outcome !== 'announced-before') {
       onAnnounce({
         id: SANDBOX_CONTAINED_ANNOUNCEMENT_ID,
         text: SANDBOX_CONTAINED_ANNOUNCEMENT_TEXT,

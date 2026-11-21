@@ -18,6 +18,7 @@
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { withSyncFileLock } from './sync-file-lock.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
@@ -47,18 +48,25 @@ export class ProjectServiceApprovals {
   approve(projectPath: string, service: string, fingerprint: string): void {
     this.#refresh();
     if (this.#files.get(projectPath)?.get(service) === fingerprint) return;
-    const next = new Map([...this.#files].map(([path, entries]) => [path, new Map(entries)]));
-    const entries = next.get(projectPath) ?? new Map<string, string>();
-    entries.set(service, fingerprint);
-    next.set(projectPath, entries);
-    const document: ApprovalDocument = {
-      version: 1,
-      files: Object.fromEntries([...next].map(([path, approved]) => [path, Object.fromEntries([...approved].sort(([a], [b]) => a.localeCompare(b)))])),
-    };
     mkdirSync(dirname(this.#file), { recursive: true, mode: 0o700 });
-    writeJsonFileAtomic(this.#file, document, { mode: 0o600 });
-    this.#files = next;
-    this.#identity = this.#stat();
+    // The daemon and a terminal may confirm at once: the record is read again
+    // and written under the file's lock, so neither drops the other's entries.
+    withSyncFileLock(this.#file, () => {
+      this.#identity = null;
+      this.#refresh();
+      if (this.#files.get(projectPath)?.get(service) === fingerprint) return;
+      const next = new Map([...this.#files].map(([path, entries]) => [path, new Map(entries)]));
+      const entries = next.get(projectPath) ?? new Map<string, string>();
+      entries.set(service, fingerprint);
+      next.set(projectPath, entries);
+      const document: ApprovalDocument = {
+        version: 1,
+        files: Object.fromEntries([...next].map(([path, approved]) => [path, Object.fromEntries([...approved].sort(([a], [b]) => a.localeCompare(b)))])),
+      };
+      writeJsonFileAtomic(this.#file, document, { mode: 0o600 });
+      this.#files = next;
+      this.#identity = this.#stat();
+    });
   }
 
   #stat(): string | null {

@@ -355,9 +355,10 @@ export async function markDuplicateStale(
   domain: AgentLearningConsolidationDomain,
   duplicateId: string,
   survivorId: string,
-  judgmentDecisionIds: readonly string[] = [],
+  judgmentDecisionIds: readonly string[] | undefined,
 ): Promise<Record<string, unknown>> {
-  const reason = `Duplicate of ${survivorId}; staged by learning curator consolidation. Jev decisions=${judgmentDecisionIds.join(',')}`;
+  const decisions = judgmentDecisionIds && judgmentDecisionIds.length > 0 ? ` Jev decisions=${judgmentDecisionIds.join(',')}` : '';
+  const reason = `Duplicate of ${survivorId}; staged by learning curator consolidation.${decisions}`;
   if (domain === 'memory') {
     const record = await memory.updateReview(duplicateId, { state: 'stale', staleReason: reason, reviewedBy: 'agent' });
     if (!record) throw new Error(`Unknown Agent-local memory ${duplicateId}`);

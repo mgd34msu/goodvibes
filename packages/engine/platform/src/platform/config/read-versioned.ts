@@ -54,13 +54,16 @@ export interface ReadVersionedOptions {
  *
  * Parse flow:
  *   1. If the file does not exist → return null.
- *   2. If JSON is corrupt → quarantine to `<path>.unrecognized`, return null.
- *   3. If the version field is missing → quarantine, return null. If it is
+ *   2. If the file exists but cannot be read (EACCES, EIO, EMFILE, ...) → throw
+ *      that error and leave the file where it is: nothing is known to be wrong
+ *      with its contents, so it is never quarantined for it.
+ *   3. If JSON is corrupt or not an object → quarantine to `<path>.unrecognized`, return null.
+ *   4. If the version field is missing → quarantine, return null. If it is
  *      higher than currentVersion → leave the file in place, return null.
- *   4. If the version is lower than currentVersion → apply stepwise migrations.
+ *   5. If the version is lower than currentVersion → apply stepwise migrations.
  *      If no migration exists for a version gap, or a migration throws,
  *      quarantine and return null.
- *   5. Return the (possibly migrated) object. Callers are responsible for
+ *   6. Return the (possibly migrated) object. Callers are responsible for
  *      narrowing the returned value, this helper handles versioning and
  *      corruption only, not schema validation.
  */
@@ -68,11 +71,17 @@ export function readVersioned<T extends { version: number }>(
   path: string,
   options: ReadVersionedOptions,
 ): T | null {
-  if (!existsSync(path)) return null;
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf-8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') return null;
+    throw error;
+  }
 
   let raw: unknown;
   try {
-    raw = JSON.parse(readFileSync(path, 'utf-8'));
+    raw = JSON.parse(text);
   } catch {
     quarantine(path);
     return null;

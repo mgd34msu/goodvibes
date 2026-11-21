@@ -1,6 +1,7 @@
 import type { ServerType } from '../discovery/scanner.js';
 import type { ProviderCapability } from './capabilities.js';
 import type { ReasoningEffortSpec } from './reasoning-effort.js';
+import { getLocalServerCacheCapability, type ProviderCacheCapability } from './cache-capability.js';
 
 /**
  * Locally-discovered servers expose the four levels their adapters already map
@@ -37,6 +38,8 @@ export interface DiscoveredServerTraits {
     multimodal: boolean;
   };
   readonly reasoningEffort?: ReasoningEffortSpec | undefined;
+  /** How this kind of server caches prompts, by server type (the registered name is a display name). */
+  readonly cacheCapability: ProviderCacheCapability;
 }
 
 const DEFAULT_MODEL_CAPABILITIES = {
@@ -49,6 +52,10 @@ const DEFAULT_MODEL_CAPABILITIES = {
 const HIGH_TIMEOUT_MS = 300_000;
 
 export function getDiscoveredTraits(serverType: ServerType): DiscoveredServerTraits {
+  return { ...adapterTraits(serverType), cacheCapability: getLocalServerCacheCapability(serverType) };
+}
+
+function adapterTraits(serverType: ServerType): Omit<DiscoveredServerTraits, 'cacheCapability'> {
   switch (serverType) {
     case 'lm-studio':
       return {

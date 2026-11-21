@@ -123,8 +123,9 @@ export interface UseChatSendReturn {
    * deleted) and a fresh turn answers the edited message. Falls back to a plain
    * resend only when the target has no server id yet (an un-persisted optimistic
    * message cannot be branched, a new send is the honest action there).
+   * Resolves true when the edit (or the fresh send) was accepted, false otherwise.
    */
-  editAndResend: (messageId: string, newText: string) => void;
+  editAndResend: (messageId: string, newText: string) => Promise<boolean>;
   /**
    * Regenerate an assistant response, the honest-lineage regenerate verb
    * (companion.chat.messages.retry). The prior response (and any turns after it)
@@ -693,19 +694,27 @@ export function useChatSend({
   // editAndResend: edit a user message and branch (honest server lineage)
   // -------------------------------------------------------------------------
   const editAndResend = useCallback(
-    (messageId: string, newText: string) => {
+    async (messageId: string, newText: string): Promise<boolean> => {
       const content = newText.trim();
-      if (!content || !activeSessionId) return;
+      if (!content || !activeSessionId) return false;
       const lease = captureLease();
-      if (!isCurrent(lease)) return;
-      if (isServerMessageId(messageId)) {
-        editMutation.mutate({ sessionId: activeSessionId, messageId, content, lease });
-        return;
+      if (!isCurrent(lease)) return false;
+      // Resolves true once the daemon accepted the edit; a failure resolves false
+      // (its error is already shown through the mutation's onError) so the caller
+      // keeps the edited text.
+      try {
+        if (isServerMessageId(messageId)) {
+          await editMutation.mutateAsync({ sessionId: activeSessionId, messageId, content, lease });
+          return true;
+        }
+        // No server id yet (an un-persisted optimistic message), a branch has nothing
+        // to fork from, so send the edited text as a fresh message instead of faking a
+        // branch. Honest: it is a new turn, not a rewrite of history that never persisted.
+        await sendMutation.mutateAsync({ body: content, files: [] });
+        return true;
+      } catch {
+        return false;
       }
-      // No server id yet (an un-persisted optimistic message), a branch has nothing
-      // to fork from, so send the edited text as a fresh message instead of faking a
-      // branch. Honest: it is a new turn, not a rewrite of history that never persisted.
-      sendMutation.mutate({ body: content, files: [] });
     },
     [activeSessionId, editMutation, sendMutation, captureLease],
   );

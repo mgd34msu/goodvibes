@@ -17,10 +17,12 @@ export interface MarkdownDisclosure {
 }
 
 
-export function parseMarkdownFrontmatter(content: string): {
+/** Reads CRLF and CR files as LF, so the frontmatter, the body and every caller see one line ending. */
+export function parseMarkdownFrontmatter(source: string): {
   metadata: MarkdownFrontmatter;
   body: string;
 } {
+  const content = source.replace(/\r\n?/g, '\n');
   const trimmed = content.trimStart();
   if (!trimmed.startsWith('---')) {
     return { metadata: {}, body: content };

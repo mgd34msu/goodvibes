@@ -60,6 +60,7 @@
  */
 import { registrableDomain } from '../security/public-suffix.js';
 import { captureCheckoutOwnership, type CheckoutOperationOwnership } from './checkout-ownership.js';
+import { merchantDomain } from './merchant-domain.js';
 import {
   DEFAULT_MARKETPLACE_LISTING_THRESHOLDS,
   evaluateMarketplaceListing,
@@ -177,12 +178,16 @@ async function readPageListing(merchant: MerchantIdentity): Promise<MarketplaceL
   return listing === undefined || listing.format === 'unknown' ? undefined : listing;
 }
 
-/** Parse a comma-separated config value into normalized registrable domains. */
+/**
+ * Parse a comma-separated config value into normalized registrable domains:
+ * `www.shop.biz` or `https://shop.biz/` reads as `shop.biz`, the form the
+ * checkout host is compared on.
+ */
 export function parseDomainList(raw: string | undefined): readonly string[] {
   if (raw === undefined) return [];
   return raw
     .split(',')
-    .map((entry) => entry.trim().toLowerCase())
+    .map(merchantDomain)
     .filter((entry) => entry.length > 0);
 }
 

@@ -69,6 +69,12 @@ export interface ConversationRewindRequest {
   readonly kind: ConversationRewindRequestKind;
   /** Undo requests: the snapshot the conversation is restored from. */
   readonly undoSnapshotId?: string | undefined;
+  /**
+   * Rewind requests: the conversation's revision the apply was confirmed
+   * against. A host whose conversation has another revision cuts nothing and
+   * answers unavailable.
+   */
+  readonly expectedRevision?: string | undefined;
   /** When this question stops waiting; an answer after it is refused. */
   readonly expiresAt: number;
 }
@@ -430,13 +436,13 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     };
   }
 
-  async rewind(anchor: RewindAnchor): Promise<RewindConversationOutcome> {
+  async rewind(anchor: RewindAnchor, expectedRevision?: string): Promise<RewindConversationOutcome> {
     const host = this.findHostForSession(anchor.sessionId);
     if (!host) {
-      if (this.fallback) return this.fallback.rewind(anchor);
+      if (this.fallback) return this.fallback.rewind(anchor, expectedRevision);
       return { droppedMessages: 0, undoSnapshotId: '', ...unavailable(this.noHostReason(anchor.sessionId)) };
     }
-    const answer = await this.ask(host, anchor.sessionId, anchor.turnId ?? null, 'rewind');
+    const answer = await this.ask(host, anchor.sessionId, anchor.turnId ?? null, 'rewind', undefined, expectedRevision);
     if (answer.kind === 'rewind') {
       return { droppedMessages: answer.droppedMessages, undoSnapshotId: answer.undoSnapshotId,
         ...(answer.undoExpiresAfter ? { undoExpiresAfter: answer.undoExpiresAfter } : {}) };
@@ -490,6 +496,7 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     turnId: string | null,
     kind: ConversationRewindRequestKind,
     undoSnapshotId?: string,
+    expectedRevision?: string,
   ): Promise<ConversationRewindAnswer> {
     const outstanding = [...this.pending.values()].filter((entry) => entry.hostId === host.hostId).length;
     if (outstanding >= CONVERSATION_HOST_MAX_PENDING) {
@@ -507,6 +514,7 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
       turnId,
       kind,
       ...(undoSnapshotId === undefined ? {} : { undoSnapshotId }),
+      ...(expectedRevision === undefined ? {} : { expectedRevision }),
       expiresAt: now + this.answerTimeoutMs,
     };
 

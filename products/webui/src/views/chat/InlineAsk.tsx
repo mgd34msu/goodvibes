@@ -115,13 +115,6 @@ export function InlineAsks({ sessionId }: { sessionId: string }) {
     });
   }, [asks, openKeys, queryClient]);
 
-  // A new chat starts with nothing folded.
-  useEffect(() => {
-    seen.current = new Map();
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- resets the folded lines when the chat changes
-    setDecided(new Map());
-  }, [sessionId]);
-
   const folded = [...decided.entries()].filter(([key]) => !openKeys.has(key));
   if (asks.length === 0 && folded.length === 0) return null;
   return (

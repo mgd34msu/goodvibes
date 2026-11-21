@@ -12,12 +12,13 @@
  * Two of these deserve their reasoning stated rather than assumed.
  *
  * **The cursor is a port, not a file.** Persistence for the cursor lands in a
- * separate round; the watcher's correctness rule, *the cursor advances only
- * after a message is fully processed*, belongs here, where the processing
+ * separate round; the watcher's correctness rule, *the cursor never passes a
+ * message that is not fully processed*, belongs here, where the processing
  * happens, and is expressible against an interface. So this module declares
- * `MailboxCursorPort` and the watcher calls `advance()` exactly once per
- * message and exactly after `deliver()` resolved. Where the record is written
- * is somebody else's decision.
+ * `MailboxCursorPort` and the watcher calls `advance()` once per settled
+ * batch, to the highest UID every consumer settled (which can include
+ * expunged and stepped-over UIDs), never past an unsettled message. Where the
+ * record is written is somebody else's decision.
  *
  * **Nothing here can spawn anything.** The watcher is not handed a
  * `SurfaceAdapterContext`, a session broker, an agent manager or a reply
@@ -150,9 +151,10 @@ export interface MailboxCursorPort {
   }): Promise<CursorResolution>;
   /**
    * Record that everything up to and including `lastSeenUid` is fully
-   * processed. Called ONCE PER MESSAGE and only after that message's
-   * `deliver()` resolved, a crash between fetch and completion therefore
-   * re-delivers, and re-delivery is caught by dedup.
+   * processed. Called ONCE PER SETTLED BATCH, to the highest UID every
+   * consumer settled (which can include expunged and stepped-over UIDs), and
+   * never past a message that is not settled: a crash before it re-delivers
+   * the batch, and re-delivery is caught by dedup.
    *
    * Returns the stored cursor so the caller uses the store's arithmetic
    * rather than repeating it.

@@ -270,10 +270,26 @@ export class KVState {
     if (reserved.length > 0) {
       throw new Error(`KVState cannot set reserved key(s): ${reserved.join(', ')}. Nothing was stored; use a different key name.`);
     }
+    const data = this.data!;
+    const before = new Map<string, { readonly present: boolean; readonly value: unknown }>();
     for (const [key, value] of Object.entries(values)) {
-      this.data![key] = value;
+      before.set(key, { present: Object.prototype.hasOwnProperty.call(data, key), value: data[key] });
+      data[key] = value;
     }
-    await this.persist();
+    try {
+      await this.persist();
+    } catch (error) {
+      // Not stored: put back each key this call still holds, so the value is
+      // neither readable nor written by a later successful write. A key a
+      // later call has set since keeps that call's value.
+      for (const [key, value] of Object.entries(values)) {
+        const previous = before.get(key)!;
+        if (!Object.prototype.hasOwnProperty.call(data, key) || !Object.is(data[key], value)) continue;
+        if (previous.present) data[key] = previous.value;
+        else delete data[key];
+      }
+      throw error;
+    }
   }
 
   async list(prefix?: string): Promise<Record<string, unknown>> {
@@ -293,15 +309,26 @@ export class KVState {
 
   async clear(keys: string[]): Promise<void> {
     await this.ensureLoaded();
-    let changed = false;
+    const data = this.data!;
+    const removed = new Map<string, unknown>();
     for (const key of keys) {
       if (RESERVED_KEYS.has(key)) continue;
-      if (Object.prototype.hasOwnProperty.call(this.data!, key)) {
-        delete this.data![key];
-        changed = true;
+      if (Object.prototype.hasOwnProperty.call(data, key)) {
+        removed.set(key, data[key]);
+        delete data[key];
       }
     }
-    if (changed) await this.persist();
+    if (removed.size === 0) return;
+    try {
+      await this.persist();
+    } catch (error) {
+      // Not cleared: put back each key that is still absent; a key a later call
+      // has set since keeps that call's value.
+      for (const [key, value] of removed) {
+        if (!Object.prototype.hasOwnProperty.call(data, key)) data[key] = value;
+      }
+      throw error;
+    }
   }
 
   async load(): Promise<void> {

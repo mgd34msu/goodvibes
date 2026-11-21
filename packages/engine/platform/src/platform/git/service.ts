@@ -583,18 +583,31 @@ export class GitService {
       const rawCheckoutOptions = { baseDir: this.cwd, unsafe: { allowUnsafeHooksPath: true } };
       const git = checkout ? await this.git() : await createSimpleGit(rawCheckoutOptions);
       await mutateWorktree(git, this.cwd, [...(checkout ? [] : ['-c', 'core.hooksPath=/dev/null']), 'worktree', 'add', ...(checkout ? [] : ['--no-checkout']), path, '-b', branch, ...(startPoint === undefined ? [] : [startPoint])], beforeMutation);
+      // A worktree this call created and cannot hand out is taken back while it
+      // is still empty of work; the error says whether that succeeded.
+      const takeBack = async (cause: string): Promise<never> => {
+        worktreeCreations.delete(this);
+        const removed = await git.raw(['worktree', 'remove', '--force', path]).then(() => true, (error: unknown) => {
+          logger.warn('git: a worktree this call created and could not hand out was not removed', { path, error: summarizeError(error) });
+          return false;
+        });
+        const branchDeleted = await git.raw(['branch', '-D', branch]).then(() => true, (error: unknown) => {
+          logger.warn('git: the branch of a worktree this call created and could not hand out was not deleted', { branch, error: summarizeError(error) });
+          return false;
+        });
+        throw new Error(removed && branchDeleted
+          ? `${cause}; the worktree ${path} and branch ${branch} this call created were taken back`
+          : `${cause}; ${[removed ? '' : `the worktree ${path}`, branchDeleted ? '' : `the branch ${branch}`].filter(Boolean).join(' and ')} this call created could not be taken back (git worktree remove --force ${path}, git branch -D ${branch})`);
+      };
       // Capture before a borrowed post hook can change the new directories.
-      worktreeCreations.set(this, captureWorktreeCreation(path, branch, this.cwd));
+      let creation: ReturnType<typeof captureWorktreeCreation>;
+      try { creation = captureWorktreeCreation(path, branch, this.cwd); }
+      catch (error) { return await takeBack(summarizeError(error)); }
+      worktreeCreations.set(this, creation);
       if (isInsideProductWorktreeDirectory(this.cwd, path) && !markProductWorktree(resolve(this.cwd, path))) {
         // Unmarked worktrees in the product's location are swept as left by an
-        // earlier version, so a worktree that cannot carry the record is not
-        // handed out: it is taken back while it is still empty of work.
-        worktreeCreations.delete(this);
-        await git.raw(['worktree', 'remove', '--force', path]).catch((error: unknown) => {
-          logger.warn('git: a worktree whose created-by record could not be written was not removed', { path, error: summarizeError(error) });
-        });
-        await git.raw(['branch', '-D', branch]).catch(() => undefined);
-        throw new Error(`could not record that the product created worktree ${path} (its git administrative directory is not writable); the worktree was not created`);
+        // earlier version, so a worktree that cannot carry the record is not handed out.
+        await takeBack(`could not record that the product created worktree ${path} (its git administrative directory is not writable)`);
       }
       await this.firePost('worktreeAdd', { path, branch });
     } catch (err) {

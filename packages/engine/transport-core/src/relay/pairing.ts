@@ -119,15 +119,14 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
     });
   }
   const w = wire as WirePairing;
-  assertPairingProtocol(w.p);
-  return {
+  return assertPairingUsable({
     protocol: w.p,
     relayUrl: w.u,
     rid: w.r,
     daemonPublicKey: w.k,
     code: w.c,
     ...(typeof w.l === 'string' ? { label: w.l } : {}),
-  };
+  });
 }
 
 /**
@@ -136,7 +135,12 @@ export function decodeRelayPairingString(text: string): RelayPairingPayload {
  * refused here, before any connection, with the reason and the next step.
  */
 export function resolveRelayPairing(pairing: RelayPairingPayload | string): RelayPairingPayload {
-  if (typeof pairing === 'string') return decodeRelayPairingString(pairing);
+  return typeof pairing === 'string' ? decodeRelayPairingString(pairing) : assertPairingUsable(pairing);
+}
+
+// The checks every pairing passes, decoded from a string or given as an object:
+// its protocol, and a relay code to send (an empty one is refused per request).
+function assertPairingUsable(pairing: RelayPairingPayload): RelayPairingPayload {
   assertPairingProtocol(pairing.protocol);
   if (typeof pairing.code !== 'string' || pairing.code.length === 0) {
     throw new GoodVibesError('This relay pairing carries no relay code.', {

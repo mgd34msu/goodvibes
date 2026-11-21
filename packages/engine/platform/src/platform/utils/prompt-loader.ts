@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync } from 'fs';
-import { dirname, isAbsolute, relative, resolve, join, sep } from 'path';
+import { basename, dirname, isAbsolute, relative, resolve, join, sep } from 'path';
 import { logger } from './logger.js';
 import { summarizeError } from './error-display.js';
 
@@ -28,8 +28,10 @@ function isInsideDirectory(root: string, candidate: string): boolean {
  * of the file being read, so a repository's instruction file cannot pull in
  * `@/home/me/.ssh/...` or `@../../.env`. Pass `null` only for a file the owner
  * chose themselves (their home-directory prompts, an explicit CLI or config
- * path). A line naming a file that does not exist is kept as written: it is
- * text such as `@someone`, not a lost include.
+ * path). An include outside it is replaced by the line
+ * `[include refused: <include> is outside <root name>/]`. A line naming a file
+ * that does not exist is kept as written: it is text such as `@someone`, not a
+ * lost include.
  */
 export function readPromptFile(
   filePath: string,
@@ -92,6 +94,8 @@ export function readPromptFile(
             path: includeResolved,
             source: resolved,
           });
+          // A visible marker, so the model and anyone reading the prompt know the file was withheld and why.
+          result.push(`[include refused: ${includePath} is outside ${basename(root)}/]`);
         } else {
           const included = readPromptFile(includeResolved, seen, currentDepth + 1, root);
           if (included) result.push(included);

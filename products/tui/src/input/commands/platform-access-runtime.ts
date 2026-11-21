@@ -18,19 +18,22 @@ import {
 interface AuthReviewBundle {
   readonly version: 1;
   readonly exportedAt: number;
-  readonly daemonLoginUrl: string;
-  readonly listenerLoginUrl: string;
+  /** The sign-in address of the daemon this terminal dials, or null when no daemon address is set. */
+  readonly daemonLoginUrl: string | null;
   readonly secretKeys: readonly string[];
   readonly activeSubscriptions: readonly string[];
   readonly pendingSubscriptions: readonly string[];
 }
 
-function inspectAuthBundle(bundle: AuthReviewBundle): string {
+/** A summary as read back: one saved by 3.4.0 or earlier also holds a fixed listener address. */
+type SavedAuthReviewBundle = AuthReviewBundle & { readonly listenerLoginUrl?: unknown };
+
+function inspectAuthBundle(bundle: SavedAuthReviewBundle): string {
   return [
     'Auth Review Bundle',
     `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
-    `  daemonLoginUrl: ${bundle.daemonLoginUrl}`,
-    `  listenerLoginUrl: ${bundle.listenerLoginUrl}`,
+    `  daemonLoginUrl: ${typeof bundle.daemonLoginUrl === 'string' && bundle.daemonLoginUrl ? bundle.daemonLoginUrl : 'no daemon address set'}`,
+    ...(typeof bundle.listenerLoginUrl === 'string' ? [`  listenerLoginUrl: ${bundle.listenerLoginUrl} (a fixed address an older release wrote)`] : []),
     `  stored secrets: ${bundle.secretKeys.length}`,
     `  active subscriptions: ${bundle.activeSubscriptions.length}`,
     `  pending subscriptions: ${bundle.pendingSubscriptions.length}`,
@@ -285,8 +288,12 @@ const authCommand = createAuthCommand<CommandContext, AuthReviewBundle>({
       ? ['  next:', ...inspection.nextActions.map((action) => `    ${action}`)]
       : ['  No active repair actions suggested.']),
   ],
-  build: (base) => ({ ...base, daemonLoginUrl: 'http://127.0.0.1:3421/login', listenerLoginUrl: 'http://127.0.0.1:3422/login' }),
-  inspect: (value) => inspectAuthBundle(value as AuthReviewBundle),
+  build: (base, ctx) => {
+    // The daemon this terminal dials; a listener session carries its own issuing origin, so no listener address is recorded.
+    const daemon = resolveControlPlaneBaseUrl(ctx.platform.configManager);
+    return { ...base, daemonLoginUrl: daemon ? buildUrl(daemon, '/login') : null };
+  },
+  inspect: (value) => inspectAuthBundle(value as SavedAuthReviewBundle),
 });
 
 export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {

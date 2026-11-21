@@ -176,11 +176,10 @@ export interface GoodVibesConfig {
   service: ServiceConfig;
   network: NetworkConfig;
   relay: RelayConfig;
-  daemon: { enabled: boolean; timezone: string; connectedHost: { enabled: boolean; url: string } };
+  daemon: DaemonProcessConfig;
   payments: PaymentsConfig;
   contract: ContractSettings;
   judgment: JudgmentSettings;
-    // default: enabled true, run the local session daemon (loopback only); timezone '', IANA name the daemon reckons calendar days in, empty means UTC
   danger: {
     httpListener: boolean;          // default: false. Enable HTTP webhook listener
   };

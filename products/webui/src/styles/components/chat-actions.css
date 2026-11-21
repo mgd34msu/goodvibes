@@ -661,6 +661,12 @@
   margin-bottom: 8px;
 }
 
+/* A message with no text and nothing else to show: one dim line. */
+.message-empty {
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}
+
 @media (max-width: 899px) {
   .message.user .message-bubble {
     max-width: 85%;

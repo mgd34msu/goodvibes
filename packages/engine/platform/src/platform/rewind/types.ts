@@ -117,7 +117,13 @@ export interface RewindConversationOutcome extends RewindConversationAvailabilit
  */
 export interface RewindConversationPort {
   preview(anchor: RewindAnchor): Promise<RewindConversationPreview>;
-  rewind(anchor: RewindAnchor): Promise<RewindConversationOutcome>;
+  /**
+   * Cut the conversation at `anchor`. `expectedRevision`, when given, is the
+   * revision the apply was confirmed against (the preview's): a conversation
+   * whose revision differs at the cut (a message arrived since) is not cut,
+   * and the outcome is unavailable saying so.
+   */
+  rewind(anchor: RewindAnchor, expectedRevision?: string): Promise<RewindConversationOutcome>;
 }
 
 /** Sink for rewind receipt events (adapted onto the RuntimeEventBus by the registrar). */

@@ -23,6 +23,7 @@ import { commandRefusal } from './confirmation.ts';
 import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
 import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { requireShellPaths } from './runtime-services.ts';
+import { resolveCommandFilePath } from './agent-local-library-args.ts';
 import { readRefusal } from '@goodvibes/engine/errors';
 
 function profileLine(profile: AgentRuntimeProfileInfo): string {
@@ -268,7 +269,8 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
               `Made Agent home ${profile.id}`,
               `  home ${profile.homeDirectory}`,
               profile.starterTemplateId ? `  starter: ${profile.starterTemplateId}` : '',
-              profile.starterTemplateApplication?.vibePath ? `  vibe ${profile.starterTemplateApplication.vibePath}` : '',
+              profile.starterTemplateApplication?.vibePath
+                ? `  ${profile.starterTemplateApplication.vibePending ? 'vibe (held for review)' : 'vibe'} ${profile.starterTemplateApplication.vibePath}` : '',
               ...(profile.starterTemplateApplication?.reviewCommands.length
                 ? ['  review before they apply:', ...profile.starterTemplateApplication.reviewCommands.map((command) => `    ${command}`)]
                 : []),
@@ -333,7 +335,8 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         sentence: 'Starter {starter} is written to {path} to change and add back, until you change it.', example: { starter: 'research', path: 'agent-starter.json' },
         async run(values, ctx) {
           const shellPaths = requireShellPaths(ctx);
-          const target = shellPaths.resolveWorkspacePath(values.path!);
+          const target = resolveCommandFilePath(ctx, values.path!, 'write');
+          if (target === null) throw commandRefusal(`${values.path} cannot be written from here.`);
           if (existsSync(target) && values.overwrite !== 'yes') throw commandRefusal(`${target} already exists; nothing was written.`, `Write over it: /agent-home export-starter ${values.starter} ${values.path} --overwrite`);
           return step(() => {
             mkdirSync(dirname(target), { recursive: true });
@@ -348,8 +351,10 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         sentence: 'The starter in {path} is added to your starters, until you change it.', example: { path: 'agent-starter.json' },
         async run(values, ctx) {
           const shellPaths = requireShellPaths(ctx);
+          const source = resolveCommandFilePath(ctx, values.path!, 'read');
+          if (source === null) throw commandRefusal(`${values.path} cannot be read from here.`);
           return step(() => {
-            const template = importAgentRuntimeProfileTemplate(shellPaths.homeDirectory, shellPaths.resolveWorkspacePath(values.path!), { replace: values.replace === 'yes' });
+            const template = importAgentRuntimeProfileTemplate(shellPaths.homeDirectory, source, { replace: values.replace === 'yes' });
             return `Added starter ${template.id} (${formatAgentRecordSource(template.source).toLowerCase()}).\n  make a home from it: /agent-home create <name> --starter ${template.id}`;
           });
         },

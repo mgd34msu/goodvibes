@@ -81,7 +81,7 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
     };
     try {
       const result = sm.save(name, snapshot.messages, metadata, records, undefined, ctx.session.conversationManager.branchState(),
-        { replace, savingConversationId: source });
+        { replace, savingConversationId: source, open: switchTo });
       if (switchTo) {
         const destination = result.sanitizedName;
         policy.copySidecars(ctx, source, destination);
@@ -217,7 +217,8 @@ export function createSessionWorkflowCommands<Context extends SessionWorkflowCon
         saveSource: 'user',
       };
       try {
-        sm.save(newId, snapshot.messages, metadata, undefined, undefined, ctx.session.conversationManager.branchState());
+        // The fork becomes the live session, so this terminal opens it for writing.
+        sm.save(newId, snapshot.messages, metadata, undefined, undefined, ctx.session.conversationManager.branchState(), { open: true });
         policy.copySidecars(ctx, source, newId);
         policy.beforeSwitch(ctx, 'fork', source, newId);
         ctx.session.runtime.sessionId = newId;

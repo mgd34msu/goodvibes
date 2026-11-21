@@ -66,8 +66,8 @@ import {
 import {
   readConversationKind,
   readDirectoryScope,
-  readLifecycleAction,
 } from './builtin/parsing.js';
+import { CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS, readAccountLifecycleAction } from './builtin/account-action-effects.js';
 import {
   listBuiltinAgentTools,
   notifyBuiltinApprovalViaRouter,
@@ -589,7 +589,7 @@ export class BuiltinChannelRuntime {
       case 'list-capabilities':
         return actionOk(await this.listCapabilities(surface));
       case 'account-action': {
-        const action = readLifecycleAction(input?.action ?? input?.accountAction);
+        const action = readAccountLifecycleAction(input?.action ?? input?.accountAction);
         if (!action) {
           return actionRefused({
             code: 'CHANNEL_ACCOUNT_ACTION_UNKNOWN',
@@ -828,10 +828,6 @@ export class BuiltinChannelRuntime {
     return lookupBuiltinDirectory({ deps: this.deps }, surface, query, { ...options, live: false });
   }
 }
-
-const CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS: readonly ChannelAccountLifecycleAction[] = [
-  'inspect', 'setup', 'retest', 'connect', 'disconnect', 'start', 'stop', 'login', 'logout', 'wait_login',
-];
 
 function readAllowlistEditInput(input: Record<string, unknown> | undefined): BuiltinAllowlistEditInput {
   const strings = (value: unknown) => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : undefined;

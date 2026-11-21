@@ -75,7 +75,18 @@ interface HeldAnalysis {
   /** Every artifact the analysis read is still the one it read. */
   readonly assertArtifacts: () => void;
   enriched?: Promise<MultimodalAnalysisResult> | undefined;
+  /** The write-back of this analysis: it is stored once, and a repeat call answers with where it already is. */
+  written?: Promise<MultimodalWritebackResult> | undefined;
 }
+
+type WritebackInput = {
+  readonly sessionId?: string | undefined;
+  readonly title?: string | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly folderPath?: string | undefined;
+  readonly metadata?: Record<string, unknown> | undefined;
+};
+type WritebackOptions = { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined };
 
 function compactText(value: string | undefined, maxLength = 240): string | undefined {
   const trimmed = value?.replace(/\s+/g, ' ').trim();
@@ -145,7 +156,7 @@ function evaluationMarkers(result: MultimodalAnalysisResult): Record<string, unk
 
 export class MultimodalService {
   private readonly sources = new WeakMap<MultimodalAnalysisResult, { text: string; artifacts: readonly ArtifactDescriptor[] }>();
-  /** The one owner of a finished analysis until write-back; held in memory, bounded, never re-admitted after eviction. */
+  /** The one owner of a finished analysis and of its write-back result; held in memory, bounded, never re-admitted after eviction. */
   private readonly analyses = new Map<string, HeldAnalysis>();
 
   private source(result: MultimodalAnalysisResult, text: string, artifacts: readonly ArtifactDescriptor[] = [result.artifact]): MultimodalAnalysisResult {
@@ -350,18 +361,31 @@ export class MultimodalService {
     };
   }
 
-  async writeBackAnalysis(
-    submitted: unknown,
-    input: {
-      readonly sessionId?: string | undefined;
-      readonly title?: string | undefined;
-      readonly tags?: readonly string[] | undefined;
-      readonly folderPath?: string | undefined;
-      readonly metadata?: Record<string, unknown> | undefined;
-    } = {},
-    options: { readonly signal?: AbortSignal | undefined; readonly assertCurrent?: (() => void) | undefined } = {},
-  ): Promise<MultimodalWritebackResult> {
-    const held = this.held(submitted), signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
+  /**
+   * Stores a held analysis and adds it to the knowledge base, once: a repeat
+   * call for the same analysis answers with the first call's result (the same
+   * artifact and knowledge source). A write-back that failed before the
+   * knowledge source committed can be tried again.
+   */
+  async writeBackAnalysis(submitted: unknown, input: WritebackInput = {}, options: WritebackOptions = {}): Promise<MultimodalWritebackResult> {
+    return this.writeBackOnce(this.held(submitted), input, options);
+  }
+
+  private writeBackOnce(held: HeldAnalysis, input: WritebackInput, options: WritebackOptions, retried = false): Promise<MultimodalWritebackResult> {
+    const started = held.written === undefined;
+    held.written ??= this.writeBack(held, input, options);
+    const written = held.written;
+    return written.catch((error: unknown) => {
+      // It rejects only when no knowledge source committed, so a later call writes again.
+      if (held.written === written) held.written = undefined;
+      // A concurrent caller whose write-back another request's failure or abort ended asks once more.
+      if (started || retried || options.signal?.aborted) throw error;
+      return this.writeBackOnce(held, input, options, true);
+    });
+  }
+
+  private async writeBack(held: HeldAnalysis, input: WritebackInput, options: WritebackOptions): Promise<MultimodalWritebackResult> {
+    const signal = options.signal, assertOwner = options.assertCurrent?.bind(options);
     const owned = { assertCurrent: () => {
       signal?.throwIfAborted();
       assertSynchronousJudgmentGuard(assertOwner, () => new TypeError('Multimodal write owner must complete synchronously and return no value.'));

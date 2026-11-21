@@ -2,12 +2,12 @@
 /**
  * generate-public-suffix-data.ts
  *
- * Regenerates the bundled public-suffix data from upstream. This is the
- * "refresh" the drift check tells you to run, and it is deliberately a
- * generator rather than a hand-edit: the first hand-curated snapshot carried
- * 174 of the 5,484 multi-label ICANN suffixes, which left 5,332 suffixes under
- * which two different registrants compared equal. Curation by hand is how that
- * happens.
+ * Regenerates the bundled public-suffix data from upstream: both sections of
+ * the list, ICANN and PRIVATE, each in its own tables. This is the "refresh"
+ * the drift check tells you to run, and it is deliberately a generator rather
+ * than a hand-edit: a hand-kept subset leaves every suffix it omits as one
+ * under which two different registrants (or two tenants of one host) compare
+ * equal.
  *
  * Run:  bun scripts/generate-public-suffix-data.ts
  * Then: bun scripts/check-public-suffix-drift.ts   (should print OK)
@@ -16,9 +16,10 @@
 import { renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
-  CURATED_PRIVATE_SUFFIXES,
   MIN_MULTI_LABEL_SUFFIXES,
+  MIN_PRIVATE_RULES,
   parsePublicSuffixList,
+  ruleCount,
   UPSTREAM_URL,
 } from './public-suffix-source.ts';
 
@@ -35,18 +36,17 @@ export function renderPublicSuffixData(text: string, snapshotDate: string): {
   readonly multiLabel: number;
   readonly wildcardParents: number;
   readonly exceptions: number;
+  readonly privateRules: number;
 } {
-  const parsed = parsePublicSuffixList(text);
-  const multiLabel = new Set(parsed.multiLabel);
-  for (const suffix of CURATED_PRIVATE_SUFFIXES) multiLabel.add(suffix);
-  if (parsed.multiLabel.size < MIN_MULTI_LABEL_SUFFIXES) {
+  const { icann, private: privateRules } = parsePublicSuffixList(text);
+  if (icann.multiLabel.size < MIN_MULTI_LABEL_SUFFIXES || ruleCount(privateRules) < MIN_PRIVATE_RULES) {
     throw new Error(
-      `public-suffix: the bundled data was left unchanged. The fetched list has only ${String(parsed.multiLabel.size)} `
-      + `multi-label ICANN suffixes (the real one has more than ${String(MIN_MULTI_LABEL_SUFFIXES)}), so it is not the full list. `
+      `public-suffix: the bundled data was left unchanged. The fetched list has only ${String(icann.multiLabel.size)} `
+      + `multi-label ICANN suffixes and ${String(ruleCount(privateRules))} private-section rules (the real one has more than `
+      + `${String(MIN_MULTI_LABEL_SUFFIXES)} and ${String(MIN_PRIVATE_RULES)}), so it is not the full list. `
       + `Check ${UPSTREAM_URL} and run the generator again.`,
     );
   }
-  const { wildcardParents, exceptions } = parsed;
   const source = `// GENERATED FILE — do not edit by hand.
 //
 // Regenerate with:  bun scripts/generate-public-suffix-data.ts
@@ -54,29 +54,50 @@ export function renderPublicSuffixData(text: string, snapshotDate: string): {
 // rather than warns. See security/public-suffix.ts for what the data is for
 // and why it is bundled rather than fetched at runtime.
 //
-// Source: ${UPSTREAM_URL} (ICANN section) plus a small hand-kept set of
-// private-section hosting suffixes where two sites under one suffix are
-// genuinely different registrants.
+// Source: ${UPSTREAM_URL}, both sections: ICANN (suffixes delegated by
+// registries) and PRIVATE (hosts that give each customer its own name, so two
+// tenants under one are different registrants). Each section has its own tables.
 //
 // Snapshot taken: ${snapshotDate}
 
-/** Multi-label public suffixes. Single-label suffixes need no rule, see the module header. */
+/** ICANN multi-label public suffixes. Single-label suffixes need no rule, see the module header. */
 export const PUBLIC_SUFFIX_MULTI_LABEL: readonly string[] = [
-${serialize(multiLabel)}
+${serialize(icann.multiLabel)}
 ];
 
-/** \`*.parent\` rules: every label directly under these is itself a suffix. */
+/** ICANN \`*.parent\` rules: every label directly under these is itself a suffix. */
 export const PUBLIC_SUFFIX_WILDCARD_PARENTS: readonly string[] = [
-${serialize(wildcardParents)}
+${serialize(icann.wildcardParents)}
 ];
 
-/** \`!exception\` rules: these are registrable despite matching a wildcard above. */
+/** ICANN \`!exception\` rules: these are registrable despite matching a wildcard above. */
 export const PUBLIC_SUFFIX_EXCEPTIONS: readonly string[] = [
-${serialize(exceptions)}
+${serialize(icann.exceptions)}
+];
+
+/** PRIVATE-section multi-label public suffixes. */
+export const PUBLIC_SUFFIX_PRIVATE_MULTI_LABEL: readonly string[] = [
+${serialize(privateRules.multiLabel)}
+];
+
+/** PRIVATE-section \`*.parent\` rules. */
+export const PUBLIC_SUFFIX_PRIVATE_WILDCARD_PARENTS: readonly string[] = [
+${serialize(privateRules.wildcardParents)}
+];
+
+/** PRIVATE-section \`!exception\` rules. */
+export const PUBLIC_SUFFIX_PRIVATE_EXCEPTIONS: readonly string[] = [
+${serialize(privateRules.exceptions)}
 ];
 `;
 
-  return { source, multiLabel: multiLabel.size, wildcardParents: wildcardParents.size, exceptions: exceptions.size };
+  return {
+    source,
+    multiLabel: icann.multiLabel.size + privateRules.multiLabel.size,
+    wildcardParents: icann.wildcardParents.size + privateRules.wildcardParents.size,
+    exceptions: icann.exceptions.size + privateRules.exceptions.size,
+    privateRules: ruleCount(privateRules),
+  };
 }
 
 if (import.meta.main) {
@@ -93,6 +114,6 @@ if (import.meta.main) {
   writeFileSync(staging, rendered.source, 'utf8');
   renameSync(staging, target);
   console.log(
-    `wrote ${target}\n  multi-label: ${String(rendered.multiLabel)}\n  wildcard parents: ${String(rendered.wildcardParents)}\n  exceptions: ${String(rendered.exceptions)}`,
+    `wrote ${target}\n  multi-label: ${String(rendered.multiLabel)}\n  wildcard parents: ${String(rendered.wildcardParents)}\n  exceptions: ${String(rendered.exceptions)}\n  of which private-section rules: ${String(rendered.privateRules)}`,
   );
 }

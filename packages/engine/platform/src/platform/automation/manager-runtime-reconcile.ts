@@ -7,6 +7,7 @@ import { buildRunTelemetryFromAgent, canSettleStoredRun, getTerminalAgentState }
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import {
+  automationNoticeEffect,
   automationRunDeliveryWanted,
   failureNoticeCoversRunDelivery,
   settleAutomationRunFailure,
@@ -209,7 +210,16 @@ export function settleAutomationRun(
   // its restart (deliverOwedRuns).
   const owed = (settlement.status !== 'failed' || !failureNoticeCoversRunDelivery(updatedJob))
     && automationRunDeliveryWanted(context.delivery, updatedJob, updatedRun);
-  if (owed) context.runs.set(updatedRun.id, { ...updatedRun, delivery: { state: 'owed', effect: automationRunEffect(updatedRun.id) } });
+  // A failed run owes its failure notice the same way: marked in the caller's
+  // save, cleared once the notice was sent or reached the owner inbox.
+  const noticeOwed = settlement.status === 'failed';
+  if (owed || noticeOwed) {
+    context.runs.set(updatedRun.id, {
+      ...updatedRun,
+      ...(owed ? { delivery: { state: 'owed' as const, effect: automationRunEffect(updatedRun.id) } } : {}),
+      ...(noticeOwed ? { notice: { state: 'owed' as const, effect: automationNoticeEffect(updatedRun.id) } } : {}),
+    });
+  }
   // A one-shot job is done only when a run of it succeeded. A failed or
   // cancelled one stays (disabled once its occurrence fired) so the owner or
   // an agent can retry the run or start it by hand; that run's success removes
@@ -255,7 +265,6 @@ export async function saveThenFollowUp(
 export function automationRunEffect(runId: string): string {
   return `automation:${runId}:result`;
 }
-
 /** The deadline a run runs under: its own timeout, else the configured default; 0 is none. */
 function runTimeoutMs(context: AutomationReconcileContext, run: AutomationRun): number {
   const own = run.execution?.timeoutMs;

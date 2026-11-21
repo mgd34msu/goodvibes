@@ -64,11 +64,11 @@ describe('PairingTokenManager', () => {
     expect(mgr.authenticate('gvp_not-a-real-token')).toBeNull();
 
     // Revoke one device, it fails immediately, the other still works.
-    expect(mgr.revoke(a.id)).toBe(true);
+    expect(mgr.revokeWithMinted(a.id).revoked).toBe(true);
     expect(mgr.authenticate(a.token)).toBeNull();
     expect(mgr.authenticate(b.token)?.id).toBe(b.id);
     // A second revoke of the same id is an honest false.
-    expect(mgr.revoke(a.id)).toBe(false);
+    expect(mgr.revokeWithMinted(a.id).revoked).toBe(false);
   });
 
   test('revoking a device revokes every token it minted, and a revoked device cannot mint', () => {

@@ -134,9 +134,14 @@ function graphDateTime(value: GraphDate | undefined, isAllDay: boolean): EventDa
     return { value: value.dateTime.slice(0, 10), kind: 'date', zone: 'floating' };
   }
   if (zone === 'UTC') {
-    // Graph returns UTC wall time without an offset; stamp it as real UTC.
-    const iso = value.dateTime.endsWith('Z') ? isoSeconds(value.dateTime) : `${isoSeconds(value.dateTime)}Z`;
-    return { value: iso, kind: 'date-time', zone: 'utc' };
+    // Graph usually returns UTC wall time without an offset, which is stamped
+    // as real UTC; a value that carries a Z or a numeric offset is converted
+    // to the UTC instant it names.
+    if (/[zZ]$|[+-]\d{2}:?\d{2}$/.test(value.dateTime)) {
+      const instant = normalizeOffsetDateTime(value.dateTime);
+      if (instant.zone === 'utc') return instant;
+    }
+    return { value: `${isoSeconds(value.dateTime)}Z`, kind: 'date-time', zone: 'utc' };
   }
   // A named zone with no offset: keep wall time and the TZID; ordering converts it.
   return { value: isoSeconds(value.dateTime), kind: 'date-time', zone: 'tzid', tzid: zone };

@@ -237,8 +237,12 @@ export interface EmailGatewayService {
   replyEnvelopeSenders?(inReplyTo: string): readonly string[];
   /** Mark read or unread, archive, or move to Trash; absent on a backend that cannot write. */
   updateMessage?(input: EmailGatewayMessageUpdate): Promise<EmailGatewayMessageUpdateResult>;
-  /** One attachment's bytes by its position in the read's attachment list; null when the message is gone. */
-  readAttachment?(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null>;
+  /**
+   * One attachment's bytes by its position in the read's attachment list, in
+   * the mailbox generation `uidValidity` the read returned; null when the
+   * message is gone.
+   */
+  readAttachment?(uid: number, index: number, uidValidity: number): Promise<EmailGatewayAttachmentContent | null>;
   /** The newest drafts in the Drafts folder (older than UID `before` when given), each with its body. */
   listDrafts?(limit: number, before?: number): Promise<EmailGatewayDraftList>;
   /** Replace one saved draft with an edited one; absent on a backend that cannot. */
@@ -396,8 +400,17 @@ export function createEmailAttachmentGetHandler(service: EmailGatewayService): G
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
       throw new GatewayVerbError('index (the attachment\'s position, from 0) is required', 'INVALID_ARGUMENT', 400, 'index');
     }
+    // As for email.inbox.update: without the generation the message was read
+    // under, a reset mailbox would hand over another message's attachment.
+    if (params.uidValidity === undefined || params.uidValidity === null) {
+      throw new GatewayVerbError(
+        'uidValidity is required: pass the uidValidity email.inbox.list or email.inbox.read returned with this uid. Nothing was changed.',
+        'INVALID_ARGUMENT', 400, 'uidValidity',
+      );
+    }
+    const uidValidity = readUidValidity(params.uidValidity);
     if (!service.readAttachment) return unsupported('attachment downloads');
-    const attachment = await service.readAttachment(uid, index);
+    const attachment = await service.readAttachment(uid, index, uidValidity);
     if (attachment === null) {
       throw new GatewayVerbError(
         `No message with UID ${String(uid)} is in the mailbox. It may have been moved or deleted since it was listed.`,

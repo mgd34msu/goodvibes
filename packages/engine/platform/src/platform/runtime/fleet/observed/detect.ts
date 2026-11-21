@@ -54,10 +54,16 @@ export interface TmuxPaneRow {
   readonly tty: string;
 }
 
-/** Injectable tmux pane reader. The default runs `tmux list-panes -a`; tests substitute a stub. `listPanesAsync` serves the scan. */
+/**
+ * Injectable tmux pane reader. The default runs `tmux list-panes -a`; tests
+ * substitute a stub. `listPanesAsync` serves the scan. Each answers the pane
+ * rows (empty when tmux is not installed or no tmux server runs), or undefined
+ * when the list could not be read (tmux failed or did not answer in time), so
+ * a failed read is never taken for "no pane".
+ */
 export interface TmuxPaneReader {
-  listPanes(): readonly TmuxPaneRow[];
-  listPanesAsync?(): Promise<readonly TmuxPaneRow[]>;
+  listPanes(): readonly TmuxPaneRow[] | undefined;
+  listPanesAsync?(): Promise<readonly TmuxPaneRow[] | undefined>;
 }
 
 const COMMAND_TIMEOUT_MS = 5_000;
@@ -329,35 +335,58 @@ function parsePaneList(stdout: string): readonly TmuxPaneRow[] {
 
 const LIST_PANES_ARGS = ['list-panes', '-a', '-F', '#{pane_tty} #{pane_id}'] as const;
 
+/** tmux's answer when no server runs: a real empty pane list, not a failed read. */
+function isNoTmuxServer(stderr: string): boolean {
+  return /no server running|error connecting to/i.test(stderr);
+}
+
+/** A spawn error that means tmux is not installed: no tmux, so no panes. */
+function isMissingProgram(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException | null)?.code === 'ENOENT';
+}
+
+/**
+ * The pane list from one finished `tmux list-panes`, or undefined when the read
+ * failed. No tmux installed and no tmux server are real empty lists.
+ */
+function readPaneResult(spawnError: unknown, status: number | null, stdout: string, stderr: string): readonly TmuxPaneRow[] | undefined {
+  if (spawnError !== undefined && spawnError !== null) return isMissingProgram(spawnError) ? [] : undefined;
+  if (status === 0) return parsePaneList(stdout);
+  return isNoTmuxServer(stderr) ? [] : undefined;
+}
+
 /**
  * The real tmux pane reader. Runs `tmux list-panes -a -F '#{pane_tty} #{pane_id}'`
  * (read-only; never a state-changing tmux verb, never a shell). No tmux
- * server, or no panes, yields an empty set, detection then honestly reports no
- * steer channel for every tty.
+ * installed, no tmux server, or no panes, yields an empty set, and detection
+ * then honestly reports no steer channel for every tty; a read that failed
+ * (tmux erred or did not answer in time) yields undefined.
  */
 export function defaultTmuxPaneReader(): TmuxPaneReader {
   return {
-    listPanes(): readonly TmuxPaneRow[] {
+    listPanes(): readonly TmuxPaneRow[] | undefined {
       let result;
       try {
         result = spawnSync('tmux', [...LIST_PANES_ARGS], {
           encoding: 'utf-8',
           timeout: COMMAND_TIMEOUT_MS,
         });
-      } catch {
-        return [];
+      } catch (error) {
+        return isMissingProgram(error) ? [] : undefined;
       }
-      if (result.status !== 0 || !result.stdout) return [];
-      return parsePaneList(result.stdout);
+      return readPaneResult(result.error, result.status, result.stdout ?? '', result.stderr ?? '');
     },
-    listPanesAsync(): Promise<readonly TmuxPaneRow[]> {
+    listPanesAsync(): Promise<readonly TmuxPaneRow[] | undefined> {
       return new Promise((resolve) => {
         try {
-          execFile('tmux', [...LIST_PANES_ARGS], { encoding: 'utf-8', timeout: COMMAND_TIMEOUT_MS }, (error, stdout) => {
-            resolve(error || !stdout ? [] : parsePaneList(stdout));
+          execFile('tmux', [...LIST_PANES_ARGS], { encoding: 'utf-8', timeout: COMMAND_TIMEOUT_MS }, (error, stdout, stderr) => {
+            // A non-zero exit arrives as an error carrying the exit code; tmux's own refusal is read from stderr.
+            const exitCode = error && typeof (error as { code?: unknown }).code === 'number' ? (error as { code: number }).code : null;
+            if (exitCode !== null && !error?.killed) resolve(readPaneResult(undefined, exitCode, stdout, stderr));
+            else resolve(readPaneResult(error ?? undefined, error ? null : 0, stdout, stderr));
           });
-        } catch {
-          resolve([]);
+        } catch (error) {
+          resolve(isMissingProgram(error) ? [] : undefined);
         }
       });
     },

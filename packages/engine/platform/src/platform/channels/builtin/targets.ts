@@ -11,6 +11,7 @@ import type {
 import type { BuiltinChannelRuntimeDeps, ManagedSurface } from './shared.js';
 import { resolveSurfaceSecret } from './surface-secrets.js';
 import { logger } from '../../utils/logger.js';
+import { conversationKindOfDirectoryEntry, directoryEntryNamedBy, pickDirectoryEntry } from '../directory-match.js';
 
 /** Provider pages are fetched at a fixed size; `limit` only bounds what is returned. */
 const PROVIDER_PAGE_SIZE = 200;
@@ -68,14 +69,17 @@ export async function resolveBuiltinTarget(
       error: directoryError,
     });
   }
-  const directoryEntry = pickBestDirectoryEntry(directoryEntries, search);
-  if (directoryEntry) {
-    return resolveDirectoryEntryTarget(surface, options, directoryEntry, explicit);
+  const picked = pickDirectoryEntry(directoryEntries, search);
+  if (picked !== null && 'entry' in picked) {
+    return resolveDirectoryEntryTarget(surface, options, picked.entry, explicit);
   }
+  // A name several conversations share resolves to none of them: the fallback
+  // target says so and lists them, so the caller passes #name, @name or a typed id.
+  const ambiguous = picked !== null && 'ambiguous' in picked ? picked.ambiguous : undefined;
   const searchTruncated = isTruncatedDirectory(directoryEntries);
   if (explicit) {
-    return directoryError || searchTruncated
-      ? { ...explicit, metadata: { ...explicit.metadata, ...(directoryError ? { directoryError } : {}), ...(searchTruncated ? { searchTruncated: true } : {}) } }
+    return directoryError || searchTruncated || ambiguous
+      ? { ...explicit, metadata: { ...explicit.metadata, ...(directoryError ? { directoryError } : {}), ...(searchTruncated ? { searchTruncated: true } : {}), ...(ambiguous ? { ambiguous } : {}) } }
       : explicit;
   }
 
@@ -96,6 +100,7 @@ export async function resolveBuiltinTarget(
       ...(directoryError ? { directoryError } : {}),
       // Nothing matched within the pages searched; past the cap it may exist.
       ...(searchTruncated ? { searchTruncated: true } : {}),
+      ...(ambiguous ? { ambiguous } : {}),
     },
   };
   return {
@@ -812,7 +817,7 @@ function resolveDirectoryEntryTarget(
   entry: ChannelDirectoryEntry,
   explicit?: ChannelResolvedTarget | null,
 ): ChannelResolvedTarget {
-  const kind = explicit?.kind ?? kindForDirectoryEntry(entry);
+  const kind = explicit?.kind ?? conversationKindOfDirectoryEntry(entry);
   const metadataSessionId = typeof entry.metadata.sessionId === 'string' ? entry.metadata.sessionId : undefined;
   const routeBacked = typeof entry.metadata.externalId === 'string' || typeof entry.metadata.parentBindingId === 'string';
   const target: ChannelResolvedTarget = {
@@ -852,29 +857,6 @@ function scopeForTargetKind(kind?: ChannelConversationKind): ChannelDirectorySco
   return undefined;
 }
 
-function kindForDirectoryEntry(entry: ChannelDirectoryEntry): ChannelConversationKind {
-  if (entry.kind === 'self' || entry.kind === 'user' || entry.kind === 'member') return 'direct';
-  if (entry.kind === 'thread') return 'thread';
-  if (entry.kind === 'channel') return 'channel';
-  if (entry.kind === 'group') return 'group';
-  return 'service';
-}
-
-function pickBestDirectoryEntry(entries: readonly ChannelDirectoryEntry[], query: string): ChannelDirectoryEntry | undefined {
-  const normalized = query.trim().replace(/^[@#]/, '').toLowerCase();
-  // Only an exact match resolves. A name that merely contains the input is a
-  // candidate for a directory listing, not the conversation the caller meant:
-  // sending to it, or allow-listing it, would reach somebody else.
-  return entries.find((entry) => [
-    entry.id,
-    entry.handle,
-    entry.label,
-    entry.groupId,
-    entry.threadId,
-    ...(entry.aliases ?? []),
-  ].some((value) => typeof value === 'string' && value.replace(/^[@#]/, '').toLowerCase() === normalized));
-}
-
 /**
  * Follow a provider's pages until `limit` entries match the needle or the pages
  * run out. The needle is applied to every page before anything is truncated, so
@@ -893,7 +875,7 @@ async function collectMatchingPages(
     found.push(...filterProviderDirectory(result.entries, needle, Number.MAX_SAFE_INTEGER));
     // An exact name is the conversation or person being looked for; the pages
     // after it can only add near misses, each one a request against a rate limit.
-    if (found.length >= limit || !result.next || (needle && pickBestDirectoryEntry(found, needle))) return found;
+    if (found.length >= limit || !result.next || (needle && found.some((entry) => directoryEntryNamedBy(entry, needle)))) return found;
     cursor = result.next;
   }
   logger.warn('Provider directory search stopped at its page cap', { what, pages: PROVIDER_MAX_PAGES, matches: found.length });

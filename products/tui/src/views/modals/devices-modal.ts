@@ -28,7 +28,8 @@ import { formatDeviceLine, shortTokenId } from '@goodvibes/engine/platform/platf
 export interface DevicesModalPairingTokens {
   list(): PublicPairingToken[];
   rename(id: string, name: string): Promise<boolean>;
-  revoke(id: string): boolean;
+  /** Revokes here and on the authority record, so the device is refused on every machine of the group. */
+  revokeEverywhere(id: string): Promise<{ readonly revoked: boolean; readonly alsoRevoked: readonly string[] }>;
   mintForMigration(input: { readonly name: string; readonly origin?: 'owner-pairing' | 'automation' | undefined }): MintedPairingToken;
   isLegacyRevoked(): boolean;
 }
@@ -142,10 +143,18 @@ class DevicesModalSurface implements ConfigModalSurface {
     if (id === 'revoke') {
       const deviceId = deviceIdOf(ctx.row);
       if (!deviceId) { ctx.setStatus('Select a device row first.'); return; }
-      const record = tokens.list().find((t) => t.id === deviceId);
-      const revoked = tokens.revoke(deviceId);
-      ctx.setStatus(revoked ? `Revoked "${record?.name ?? shortTokenId(deviceId)}": its token stops working now.` : 'That device was already absent.');
-      this.requestRender();
+      const listed = tokens.list();
+      const nameOf = (id: string): string => listed.find((t) => t.id === id)?.name ?? shortTokenId(id);
+      const name = nameOf(deviceId);
+      ctx.setStatus(`Revoking "${name}"...`);
+      void tokens.revokeEverywhere(deviceId).then(
+        (outcome) => {
+          const also = outcome.alsoRevoked.length > 0 ? ` Also revoked with it: ${outcome.alsoRevoked.map((id) => `"${nameOf(id)}"`).join(', ')}.` : '';
+          ctx.setStatus(outcome.revoked ? `Revoked "${name}": its token stops working now.${also}` : 'That device was already absent.');
+          this.requestRender();
+        },
+        (error: unknown) => { ctx.setStatus(`"${name}" was not revoked: ${error instanceof Error ? error.message : String(error)}`); this.requestRender(); },
+      );
       return;
     }
 

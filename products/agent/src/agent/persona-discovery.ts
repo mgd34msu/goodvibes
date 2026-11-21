@@ -2,7 +2,7 @@ import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
+import { markdownRecordName, parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
 
 export type PersonaOrigin = 'project-local' | 'global' | 'custom';
 
@@ -15,9 +15,11 @@ export interface DiscoveredPersonaRecord {
   readonly frontmatter: Record<string, string>;
 }
 
-const DIRECTORY_MARKERS: readonly string[] = ['PERSONA.md', 'persona.md'];
+/** The file a persona folder holds its text in; the startup summary reads the same list. */
+export const PERSONA_DIRECTORY_MARKERS: readonly string[] = ['PERSONA.md', 'persona.md'];
 
-function getPersonaDirectories(cwd: string, homeDir: string): Array<{ root: string; origin: PersonaOrigin }> {
+/** Where personas are discovered, project first; the startup summary reads the same roots. */
+export function getPersonaDirectories(cwd: string, homeDir: string): Array<{ root: string; origin: 'project-local' | 'global' }> {
   return [
     { root: join(cwd, '.goodvibes', 'personas'), origin: 'project-local' },
     { root: join(cwd, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'personas'), origin: 'project-local' },
@@ -38,7 +40,8 @@ async function readPersonaFile(path: string, origin: PersonaOrigin): Promise<Dis
   const markdownBody = stripMarkdownFrontmatter(content);
   const body = (frontmatter.system_prompt ?? markdownBody).trim();
   if (!body) return null;
-  const name = frontmatter.name ?? path.split(/[\\/]/).pop()?.replace(/\.md$/i, '') ?? 'persona';
+  const name = markdownRecordName(frontmatter, path);
+  if (!name) return null;
   const description = frontmatter.description ?? frontmatter.summary ?? frontmatter.title ?? '';
 
   return {
@@ -67,7 +70,7 @@ async function scanPersonaDirectory(root: string, origin: PersonaOrigin): Promis
       continue;
     }
 
-    for (const marker of DIRECTORY_MARKERS) {
+    for (const marker of PERSONA_DIRECTORY_MARKERS) {
       const record = await readPersonaFile(join(root, entry, marker), origin);
       if (record) {
         records.push(record);

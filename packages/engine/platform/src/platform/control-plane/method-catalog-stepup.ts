@@ -23,6 +23,7 @@
  * returns assertions.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
 import {
   BOOLEAN_SCHEMA,
   EMPTY_OBJECT_SCHEMA,
@@ -78,6 +79,8 @@ export const STEP_UP_CHALLENGE_MINT_OUTPUT_SCHEMA = objectSchema({
   expiresAt: NUMBER_SCHEMA,
 }, ['challengeId', 'challenge', 'expiresAt']);
 
+const STEP_UP_CHALLENGES_FULL: ContractErrorCode = { code: 'STEP_UP_CHALLENGES_FULL', status: 429, meaning: 'Too many step-up challenges are open; answer one or let it expire, then ask again.' };
+
 export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
     id: 'stepup.credentials.register',
@@ -121,5 +124,6 @@ export const builtinGatewayStepUpMethodDescriptors: readonly GatewayMethodDescri
     http: { method: 'POST', path: '/api/stepup/challenge' },
     inputSchema: STEP_UP_CHALLENGE_MINT_INPUT_SCHEMA,
     outputSchema: STEP_UP_CHALLENGE_MINT_OUTPUT_SCHEMA,
+    errorCodes: [STEP_UP_CHALLENGES_FULL],
   }),
 ];

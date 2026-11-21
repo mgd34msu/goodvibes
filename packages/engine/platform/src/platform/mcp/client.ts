@@ -29,6 +29,7 @@ import { logger } from '../utils/logger.js';
 import { VERSION } from '../version.js';
 import type { McpServerConfig } from './config.js';
 import { summarizeError } from '../utils/error-display.js';
+import { drainStderrTail } from '../utils/stderr-tail.js';
 import { OwnedScope, mergeCloseReports, NOTHING_RUNNING, requireStopped, type CloseReport } from '../utils/owned-work.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { McpHttpConnection, McpRpcError } from './http-connection.js';
@@ -234,6 +235,8 @@ export class McpClient {
    * observed, so disconnect() stops it too and never forgets one.
    */
   readonly #processScopes = new Map<ReturnType<typeof Bun.spawn>, OwnedScope>();
+  /** Each stdio process's stderr, read to its end (an unread pipe blocks the server) with its last lines kept to explain an exit. */
+  readonly #stderrTails = new WeakMap<ReturnType<typeof Bun.spawn>, { tail(): string }>();
   #phase: McpClientPhase = 'idle';
   #lastError: string | null = null;
   private initialized = false;
@@ -353,7 +356,22 @@ export class McpClient {
     }
     if (this.proc && this.isConnected) return;
     await this._startProcess();
-    await this._negotiate();
+    const proc = this.proc;
+    try {
+      await this._negotiate();
+    } catch (error) {
+      // The server's own words on stderr say why it would not answer.
+      const reason = proc ? this.#withStderr(summarizeError(error), proc) : summarizeError(error);
+      throw reason === summarizeError(error) ? error : new Error(reason, { cause: error });
+    }
+  }
+
+  /** `reason`, followed by the last lines the process wrote to stderr when it wrote any. */
+  #withStderr(reason: string, proc: ReturnType<typeof Bun.spawn>): string {
+    const tail = this.#stderrTails.get(proc)?.tail() ?? '';
+    if (!tail) return reason;
+    const lines = tail.split('\n').map(line => line.trim()).filter(line => line.length > 0).slice(-5).join(' | ');
+    return `${reason}: ${lines.length > 500 ? `...${lines.slice(-500)}` : lines}`;
   }
 
   /** Every page of tools/list: a server that pages is never silently cut to its first page. */
@@ -613,6 +631,7 @@ export class McpClient {
         ...(cwd ? { cwd } : {}),
       });
       this.proc = proc;
+      this.#stderrTails.set(proc, drainStderrTail(proc.stderr));
       const label = `MCP server ${this.config.name}`;
       const scope = new OwnedScope(label);
       scope.child(label, { pid: proc.pid, kill: signal => proc.kill(signal), exited: proc.exited });
@@ -821,9 +840,10 @@ export class McpClient {
   #onProcessExit(proc: ReturnType<typeof Bun.spawn>): void {
     // Reject remaining pending requests before retiring the connection, so
     // callers learn the process exited rather than a bare abort.
+    const exited = this.#withStderr('the server process exited unexpectedly', proc);
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timer);
-      pending.reject(new Error(`McpClient(${this.config.name}): process exited unexpectedly`));
+      pending.reject(new Error(`McpClient(${this.config.name}): ${exited}`));
     }
     this.pendingRequests.clear();
     this.retireConnection('the server process exited');
@@ -841,7 +861,7 @@ export class McpClient {
       try { proc.kill(); } catch { /* already gone */ }
     }
     // Keep a more specific failure (a timed-out handshake) when there is one.
-    this.#lastError ??= 'the server process exited unexpectedly';
+    this.#lastError ??= exited;
     // Reconnecting is the owner's job (the MCP registry's lifecycle); this client reports the exit.
     this.#phase = 'gave-up';
     // The exit status can land after stdout closes; a client that gave up holds no process.

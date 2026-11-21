@@ -24,11 +24,11 @@ export const WORK_PLAN_TOOL_SCHEMA = {
     },
     owner: {
       type: 'string',
-      description: '(add, update) Who is doing it: an agent id, a cohort name or the user.',
+      description: '(add, update) Who is doing it: an agent id, a cohort name or the user. (update) An empty string clears it.',
     },
     notes: {
       type: 'string',
-      description: '(add, update) Detail, acceptance notes or what is blocking it.',
+      description: '(add, update) Detail, acceptance notes or what is blocking it. (update) An empty string clears it.',
     },
   },
   required: ['action'],

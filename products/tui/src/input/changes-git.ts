@@ -6,7 +6,7 @@
  * here throws into the render loop; failures come back as text to show.
  */
 
-import { isAbsolute, join, relative } from 'node:path';
+import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { GitService } from '@goodvibes/engine/platform/platform/git';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
@@ -93,19 +93,27 @@ async function untrackedChunk(repoRoot: string, path: string): Promise<string> {
   return result.out.endsWith('\n') ? result.out : `${result.out}\n`;
 }
 
+/** The repository root git names for `cwd`, or null outside a repository. */
+async function gitTopLevel(cwd: string): Promise<string | null> {
+  const top = await run(['rev-parse', '--show-toplevel'], cwd);
+  return top.ok ? top.out.trim() || cwd : null;
+}
+
+/** True when `path` (absolute, or relative to `cwd`) lies inside the repository at `repoRoot`. */
+export function insideRepo(repoRoot: string, cwd: string, path: string): boolean {
+  const rel = relative(repoRoot, resolve(cwd, path));
+  return rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+}
+
 /**
  * Untracked, non-ignored files as all-added diff chunks, one per file. With
  * `only` set, just the untracked files among those paths (the session's own
- * new files); otherwise every untracked file in the repository.
+ * new files, all inside the repository); otherwise every untracked file in the
+ * repository. `repoRoot` null (not a repository) lists nothing.
  */
-export async function loadUntrackedDiff(cwd: string, only?: readonly string[]): Promise<{ raw: string; count: number; skipped: number }> {
-  if (only && only.length === 0) return { raw: '', count: 0, skipped: 0 };
-  const top = await run(['rev-parse', '--show-toplevel'], cwd);
-  if (!top.ok) return { raw: '', count: 0, skipped: 0 };
-  const repoRoot = top.out.trim() || cwd;
-  // A session path outside this repository would fail the whole listing; leave it out.
-  const specs = only ? only.filter((path) => !isAbsolute(path) || path.startsWith(`${repoRoot}/`)) : [':/'];
-  if (specs.length === 0) return { raw: '', count: 0, skipped: 0 };
+async function loadUntrackedDiff(cwd: string, repoRoot: string | null, only?: readonly string[]): Promise<{ raw: string; count: number; skipped: number }> {
+  if (repoRoot === null || (only && only.length === 0)) return { raw: '', count: 0, skipped: 0 };
+  const specs = only ?? [':/'];
   const listed = await run(['ls-files', '--others', '--exclude-standard', '--full-name', '-z', '--', ...specs], cwd);
   if (!listed.ok) return { raw: '', count: 0, skipped: 0 };
   const paths = listed.out.split('\0').filter((path) => path.length > 0).sort();
@@ -131,6 +139,8 @@ export async function loadDiff(cwd: string, source: ChangesSource, sessionFiles:
   if (source === 'session' && sessionFiles.length === 0) {
     return { raw: '', label: 'this session · no files changed yet', error: null };
   }
+  // One rev-parse serves both the untracked listing and the session's split into inside and outside paths.
+  const repoRoot = source === 'staged' ? null : await gitTopLevel(cwd);
   let args: string[];
   let label: string;
   let untrackedOnly: readonly string[] | undefined;
@@ -140,17 +150,23 @@ export async function loadDiff(cwd: string, source: ChangesSource, sessionFiles:
   } else if (source === 'staged') {
     args = ['diff', '--cached', '--no-color', ...DIFF_PREFIX_ARGS];
     label = 'staged';
-  } else if (source === 'session' && sessionFiles.length > 0) {
-    args = ['diff', '--no-color', ...DIFF_PREFIX_ARGS, 'HEAD', '--', ...sessionFiles];
-    label = `this session · ${sessionFiles.length} file${sessionFiles.length === 1 ? '' : 's'} vs HEAD`;
-    untrackedOnly = sessionFiles;
+  } else if (source === 'session') {
+    // git refuses a whole diff over one path outside the work tree, so those are left out and counted.
+    const inside = repoRoot === null ? [...sessionFiles] : sessionFiles.filter((path) => insideRepo(repoRoot, cwd, path));
+    const outside = sessionFiles.length - inside.length;
+    if (inside.length === 0) {
+      return { raw: '', label: `this session · ${outside} file${outside === 1 ? '' : 's'}, all outside this repository`, error: null };
+    }
+    args = ['diff', '--no-color', ...DIFF_PREFIX_ARGS, 'HEAD', '--', ...inside];
+    label = `this session · ${inside.length} file${inside.length === 1 ? '' : 's'} vs HEAD${outside > 0 ? ` · ${outside} outside this repository (not shown)` : ''}`;
+    untrackedOnly = inside;
   } else {
     args = ['diff', '--no-color', ...DIFF_PREFIX_ARGS, 'HEAD'];
     label = 'all changes vs HEAD';
   }
   let [result, untracked] = await Promise.all([
     run(args, cwd),
-    source === 'staged' ? Promise.resolve({ raw: '', count: 0, skipped: 0 }) : loadUntrackedDiff(cwd, untrackedOnly),
+    source === 'staged' ? Promise.resolve({ raw: '', count: 0, skipped: 0 }) : loadUntrackedDiff(cwd, repoRoot, untrackedOnly),
   ]);
   const headAt = args.indexOf('HEAD');
   if (!result.ok && headAt >= 0) {

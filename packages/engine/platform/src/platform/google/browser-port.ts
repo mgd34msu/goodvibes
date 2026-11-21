@@ -175,5 +175,29 @@ export function createGoogleBrowserPort(
       // found in it, so the words never reach the model as direction.
       return requireStringField(readUntrustedEnvelope(result), 'text');
     },
+
+    async settle(settleOptions) {
+      const signal = settleOptions?.signal;
+      signal?.throwIfAborted();
+      // No text or address given: the engine waits for network idle under its
+      // own wait deadline.
+      const waited = engine.waitFor(target(), {});
+      let stop: (() => void) | undefined;
+      const stopped = new Promise<never>((_, reject) => {
+        stop = () => { try { signal?.throwIfAborted(); } catch (error) { reject(error); } };
+        signal?.addEventListener('abort', stop, { once: true });
+      });
+      try {
+        adopt(await Promise.race([waited, stopped]));
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        // Still loading at the deadline: the page is read as it stands, and a
+        // page that is gone fails that read with its own error.
+      } finally {
+        if (stop) signal?.removeEventListener('abort', stop);
+        waited.catch(() => undefined);
+        stopped.catch(() => undefined);
+      }
+    },
   };
 }

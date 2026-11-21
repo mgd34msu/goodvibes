@@ -278,6 +278,9 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
           const chat = parseChat(values.chat ?? '');
           if (!chat) throw commandRefusal(`"${values.chat}" is not a chat id (chatId or chatId/threadId). Nothing was configured.`);
           const pendingRetentionMs = durationOf(values.hold, 'Each message waits');
+          // The hold as given (validated above); a bare number is milliseconds.
+          const givenHold = (values.hold ?? '').trim();
+          const heldFor = /^\d+$/.test(givenHold) ? `${givenHold}ms` : givenHold;
           const configurationLifetimeMs = durationOf(values.for, 'Hold the chat for');
           const result = await call(context, 'configure', {
             ...chat, accountId: values.bot!, pendingRetention: 'memory-only-until-deadline', pendingRetentionMs, configurationLifetimeMs, onExpiry: 'release-original-and-hold',
@@ -286,7 +289,7 @@ export function registerTelegramIntakeCommand<Ctx extends TelegramIntakeCommandC
           const identity = result.accountIdentity as { readonly username: string } | undefined;
           return [
             `Chat ${text(chat.chatId)}${chat.threadId ? `/${text(chat.threadId)}` : ''} is held for you${identity ? ` on @${text(identity.username)}` : ''}.`,
-            `Configuration ${text(String(result.configurationId))} lasts until ${when(Number(result.expiresAt))}; each message is kept in memory for ${Math.round(pendingRetentionMs / 60_000)} min.`,
+            `Configuration ${text(String(result.configurationId))} lasts until ${when(Number(result.expiresAt))}; each message is kept in memory for ${heldFor}.`,
             'The chat is not answered normally until /telegram release.',
           ].join('\n');
         },

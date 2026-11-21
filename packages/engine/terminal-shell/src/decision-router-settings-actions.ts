@@ -41,8 +41,11 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
   try { settings = captureDecisionRouterSettings(config.get('provider.decisionRouter')); }
   catch (error) { ctx.print('Unable to read routing settings: ' + summarizeError(error)); return true; }
   const openedRevision = JSON.stringify(settings);
+  const readRevision = (): string => JSON.stringify(captureDecisionRouterSettings(config.get('provider.decisionRouter')));
+  /** Whether the saved settings are still the ones `baseline` recorded. */
+  const unchangedSince = (baseline: string): boolean => readRevision() === baseline;
   const current = () => {
-    if (JSON.stringify(captureDecisionRouterSettings(config.get('provider.decisionRouter'))) === openedRevision) return true;
+    if (unchangedSince(openedRevision)) return true;
     ctx.print('Routing settings changed while this picker was open. Reopen it before saving.');
     changed(); ctx.renderRequest(); return false;
   };
@@ -69,12 +72,16 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
     if (!selected) return;
     const id = selected.item.id;
     if (id === '__advanced__') {
-      const apply = (text: string): void => {
-        try { if (!current()) return; config.setDynamic('provider.decisionRouter', captureDecisionRouterSettings(JSON.parse(text))); changed(); ctx.renderRequest(); }
-        catch (error) { ctx.print('Unable to save routing settings: ' + summarizeError(error)); ctx.renderRequest(); }
+      const apply: ApplyRouting = (text, baseline) => {
+        try {
+          if (!unchangedSince(baseline)) return 'overtaken';
+          config.setDynamic('provider.decisionRouter', captureDecisionRouterSettings(JSON.parse(text))); changed(); ctx.renderRequest();
+          return 'saved';
+        } catch (error) { ctx.print('Unable to save routing settings: ' + summarizeError(error)); ctx.renderRequest(); return 'failed'; }
       };
       if (ctx.openFileInEditor && editorConfigured()) {
-        void editAdvancedInEditor(ctx, ctx.openFileInEditor, JSON.stringify(config.get('provider.decisionRouter'), null, 2), apply);
+        // The editor's own baseline is taken as its file is written, not when the picker opened.
+        void editAdvancedInEditor(ctx, ctx.openFileInEditor, JSON.stringify(config.get('provider.decisionRouter'), null, 2), readRevision, apply, changed);
         return;
       }
       // No external editor: the whole configuration is typed on one line, and a refused value says why as it is typed.
@@ -89,7 +96,10 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
       }, result => {
         if (!result) return;
         if (result.item.id === INVALID_ROUTING) { ctx.print('Routing settings not saved: ' + (result.item.detail ?? 'not valid JSON')); ctx.renderRequest(); return; }
-        apply(result.item.id);
+        if (apply(result.item.id, openedRevision) === 'overtaken') {
+          ctx.print('Routing settings changed while this picker was open. Reopen it before saving.');
+          changed(); ctx.renderRequest();
+        }
       });
       return;
     }
@@ -121,21 +131,29 @@ export function openDecisionRouterSettings(ctx: DecisionRouterPickerContext, cha
 
 const INVALID_ROUTING = '__invalid_routing__';
 
+/** Saves typed routing settings unless the saved ones changed since `baseline`; says which happened. */
+type ApplyRouting = (text: string, baseline: string) => 'saved' | 'overtaken' | 'failed';
+
 /**
  * Edit the routing settings as pretty JSON in the user's editor. The file is
  * read back only after the editor exits, and removed after that. A refused
- * edit shows its validation error and offers to edit it again, starting from
- * what was typed, so nothing written is lost to a typo.
+ * edit, or one overtaken by a change made elsewhere while the editor was open,
+ * offers to edit it again, starting from what was typed, so nothing written is
+ * lost to a typo or to another surface's save.
  */
 async function editAdvancedInEditor(
   ctx: DecisionRouterPickerContext,
   openFileInEditor: FileEditorOpener,
   initial: string,
-  apply: (text: string) => void,
+  readRevision: () => string,
+  apply: ApplyRouting,
+  changed: () => void,
 ): Promise<void> {
   let dir: string | undefined;
   let edited = initial;
+  let baseline = '';
   try {
+    baseline = readRevision();
     dir = mkdtempSync(join(tmpdir(), 'goodvibes-routing-'));
     const file = join(dir, 'decision-router.json');
     writeFileSync(file, `${initial}\n`, { encoding: 'utf8', mode: 0o600 });
@@ -153,16 +171,31 @@ async function editAdvancedInEditor(
   } finally {
     if (dir !== undefined) rmSync(dir, { recursive: true, force: true });
   }
-  if (edited === initial.trim()) { ctx.print('Routing settings unchanged.'); ctx.renderRequest(); return; }
   const problem = routingProblem(edited);
-  if (problem === undefined) { apply(edited); return; }
+  if (problem === undefined && sameSettings(edited, baseline)) { ctx.print('Routing settings unchanged.'); ctx.renderRequest(); return; }
+  let reason: string;
+  if (problem === undefined) {
+    const outcome = apply(edited, baseline);
+    if (outcome !== 'overtaken') return;
+    reason = 'The routing settings were changed elsewhere while the editor was open, so this edit was not saved over them.';
+    changed(); ctx.renderRequest();
+  } else {
+    reason = problem;
+  }
   const open = ctx.openSelection;
-  if (!open) { ctx.print('Routing settings not saved: ' + problem); return; }
+  if (!open) { ctx.print('Routing settings not saved: ' + reason); ctx.renderRequest(); return; }
   open('Routing settings not saved', [
-    { id: 'edit', label: 'Edit again', detail: problem, primaryAction: 'select' },
-    { id: 'discard', label: 'Discard the edit', detail: 'The saved routing settings stay as they were.', primaryAction: 'select' },
+    { id: 'edit', label: 'Edit again', detail: reason, primaryAction: 'select' },
+    { id: 'discard', label: 'Discard the edit', detail: 'The saved routing settings stay as they are.', primaryAction: 'select' },
   ], { allowSearch: false }, choice => {
-    if (choice?.item.id === 'edit') void editAdvancedInEditor(ctx, openFileInEditor, edited, apply);
-    else ctx.print('Routing settings not saved: ' + problem);
+    // Edit again reopens the kept text against the settings as they are now.
+    if (choice?.item.id === 'edit') void editAdvancedInEditor(ctx, openFileInEditor, edited, readRevision, apply, changed);
+    else ctx.print('Routing settings not saved: ' + reason);
   });
+}
+
+/** Whether typed routing settings are the ones `revision` recorded. */
+function sameSettings(text: string, revision: string): boolean {
+  try { return JSON.stringify(captureDecisionRouterSettings(JSON.parse(text))) === revision; }
+  catch { return false; }
 }

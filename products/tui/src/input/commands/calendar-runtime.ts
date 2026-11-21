@@ -25,6 +25,7 @@ import {
   claimIrreversibleWrite,
   READ_INVOCATION_CONTEXT,
   errorText,
+  failureProvesNothingWritten,
   probeConnection,
   renderConnectionStatus,
 } from './connection-status.ts';
@@ -157,18 +158,27 @@ async function addEvent(ctx: CommandContext, event: CalendarNewEvent, again: boo
   if (!event.end) throw commandRefusal('The daemon\'s calendar needs an end time: give Ends (--end). Nothing was added.');
   const start = eventTime('Starts', event.start);
   const end = eventTime('Ends', event.end);
-  if (!claimIrreversibleWrite(gateway, `calendar.create\0${event.title}\0${start.instant}\0${end.instant}`, again)) {
+  const fingerprint = ['calendar.create', event.title, start.instant, end.instant, event.location ?? '', event.notes ?? ''].join('\0');
+  const release = claimIrreversibleWrite(gateway, fingerprint, again);
+  if (release === null) {
     throw commandRefusal('This exact event was already added (or an add was attempted and its outcome is unknown) from this session, so it was not added again.',
       'Check the calendar first; to add it anyway choose "Add it again" (/calendar add ... --again)');
   }
   return await withStatusOnFailure(gateway, 'The event was not added', async () => {
-    const result = await gateway.invoke('calendar.events.create', {
-      ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
-      body: {
-        title: event.title, start: start.instant, end: end.instant, confirm: true,
-        ...(event.location ? { location: event.location } : {}), ...(event.notes ? { description: event.notes } : {}),
-      },
-    }) as { readonly eventId: string; readonly createdAt: string };
+    let result: { readonly eventId: string; readonly createdAt: string };
+    try {
+      result = await gateway.invoke('calendar.events.create', {
+        ...EXPLICIT_WRITE_INVOCATION_CONTEXT,
+        body: {
+          title: event.title, start: start.instant, end: end.instant, confirm: true,
+          ...(event.location ? { location: event.location } : {}), ...(event.notes ? { description: event.notes } : {}),
+        },
+      }) as { readonly eventId: string; readonly createdAt: string };
+    } catch (error) {
+      // A refusal before any write leaves the same add free to retry once its cause is fixed.
+      if (failureProvesNothingWritten(error)) release();
+      throw error;
+    }
     const zone = start.zoneStated || end.zoneStated ? ` A time typed without a zone was read in this machine's zone, UTC${offsetLabel(new Date(start.instant).getTimezoneOffset())}.` : '';
     return `Added "${event.title}", ${formatWhen(start.instant)} to ${formatWhen(end.instant)} (event ${result.eventId}).${zone}`;
   });

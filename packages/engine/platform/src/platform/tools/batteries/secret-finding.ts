@@ -24,11 +24,27 @@ export const MAX_JUDGED_SCAN_LINE_CHARS = 400;
 
 const carried = (line: string): string => line.length > MAX_JUDGED_SCAN_LINE_CHARS ? `${line.slice(0, MAX_JUDGED_SCAN_LINE_CHARS)}…` : line;
 
-/** What a scan reading sees: the file, the candidate line, and `context` lines on each side of it. */
-export function scanCandidateView(file: string, lines: readonly string[], index: number, context = SECRET_CONTEXT_LINES): { file: string; line: string; before: string[]; after: string[] } {
+/**
+ * A long line cut to MAX_JUDGED_SCAN_LINE_CHARS around `focus` (where the
+ * candidate was found), with a marker on each cut side, so what made the line
+ * a candidate is always in the part carried.
+ */
+function carriedAround(line: string, focus: number): string {
+  if (line.length <= MAX_JUDGED_SCAN_LINE_CHARS) return line;
+  const start = Math.max(0, Math.min(focus - Math.floor(MAX_JUDGED_SCAN_LINE_CHARS / 4), line.length - MAX_JUDGED_SCAN_LINE_CHARS));
+  const end = start + MAX_JUDGED_SCAN_LINE_CHARS;
+  return `${start > 0 ? '…' : ''}${line.slice(start, end)}${end < line.length ? '…' : ''}`;
+}
+
+/**
+ * What a scan reading sees: the file, the candidate line, and `context` lines
+ * on each side of it. `focus` is where on the line the candidate was found; a
+ * line too long to carry whole is carried around it.
+ */
+export function scanCandidateView(file: string, lines: readonly string[], index: number, context = SECRET_CONTEXT_LINES, focus = 0): { file: string; line: string; before: string[]; after: string[] } {
   return completeJudgmentView({
     file,
-    line: carried(lines[index] ?? ''),
+    line: carriedAround(lines[index] ?? '', focus),
     before: lines.slice(Math.max(0, index - context), index).map(carried),
     after: lines.slice(index + 1, index + 1 + context).map(carried),
   });

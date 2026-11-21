@@ -1,6 +1,7 @@
 import { createCliSecretsCommand } from '@goodvibes/engine/terminal-shell/cli-secrets-command';
 import { createCliWorkspaceCommands } from '@goodvibes/engine/terminal-shell/cli-workspace-commands';
 import { createCliSubscriptionView } from '@goodvibes/engine/terminal-shell/cli-subscription-view';
+import { readOptionValue } from '@goodvibes/engine/terminal-shell/cli-arguments';
 import { withProviderServices, withSessionServices, type OneShotProviderServices, type OneShotSessionServices } from './one-shot-services.ts';
 import { createRuntimeSecretsManager, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
@@ -17,9 +18,7 @@ import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
  * print its `#pair=` link and QR. The Agent's own host credential is never printed.
  */
 export async function renderPairing(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
-  const args = runtime.cli.commandArgs;
-  const nameIndex = args.indexOf('--name');
-  const name = nameIndex >= 0 ? args[nameIndex + 1] : undefined;
+  const name = readOptionValue(runtime.cli.commandArgs, '--name');
   const json = runtime.cli.flags.outputFormat === 'json';
   const outcome = await mintAgentDevicePairing(
     createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeTimeoutMs: 15_000 }),

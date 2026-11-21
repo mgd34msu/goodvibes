@@ -13,6 +13,7 @@ import type { StateInput } from './schema.js';
 import { toRecord } from '../../utils/record-coerce.js';
 import { summarizeError } from '../../utils/error-display.js';
 import {
+  currentMemoryRecord,
   listMemoryRecords,
   memoryRecordsForKey,
   memoryValueRefusal,
@@ -426,35 +427,28 @@ async function runHooks(
     };
   }
 
-  if (action === 'enable') {
+  // Enable, disable and remove act on the hook that was approved: the approval awaits, and a hooks-file
+  // reload meanwhile can put a different definition under the same name.
+  const changeNamedHook = async (
+    change: 'enable' | 'disable' | 'remove',
+    apply: (name: string) => boolean,
+  ): Promise<{ success: boolean; output?: string; error?: string }> => {
     const name = input.hookName;
-    if (!name) return { success: false, error: 'hooks action "enable" requires "hookName"' };
+    if (!name) return { success: false, error: `hooks action "${change}" requires "hookName"` };
     const target = existing(name);
-    if (target) { const refused = await approve({ action: 'enable', eventPattern: target.pattern, hook: target.hook }); if (refused) return refused; }
-    const found = dispatcher.enableHook(name);
-    if (!found) return { success: false, error: `No hook named "${name}" found` };
-    return { success: true, output: JSON.stringify({ mode: 'hooks', action: 'enable', name, enabled: true }) };
-  }
+    if (!target) return { success: false, error: `No hook named "${name}" found` };
+    const refused = await approve({ action: change, eventPattern: target.pattern, hook: target.hook });
+    if (refused) return refused;
+    if (existing(name)?.hook !== target.hook) {
+      return { success: false, error: `The hook "${name}" changed while this call waited for approval. Nothing was changed; list the hooks and ask again.` };
+    }
+    if (!apply(name)) return { success: false, error: `No hook named "${name}" found` };
+    return { success: true, output: JSON.stringify({ mode: 'hooks', action: change, name, ...(change === 'remove' ? {} : { enabled: change === 'enable' }) }) };
+  };
 
-  if (action === 'disable') {
-    const name = input.hookName;
-    if (!name) return { success: false, error: 'hooks action "disable" requires "hookName"' };
-    const target = existing(name);
-    if (target) { const refused = await approve({ action: 'disable', eventPattern: target.pattern, hook: target.hook }); if (refused) return refused; }
-    const found = dispatcher.disableHook(name);
-    if (!found) return { success: false, error: `No hook named "${name}" found` };
-    return { success: true, output: JSON.stringify({ mode: 'hooks', action: 'disable', name, enabled: false }) };
-  }
-
-  if (action === 'remove') {
-    const name = input.hookName;
-    if (!name) return { success: false, error: 'hooks action "remove" requires "hookName"' };
-    const target = existing(name);
-    if (target) { const refused = await approve({ action: 'remove', eventPattern: target.pattern, hook: target.hook }); if (refused) return refused; }
-    const removed = dispatcher.unregister(name);
-    if (!removed) return { success: false, error: `No hook named "${name}" found` };
-    return { success: true, output: JSON.stringify({ mode: 'hooks', action: 'remove', name }) };
-  }
+  if (action === 'enable') return changeNamedHook('enable', name => dispatcher.enableHook(name));
+  if (action === 'disable') return changeNamedHook('disable', name => dispatcher.disableHook(name));
+  if (action === 'remove') return changeNamedHook('remove', name => dispatcher.unregister(name));
 
   if (action === 'add') {
     const def = input.hookDefinition;
@@ -809,7 +803,7 @@ async function runMemory(
 
   if (action === 'get') {
     try {
-      const record = (await memoryRecordsForKey(store, safeKey, signal))[0];
+      const record = await currentMemoryRecord(store, safeKey, signal);
       if (!record) {
         return { success: true, output: JSON.stringify({ mode: 'memory', action: 'get', key: safeKey, value: null }) };
       }

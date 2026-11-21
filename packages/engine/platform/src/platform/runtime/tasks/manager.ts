@@ -272,7 +272,6 @@ export class UnifiedTaskManager implements TaskManager {
       parentTaskId: params.parentTaskId,
       childTaskIds: [],
       queuedAt: now,
-      retryPolicy: params.retryPolicy,
       correlationId: params.correlationId,
       turnId: params.turnId,
     };
@@ -461,8 +460,6 @@ export class UnifiedTaskManager implements TaskManager {
       endedAt: undefined,
       error: undefined,
       exitCode: undefined,
-      retryAt: undefined,
-      retryDelayMs: undefined,
       queuedAt: Date.now(),
     }), 'queued');
   }

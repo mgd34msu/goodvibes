@@ -40,6 +40,7 @@ import { type FeatureFlagReader, isFeatureGateEnabled, requireFeatureGate } from
 import {
   DEFAULT_DOMAINS,
   DEFAULT_SERVER_CONFIG,
+  canReplayEventToClient,
   createScopedSessionDelivery,
   frameSessionId,
   hasReplayScope,
@@ -360,16 +361,15 @@ export class ControlPlaneGateway {
     if (this.recentMessages.length > 200) {
       this.recentMessages.length = 200;
     }
+    // Surface messages go to web clients; the one scope decides both live delivery and replay.
     const record = this.rememberEvent('surface-message', message, {
+      clientKind: 'web',
       ...(message.clientId ? { clientId: message.clientId } : {}),
       ...(message.routeId ? { routeId: message.routeId } : {}),
       ...(message.surfaceId ? { surfaceId: message.surfaceId } : {}),
     });
     for (const client of this.liveClients.values()) {
-      if (client.kind !== 'web') continue;
-      if (message.clientId && client.clientId !== message.clientId) continue;
-      if (message.routeId && client.routeId !== message.routeId) continue;
-      if (message.surfaceId && client.surfaceId !== message.surfaceId) continue;
+      if (!canReplayEventToClient(record, { clientKind: client.kind, clientId: client.clientId, routeId: client.routeId, surfaceId: client.surfaceId })) continue;
       if (client.current && !client.current()) continue;
       if (!grantAllowsEvent(client.grant, 'surface-message', Boolean(message.clientId))) continue;
       client.send('surface-message', message, record.id);

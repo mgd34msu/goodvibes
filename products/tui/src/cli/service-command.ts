@@ -75,10 +75,13 @@ export async function handleServiceCommand(runtime: CliCommandRuntime): Promise<
     const ran = runDaemonServiceVerb(sub);
     const starting = sub === 'install' || sub === 'start' || sub === 'restart';
     // The platform accepting the command is not the daemon answering: a daemon
-    // that cannot bind or exits at boot is named here (the exit code is the daemon command's).
+    // that cannot bind or exits at boot is named here. A non-zero code from the
+    // daemon command is passed through; a start it accepted but that never ran
+    // or answered exits 1.
     const notReady = starting && ran.exitCode === 0
       ? await waitUntilServiceAnswers(runtime, createPlatformServiceManager(runtime), sub)
       : undefined;
+    const exitCode = ran.exitCode !== 0 ? ran.exitCode : notReady ? 1 : 0;
     const posture = await buildCliServicePosture(runtime, { probe: starting });
     const text = [
       ...ran.lines,
@@ -88,9 +91,9 @@ export async function handleServiceCommand(runtime: CliCommandRuntime): Promise<
     ].join('\n');
     return {
       output: json
-        ? JSON.stringify({ action: sub, ok: ran.exitCode === 0 && notReady === undefined, exitCode: ran.exitCode, lines: ran.lines, ...(notReady ? { notReady } : {}), posture }, null, 2)
+        ? JSON.stringify({ action: sub, ok: exitCode === 0, exitCode, lines: ran.lines, ...(notReady ? { notReady } : {}), posture }, null, 2)
         : text,
-      exitCode: ran.exitCode,
+      exitCode,
     };
   }
   return {

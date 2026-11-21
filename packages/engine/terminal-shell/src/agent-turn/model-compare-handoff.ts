@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import type { ArtifactRecord } from '@goodvibes/engine/platform/platform/artifacts';
+import type { ArtifactDescriptor, ArtifactRecord } from '@goodvibes/engine/platform/platform/artifacts';
 import { createZipArchive, packageArtifactFilename, prepareArtifactMetadata, sanitizeArtifactSourceUri, type ArtifactPackageEntry } from './artifact-archive.js';
 import type { AgentModelCompareArtifactStore, LoadedComparisonHandoff, SavedComparisonArtifact } from './model-compare-types.js';
 import { MAX_HANDOFF_ARCHIVE_BYTES, MAX_HANDOFF_ARTIFACT_BYTES, MAX_HANDOFF_DIFF_INPUT_LINES, MAX_HANDOFF_DIFF_ROWS, MAX_HANDOFF_DIFF_SECTION_PREVIEW_CHARS } from './model-compare-types.js';
-import { isModelCompareHandoffArtifact, isModelCompareRouteDecisionArtifact, toSavedComparisonArtifact } from './model-compare-run.js';
+import { isModelCompareArtifact, isModelCompareHandoffArtifact, isModelCompareJudgmentArtifact, isModelCompareRouteDecisionArtifact, toSavedComparisonArtifact } from './model-compare-run.js';
 import { isTextLike, listAllArtifacts, readString, readStringList, previewText } from './model-compare-utils.js';
 import { createFenceTracker } from './markdown-fence.js';
 
@@ -19,6 +19,26 @@ export interface ComparisonHandoffArchivePayload {
   readonly includedArtifactIds: readonly string[];
   readonly routeDecisionArtifactIds: readonly string[];
   readonly entries: readonly ArtifactPackageEntry[];
+}
+
+/**
+ * A related artifact carried by an output that keeps model identities hidden
+ * must not hold them: the saved comparison and a route decision always name the
+ * models; a judgment, export or handoff names them when it was made revealed.
+ * A blind judgment stores no winner model, so it may be carried.
+ */
+export function assertRelatedArtifactKeepsBlind(record: ArtifactDescriptor, reveal: boolean): void {
+  if (reveal) return;
+  const metadata = record.metadata;
+  const names = isModelCompareArtifact(record) ? 'is a saved comparison, which names every candidate model'
+    : isModelCompareRouteDecisionArtifact(record) ? 'is a route decision, which names the models'
+      : isModelCompareJudgmentArtifact(record) && metadata.revealIncludedInJudgment === true ? 'is a judgment that stored its winner model'
+        : metadata.revealIncludedInExport === true ? 'is an export made with model identities revealed'
+          : metadata.revealIncludedInHandoff === true ? 'is a handoff made with model identities revealed'
+            : null;
+  if (names) {
+    throw new Error(`Related artifact ${record.id} ${names}, and this output keeps model identities hidden; nothing was written. Drop ${record.id} from relatedArtifactIds, or pass reveal:true. (A blind judgment stores no winner model and may be included.)`);
+  }
 }
 
 export function formatArchiveBytes(value: number): string {
@@ -329,6 +349,8 @@ export async function loadHandoffArchiveArtifacts(
       throw new Error(`Reviewer handoff archive would exceed ${MAX_HANDOFF_ARCHIVE_BYTES} bytes of source artifacts (reached at ${request.id}). Remove related artifacts and try again.`);
     }
     const loaded = await artifactStore.readContent(request.id);
+    // Checked before any bytes go into the archive.
+    if (request.role === 'related') assertRelatedArtifactKeepsBlind(loaded.record, identityRolesIncluded);
     artifacts.push({ role: request.role, ...loaded });
   }
   return artifacts;

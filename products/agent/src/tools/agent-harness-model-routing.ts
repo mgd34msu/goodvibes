@@ -8,7 +8,7 @@ import { localBenchmarkRouteLatencyMap, localBenchmarkRouteLatencyMapFor, readLo
 import { localModelDetection, localModelServerEndpoints, localModelServerFacts } from './agent-harness-local-model-endpoints.ts';
 import { runLocalModelServerSmoke } from './agent-harness-local-model-smoke.ts';
 import { localHardwareProfile, modelReadinessScore } from './agent-harness-model-readiness.ts';
-import { contextWindowFor, loadModels, listProviderIds, modelBenchmarkCompositeScore, modelBenchmarkQualityTier, modelAvailable, modelConfigured, modelCapabilities, modelCurrent, modelDisplayName, modelModelId, modelProviderId, modelReasoning, modelRegistryKey, modelTier, readConfig, readProviderApi } from './agent-harness-model-catalog.ts';
+import { contextWindowFor, loadModels, loadPinnedModelIds, listProviderIds, modelBenchmarkCompositeScore, modelBenchmarkQualityTier, modelAvailable, modelConfigured, modelCapabilities, modelCurrent, modelDisplayName, modelModelId, modelProviderId, modelReasoning, modelRegistryKey, modelTier, readConfig, readProviderApi } from './agent-harness-model-catalog.ts';
 import type { AgentHarnessModelRoutingArgs, LocalModelServerEndpoint, ModelCandidate, ModelProviderHealthSignal, ModelRouteLookupSource, ModelRouteResolution, RouteCandidate } from './agent-harness-model-routing-types.ts';
 import type { ModelReadingOptions } from './agent-harness-model-reading-source.ts';
 import { rankHarnessCatalog } from '@goodvibes/engine/terminal-shell/agent-turn/catalog-ranking';
@@ -381,31 +381,42 @@ export async function modelRoutingSummary(context: CommandContext, args: AgentHa
     if (existing) return existing;
     const result = describeModel(model, { context, includeParameters, reading }); descriptions.set(key, result); return result;
   };
+  // The current model can be missing from the selectable catalog; its pinned
+  // state is read from the favorites by the same rule the catalog uses.
+  let unlistedCurrentModel: ModelCandidate | null = null;
+  if (!loadedCurrentModel && currentModel) {
+    const registryKey = modelRegistryKey(currentModel);
+    const modelId = modelModelId(currentModel);
+    const pinnedIds = await loadPinnedModelIds(context);
+    reading.assertCurrent?.();
+    unlistedCurrentModel = {
+      kind: 'model',
+      id: registryKey,
+      registryKey,
+      modelId,
+      providerId: modelProviderId(currentModel),
+      displayName: modelDisplayName(currentModel),
+      current: true,
+      contextWindow: contextWindowFor(context, currentModel),
+      reasoningEffort: modelReasoning(currentModel),
+      capabilities: modelCapabilities(currentModel),
+      tier: modelTier(currentModel),
+      benchmarkCompositeScore: modelBenchmarkCompositeScore(currentModel),
+      benchmarkQualityTier: modelBenchmarkQualityTier(currentModel),
+      localBenchmarkLatency: null,
+      pinned: pinnedIds === null ? null : pinnedIds.has(registryKey) || pinnedIds.has(modelId),
+      available: modelAvailable(currentModel),
+      configured: modelConfigured(currentModel),
+    };
+  }
   return {
     status: readProviderApi(context) ? 'available' : 'degraded',
     current: {
       provider: context.session.runtime.provider,
       model: context.session.runtime.model,
       reasoningEffort: context.session.runtime.reasoningEffort || readConfig(context, 'provider.reasoningEffort') || null,
-      currentModel: loadedCurrentModel ? await describe(loadedCurrentModel) : currentModel ? await describeModel({
-        kind: 'model',
-        id: modelRegistryKey(currentModel),
-        registryKey: modelRegistryKey(currentModel),
-        modelId: modelModelId(currentModel),
-        providerId: modelProviderId(currentModel),
-        displayName: modelDisplayName(currentModel),
-        current: true,
-        contextWindow: contextWindowFor(context, currentModel),
-        reasoningEffort: modelReasoning(currentModel),
-        capabilities: modelCapabilities(currentModel),
-        tier: modelTier(currentModel),
-        benchmarkCompositeScore: modelBenchmarkCompositeScore(currentModel),
-        benchmarkQualityTier: modelBenchmarkQualityTier(currentModel),
-        localBenchmarkLatency: null,
-        pinned: false,
-        available: modelAvailable(currentModel),
-        configured: modelConfigured(currentModel),
-      }, { context, includeParameters, reading }) : null,
+      currentModel: loadedCurrentModel ? await describe(loadedCurrentModel)
+        : unlistedCurrentModel ? await describeModel(unlistedCurrentModel, { context, includeParameters, reading }) : null,
     },
     providers: providerIds,
     localCookbook: cookbook,
@@ -424,7 +435,7 @@ export async function modelRoutingSummary(context: CommandContext, args: AgentHa
       providers: providerIds.length,
       models: models.length,
     },
-    ...(models.some((model) => model.pinned === null) ? { pinnedStatus: 'unknown: the favorites could not be read, so pinned is null for each model' } : {}),
+    ...(models.some((model) => model.pinned === null) || unlistedCurrentModel?.pinned === null ? { pinnedStatus: 'unknown: the favorites could not be read, so pinned is null for each model' } : {}),
     issues: readProviderApi(context) ? [] : [{
       severity: 'warning',
       message: 'Provider API is unavailable in this runtime; static model route posture is still inspectable.',

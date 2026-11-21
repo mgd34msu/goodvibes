@@ -188,6 +188,12 @@ export class DaemonSurfaceDeliveryHelper {
   private readonly deliveringOwedRoutes = new Set<string>();
   /** Agents whose answer this process handed to its channel or recovered from the session; see `recoverPendingReply`. */
   private readonly recoveredReplies = new Set<string>();
+  /**
+   * Open approvals whose undelivered prompt was already taken to the owner by
+   * this process. Two updates of one approval published before the record's
+   * mark lands would otherwise both alert; an id leaves when its approval settles.
+   */
+  private readonly ownerAlertedApprovals = new Set<string>();
 
   constructor(
     private readonly context: DaemonSurfaceDeliveryContext,
@@ -896,6 +902,7 @@ export class DaemonSurfaceDeliveryHelper {
    * Agent or the web UI is on the owner's screen already: nothing more is done.
    */
   async notifyApprovalUpdate(approval: SharedApprovalRecord): Promise<void> {
+    if (!isOpenApprovalStatus(approval.status)) this.ownerAlertedApprovals.delete(approval.id);
     await this.context.sessionBroker.start();
     await this.context.routeBindings.start();
     // An ask a guest's turn raised (someone a channel admits who is not its
@@ -909,6 +916,11 @@ export class DaemonSurfaceDeliveryHelper {
     // Marked already: the record update that said so is itself published here.
     const marked = approval.metadata['promptDelivery'];
     if (typeof marked === 'object' && marked !== null && (marked as { delivered?: unknown }).delivered === false) return;
+    // Claimed with no await since the mark was read: an update published before
+    // the mark lands, processed after this alert, finds the claim. Kept until
+    // the approval settles, not released when this alert ends.
+    if (this.ownerAlertedApprovals.has(approval.id)) return;
+    this.ownerAlertedApprovals.add(approval.id);
     const reason = outcome.reason === 'delivery-failed' && outcome.error ? `delivery-failed: ${outcome.error}` : outcome.reason;
     const webUrl = this.controlPlaneWebUrl({ approvalId: approval.id, sessionId: approval.sessionId });
     const text = `Approval required for ${approval.request.tool}: ${approval.request.analysis.summary}. `

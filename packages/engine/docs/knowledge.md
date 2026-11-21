@@ -597,14 +597,14 @@ The platform-owned `HomeGraphService` supports:
 - generated Home Graph page listing with markdown content for panels and
   editors
 - visual knowledge-base maps from Home Graph nodes, sources, and edges
-- packet generation with sharing profiles (`guest`, `pet-sitter`, `emergency`, `contractor`, `network-admin`, each limited to the sections it may show) and `includeFields`/`excludeFields` over the sections devices, rooms, maintenance, troubleshooting, network, sources and issues; unknown profiles or field names are refused. Maintenance, troubleshooting (with warnings) and network sections list the facts the home has, grouped by device; a shown section with nothing recorded says so. A `guest` packet lists only devices the owner shared with guests: review the device with `value: { shareWith: ["guest"] }` (or `"all"`). A `packetKind` that names a profile selects it when no `sharingProfile` is given
+- packet generation with sharing profiles (`guest`, `pet-sitter`, `emergency`, `contractor`, `network-admin`, each limited to the sections it may show) and `includeFields`/`excludeFields` over the sections devices, rooms, maintenance, troubleshooting, network, sources and issues; unknown profiles or field names are refused. Maintenance, troubleshooting (with warnings) and network sections list the facts the home has, grouped by device; a shown section with nothing recorded says so. A `guest` packet lists only devices the owner shared with guests: review the device with `value: { shareWith: ["guest"] }` (or `"all"`); any other `shareWith` label is refused, since the other profiles show every device and are limited by section. A `packetKind` that names a profile selects it when no `sharingProfile` is given
 - issue listing and review actions; an action that would change nothing is refused with the actions that apply. On a source, `reject` and `forget` retire it from answers, `reopen` brings it back and `accept` records the decision; `resolve` and `edit` apply to issues and nodes only
 - durable semantic review decisions for generated issues
 - base knowledge refinement task listing and on-demand runs over
   `GET /api/homeassistant/home-graph/refinement/tasks` and
   `POST /api/homeassistant/home-graph/refinement/run`
 - integration documentation-candidate source discovery
-- source inventory, graph browse, export, and import
+- source inventory, graph browse, export, and import; an import whose file holds a record already stored in another knowledge space is refused before anything is written, naming the record, the space that owns it and the space the file was exported from (import the file into the space it came from, or reset that space first)
 
 ### Node kinds and relations
 
@@ -924,6 +924,10 @@ The projection service renders structured knowledge as markdown:
 - source-health dashboard
 - backlinks dashboard
 - rollup pages for domains, topics, and bookmark folders
+
+A dashboard projection takes the id `source-health` (the default when none is
+given) or `backlinks`; any other id is refused as an unknown projection target
+that lists the known dashboards.
 
 `knowledge.projection.materialize` stores a generated projection as a durable
 markdown artifact and a stable generated source. Generated projection sources

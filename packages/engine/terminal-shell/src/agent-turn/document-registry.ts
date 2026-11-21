@@ -606,6 +606,8 @@ export class AgentDocumentRegistry {
       const summary = input.summary?.trim() || 'AI suggested revision.';
       const rationale = input.rationale?.trim() || 'No rationale provided.';
       assertDocumentContentSafe([title, body, summary, rationale, ...tags]);
+      const duplicate = this.titleHolder(title, existing.id);
+      if (duplicate) throw new Error(`Document already exists ${duplicate}`);
       const timestamp = nowIso();
       const suggestion: AgentDocumentSuggestion = {
         id: this.nextSuggestionId(existing.suggestions),
@@ -649,6 +651,9 @@ export class AgentDocumentRegistry {
       if (movedOn) {
         throw new Error(`Document suggestion ${target.id} was proposed against ${target.baseVersionId ?? 'an earlier version'}, and ${existing.id} is now at ${current}; accepting it would undo the changes made since. Nothing changed. Propose the revision again against ${current} (mode:"suggest"), or reject ${target.id} (mode:"rejectSuggestion").`);
       }
+      // Another document may have taken the suggested title since it was proposed.
+      const duplicate = this.titleHolder(target.title, existing.id);
+      if (duplicate) throw new Error(`Document already exists ${duplicate}`);
       const timestamp = nowIso();
       const version: AgentDocumentVersion = {
         id: nextVersionId(existing),

@@ -473,15 +473,42 @@ function renderLaunchdPlist(definition: ManagedServiceDefinition, startAtLogin: 
   ].join('\n');
 }
 
+/**
+ * One word of a Windows command line, as the C runtime splits it: a word with
+ * whitespace or a quote is wrapped in quotes, an inner quote is escaped, and
+ * the backslashes before a quote (or the closing one) are doubled.
+ */
+function windowsWord(value: string): string {
+  if (/[\x00\r\n]/.test(value)) throw new Error('A Windows task command cannot contain NUL or a line break.');
+  if (value.length > 0 && !/[\s"]/.test(value)) return value;
+  return `"${value.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, '$1$1')}"`;
+}
+
+/**
+ * What the logon task runs (`/TR`): the quoted command, and when the service
+ * sets environment variables (a GoodVibes home that differs from the default),
+ * the command started by cmd.exe after setting each, so the task starts with
+ * the same homes the systemd unit and the LaunchAgent give it.
+ */
+function windowsTaskRun(definition: ManagedServiceDefinition): string {
+  const command = [definition.command, ...definition.args].map(windowsWord).join(' ');
+  const env = Object.entries(definition.env).filter(([, value]) => value.length > 0);
+  if (env.length === 0) return command;
+  const assignments = env.map(([key, value]) => {
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) throw new Error('Invalid Windows task environment variable name.');
+    // cmd.exe expands % and ends a quoted assignment at ", even inside quotes.
+    if (/["%\x00-\x1f]/.test(value)) throw new Error(`The Windows task cannot carry the value of ${key}: it contains a quote, a percent sign or a control character.`);
+    return `set "${key}=${value}"&& `;
+  }).join('');
+  return `cmd.exe /d /s /c "${assignments}${command}"`;
+}
+
 function renderWindowsCommand(definition: ManagedServiceDefinition): string {
-  const taskName = definition.name;
-  const commandLine = [definition.command, ...definition.args].join(' ');
-  return `schtasks /Create /SC ONLOGON /TN "${taskName}" /TR "${commandLine}" /F`;
+  return `schtasks /Create /SC ONLOGON /TN "${definition.name}" /TR ${windowsWord(windowsTaskRun(definition))} /F`;
 }
 
 function windowsCreateArgs(definition: ManagedServiceDefinition): string[] {
-  const commandLine = [definition.command, ...definition.args].join(' ');
-  return ['/Create', '/SC', 'ONLOGON', '/TN', definition.name, '/TR', commandLine, '/F'];
+  return ['/Create', '/SC', 'ONLOGON', '/TN', definition.name, '/TR', windowsTaskRun(definition), '/F'];
 }
 
 /**

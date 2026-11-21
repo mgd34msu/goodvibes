@@ -15,7 +15,7 @@ import { useQuery } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { FleetAttemptGroup } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
-import { isMethodUnavailableError } from '../../lib/errors';
+import { formatError, isMethodUnavailableError } from '../../lib/errors';
 import { sortApprovalsNewestFirst } from '../../lib/approvals';
 import { hostedSessionsFromListResult, sortHostedSessionsNewestFirst } from '../../lib/hosted-sessions';
 import { sortUnionSessions, unionSessionFromRecord, unionSessionsFromListResponse } from '../../lib/sessions-union';
@@ -33,6 +33,21 @@ import type { CiWatch } from './work-items';
 
 const FLEET_FALLBACK_POLL_MS = 15_000;
 const FLEET_SAFETY_POLL_MS = 60_000;
+
+/** The older sessions read with "Show older sessions", for the pairing `revision`. */
+interface OlderSessions {
+  readonly revision: number;
+  readonly records: readonly unknown[];
+  readonly cursor: string;
+  readonly loading: boolean;
+  readonly done: boolean;
+  /** Why the last page could not be read; empty when it was. */
+  readonly error: string;
+}
+
+function emptyOlderSessions(revision: number): OlderSessions {
+  return { revision, records: [], cursor: '', loading: false, done: false, error: '' };
+}
 
 export interface WorkDataOptions {
   contractScope: ClientLifetime;
@@ -116,21 +131,26 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
   const approvalRecords = useMemo(() => sortApprovalsNewestFirst(approvals.data?.approvals ?? []), [approvals.data]);
   // The session snapshot holds the newest 50; "Show older sessions" reads sessions.search a page at a
   // time with its cursor, so every open session is reachable (and opens) here. No read until pressed.
-  const [olderSessions, setOlderSessions] = useState<{ readonly records: readonly unknown[]; readonly cursor: string; readonly started: boolean; readonly loading: boolean; readonly done: boolean }>(
-    { records: [], cursor: '', started: false, loading: false, done: false });
+  // The pages belong to the pairing they were read under (contractScope.revision): a new pairing
+  // starts with none, and a page that lands after the pairing changed is not shown.
+  const revision = contractScope.revision;
+  const [storedOlderSessions, setOlderSessions] = useState<OlderSessions>(() => emptyOlderSessions(revision));
+  const olderSessions = storedOlderSessions.revision === revision ? storedOlderSessions : emptyOlderSessions(revision);
   const snapshotFull = companionSessionsFromListResponse(sessions.data).length >= SESSION_SNAPSHOT_SIZE;
   const loadOlderSessions = useCallback(() => {
     if (olderSessions.loading || olderSessions.done) return;
-    setOlderSessions((current) => ({ ...current, loading: true }));
+    setOlderSessions({ ...olderSessions, loading: true, error: '' });
     platformClient.operator.sessions.search({ limit: OLDER_SESSIONS_PAGE, ...(olderSessions.cursor ? { cursor: olderSessions.cursor } : {}) }).then((page) => {
       const record = page as { sessions?: unknown[]; nextCursor?: unknown; hasMore?: unknown };
       const next = typeof record.nextCursor === 'string' ? record.nextCursor : '';
-      setOlderSessions((current) => ({
+      setOlderSessions((current) => (current.revision !== revision ? current : {
+        revision,
         records: [...current.records, ...(Array.isArray(record.sessions) ? record.sessions : [])],
-        cursor: next, started: true, loading: false, done: record.hasMore !== true || !next,
+        cursor: next, loading: false, done: record.hasMore !== true || !next, error: '',
       }));
-    }, () => setOlderSessions((current) => ({ ...current, loading: false })));
-  }, [olderSessions.loading, olderSessions.done, olderSessions.cursor]);
+    }, (cause: unknown) => setOlderSessions((current) => (current.revision !== revision ? current
+      : { ...current, loading: false, error: formatError(cause) })));
+  }, [olderSessions, revision]);
   const sessionRecords = useMemo(() => {
     const newest = unionSessionsFromListResponse(sessions.data);
     if (olderSessions.records.length === 0) return sortUnionSessions(newest);
@@ -139,7 +159,7 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
     return sortUnionSessions([...newest, ...older]);
   }, [sessions.data, olderSessions.records]);
   const moreSessions = snapshotFull && !olderSessions.done
-    ? { loading: olderSessions.loading, load: loadOlderSessions }
+    ? { loading: olderSessions.loading, error: olderSessions.error, load: loadOlderSessions }
     : null;
   const hostedRecords = useMemo(
     () => sortHostedSessionsNewestFirst(hostedSessionsFromListResult(hosted.data)),

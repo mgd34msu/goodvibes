@@ -58,6 +58,7 @@ function managerStatus(context: FileRecoveryContext): {
         path: workspacePath(context, nextUndo.path),
         tool: nextUndo.tool,
         timestamp: nextUndo.timestamp,
+        ...(nextUndo.toolCallId !== undefined ? { toolCallId: nextUndo.toolCallId } : {}),
       },
     } : {}),
   };
@@ -90,8 +91,10 @@ export function fileRecoveryCatalogStatus(context: FileRecoveryContext): Record<
     undoDepth: status.undoDepth,
     redoDepth: status.redoDepth,
     // Undo reverts only the newest entry; this says which one that is, so a
-    // reader can tell which execution record the undo would actually revert.
+    // reader can tell which execution record the undo would actually revert:
+    // the record whose call id is nextUndoCallId.
     ...(typeof status.nextUndo?.timestamp === 'string' ? { nextUndoAt: status.nextUndo.timestamp } : {}),
+    ...(typeof status.nextUndo?.toolCallId === 'string' ? { nextUndoCallId: status.nextUndo.toolCallId } : {}),
     readOnly: true,
   };
 }

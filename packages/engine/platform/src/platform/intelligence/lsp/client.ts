@@ -38,10 +38,15 @@ interface DiagnosticsWaiter {
 /** What a sync told the server, so a diagnostics wait can match the answer. */
 export interface DocumentSync {
   readonly version: number;
-  /** Notification sequence at the moment the text was sent. */
+  /** Notification sequence at the moment this text was sent (the earlier send when the text is unchanged). */
   readonly sentAtSeq: number;
-  /** False when the server already had this exact text. */
-  readonly changed: boolean;
+}
+
+/** An open document: the text the server has, its version, and the notification sequence it was sent at. */
+interface OpenDocument {
+  readonly text: string;
+  readonly version: number;
+  readonly sentAtSeq: number;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -64,7 +69,7 @@ export class LspClient {
   private buffer: Uint8Array = new Uint8Array(0);
   private readLoopRunning = false;
   /** Opened documents in least-recently-used order (a Map keeps insertion order). */
-  private readonly documents = new Map<string, { text: string; version: number }>();
+  private readonly documents = new Map<string, OpenDocument>();
   private readonly published = new Map<string, PublishedDiagnostics>();
   private readonly diagnosticsWaiters = new Set<DiagnosticsWaiter>();
   private notificationSeq = 0;
@@ -164,15 +169,15 @@ export class LspClient {
       this.documents.delete(uri);
       if (known.text === text) {
         this.documents.set(uri, known);
-        return { version: known.version, sentAtSeq, changed: false };
+        return { version: known.version, sentAtSeq: known.sentAtSeq };
       }
       const version = known.version + 1;
       this.notify('textDocument/didChange', { textDocument: { uri, version }, contentChanges: [{ text }] });
-      this.documents.set(uri, { text, version });
-      return { version, sentAtSeq, changed: true };
+      this.documents.set(uri, { text, version, sentAtSeq });
+      return { version, sentAtSeq };
     }
     this.notify('textDocument/didOpen', { textDocument: { uri, languageId, version: 1, text } });
-    this.documents.set(uri, { text, version: 1 });
+    this.documents.set(uri, { text, version: 1, sentAtSeq });
     while (this.documents.size > MAX_OPEN_DOCUMENTS) {
       const oldest = this.documents.keys().next().value;
       if (oldest === undefined) break;
@@ -180,7 +185,7 @@ export class LspClient {
       this.published.delete(oldest);
       this.notify('textDocument/didClose', { textDocument: { uri: oldest } });
     }
-    return { version: 1, sentAtSeq, changed: true };
+    return { version: 1, sentAtSeq };
   }
 
   /**
@@ -188,12 +193,13 @@ export class LspClient {
    * `timeoutMs`. A server that stamps its notification with a version is
    * matched on it. For one that does not, the answer is the newest
    * publication after the text was sent once {@link DIAGNOSTICS_SETTLE_MS}
-   * pass without another. When the text did not change, the newest
-   * publication already held is the answer. Null when none arrived in time.
+   * pass without another. A publication already held answers at once when it
+   * is for this text: stamped with its version, or version-less and received
+   * after the text was sent. Null when none arrived in time.
    */
   waitForDiagnostics(uri: string, sync: DocumentSync, timeoutMs: number): Promise<Diagnostic[] | null> {
     const current = this.published.get(uri);
-    if (current && (current.version === sync.version || !sync.changed)) {
+    if (current && (current.version === sync.version || (current.version === undefined && current.seq > sync.sentAtSeq))) {
       return Promise.resolve(current.diagnostics);
     }
     if (!this.isRunning) return Promise.resolve(null);
@@ -221,12 +227,15 @@ export class LspClient {
       const deadline = setTimeout(() => waiter.resolve(latest), timeoutMs);
       deadline.unref?.();
       this.diagnosticsWaiters.add(waiter);
-      if (current && current.version === undefined && current.seq > sync.sentAtSeq) waiter.offer(current.diagnostics);
     });
   }
 
-  /** Stop the server process. */
-  async stop(): Promise<void> {
+  /**
+   * Stop the server process: close its input and send `signal` (SIGTERM by
+   * default; SIGKILL for a server that has nothing to save, such as one that
+   * failed its handshake).
+   */
+  async stop(signal: NodeJS.Signals = 'SIGTERM'): Promise<void> {
     if (!this.proc) return;
     // Reject all pending requests
     for (const [id, pending] of this.pendingRequests) {
@@ -237,7 +246,7 @@ export class LspClient {
     for (const waiter of [...this.diagnosticsWaiters]) waiter.resolve(null);
     try {
       (this.proc.stdin as import('bun').FileSink).end();
-      this.proc.kill();
+      this.proc.kill(signal);
       await this.proc.exited;
     } catch (err) {
       logger.warn('LspClient: shutdown cleanup failed', { err: summarizeError(err) });

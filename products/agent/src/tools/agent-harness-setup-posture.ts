@@ -395,7 +395,9 @@ export async function runSetupInstallSmoke(context: CommandContext, args: AgentH
     evidenceFields,
     ownership,
   });
-  ownership.assertCurrent();
+  // A saved artifact is committed: its answer must reach the caller with the id, so a
+  // source change after the save is not checked. A run that saved nothing is still a read.
+  if (artifact.status !== 'saved') ownership.assertCurrent();
   const result = installSmokeRunResult(smokePlan, evidenceFields.map((field) => field.id));
   const ignoredFields = ignoredSetupSmokeEvidenceFields(args.fields);
   return {

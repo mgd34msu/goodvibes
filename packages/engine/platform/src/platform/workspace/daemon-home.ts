@@ -147,26 +147,48 @@ export function readOperatorTokenFile(daemonHomeDir: string): string | undefined
  */
 export function readDaemonSetting(daemonHomeDir: string, key: string): string | undefined {
   const settingsPath = join(daemonHomeDir, 'daemon-settings.json');
-  if (!existsSync(settingsPath)) return undefined;
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(readFileSync(settingsPath, 'utf-8'));
-  } catch (error: unknown) {
-    const code = (error as { readonly code?: unknown } | null)?.code;
-    if (code === 'ENOENT') return undefined;
-    // The parser's own message can quote the file's text, which holds pairing state; only the kind is named.
-    throw unreadableDaemonSettings(settingsPath, error instanceof SyntaxError ? 'it is not valid JSON'
-      : typeof code === 'string' ? code : 'the file could not be opened');
-  }
-  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    throw unreadableDaemonSettings(settingsPath, 'it does not hold a JSON object');
-  }
-  const val = (parsed as Record<string, unknown>)[key];
+  const settings = parseDaemonSettings(settingsPath);
+  if (settings.kind === 'absent') return undefined;
+  if (settings.kind === 'malformed') throw unreadableDaemonSettings(settingsPath, settings.why);
+  const val = settings.value[key];
   return typeof val === 'string' ? val : undefined;
 }
 
 function unreadableDaemonSettings(settingsPath: string, cause: string): Error {
   return new Error(`${settingsPath} could not be read (${cause}); fix or remove it, or start with --working-dir`);
+}
+
+type DaemonSettingsFile =
+  | { readonly kind: 'absent' }
+  | { readonly kind: 'object'; readonly value: Readonly<Record<string, unknown>> }
+  | { readonly kind: 'malformed'; readonly why: 'it is not valid JSON' | 'it does not hold a JSON object' };
+
+/**
+ * The settings file as the reader and the writer both see it. A file that
+ * exists but cannot be read (permissions, a directory in its place) throws an
+ * error naming the file and the error code: its bytes are untouched, since
+ * nothing is known to be wrong with them.
+ */
+function parseDaemonSettings(settingsPath: string): DaemonSettingsFile {
+  let text: string;
+  try {
+    text = readFileSync(settingsPath, 'utf-8');
+  } catch (error: unknown) {
+    const code = (error as { readonly code?: unknown } | null)?.code;
+    if (code === 'ENOENT') return { kind: 'absent' };
+    throw unreadableDaemonSettings(settingsPath, typeof code === 'string' ? code : 'the file could not be opened');
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    // The parser's own message can quote the file's text, which holds pairing state; only the kind is named.
+    return { kind: 'malformed', why: 'it is not valid JSON' };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { kind: 'malformed', why: 'it does not hold a JSON object' };
+  }
+  return { kind: 'object', value: parsed as Record<string, unknown> };
 }
 
 /**
@@ -181,22 +203,21 @@ export function writeDaemonSetting(daemonHomeDir: string, key: string, value: st
   const settingsPath = join(daemonHomeDir, 'daemon-settings.json');
   mkdirSync(daemonHomeDir, { recursive: true, mode: 0o700 });
   withProcessLockSync(`${settingsPath}.writer.sqlite`, () => {
-    let existing: Record<string, unknown> = {};
-    if (existsSync(settingsPath)) {
-      try {
-        existing = JSON.parse(readFileSync(settingsPath, 'utf-8')) as Record<string, unknown>;
-      } catch (err: unknown) {
-        // Keep the unreadable bytes: the file may hold other keys (pairing
-        // state) that an operator can still recover. If they cannot be set
-        // aside, refuse the write rather than destroy them.
-        const aside = `${settingsPath}.corrupt-${Date.now()}`;
-        renameSync(settingsPath, aside);
-        logger.warn('[DaemonHome] daemon-settings.json could not be parsed; it was moved aside and a fresh file is being written', {
-          path: settingsPath,
-          movedTo: aside,
-          error: String(err),
-        });
-      }
+    // A file that cannot be read throws here and is left as it is.
+    const settings = parseDaemonSettings(settingsPath);
+    let existing: Readonly<Record<string, unknown>> = {};
+    if (settings.kind === 'object') existing = settings.value;
+    else if (settings.kind === 'malformed') {
+      // Keep the bytes: the file may hold other keys (pairing state) that an
+      // operator can still recover. If they cannot be set aside, refuse the
+      // write rather than destroy them.
+      const aside = `${settingsPath}.corrupt-${Date.now()}`;
+      renameSync(settingsPath, aside);
+      logger.warn('[DaemonHome] daemon-settings.json could not be used; it was moved aside and a fresh file is being written', {
+        path: settingsPath,
+        movedTo: aside,
+        reason: settings.why,
+      });
     }
     writeJsonFileAtomic(settingsPath, { ...existing, [key]: value }, { mode: 0o600, durable: true, trailingNewline: false });
   });

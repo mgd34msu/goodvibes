@@ -37,7 +37,8 @@ const VALID_CLASSES: readonly MemoryClass[] = [
 const VALID_SCOPES: readonly MemoryScope[] = ['session', 'project', 'team'];
 export const VALID_REVIEW_STATES: readonly MemoryReviewState[] = ['fresh', 'reviewed', 'stale', 'contradicted'];
 const VALID_PROVENANCE_KINDS: readonly ProvenanceLinkKind[] = ['session', 'turn', 'task', 'event', 'file'];
-const VALUE_OPTIONS = new Set([
+/** The options the memory command reads with a value; the CLI catalog declares its memory entry from this list. */
+export const MEMORY_VALUE_OPTIONS: readonly string[] = [
   'by',
   'cls',
   'confidence',
@@ -53,7 +54,10 @@ const VALUE_OPTIONS = new Set([
   'tags',
   'task',
   'turn',
-]);
+];
+/** The options the memory command reads as bare flags. */
+export const MEMORY_FLAG_OPTIONS: readonly string[] = ['semantic', 'vector', 'yes'];
+const VALUE_OPTIONS: ReadonlySet<string> = new Set(MEMORY_VALUE_OPTIONS);
 interface CommandSuccess<TData> {
   readonly ok: true;
   readonly kind: string;

@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline/promises';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { splitCommandOption } from '@goodvibes/engine/terminal-shell/cli-arguments';
 import type { CliCommandRuntime } from './management.ts';
 import { previewAgentHostPairing, unpairAgentHost } from '../runtime/agent-host-pairing.ts';
 
@@ -33,8 +34,10 @@ export async function runSetupPairingCommand(runtime: CliCommandRuntime, termina
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
     if (arg === '--apply' && !apply) { apply = true; continue; }
-    if (arg === '--name' && !named && args[index + 1] && !args[index + 1]!.startsWith('--')) {
-      named = true; name = args[++index]!; continue;
+    const option = splitCommandOption(arg ?? '');
+    if (option.name === '--name' && !named) {
+      if (option.value !== undefined && option.value.trim().length > 0) { named = true; name = option.value; continue; }
+      if (option.value === undefined && args[index + 1] && !args[index + 1]!.startsWith('--')) { named = true; name = args[++index]!; continue; }
     }
     console.error('Usage: goodvibes-agent setup pair [--name <device-name>] [--apply]. --apply requires fresh terminal confirmation; --yes is unsupported.');
     return 2;

@@ -103,16 +103,22 @@ export class McpLifecycleManager {
     if (this.#move(entry, 'connecting')) this.#emit({ type: 'MCP_CONNECTING', serverId: serverName });
   }
 
-  /** The server is connected and answering. */
+  /**
+   * The server is connected and answering. The reconnect count is kept: a
+   * server that connects and drops again at once keeps counting toward the
+   * attempt limit, and only a connection that stayed up starts a fresh cycle
+   * (see {@link failed}).
+   */
   connected(serverName: string, toolCount = 0): void {
     const tracked = this.#track(serverName);
     this.#cancelTimer(tracked);
     const { entry } = tracked;
     if (entry.state === 'connected') return;
+    // A degraded server whose tools loaded again stays the same connection.
+    const sameConnection = isOperational(entry.state);
     if (!canTransition(entry.state, 'connected')) this.#move(entry, 'connecting');
     if (!this.#move(entry, 'connected')) return;
-    entry.reconnectAttempts = 0;
-    entry.connectedAt = Date.now();
+    if (!sameConnection) entry.connectedAt = Date.now();
     delete entry.lastError;
     delete entry.stoppedReason;
     this.#emit({ type: 'MCP_CONNECTED', serverId: serverName, toolCount, resourceCount: 0 });
@@ -144,6 +150,11 @@ export class McpLifecycleManager {
     const { entry } = tracked;
     if (entry.state === 'disconnected' || entry.state === 'configured' || entry.state === 'reconnecting') return;
     tracked.generation++;
+    // A connection that stayed up at least the longest back-off starts a fresh cycle;
+    // one that dropped sooner keeps counting, so a server that drops after every connect is given up on.
+    if (isOperational(entry.state) && entry.connectedAt !== undefined && Date.now() - entry.connectedAt >= this.#config.maxDelayMs) {
+      entry.reconnectAttempts = 0;
+    }
     entry.lastError = reason;
     entry.disconnectedAt = Date.now();
     const stop = this.#stopReason(entry) ?? (canTransition(entry.state, 'reconnecting') ? undefined : 'it cannot be reconnected from its current state');
@@ -237,10 +248,14 @@ export class McpLifecycleManager {
     return this.#servers.get(serverName)?.entry.state === 'reconnecting';
   }
 
-  /** The reconnect state for status surfaces and refusals; undefined when no cycle ran or stopped. */
+  /**
+   * The reconnect state for status surfaces and refusals; undefined when no
+   * cycle ran or stopped, and while the server is connected (the attempt count
+   * it keeps then is not shown).
+   */
   reconnectStatus(serverName: string): McpReconnectStatus | undefined {
     const entry = this.#servers.get(serverName)?.entry;
-    if (!entry || (entry.reconnectAttempts === 0 && entry.stoppedReason === undefined)) return undefined;
+    if (!entry || isOperational(entry.state) || (entry.reconnectAttempts === 0 && entry.stoppedReason === undefined)) return undefined;
     return {
       state: entry.state,
       attempt: entry.reconnectAttempts,

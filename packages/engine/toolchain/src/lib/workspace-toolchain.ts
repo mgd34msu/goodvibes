@@ -58,12 +58,13 @@ export interface WorkspaceToolchainOptions {
   readonly execPath?: string;
 }
 
-const FORWARDED: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM'];
+/** A hangup is forwarded too: the detached group has no terminal, so a closed terminal reaches it only this way. */
+const FORWARDED: readonly NodeJS.Signals[] = ['SIGINT', 'SIGTERM', 'SIGHUP'];
 
 /**
  * Run the declared CLI with `args` and resolve with its exit code. On POSIX the
- * build runs as its own process group: an interrupt is passed to the whole
- * group, and whatever the build leaves running when it exits is killed, so no
+ * build runs as its own process group: an interrupt, termination or hangup is
+ * passed to the whole group, and whatever the build leaves running when it exits is killed, so no
  * grandchild keeps writing build output after the command returned.
  */
 export async function runWorkspaceToolchain(

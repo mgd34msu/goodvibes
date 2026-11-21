@@ -310,8 +310,8 @@ export function createServiceBackedGateway(service: EmailService): EmailGatewayS
       });
     },
 
-    async readAttachment(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null> {
-      return guard(async () => service.readAttachment(uid, index));
+    async readAttachment(uid: number, index: number, uidValidity: number): Promise<EmailGatewayAttachmentContent | null> {
+      return guard(async () => service.readAttachment(uid, index, uidValidity));
     },
 
     async listDrafts(limit: number, before?: number): Promise<EmailGatewayDraftList> {
@@ -407,9 +407,9 @@ export function instrumentEmailGateway(
     }),
 
     ...(backend.readAttachment === undefined ? {} : {
-      async readAttachment(uid: number, index: number): Promise<EmailGatewayAttachmentContent | null> {
+      async readAttachment(uid: number, index: number, uidValidity: number): Promise<EmailGatewayAttachmentContent | null> {
         await ready();
-        const result = await backend.readAttachment!(uid, index);
+        const result = await backend.readAttachment!(uid, index, uidValidity);
         if (result) log('email.attachment.get', { uid, index, sizeBytes: result.sizeBytes });
         return result;
       },

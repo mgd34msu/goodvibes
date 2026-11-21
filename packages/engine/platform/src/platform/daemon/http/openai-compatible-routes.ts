@@ -162,7 +162,7 @@ async function handleChatCompletions(
   prefix: string,
 ): Promise<Response> {
   const body = await context.parseJsonBody(request);
-  if (body instanceof Response) return openAIErrorFromResponse(body);
+  if (body instanceof Response) return await openAIErrorFromResponse(body);
 
   const parsed = body as ChatCompletionRequest;
   if (!Array.isArray(parsed.messages)) {
@@ -334,9 +334,11 @@ function normalizeMessageContent(content: unknown): string | ContentPart[] {
   if (content === null || content === undefined) return '';
   if (!Array.isArray(content)) return String(content);
 
+  // A part the route cannot hand to the model is refused, as an unapplied
+  // option is: dropping it would answer about content the model never saw.
   const parts: ContentPart[] = [];
   const textParts: string[] = [];
-  for (const item of content) {
+  for (const [index, item] of content.entries()) {
     if (!isRecord(item)) {
       textParts.push(String(item));
       continue;
@@ -347,15 +349,18 @@ function normalizeMessageContent(content: unknown): string | ContentPart[] {
       if (text) textParts.push(text);
       continue;
     }
-    if (type === 'image_url' && isRecord(item.image_url)) {
-      const url = readString(item.image_url.url);
-      if (url?.startsWith('data:')) {
-        const parsed = parseDataUrl(url);
-        if (parsed) parts.push({ type: 'image', data: parsed.data, mediaType: parsed.mediaType });
-      } else if (url) {
-        textParts.push(`[image_url: ${url}]`);
+    if (type === 'image_url') {
+      const url = isRecord(item.image_url) ? readString(item.image_url.url) : undefined;
+      if (!url) throw new Error(`Content part ${index} (image_url) has no image_url.url.`);
+      if (!url.startsWith('data:')) {
+        throw new Error(`Content part ${index} (image_url) is a remote URL, which this endpoint does not fetch. Send the image as a base64 data URL (data:<media type>;base64,<data>).`);
       }
+      const parsed = parseDataUrl(url);
+      if (!parsed) throw new Error(`Content part ${index} (image_url) is not a base64 data URL; send it as data:<media type>;base64,<data>.`);
+      parts.push({ type: 'image', data: parsed.data, mediaType: parsed.mediaType });
+      continue;
     }
+    throw new Error(`Content part ${index} has type ${type ? `"${type}"` : '(none)'}, which this endpoint does not support; the supported types are text and image_url.`);
   }
   if (parts.length === 0) return textParts.join('\n');
   if (textParts.length > 0) parts.unshift({ type: 'text', text: textParts.join('\n') });
@@ -369,10 +374,12 @@ function contentAsText(content: string | ContentPart[]): string {
 
 function normalizeTools(tools: readonly unknown[]): ToolDefinition[] {
   const normalized: ToolDefinition[] = [];
-  for (const tool of tools) {
-    if (!isRecord(tool) || tool.type !== 'function' || !isRecord(tool.function)) continue;
+  for (const [index, tool] of tools.entries()) {
+    if (!isRecord(tool) || tool.type !== 'function' || !isRecord(tool.function)) {
+      throw new Error(`Tool ${index} is not a function tool; each tool must be { "type": "function", "function": { "name": ... } }.`);
+    }
     const name = readString(tool.function.name);
-    if (!name) continue;
+    if (!name) throw new Error(`Tool ${index} has no function.name.`);
     normalized.push({
       name,
       description: readString(tool.function.description) ?? '',
@@ -384,15 +391,15 @@ function normalizeTools(tools: readonly unknown[]): ToolDefinition[] {
 
 function normalizeToolCalls(toolCalls: readonly unknown[]): ToolCall[] {
   const normalized: ToolCall[] = [];
-  for (const call of toolCalls) {
-    if (!isRecord(call) || !isRecord(call.function)) continue;
-    const id = readString(call.id);
-    const name = readString(call.function.name);
-    if (!id || !name) continue;
+  for (const [index, call] of toolCalls.entries()) {
+    const fn = isRecord(call) && isRecord(call.function) ? call.function : undefined;
+    const id = isRecord(call) ? readString(call.id) : undefined;
+    const name = fn ? readString(fn.name) : undefined;
+    if (!fn || !id || !name) throw new Error(`Assistant tool call ${index} needs an id and a function.name.`);
     normalized.push({
       id,
       name,
-      arguments: parseToolArguments(readString(call.function.arguments) ?? '{}'),
+      arguments: parseToolArguments(readString(fn.arguments) ?? '{}'),
     });
   }
   return normalized;
@@ -711,8 +718,17 @@ function openAIErrorBody(message: string, type: string, code: string, param: str
   return { message, type, param, code };
 }
 
-function openAIErrorFromResponse(response: Response): Response {
-  return openAIError(response.statusText || 'Invalid request body', response.status || 400, 'invalid_request_error', 'invalid_json');
+/** The body parser's own refusal, in the OpenAI error shape, with its reason and status kept. */
+async function openAIErrorFromResponse(response: Response): Promise<Response> {
+  let reason: string | undefined;
+  try {
+    const refusal: unknown = await response.json();
+    reason = isRecord(refusal) ? readString(refusal.error) : undefined;
+  } catch {
+    reason = undefined;
+  }
+  const status = response.status || 400;
+  return openAIError(reason || 'Invalid request body', status, 'invalid_request_error', status === 413 ? 'request_too_large' : 'invalid_json');
 }
 
 function modelOwnerFor(id: string, models: ReturnType<ProviderRegistry['listModels']>, defaultOwner: string): string {
@@ -727,10 +743,13 @@ function normalizePathPrefix(prefix: string): string {
   return trimmed.startsWith('/') ? trimmed.replace(/\/+$/u, '') : `/${trimmed.replace(/\/+$/u, '')}`;
 }
 
+/** A base64 data URL: the media type is what precedes its first parameter, and whitespace in the payload is dropped. */
 function parseDataUrl(value: string): { mediaType: string; data: string } | null {
-  const match = value.match(/^data:([^;,]+);base64,(.+)$/u);
+  const match = value.match(/^data:([^;,]+)((?:;[^;,]*)*);base64,([\s\S]+)$/u);
   if (!match) return null;
-  return { mediaType: match[1]!, data: match[2]! };
+  const data = match[3]!.replace(/\s+/gu, '');
+  if (!data) return null;
+  return { mediaType: match[1]!.trim(), data };
 }
 
 

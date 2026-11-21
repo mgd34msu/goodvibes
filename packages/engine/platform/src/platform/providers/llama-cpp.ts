@@ -16,7 +16,7 @@ import type {
   ProviderRuntimeMetadataDeps,
 } from './interface.js';
 import { buildCompatChatRequest, OpenAICompatProvider, type OpenAICompatOptions } from './openai-compat.js';
-import { getCacheCapability } from './cache-capability.js';
+import { getCacheCapability, type ProviderCacheCapability } from './cache-capability.js';
 import { StreamTextAccumulator } from './inline-reasoning.js';
 import { LOCAL_SERVER_EFFORT } from './discovered-traits.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
@@ -76,6 +76,8 @@ export class LlamaCppProvider implements LLMProvider {
   readonly modelSource: ProviderModelSource = { kind: 'live-discovery' };
   readonly models: string[];
   readonly capabilities?: Partial<ProviderCapability> | undefined;
+  /** How this server caches prompts; the capability registry reports it as this provider's caching. */
+  readonly cacheCapability: ProviderCacheCapability;
 
   private readonly defaultModel: string;
   private readonly reasoningFormat: OpenAICompatOptions['reasoningFormat'];
@@ -89,6 +91,7 @@ export class LlamaCppProvider implements LLMProvider {
     this.name = opts.name;
     this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
+    this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
     this.defaultModel = opts.defaultModel;
     this.reasoningFormat = opts.reasoningFormat ?? 'none';
     this.nativeChatUrl = deriveLlamaCppChatUrl(opts.baseURL);
@@ -206,7 +209,7 @@ export class LlamaCppProvider implements LLMProvider {
     model: string,
   ): Promise<ChatResponse> {
     const request = buildCompatChatRequest(
-      { name: this.name, reasoningFormat: this.reasoningFormat ?? 'none', cacheCapability: getCacheCapability(this.name) },
+      { name: this.name, reasoningFormat: this.reasoningFormat ?? 'none', cacheCapability: this.cacheCapability },
       params,
       model,
     );

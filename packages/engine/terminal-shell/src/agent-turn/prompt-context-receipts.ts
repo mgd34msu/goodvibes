@@ -34,7 +34,6 @@ import {
   buildEnabledSkillsPrompt,
   skillStorePath,
   skillStoreUnreadableNotice,
-  evaluateAgentSkillBundleReadiness,
   evaluateAgentSkillReadiness,
 } from './skill-registry.js';
 import { buildVibePrompt, discoverVibeFiles, type AgentVibeSnapshot } from './vibe-file.js';
@@ -315,26 +314,15 @@ function buildRuntimePromptReceiptSegments(
       enabledSkills: [],
       bundles: [],
       enabledBundles: [],
+      activeBundles: [],
       activeSkills: [],
     };
     skillStoreProblem = skillStoreUnreadableNotice(skillSnapshot.path, error).split('\n')[1];
   }
-  const readyBundles = skillSnapshot.enabledBundles.filter((bundle) => {
-    if (bundle.reviewState !== 'reviewed') return false;
-    const readiness = evaluateAgentSkillBundleReadiness(bundle, skillSnapshot.skills);
-    return readiness.ready && readiness.includedSkills.every((skill) => skill.reviewState === 'reviewed');
-  });
-  const readySkillIds = new Set([
-    ...skillSnapshot.enabledSkills.map((skill) => skill.id),
-    ...readyBundles.flatMap((bundle) => bundle.skillIds),
-  ]);
-  const readySkills = skillSnapshot.skills.filter(
-    (skill) => readySkillIds.has(skill.id) && skill.reviewState === 'reviewed' && evaluateAgentSkillReadiness(skill).ready,
-  );
   // As with routines, the prompt carries only the first few in full; the
   // receipt counts those and reports the rest as suppressed, not applied.
-  const activeBundles = readyBundles.slice(0, ENABLED_SKILL_BUNDLES_PROMPT_LIMIT);
-  const activeSkills = readySkills.slice(0, ENABLED_SKILLS_PROMPT_LIMIT);
+  const activeBundles = skillSnapshot.activeBundles.slice(0, ENABLED_SKILL_BUNDLES_PROMPT_LIMIT);
+  const activeSkills = skillSnapshot.activeSkills.slice(0, ENABLED_SKILLS_PROMPT_LIMIT);
   const candidateSkillIds = new Set([
     ...skillSnapshot.enabledSkills.map((skill) => skill.id),
     ...skillSnapshot.enabledBundles.flatMap((bundle) => bundle.skillIds),

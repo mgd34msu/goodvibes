@@ -93,15 +93,16 @@ export class AnthropicProvider implements LLMProvider {
   }
 
   /**
-   * Per-model max output tokens as the PROVIDER reports them, populated by
-   * `refreshModels()` from GET /v1/models.
+   * Per-model max output tokens as the PROVIDER reports them, rebuilt by
+   * `refreshModels()` from the listing GET /v1/models returned, whether that
+   * listing is live, cached on disk or lent by a host registry.
    *
-   * Empty until a live refresh succeeds, which is why the documented rows
-   * still have to be correct, but once populated it is authoritative, so a
-   * model released after this build shipped is capped at its real limit
+   * Empty until a listing with limits is read, which is why the documented
+   * rows still have to be correct, but once populated it is authoritative, so
+   * a model released after this build shipped is capped at its real limit
    * rather than by a row.
    */
-  private readonly _liveMaxOutput = new Map<string, number>();
+  private _liveMaxOutput = new Map<string, number>();
 
   private readonly apiKey: string;
   private readonly cacheHitTracker: Pick<CacheHitTracker, 'getHitRate' | 'recordTurn'>;
@@ -427,19 +428,22 @@ export class AnthropicProvider implements LLMProvider {
       cachePath: this.modelsCachePath,
       isConfigured: this.isConfigured(),
       // The same /v1/models call that lists the ids also reports each model's
-      // token limits, so the output cap is recorded here rather than fetched
-      // separately or guessed from a table. Only ids flow back to the shared
-      // refresh machinery, which is id-shaped by design.
+      // token limits; they travel with the listing (and its cache file), so a
+      // cached or lent listing gives the same caps as a live one.
       fetchLive: async () => {
         const models = await fetchAnthropicModels(this.apiKey);
+        const maxOutputTokens: Record<string, number> = {};
         for (const model of models) {
-          if (model.maxOutputTokens !== undefined) this._liveMaxOutput.set(model.id, model.maxOutputTokens);
+          if (model.maxOutputTokens !== undefined) maxOutputTokens[model.id] = model.maxOutputTokens;
         }
-        return models.map((model) => model.id);
+        return { models: models.map((model) => model.id), maxOutputTokens };
       },
       force,
     });
     this._models = [...result.models];
+    // A listing that carries no limits (the pinned catalog, or a cache file an older release wrote)
+    // leaves the caps already known in place.
+    if (result.maxOutputTokens) this._liveMaxOutput = new Map(Object.entries(result.maxOutputTokens));
     return result;
   }
 

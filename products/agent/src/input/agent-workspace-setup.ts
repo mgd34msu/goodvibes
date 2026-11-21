@@ -108,6 +108,15 @@ function hostSetupItems(input: AgentWorkspaceSetupChecklistInput, reading: Agent
       knowledge: { status: 'optional', detail: 'Agent Knowledge needs the connected host.' },
     };
   }
+  if (reading.credentialAccepted === null) {
+    // The host answered but not with its status (another version, a server error):
+    // the reading's own message names the next step, and re-pairing would not help.
+    return {
+      runtime: { status: 'recommended', detail: `${reading.detail}${at}` },
+      auth: { status: 'recommended', detail: `Not checked: the host did not answer the status read.${at}` },
+      knowledge: { status: 'optional', detail: 'Agent Knowledge needs the connected host.' },
+    };
+  }
   if (!reading.credentialAccepted) {
     return {
       runtime: { status: 'ready', detail: `A host answers at ${input.runtimeBaseUrl}.${at}` },

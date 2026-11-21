@@ -665,20 +665,32 @@ export class EmailService {
     const chosen = input.mailbox ?? (config.draftsMailbox.length > 0 ? config.draftsMailbox : undefined);
     const remembered = chosen === undefined ? this.#draftsMailboxes.get(account) : undefined;
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
-    const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined, (client) => client.replaceDraft({
-      to: input.to,
-      subject: input.subject,
-      body: input.body,
-      from,
-      inReplyTo: input.inReplyTo,
-      references: input.references,
-      mailbox: chosen ?? remembered,
-      uid: input.uid,
-      uidValidity: input.uidValidity,
-      messageId: `<${randomUUID()}@${messageIdDomain(from)}>`,
-    }), { effect: true });
-    if (chosen === undefined) this.#draftsMailboxes.set(account, result.mailbox);
-    return result;
+    // As in createDraft: one Message-ID per replacement, kept across attempts, so
+    // a retry after a save whose answer was lost finds the edited draft first.
+    const draftKey = `${draftIdentityKey(account, { ...input, from, mailbox: chosen })}:${String(input.uid)}:${String(input.uidValidity)}`;
+    const uncertain = this.#unconfirmedDrafts.get(draftKey);
+    const messageId = uncertain ?? `<${randomUUID()}@${messageIdDomain(from)}>`;
+    try {
+      const result = await withEmailReadConnection(this.deps, config, sourceRead, undefined, (client) => client.replaceDraft({
+        to: input.to,
+        subject: input.subject,
+        body: input.body,
+        from,
+        inReplyTo: input.inReplyTo,
+        references: input.references,
+        mailbox: chosen ?? remembered,
+        uid: input.uid,
+        uidValidity: input.uidValidity,
+        messageId,
+        lookFirst: uncertain !== undefined,
+      }), { effect: true });
+      this.#unconfirmedDrafts.delete(draftKey);
+      if (chosen === undefined) this.#draftsMailboxes.set(account, result.mailbox);
+      return result;
+    } catch (error) {
+      if (error instanceof DraftAppendUnconfirmedError) rememberBounded(this.#unconfirmedDrafts, draftKey, messageId);
+      throw error;
+    }
   }
 
   /**
@@ -695,14 +707,16 @@ export class EmailService {
 
   /**
    * One attachment's bytes, by its position in `readMessage`'s attachment list,
-   * or null when the message is gone. The bytes are handed over as a file and
-   * never read as text, so nothing is recorded as an untrusted ingest.
+   * or null when the message is gone. `uidValidity` is the mailbox generation
+   * the message was read under; a reset mailbox refuses before anything is
+   * fetched. The bytes are handed over as a file and never read as text, so
+   * nothing is recorded as an untrusted ingest.
    */
-  async readAttachment(uid: number, index: number): Promise<ImapAttachmentContent | null> {
+  async readAttachment(uid: number, index: number, uidValidity: number): Promise<ImapAttachmentContent | null> {
     const config = this.getValidatedConfig('read');
     const sourceRead = this.deps.replySubjectSourceOwner?.beginRead(config);
     return withEmailReadConnection(this.deps, config, sourceRead, undefined,
-      (client) => client.fetchAttachment(uid, index), { maxLiteralBytes: IMAP_ATTACHMENT_LITERAL_BYTES });
+      (client) => client.fetchAttachment(uid, index, uidValidity), { maxLiteralBytes: IMAP_ATTACHMENT_LITERAL_BYTES });
   }
 
   /** The newest drafts in the account's Drafts folder (older than UID `before` when given), newest first, each with its body. */

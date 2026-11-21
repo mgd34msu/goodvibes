@@ -10,6 +10,7 @@ import { buildHomeGraphMetadata, edgeIsActive, isGeneratedPageSource } from './h
 import type { HomeGraphState } from './state.js';
 import { projectHomeGraphQualityInput } from './quality/projection.js';
 import { captureHomeGraphRows } from './rows-current.js';
+import { knowledgeRecordVersion } from '../store-record-representation.js';
 import { createHomeGraphAutoLinkReader, HomeGraphAutoLinkHeldError as Held, MAX_AUTO_LINK_CANDIDATES,
   type AutoLinkReading, type AutoLinkReadingInput } from './auto-link/reader.js';
 
@@ -81,7 +82,14 @@ function candidate(node: KnowledgeNodeRecord, deviceEntities: ReadonlySet<string
  * would change its generation and retire every reference minted for it. A
  * daemon restart reads each unlinked document once more.
  */
-interface RecordedOutcome { readonly status: Exclude<HomeGraphAutoLinkStatus, 'linked'>; readonly pool: number; readonly sourceUpdatedAt: number; readonly extractionId: string | null; readonly extractionUpdatedAt: number | null }
+interface RecordedOutcome {
+  readonly status: Exclude<HomeGraphAutoLinkStatus, 'linked'>;
+  /** Version of the candidate pool it was read against: each candidate's id and updatedAt, and the device memberships of entities. */
+  readonly poolVersion: string;
+  readonly sourceUpdatedAt: number;
+  readonly extractionId: string | null;
+  readonly extractionUpdatedAt: number | null;
+}
 const recordedOutcomes = new WeakMap<KnowledgeStore, Map<string, RecordedOutcome>>();
 function outcomesFor(store: KnowledgeStore): Map<string, RecordedOutcome> {
   let map = recordedOutcomes.get(store);
@@ -137,21 +145,29 @@ async function linkSources(input: AutoLinkSourcesInput): Promise<HomeGraphAutoLi
   const nodeById = new Map(input.state.nodes.map((node) => [node.id, node]));
   const belongsTo = new Map<string, KnowledgeNodeRecord[]>();
   const deviceEntities = new Set<string>();
+  const memberships: string[] = [];
   for (const edge of input.state.edges) {
     if (!edgeIsActive(edge) || edge.relation !== 'belongs_to_device' || edge.fromKind !== 'node' || edge.toKind !== 'node') continue;
     const entity = nodeById.get(edge.fromId);
     if (entity?.kind !== 'ha_entity') continue;
     deviceEntities.add(entity.id);
     belongsTo.set(edge.toId, [...(belongsTo.get(edge.toId) ?? []), entity]);
+    memberships.push(`${entity.id}\u0000${edge.toId}`);
   }
   const pool = input.state.nodes.filter((node) => candidate(node, deviceEntities));
+  // A rename, a one-for-one swap or an entity moved between devices changes
+  // this even when the number of candidates stays the same.
+  const poolVersion = knowledgeRecordVersion({
+    candidates: pool.map((node) => `${node.id}\u0000${node.updatedAt}`).sort(),
+    memberships: memberships.sort(),
+  });
   const outcomes = outcomesFor(input.store);
   const plans = input.sources.filter((source) => !skipped(source) && source.status !== 'stale'
     && getKnowledgeSpaceId(source) === input.spaceId && !hasActiveSourceLink(source.id, input.state.edges))
     .map((source) => ({ source, extraction: input.extractionBySourceId.get(source.id) }))
     .filter(({ source, extraction }) => {
       const recorded = outcomes.get(source.id);
-      return !recorded || recorded.status === 'unread' || recorded.pool !== pool.length || recorded.sourceUpdatedAt !== source.updatedAt
+      return !recorded || recorded.status === 'unread' || recorded.poolVersion !== poolVersion || recorded.sourceUpdatedAt !== source.updatedAt
         || recorded.extractionId !== (extraction?.id ?? null) || recorded.extractionUpdatedAt !== (extraction?.updatedAt ?? null);
     });
   if (plans.length === 0) return { linked: [], outcomes: [], counts: counts([]) };
@@ -191,12 +207,21 @@ async function linkSources(input: AutoLinkSourcesInput): Promise<HomeGraphAutoLi
       const node = listed[Number(reading.reference.slice('candidate-'.length)) - 1]?.node;
       if (!node) throw new Held('malformed');
       const commit = rowsCurrent!;
-      const edge = await input.store.upsertEdge(guardKnowledgeEdgeInput({
-        fromKind: 'source', fromId: source.id, toKind: 'node', toId: node.id,
-        relation: reading.relation, weight: 1,
-        metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, { linkStatus: 'active',
-          linkMethod: 'homegraph-auto-link', ...reading.provenance, autoLinkedAt: Date.now(), autoLinkReasons: ['settled-document-subject'] }),
-      }, commit));
+      let edge: KnowledgeEdgeRecord;
+      try {
+        edge = await input.store.upsertEdge(guardKnowledgeEdgeInput({
+          fromKind: 'source', fromId: source.id, toKind: 'node', toId: node.id,
+          relation: reading.relation, weight: 1,
+          metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, { linkStatus: 'active',
+            linkMethod: 'homegraph-auto-link', ...reading.provenance, autoLinkedAt: Date.now(), autoLinkReasons: ['settled-document-subject'] }),
+        }, commit));
+      } catch (error) {
+        if (!(error instanceof Held) || error.reason !== 'stale') throw error;
+        // The home changed while the document was read: nothing is written and
+        // no outcome is recorded, so the next pass reads it again.
+        reported.push({ sourceId: source.id, status: 'unread', reason: 'stale', shortlisted: listed.length });
+        continue;
+      }
       linked.push({ edge, node, relation: reading.relation, score: 0, reasons: ['settled-document-subject'] });
       reported.push({ sourceId: source.id, status: 'linked', shortlisted: listed.length });
       outcomes.delete(source.id);
@@ -205,7 +230,7 @@ async function linkSources(input: AutoLinkSourcesInput): Promise<HomeGraphAutoLi
     const reason = reading.status === 'unread' ? reading.reason : undefined;
     reported.push({ sourceId: source.id, status: reading.status, ...(reason ? { reason } : {}), shortlisted: listed.length });
     // Not read again until the document, its extraction or the home's device list changes.
-    outcomes.set(source.id, { status: reading.status, pool: pool.length, sourceUpdatedAt: source.updatedAt,
+    outcomes.set(source.id, { status: reading.status, poolVersion, sourceUpdatedAt: source.updatedAt,
       extractionId: extraction?.id ?? null, extractionUpdatedAt: extraction?.updatedAt ?? null });
   }
   return { linked, outcomes: reported, counts: counts(reported) };

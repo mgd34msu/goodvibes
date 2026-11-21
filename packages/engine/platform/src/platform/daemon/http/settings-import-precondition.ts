@@ -1,7 +1,11 @@
 /**
- * The daemon side of a settings import: the credential is stored before the
- * setting that points at it, each owner (secret store, config manager) does
- * its own compare-and-write under its own lock, and the receipt names what was
+ * The daemon side of a settings import. Each step is ordered by what it does to
+ * a credential the configuration points at: a credential stored by the import
+ * is published before the setting that points at it, and a credential the
+ * import clears is deleted only after the setting no longer points at it, so a
+ * failure between the steps leaves an unused credential, never a setting that
+ * points at a missing one. Each owner (secret store, config manager) does its
+ * own compare-and-write under its own lock, and the receipt names what was
  * written. The import is admitted once, by the caller's own gate when the
  * caller is an agent; a paired admin's request, or one from an app on the
  * daemon's own machine with the operator token it holds, is not judged a
@@ -10,7 +14,7 @@
  */
 import { createSettingsImportPreconditionHandler, type SettingsImportPreconditionFacts, type SettingsImportPreconditionHandler } from '@goodvibes/engine/daemon-api';
 import type { ConfigManager, PreparedConfigMutation, PreparedConfigMutationTransition, PreparedConfigMutationReceipt } from '../../config/manager.js';
-import type { SecretsManager, PreparedSecretImport, SecretImportEntry } from '../../config/secrets.js';
+import type { SecretsManager, PreparedSecretImport, PreparedScopedSecretDeletion, SecretImportEntry } from '../../config/secrets.js';
 import { isDaemonOwnedConfigKey } from '../../config/config-ownership.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
 import { isSecretRefInput } from '../../config/secret-refs.js';
@@ -28,16 +32,28 @@ export interface ServingSettingsImportAuthority extends ServingSettingsAuthority
   readonly extractAuthToken: DaemonControlPlaneHelper['extractAuthToken'];
   readonly requireAdmin: DaemonControlPlaneHelper['requireAdmin'];
 }
-export type ServingSettingsImportSecrets = Pick<SecretsManager, 'prepareImport' | 'inspectPreparedImport' | 'assertPreparedImport' | 'withPreparedImport' | 'assertCompletedImport'>;
+export type ServingSettingsImportSecrets = Pick<SecretsManager, 'prepareImport' | 'inspectPreparedImport' | 'assertPreparedImport' | 'withPreparedImport' | 'assertCompletedImport'
+  | 'prepareScopedDeletion' | 'inspectPreparedScopedDeletion' | 'assertPreparedScopedDeletion' | 'applyPreparedScopedDeletion' | 'assertCompletedScopedDeletion'>;
+/** The receipt of an import that clears a credential: written by `finish`, completed once the deletions ran. */
+interface OpenReceipt {
+  status: 'committed' | 'partial';
+  readonly completedPaths: string[];
+  uncertainPath?: string;
+  verifiedInOwningStore: boolean;
+}
 interface Prepared {
   readonly config: PreparedConfigMutation;
   readonly facts: SettingsImportPreconditionFacts;
   readonly host: ExternalPermissionHost;
+  /** The credentials the import stores, published before the configuration. */
   readonly secret?: { readonly owner: ServingSettingsImportSecrets; readonly handle: PreparedSecretImport };
+  /** The credentials the import clears, deleted after the configuration no longer points at them. */
+  readonly deletions?: { readonly owner: ServingSettingsImportSecrets; readonly items: readonly { readonly key: string; readonly handle: PreparedScopedSecretDeletion }[] };
   transition?: PreparedConfigMutationTransition;
   finishSecret?: (assertCurrent: () => void) => PreparedConfigMutationReceipt;
   secretCompleted?: true;
   configCompleted?: true;
+  receipt?: OpenReceipt;
 }
 interface Authority {
   readonly admin: SettingsAdminAuthority;
@@ -52,6 +68,13 @@ function allowed(snapshot: NativePairedSnapshot | null): snapshot is NativePaire
 function samePairedAuthority(current: NativePairedSnapshot, expected: NativePairedSnapshot): boolean {
   return current.principalId === expected.principalId && current.tokenId === expected.tokenId
     && current.authorityId === expected.authorityId && current.authorityRevision === expected.authorityRevision;
+}
+/** Written files are confirmed durable; nothing is re-checked after a write. The first path that is not, or null. */
+function unconfirmedPath(paths: readonly string[]): string | null {
+  for (const path of paths) {
+    try { confirmFileDurable(path); } catch { return path; }
+  }
+  return null;
 }
 export function createServingSettingsImportPrecondition(input: {
   readonly manager: ConfigManager;
@@ -70,6 +93,10 @@ export function createServingSettingsImportPrecondition(input: {
     else manager.assertPreparedMutation(prepared.config);
     if (prepared.secretCompleted && prepared.secret) prepared.secret.owner.assertCompletedImport(prepared.secret.handle);
     else if (prepared.secret && !prepared.finishSecret) prepared.secret.owner.assertPreparedImport(prepared.secret.handle);
+    // Until the first publication the captured deletions still describe the stores.
+    if (prepared.deletions && !prepared.transition && !prepared.finishSecret) {
+      for (const item of prepared.deletions.items) prepared.deletions.owner.assertPreparedScopedDeletion(item.handle);
+    }
   };
   // Revocation is checked here once, right before the write; the token and the
   // paired record are what can change while a request waits.
@@ -78,6 +105,41 @@ export function createServingSettingsImportPrecondition(input: {
     const current = captured.native.current();
     if (authority.extractAuthToken(req) !== captured.token || !allowed(current) || !samePairedAuthority(current, captured.expected)) {
       throw new Error('Native settings import authority changed');
+    }
+  };
+  /**
+   * Deletes the cleared credentials once the configuration that no longer
+   * points at them is published, each gated on that configuration still being
+   * the one written, and completes the receipt with what was deleted. A
+   * deletion that does not commit leaves the receipt partial, naming its path.
+   */
+  const finishDeletions = async (prepared: Prepared, current: () => void): Promise<void> => {
+    const { receipt, deletions } = prepared;
+    if (!receipt || !deletions || !prepared.configCompleted) return;
+    const gate = () => { current(); manager.assertCompletedMutation(prepared.config); };
+    for (const [index, item] of deletions.items.entries()) {
+      // A handle captured before an earlier publication describes stores that
+      // have moved since, so every deletion after the first write is captured now.
+      const fresh = index > 0 || prepared.secret !== undefined;
+      let handle: PreparedScopedSecretDeletion | undefined;
+      let deletion: PreparedConfigMutationReceipt;
+      try {
+        handle = fresh ? deletions.owner.prepareScopedDeletion(item.key, 'daemon') : item.handle;
+        deletion = await deletions.owner.applyPreparedScopedDeletion(handle, gate);
+      } catch {
+        deletion = Object.freeze({ status: 'unknown', completedPaths: Object.freeze([]) });
+      }
+      receipt.completedPaths.push(...deletion.completedPaths);
+      const uncertainPath = deletion.status === 'committed' ? unconfirmedPath(deletion.completedPaths) : deletion.uncertainPath
+        ?? deletions.owner.inspectPreparedScopedDeletion(handle ?? item.handle).destinations[deletion.completedPaths.length]?.path ?? null;
+      if (deletion.status !== 'committed' || uncertainPath !== null) {
+        receipt.status = 'partial';
+        receipt.verifiedInOwningStore = false;
+        if (uncertainPath !== null) receipt.uncertainPath = uncertainPath;
+        return;
+      }
+      try { if (handle) deletions.owner.assertCompletedScopedDeletion(handle); }
+      catch { receipt.verifiedInOwningStore = false; }
     }
   };
   return createSettingsImportPreconditionHandler({
@@ -105,7 +167,7 @@ export function createServingSettingsImportPrecondition(input: {
         input.assertServingOwner();
         const host = input.host();
         if (!host) throw new Error('Native settings import owner unavailable');
-        const schema = manager.getSchema(), entries: SecretImportEntry[] = [];
+        const schema = manager.getSchema(), entries: SecretImportEntry[] = [], cleared: string[] = [];
         if (request.settings.length > schema.length || new Set(request.settings.map(entry => entry.key)).size !== request.settings.length) throw new Error('Native settings import invalid');
         const changes = request.settings.map(entry => {
           const setting = schema.find(setting => setting.key === entry.key);
@@ -114,7 +176,7 @@ export function createServingSettingsImportPrecondition(input: {
           if (isSecretBearingConfigKey(setting.key)) {
             if (typeof value !== 'string') throw new Error('Native credential setting invalid');
             const normalized = value.trim(), key = daemonSecretKeyFor(setting.key);
-            if (!normalized) { value = ''; entries.push({ key, scope: 'daemon', operation: 'delete' }); }
+            if (!normalized) { value = ''; cleared.push(key); }
             else if (normalized.startsWith('goodvibes://secrets/') && isSecretRefInput(normalized)) value = normalized;
             else if (normalized.startsWith('goodvibes://')) throw new Error('Native credential reference invalid');
             // The credential goes to the secret store; the setting and the facts carry only its reference.
@@ -128,9 +190,13 @@ export function createServingSettingsImportPrecondition(input: {
         manager.protectPreparedMutationTargets(config);
         const configFacts = manager.inspectPreparedMutation(config);
         const secretOwner = input.secrets();
-        if (entries.length && !secretOwner) throw new Error('Native credential owner unavailable');
+        if ((entries.length || cleared.length) && !secretOwner) throw new Error('Native credential owner unavailable');
         const secret = entries.length && secretOwner ? { owner: secretOwner, handle: secretOwner.prepareImport(entries) } : undefined;
+        const deletions = cleared.length && secretOwner
+          ? { owner: secretOwner, items: cleared.map(key => ({ key, handle: secretOwner.prepareScopedDeletion(key, 'daemon') })) }
+          : undefined;
         const credential = secret?.owner.inspectPreparedImport(secret.handle);
+        const deletionFacts = deletions ? deletions.items.map(item => deletions.owner.inspectPreparedScopedDeletion(item.handle)) : [];
         const effects = (configFacts.effects ?? [configFacts]).map(effect => {
           if (effect.operation !== 'set') throw new Error('Native settings import invalid');
           return Object.freeze({ operation: 'set' as const, key: effect.key, value: effect.value, destinations: effect.destinations });
@@ -142,24 +208,35 @@ export function createServingSettingsImportPrecondition(input: {
         const credentialValues = new Set(entries.flatMap(entry => entry.operation !== 'delete' && entry.value ? [entry.value] : []));
         const duplicated = effects.find(effect => typeof effect.value === 'string' && credentialValues.has(effect.value));
         if (duplicated) throw new Error(`Native settings import invalid: ${duplicated.key} repeats a credential being imported`);
+        const credentialItems = [
+          ...(credential?.items ?? []),
+          ...deletionFacts.map(fact => ({ key: fact.key, scope: fact.scope, configured: false })),
+        ];
+        const storeDestinations = credential?.destinations ?? [];
+        const deleteDestinations = deletionFacts.flatMap(fact => fact.destinations);
         // Credential values are references here, so the facts carry keys, references, other setting values and paths.
+        // Destinations are in publication order: stored credentials, configuration, cleared credentials.
         const facts: SettingsImportPreconditionFacts = Object.freeze({ operation: 'import', effects: Object.freeze(effects), incarnation: configFacts.incarnation,
-          destinations: Object.freeze([...(credential?.destinations ?? []), ...configFacts.destinations]),
-          ...(credential ? { credential: Object.freeze({ items: Object.freeze(credential.items.map(item => {
+          destinations: Object.freeze([...storeDestinations, ...configFacts.destinations, ...deleteDestinations]),
+          ...(credentialItems.length ? { credential: Object.freeze({ items: Object.freeze(credentialItems.map(item => {
             if (item.scope !== 'daemon') throw new Error('Native credential scope invalid');
             return Object.freeze({ key: item.key, scope: item.scope, configured: item.configured });
-          })), destinations: credential.destinations }) } : {}) });
-        const prepared = { config, facts, host, ...(secret ? { secret } : {}) }; assertPrepared(prepared); return prepared;
+          })), destinations: Object.freeze([...storeDestinations, ...deleteDestinations]) }) } : {}) });
+        const prepared = { config, facts, host, ...(secret ? { secret } : {}), ...(deletions ? { deletions } : {}) }; assertPrepared(prepared); return prepared;
       },
       inspect: prepared => prepared.facts,
       assert: assertPrepared,
       async withPrepared(prepared, operation, current) {
         assertPrepared(prepared); current();
-        if (!prepared.secret) return operation();
-        return prepared.secret.owner.withPreparedImport(prepared.secret.handle, finish => {
-          prepared.finishSecret = finish;
-          try { current(); return operation(); } finally { delete prepared.finishSecret; }
-        }, current);
+        const result = prepared.secret
+          ? await prepared.secret.owner.withPreparedImport(prepared.secret.handle, finish => {
+            prepared.finishSecret = finish;
+            try { current(); return operation(); } finally { delete prepared.finishSecret; }
+          }, current)
+          : operation();
+        // The configuration is published (or the import stopped before it): only now may a cleared credential go.
+        await finishDeletions(prepared, current);
+        return result;
       },
       begin(prepared) { const transition = manager.beginPreparedMutation(prepared.config); prepared.transition = transition; return transition; },
       assertTransition(prepared, transition) { manager.assertPreparedMutationTransition(prepared.config, transition); },
@@ -167,13 +244,6 @@ export function createServingSettingsImportPrecondition(input: {
         const completedPaths: string[] = [];
         const settingsPath = prepared.facts.effects[0]?.destinations[0]?.path;
         const credentialPath = prepared.facts.credential?.destinations[0]?.path;
-        // Written files are confirmed durable; nothing is re-checked after a write.
-        const confirm = (paths: readonly string[]): string | null => {
-          for (const path of paths) {
-            try { confirmFileDurable(path); } catch { return path; }
-          }
-          return null;
-        };
         if (prepared.secret) {
           if (!prepared.finishSecret) throw new Error('Native credential publication unavailable');
           const receipt = prepared.finishSecret(assertCurrent); completedPaths.push(...receipt.completedPaths);
@@ -183,7 +253,7 @@ export function createServingSettingsImportPrecondition(input: {
             return Object.freeze({ ...receipt, ...(uncertainPath ? { uncertainPath } : {}) });
           }
           prepared.secretCompleted = true;
-          const uncertainPath = confirm(receipt.completedPaths);
+          const uncertainPath = unconfirmedPath(receipt.completedPaths);
           if (uncertainPath !== null) return Object.freeze({ status: 'partial', completedPaths: Object.freeze(completedPaths), uncertainPath });
         }
         let receipt: PreparedConfigMutationReceipt;
@@ -194,12 +264,15 @@ export function createServingSettingsImportPrecondition(input: {
         completedPaths.push(...receipt.completedPaths);
         if (receipt.status !== 'committed') return Object.freeze({ ...receipt, status: completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths) });
         prepared.configCompleted = true;
-        const uncertainPath = confirm(receipt.completedPaths);
+        const uncertainPath = unconfirmedPath(receipt.completedPaths);
         if (uncertainPath !== null) return Object.freeze({ status: completedPaths.length ? 'partial' : 'unknown', completedPaths: Object.freeze(completedPaths), uncertainPath });
         let verifiedInOwningStore = false;
         try { manager.assertCompletedMutation(prepared.config); if (prepared.secret) prepared.secret.owner.assertCompletedImport(prepared.secret.handle); verifiedInOwningStore = true; }
         catch { /* The completed durable receipt survives a reporting failure. */ }
-        return Object.freeze({ status: 'committed', completedPaths: Object.freeze(completedPaths), verifiedInOwningStore });
+        if (!prepared.deletions) return Object.freeze({ status: 'committed', completedPaths: Object.freeze(completedPaths), verifiedInOwningStore });
+        // The cleared credentials are deleted next, outside this synchronous step; their paths join this receipt.
+        prepared.receipt = { status: 'committed', completedPaths, verifiedInOwningStore };
+        return prepared.receipt;
       },
     },
   });

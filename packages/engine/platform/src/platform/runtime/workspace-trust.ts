@@ -332,6 +332,8 @@ export class WorkspaceTrustManager {
   private loadFault: string | null = null;
   /** True when an earlier build's in-workspace trust.json was found and not honored. */
   private legacyIgnored = false;
+  /** True when this process's last answer could not be saved: the register's lack of a row does not withdraw it. */
+  private unsavedLevel = false;
   private question: WorkspaceTrustQuestion | null = null;
   private readonly levelListeners = new Set<(level: WorkspaceTrustLevel) => void>();
   /** The directory judged, as its real path: the key of the decision. */
@@ -388,7 +390,12 @@ export class WorkspaceTrustManager {
     }
     this.registerIdentity = identity;
     if (persisted) {
+      // A decision on disk (another process's, a restriction included) takes effect.
       this.level = persisted.level;
+      this.unsavedLevel = false;
+    } else if (this.unsavedLevel) {
+      // This process's answer never reached the register, so its absence there
+      // is not a removal by another process: the answer stays for this session.
     } else if (fault === null && this.level !== null && !this.legacyIgnored) {
       // The decision was removed from the register by another process: undecided again.
       this.level = null;
@@ -502,11 +509,13 @@ export class WorkspaceTrustManager {
     this.pendingDecisions++;
     try {
       await this.store.setTrust(this.workspaceRoot, level);
+      this.unsavedLevel = false;
       this.loadFault = null;
       // This process's own write: the decision in memory is the one on disk.
       this.registerIdentity = fileIdentity(this.registerPath);
       return { saved: true };
     } catch (error) {
+      this.unsavedLevel = true;
       return { saved: false, fault: `the workspace register ${this.registerPath} could not be written (${summarizeError(error)})` };
     } finally {
       this.pendingDecisions--;

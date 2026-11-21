@@ -15,7 +15,7 @@
  */
 import { existsSync } from 'node:fs';
 import type { RemoteHostCredentialStore, RemoteHostLogger } from './context.js';
-import { PeerRegistry, type PeerRecord, type BackendKind } from './peer-registry.js';
+import { PeerRegistry, normalizeBackendConfig, parseAzureServicePrincipalCredential, type PeerRecord, type BackendKind } from './peer-registry.js';
 import { RemoteDispatcher, type RemoteInvokeResult } from './dispatcher.js';
 import {
   BackendDispatchError,
@@ -120,6 +120,7 @@ export class RemoteBackendHost {
   private readonly registry: PeerRegistry;
   private readonly dispatcher: RemoteDispatcher;
   private readonly isPairedPeer: (peerId: string) => boolean;
+  private readonly credentials: RemoteHostCredentialStore;
   private opened = false;
   private closed = false;
   private closing: Promise<void> | null = null;
@@ -134,6 +135,7 @@ export class RemoteBackendHost {
       ...(options.backends ? { backends: options.backends } : {}),
     });
     this.isPairedPeer = options.isPairedPeer ?? (() => false);
+    this.credentials = options.credentials;
   }
 
   private async open(): Promise<void> {
@@ -178,21 +180,42 @@ export class RemoteBackendHost {
       throw new BackendDispatchError('backendConfig must be an object. Nothing was registered.', 'REMOTE_BACKEND_INVALID_CONFIG', 400);
     }
     const displayName = typeof input.displayName === 'string' && input.displayName.trim().length > 0 ? input.displayName : peerId;
+    await this.assertAzureCredentialShape(input.backendKind, (backendConfig ?? {}) as Record<string, unknown>);
     await this.open();
-    return this.registry.register({
+    const replaced = peerId.length > 0 && this.registry.get(peerId) !== null;
+    const record = await this.registry.register({
       peerId,
       displayName,
       // Checked against the four kinds by the registry, which refuses any other.
       backendKind: input.backendKind as BackendKind,
       backendConfig: (backendConfig ?? {}) as Record<string, unknown>,
     });
+    // A replaced key or kind leaves no key file or connection behind.
+    if (replaced) await this.dispatcher.forget(record.peerId);
+    return record;
   }
 
-  /** Remove a backend; false when no backend had that id. */
+  /**
+   * An azure backend signs in as the service principal its credential names,
+   * so a stored credential of another shape is refused here, before anything
+   * is registered. A credential not stored yet is checked when a command runs.
+   */
+  private async assertAzureCredentialShape(backendKind: unknown, raw: Record<string, unknown>): Promise<void> {
+    if (backendKind !== 'cloud-terminal' || raw.provider !== 'azure') return;
+    const config = normalizeBackendConfig('cloud-terminal', raw);
+    if (config.kind !== 'cloud-terminal') return;
+    let stored: string | null;
+    try { stored = await this.credentials.resolveRef(config.credentialRef); } catch { stored = null; }
+    if (typeof stored === 'string' && stored.length > 0) parseAzureServicePrincipalCredential(stored);
+  }
+
+  /** Remove a backend and what its backend held for it; false when no backend had that id. */
   async remove(peerId: string): Promise<boolean> {
     if (!this.opened && !existsSync(this.registry.dbPath)) return false;
     await this.open();
-    return this.registry.remove(peerId);
+    const removed = await this.registry.remove(peerId);
+    if (removed) await this.dispatcher.forget(peerId);
+    return removed;
   }
 
   /** Run one command on a registered backend and return its exit code and output. */

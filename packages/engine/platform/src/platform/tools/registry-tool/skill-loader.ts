@@ -28,7 +28,8 @@ export interface SkillLoaderRoots {
 /**
  * Inlines `@include` lines like the registry tool does: same nesting limit,
  * cycle guard and escaped `@@` marker, but an include must stay inside the
- * skill and agent directories. An include that escapes is left out.
+ * skill and agent directories. An include that escapes is replaced by the line
+ * `[include refused: <include> is outside the skill and agent folders]`.
  */
 function materializeScoped(
   scope: readonly string[], filePath: string, body: string, visited = new Set<string>(), depth = 0,
@@ -49,6 +50,8 @@ function materializeScoped(
     if (!existsSync(target)) continue;
     if (!isInsideLiveRegistryScope(scope, target)) {
       logger.warn('skill include left out: outside .goodvibes/skills and .goodvibes/agents', { skill: path, include: target });
+      // A visible marker, so the model knows the file was withheld and why.
+      result.push(`[include refused: ${include[1]!.split('#')[0]!} is outside the skill and agent folders]`);
       continue;
     }
     let included: string;

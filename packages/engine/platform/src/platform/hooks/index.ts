@@ -31,7 +31,7 @@ export type {
   HooksConfig,
 } from './types.js';
 export type { HookActivityRecord } from './activity.js';
-export type { HookAuthoringAction, HookConfigInspection, HookSimulationResult } from './workbench.js';
+export type { HookAuthoringAction, HookConfigInspection, HookSimulationResult, HooksFileDescription } from './workbench.js';
 export type { HookExecutionMode, HookAuthority, HookPointContract } from './contracts.js';
 export {
   listHookPointContracts,

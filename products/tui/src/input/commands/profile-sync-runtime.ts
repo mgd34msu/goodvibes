@@ -124,15 +124,17 @@ export function registerProfileSyncRuntimeCommands(registry: CommandRegistry): v
           // the manager's own test decides which names keep nothing once stored.
           const unstorable = incoming.filter((entry) => pm.storedName(entry.name) === undefined).map((entry) => entry.name);
           if (unstorable.length > 0) throw commandRefusal(`${unstorable.length} preset name(s) keep no characters once stored (letters and digits of any script, "-" and "_" are kept): ${unstorable.map((name) => JSON.stringify(name)).join(', ')}. Nothing was changed.`);
+          // Every name was proven storable above.
+          const storedAs = (name: string): string => pm.storedName(name)!;
           const seen = new Map<string, string>();
           for (const entry of incoming) {
-            const stored = pm.sanitizeName(entry.name);
+            const stored = storedAs(entry.name);
             const first = seen.get(stored);
             if (first !== undefined) throw commandRefusal(`"${first}" and "${entry.name}" are both stored as "${stored}". Nothing was changed.`);
             seen.set(stored, entry.name);
           }
           const existing = new Set(pm.list().map((profile) => profile.name));
-          const clashes = incoming.filter((entry) => existing.has(pm.sanitizeName(entry.name))).map((entry) => pm.sanitizeName(entry.name));
+          const clashes = incoming.filter((entry) => existing.has(storedAs(entry.name))).map((entry) => storedAs(entry.name));
           if (clashes.length > 0 && !overwrite) {
             throw commandRefusal(`${clashes.length} preset(s) already exist: ${clashes.join(', ')}. Nothing was changed.`, `Replace them: /presets import ${values.path} --overwrite, or give a prefix: --prefix <word>`);
           }

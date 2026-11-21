@@ -127,9 +127,12 @@ export function createGoodVibesContextTool(deps: GoodVibesRuntimeToolDeps): Tool
         case 'summary':
           return ok(await buildRuntimeSummary(deps));
         case 'config_get':
-          return ok(await buildConfigSnapshot(deps, args));
-        case 'config_schema':
-          return ok(await buildConfigSchema(deps, args));
+        case 'config_schema': {
+          // A mistyped key must not read as a setting that is simply unset.
+          const key = readString(args.key);
+          if (key && !isValidConfigKey(key)) return { success: false, error: UNKNOWN_CONFIG_KEY_ERROR };
+          return ok(mode === 'config_get' ? await buildConfigSnapshot(deps, args) : await buildConfigSchema(deps, args));
+        }
         case 'integrations':
           return ok(await buildIntegrationSnapshot(deps, args));
         case 'tools':
@@ -377,7 +380,8 @@ async function buildRuntimeSummary(deps: GoodVibesRuntimeToolDeps): Promise<Json
  * cannot be told apart from the truth.
  */
 async function buildConfigSnapshot(deps: GoodVibesRuntimeToolDeps, args: JsonRecord): Promise<JsonRecord> {
-  const matching = selectSchema(deps.configManager.getSchema(), args);
+  const fullSchema = deps.configManager.getSchema();
+  const matching = selectSchema(fullSchema, args);
   // `limit` bounds a broad dump the way it bounds the tools listing; what was left out is said.
   const limit = args.limit === undefined ? undefined : clampLimit(args.limit, 1000, 5000);
   const schema = limit === undefined ? matching : matching.slice(0, limit);
@@ -391,6 +395,7 @@ async function buildConfigSnapshot(deps: GoodVibesRuntimeToolDeps, args: JsonRec
   const unreachable = reads.filter((read): read is Extract<ConfigReadResult, { available: false }> => !read.available);
   return {
     settings,
+    ...noMatchNote(fullSchema, matching),
     ...(schema.length < matching.length ? { truncated: { returned: schema.length, total: matching.length, note: 'Narrow with key, prefix or category, or raise limit, to see the rest.' } } : {}),
     ...(unreachable.length > 0
       ? {
@@ -406,8 +411,11 @@ async function buildConfigSnapshot(deps: GoodVibesRuntimeToolDeps, args: JsonRec
 }
 
 async function buildConfigSchema(deps: GoodVibesRuntimeToolDeps, args: JsonRecord): Promise<JsonRecord> {
+  const fullSchema = deps.configManager.getSchema();
+  const matching = selectSchema(fullSchema, args);
   return {
-    settings: await mapWithConcurrency(selectSchema(deps.configManager.getSchema(), args), REDACTION_CONCURRENCY, async (setting) => ({
+    ...noMatchNote(fullSchema, matching),
+    settings: await mapWithConcurrency(matching, REDACTION_CONCURRENCY, async (setting) => ({
       key: setting.key,
       category: setting.key.split('.')[0],
       type: setting.type,
@@ -501,6 +509,15 @@ function selectSchema(schema: readonly ConfigSetting[], args: JsonRecord): Confi
     if (category && setting.key.split('.')[0] !== category) return false;
     return true;
   });
+}
+
+/** The refusal for a key no setting has, worded as the settings write refusal words it. */
+const UNKNOWN_CONFIG_KEY_ERROR = 'No setting has that key. List the keys with goodvibes_context mode "config_schema" (prefix narrows the list).';
+
+/** A note for a prefix or category that matched nothing, so the empty list is not read as settings that are unset. */
+function noMatchNote(schema: readonly ConfigSetting[], matching: readonly ConfigSetting[]): JsonRecord {
+  if (matching.length > 0) return {};
+  return { note: `No setting matches that prefix or category. The categories are: ${listConfigCategories(schema).join(', ')}.` };
 }
 
 function listConfigCategories(schema: readonly ConfigSetting[]): string[] {

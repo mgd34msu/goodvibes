@@ -23,9 +23,11 @@ import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from '../agent/mar
  *   skill:   name, description (or summary), requires-env, requires-command(s)
  *
  * This module only READS. It produces an OpenClawImportPlan; writing through
- * the Agent's registries happens in import-command.ts. Anything that is not a
- * recognized instruction/memory/skill/allowlist file is reported as skipped
- * with a plain reason, never guessed.
+ * the Agent's registries happens in import-command.ts. Anything in a recognized
+ * location (top-level markdown, instructions/, personas/, memory/, skills/, the
+ * allowlist files) that is not imported is reported as skipped with a plain
+ * reason, never guessed; other top-level files are left unreported, since the
+ * workspace root legitimately holds unrelated files.
  */
 
 export const OPENCLAW_LAYOUT_VERSION = 'v1';
@@ -190,7 +192,10 @@ function collectPersonas(root: string, skipped: SkippedEntry[]): PlannedPersona[
     const dirPath = join(root, dir);
     if (!isDirectory(dirPath)) continue;
     for (const entry of listDir(dirPath)) {
-      if (!entry.toLowerCase().endsWith('.md')) continue;
+      if (!entry.toLowerCase().endsWith('.md')) {
+        skipped.push({ path: join(dirPath, entry), reason: `non-markdown file in ${dir} folder` });
+        continue;
+      }
       const persona = personaFromFile(join(dirPath, entry), skipped);
       if (persona) personas.push(persona);
     }
@@ -329,7 +334,7 @@ function collectAllowlistEntries(value: unknown): readonly string[] {
 }
 
 function collectPermissions(root: string, skipped: SkippedEntry[]): PlannedPermissions {
-  for (const filename of ALLOWLIST_FILENAMES) {
+  for (const [index, filename] of ALLOWLIST_FILENAMES.entries()) {
     const full = join(root, filename);
     if (!existsSync(full) || isDirectory(full)) continue;
     const content = safeReadFile(full);
@@ -364,6 +369,13 @@ function collectPermissions(root: string, skipped: SkippedEntry[]): PlannedPermi
         categories.add(category);
       } else {
         skipped.push({ path: full, reason: `allowlist entry "${entry}" does not map to a known Agent tool category` });
+      }
+    }
+    // Only one allowlist file is imported; any later one that exists is named, not silently ignored.
+    for (const later of ALLOWLIST_FILENAMES.slice(index + 1)) {
+      const laterPath = join(root, later);
+      if (existsSync(laterPath) && !isDirectory(laterPath)) {
+        skipped.push({ path: laterPath, reason: `allowlist file not read: ${filename} was used; only one allowlist file is imported` });
       }
     }
     return { sourcePath: full, categories: [...categories].sort(), matched };

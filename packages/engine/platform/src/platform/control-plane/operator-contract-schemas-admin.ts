@@ -490,7 +490,7 @@ export const AUTOMATION_JOB_SCHEMA = objectSchema({
   lastRunAt: NUMBER_SCHEMA,
   lastRunId: STRING_SCHEMA,
   // How the last run's answer reached the person (AutomationJob.lastOutcome).
-  lastOutcome: enumSchema(['delivered', 'not-delivered', 'inbox', 'failed']),
+  lastOutcome: enumSchema(['delivered', 'partly-delivered', 'not-delivered', 'inbox', 'failed']),
   runCount: NUMBER_SCHEMA,
   successCount: NUMBER_SCHEMA,
   failureCount: NUMBER_SCHEMA,

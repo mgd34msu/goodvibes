@@ -270,11 +270,17 @@ function readBooleanQuery(url: URL, key: string): boolean | undefined {
   return value === '1' || value.toLowerCase() === 'true';
 }
 
-function readLimitQuery(url: URL): number | undefined {
+/** The `limit` query value: undefined when absent or empty, null when present but not a finite number. */
+function readLimitQuery(url: URL): number | null | undefined {
   const value = url.searchParams.get('limit');
   if (value === null || value.trim() === '') return undefined;
   const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/** The 400 answer for a `limit` that is not a number, naming the range the route accepts. */
+function invalidLimit(range: string): Response {
+  return Response.json({ error: `limit must be a number (${range})`, code: 'INVALID_ARGUMENT' }, { status: 400 });
 }
 
 // ---------------------------------------------------------------------------
@@ -307,13 +313,14 @@ function handleSearchMessages(url: URL, context: CompanionChatRouteContext): Res
     return Response.json({ error: 'query is required', code: 'INVALID_ARGUMENT' }, { status: 400 });
   }
   const requested = readLimitQuery(url);
+  if (requested === null) return invalidLimit(`1 to ${MESSAGE_SEARCH_MAX_LIMIT}`);
   const limit = Math.min(MESSAGE_SEARCH_MAX_LIMIT, Math.max(1, Math.floor(requested ?? MESSAGE_SEARCH_DEFAULT_LIMIT)));
   const rawCursor = url.searchParams.get('cursor');
   const offset = rawCursor === null || rawCursor === '' ? 0 : Number(rawCursor);
   if (!Number.isInteger(offset) || offset < 0) {
     return Response.json({ error: 'cursor is not one this search returned', code: 'INVALID_CURSOR' }, { status: 400 });
   }
-  const includeClosed = url.searchParams.get('includeClosed') === 'true';
+  const includeClosed = readBooleanQuery(url, 'includeClosed') === true;
   const needle = query.toLowerCase();
   const { sessions } = context.chatManager.listSessions({ includeClosed, limit: Number.MAX_SAFE_INTEGER });
   const hits: {
@@ -358,9 +365,11 @@ function handleListSessions(
   if (parseSessionListCursor(cursor) === null) {
     return Response.json({ error: 'cursor is not one this list returned', code: 'INVALID_CURSOR' }, { status: 400 });
   }
+  const limit = readLimitQuery(url);
+  if (limit === null) return invalidLimit('0 or more');
   const input: ListCompanionChatSessionsInput = {
     includeClosed: readBooleanQuery(url, 'includeClosed'),
-    limit: readLimitQuery(url),
+    limit,
     cursor,
   };
   return Response.json(context.chatManager.listSessions(input));
@@ -875,6 +884,7 @@ async function handleGetMessages(
     return Response.json({ error: 'Session not found', code: 'SESSION_NOT_FOUND' }, { status: 404 });
   }
   const limit = readLimitQuery(url);
+  if (limit === null) return invalidLimit('1 to 1000');
   const before = url.searchParams.get('before') ?? undefined;
   try {
     if (limit === undefined && before === undefined) {

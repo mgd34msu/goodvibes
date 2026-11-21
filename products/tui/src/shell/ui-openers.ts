@@ -37,7 +37,7 @@ import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { buildFirstOpenItems, decodeFirstOpenChoice, selfRecordWorkspaceRegistration } from '../cli/tui-startup.ts';
 import type { SettingsDaemonCredentialWriter } from '../input/settings-modal-secrets.ts';
 import type { DaemonOwnedConfigWriter } from '../input/settings-modal-mutations.ts';
-import type { WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
 
 /** Longer than one frame of the render coalescer (16 ms), so the "applying" message is on screen first. */
 const SERVICE_APPLY_AFTER_PAINT_MS = 20;
@@ -141,19 +141,26 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   // Trust-at-consequence-time: raised by trustGatedAsk on the first non-read
   // request in an undecided workspace; the answer persists via setLevel().
   // Registration self-records here too when trusted (never for restricted,
-  // see selfRecordWorkspaceRegistration's doc).
+  // see selfRecordWorkspaceRegistration's doc). A dismissed prompt, or no
+  // selection surface to ask on, rejects as unsettled: nothing is saved, the
+  // request is refused and the next non-read request asks again.
   trustPromptRef.requestTrustDecision = () =>
-    new Promise((resolve) => {
+    new Promise((resolve, reject) => {
       const { title, items } = buildFirstOpenItems();
       if (!commandContext.openSelection) {
-        resolve('restricted');
+        reject(new WorkspaceTrustDecisionUnsettledError());
         return;
-      } // no selection surface (should not happen live)
+      }
       // While the question is open the turn waits on the owner, not the model (the throbber says so).
       trustPromptRef.awaitingOwner = true;
       commandContext.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose' }, (result) => {
         trustPromptRef.awaitingOwner = false;
         const level = decodeFirstOpenChoice(result?.item.id ?? null);
+        if (level === null) {
+          reject(new WorkspaceTrustDecisionUnsettledError());
+          render();
+          return;
+        }
         resolve(level);
         if (level === 'trusted') void selfRecordWorkspaceRegistration(commandContext.workspace?.workspaceRegistrationManager);
         render();

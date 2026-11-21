@@ -1,22 +1,9 @@
 import type { ConfigManager } from '../config/manager.js';
 import type { ConfigKey } from '../config/schema.js';
+import type { ChannelSurface } from '../channels/types.js';
 
-type SurfaceDeliveryTarget =
-  | 'slack'
-  | 'discord'
-  | 'ntfy'
-  | 'webhook'
-  | 'homeassistant'
-  | 'telegram'
-  | 'google-chat'
-  | 'signal'
-  | 'whatsapp'
-  | 'telephony'
-  | 'imessage'
-  | 'msteams'
-  | 'bluebubbles'
-  | 'mattermost'
-  | 'matrix';
+/** Every channel surface but the terminal and the web UI, which have their own rules below. */
+type SurfaceDeliveryTarget = Exclude<ChannelSurface, 'tui' | 'web'>;
 
 const SURFACE_CONFIG_SEGMENT: Readonly<Partial<Record<SurfaceDeliveryTarget, string>>> = { 'google-chat': 'googleChat' };
 
@@ -32,10 +19,15 @@ function explicitlyDisabled(configManager: ConfigManager, surface: SurfaceDelive
   return !(source.tier === 'default' && (source.effectiveOrigin === undefined || source.effectiveOrigin === 'default'));
 }
 
-const CONFIGURED_SURFACES: ReadonlySet<string> = new Set<SurfaceDeliveryTarget>([
+const DELIVERY_TARGETS = [
   'slack', 'discord', 'ntfy', 'webhook', 'homeassistant', 'telegram', 'google-chat', 'signal', 'whatsapp',
   'telephony', 'imessage', 'msteams', 'bluebubbles', 'mattermost', 'matrix',
-]);
+] as const satisfies readonly SurfaceDeliveryTarget[];
+/** A surface added to ChannelSurface and not listed above fails to compile here. */
+const DELIVERY_TARGETS_COMPLETE: Exclude<SurfaceDeliveryTarget, (typeof DELIVERY_TARGETS)[number]> extends never ? true : never = true;
+void DELIVERY_TARGETS_COMPLETE;
+
+const CONFIGURED_SURFACES: ReadonlySet<string> = new Set<SurfaceDeliveryTarget>(DELIVERY_TARGETS);
 
 /**
  * Whether inbound traffic for a surface may proceed. Credentials alone keep it
@@ -108,7 +100,12 @@ export function isSurfaceDeliveryEnabled(
   if (surface === 'mattermost') {
     return Boolean(surfaces.mattermost.enabled || surfaces.mattermost.baseUrl || surfaces.mattermost.defaultChannelId || process.env.MATTERMOST_BASE_URL);
   }
-  return Boolean(surfaces.matrix.enabled || surfaces.matrix.homeserverUrl || surfaces.matrix.defaultRoomId || process.env.MATRIX_HOMESERVER);
+  if (surface === 'matrix') {
+    return Boolean(surfaces.matrix.enabled || surfaces.matrix.homeserverUrl || surfaces.matrix.defaultRoomId || process.env.MATRIX_HOMESERVER);
+  }
+  // A surface added to ChannelSurface without a rule here fails to compile.
+  const unhandled: never = surface;
+  return unhandled;
 }
 
 /**

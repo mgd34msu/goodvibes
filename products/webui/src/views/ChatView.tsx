@@ -873,12 +873,13 @@ export function ChatView({
         activeToolCalls={activeToolCalls}
         onCancelToolCall={(callId) => void cancelToolCall(callId)}
         workingLabel={workingLabel}
-        trailing={activeSessionId ? <InlineAsks sessionId={activeSessionId} /> : undefined}
+        trailing={activeSessionId ? <InlineAsks key={activeSessionId} sessionId={activeSessionId} /> : undefined}
         onUseAnotherModel={onUseAnotherModel}
       />
       <div className="chat-dock">
         {activeSessionId && (
           <QueuedMessagesPanel
+            key={activeSessionId}
             sessionId={activeSessionId}
             active={isStreaming}
             onMoveToComposer={(text) => setDraft((current) => (current.trim() ? `${current.trimEnd()}\n${text}` : text))}

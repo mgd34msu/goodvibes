@@ -141,6 +141,13 @@ export interface SessionSaveOptions {
    * new id, while the check compares the conversation's id before the move.
    */
   readonly savingConversationId?: string | undefined;
+  /**
+   * The saved file becomes the session this manager has open for writing (the
+   * live session moves to it, as `/save --switch`, a fork or a crash recovery
+   * do). Without it a save under another name writes a copy and leaves the open
+   * session as it is; a save of the open session, or with none open, opens it.
+   */
+  readonly open?: boolean | undefined;
 }
 
 /** The conversation's side branches: every branch not currently open, and the name of the one that is. */
@@ -499,14 +506,47 @@ export class SessionManager {
     const sanitizedName = this.sanitizeName(name);
     const filePath = join(this.sessionsDir, `${sanitizedName}.jsonl`);
     // A session is written by the one terminal that has it open. Saving the one
-    // this manager already has open is a check in memory; saving another opens
-    // it (one lock taken, refused when another terminal has it open) and lets go
-    // of the one this manager had open before. A copy of a conversation another
-    // owner holds (a daemon-hosted session mirrored here, `mirroredFrom`) is
-    // written by every terminal attached to it from that owner's one transcript,
-    // so it opens nothing; the file-identity check below still applies to it.
-    if (!meta.mirroredFrom) this.#holdOpen(filePath, sanitizedName);
+    // this manager already has open is a check in memory; saving another takes
+    // its lock (refused when another terminal has it open) without letting go of
+    // the open one. Only a save that succeeds moves the open session to the
+    // file, and only when the file becomes the live session (none was open, or
+    // `options.open`); otherwise the lock is let go again, so a copy saved under
+    // another name stays free and the live session stays held. A copy of a
+    // conversation another owner holds (a daemon-hosted session mirrored here,
+    // `mirroredFrom`) is written by every terminal attached to it from that
+    // owner's one transcript, so it opens nothing; the file-identity check below
+    // still applies to it.
+    const tookHold = !meta.mirroredFrom && !this.#holds(filePath);
+    if (tookHold) holdSessionFile(filePath, this, sanitizedName);
+    let written = false;
+    try {
+      const result = this.#writeSession(name, sanitizedName, filePath, messages, meta, agentRecords, contracts, branches, options);
+      written = true;
+      return result;
+    } finally {
+      if (tookHold) {
+        if (written && (this.#open === null || this.#open === filePath || options.open === true)) {
+          if (this.#open !== null && this.#open !== filePath) letGoSessionFile(this.#open, this);
+          this.#open = filePath;
+        } else {
+          letGoSessionFile(filePath, this);
+        }
+      }
+    }
+  }
 
+  /** The checks and the write of {@link save}, run while this manager holds the file's lock. */
+  #writeSession(
+    name: string,
+    sanitizedName: string,
+    filePath: string,
+    messages: object[],
+    meta: SessionMeta,
+    agentRecords: AgentRecord[] | undefined,
+    contracts: readonly ContractView[] | undefined,
+    branches: SessionBranches | undefined,
+    options: SessionSaveOptions,
+  ): { filePath: string; sanitizedName: string } {
     // Different names can still reduce to one file name ("My Chat" and "my-chat"). A file
     // that recorded the name it was saved under is never overwritten by a different name;
     // files from before the name was recorded cannot be told apart and keep their overwrite behaviour.
@@ -609,8 +649,13 @@ export class SessionManager {
   /** The session file this manager has open for writing (its lock is in heldSessionFiles), or null. */
   #open: string | null = null;
 
+  /** True when this manager already holds `filePath`'s lock as its open session. */
+  #holds(filePath: string): boolean {
+    return this.#open === filePath && heldSessionFiles.get(filePath)?.holders.has(this) === true;
+  }
+
   #holdOpen(filePath: string, sessionName: string): void {
-    if (this.#open === filePath && heldSessionFiles.get(filePath)?.holders.has(this) === true) return;
+    if (this.#holds(filePath)) return;
     holdSessionFile(filePath, this, sessionName);
     if (this.#open !== null && this.#open !== filePath) letGoSessionFile(this.#open, this);
     this.#open = filePath;

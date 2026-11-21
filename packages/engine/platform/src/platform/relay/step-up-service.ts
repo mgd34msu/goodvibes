@@ -33,7 +33,7 @@ import {
   type StoredStepUpCredential,
 } from './step-up-webauthn.js';
 import type { StepUpAssertionVerifier, StepUpRefusalReason, StepUpRequestContext, StepUpVerification } from './step-up-policy.js';
-import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
+import { AuthorityRecordUnavailableError, type AuthorityChange, type AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import type { AuthorityEntry, AuthorityKey, AuthorityView } from '../cluster/authority-record.js';
 import { randomUUID } from 'node:crypto';
 import { defineFormat, renderChecked } from '../utils/format-codec.js';
@@ -280,6 +280,17 @@ export class StepUpService {
     });
   }
 
+  /**
+   * Refuse a registration or removal while the authority record exists but
+   * cannot be read: the state loaded from it holds no credential, so a write
+   * would overwrite every passkey held here, and a removal would answer
+   * not-found for one that exists. Nothing is changed.
+   */
+  private requireReadableRecord(): void {
+    const authority = this.authority;
+    if (authority && !authority.view()) throw new AuthorityRecordUnavailableError(authority.filePath);
+  }
+
   private async saveState(state: StepUpState): Promise<void> {
     // Rendered and read back with the reader's own codec before it is stored.
     await this.secrets.set(STEP_UP_STATE_KEY, renderChecked(STEP_UP_STATE_FORMAT, state) as string);
@@ -332,12 +343,14 @@ export class StepUpService {
   removeCredential(credentialId: string): Promise<boolean> {
     return this.serialized(async () => {
       const state = await this.loadState();
+      this.requireReadableRecord();
       const remaining = state.credentials.filter((c) => c.credentialId !== credentialId);
       if (remaining.length === state.credentials.length) return false;
       state.credentials = remaining;
-      await this.saveState(state);
-      // Removed on every machine of the group: a lost phone confirms nothing anywhere.
+      // Removed on every machine of the group first: a lost phone confirms nothing anywhere.
+      // A record write that fails leaves the stored state untouched.
       await this.publish({ remove: credentialId });
+      await this.saveState(state);
       return true;
     });
   }
@@ -395,6 +408,7 @@ export class StepUpService {
     }
 
     const state = await this.loadState();
+    this.requireReadableRecord();
     // One relying party and origin policy covers every credential, so a
     // registration for a different relying party would silently make the
     // existing credentials fail verification. Refuse it, and say how to proceed.
@@ -416,10 +430,12 @@ export class StepUpService {
       createdAt: this.now(),
     };
     state.credentials = [...state.credentials.filter((c) => c.credentialId !== credential.credentialId), credential];
+    // The record first: a record write that fails leaves the stored state untouched. A local
+    // save that fails after it is harmless, since a read adds the record's credentials back.
+    await this.publish({ register: { credential, state } });
     await this.saveState(state);
     // The offer is used up by the registration it admitted.
     if (input.offeredTo !== undefined) this.registrationOffers.delete(input.offeredTo);
-    await this.publish({ register: { credential, state } });
     return {
       credentialId: credential.credentialId,
       ...(credential.label ? { label: credential.label } : {}),

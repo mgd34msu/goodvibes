@@ -46,6 +46,7 @@ import type { KeybindingsManager } from './keybindings.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
 import type { KillRing } from './kill-ring.ts';
 import type { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { guardCommandPaste, type PasteBurstGuardState } from '@goodvibes/engine/terminal-shell/paste-flood-guard';
 
 /**
  * InputFeedContext, The single long-lived context object passed to feedInputTokens
@@ -96,6 +97,10 @@ export interface InputFeedContext {
   contentWidth: number;
   readonly pasteRegistry: Map<string, string>;
   readonly imageRegistry: Map<string, { data: string; mediaType: string }>;
+  /** State for the shared unbracketed-paste-flood guard (terminal-shell), mutated in place, never reallocated. */
+  readonly burstGuard: PasteBurstGuardState;
+  /** Wiring-layer bookkeeping (not part of the shared guard) for the honest suppressed-count notice. */
+  burstSuppressedCount: number;
   readonly projectRoot: string;
   readonly selection: SelectionManager;
   readonly selectionModal: SelectionModal;
@@ -217,6 +222,7 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
     return { ...shortcutState, handled };
   },
   command: createCommandModeFeedRoute<InputFeedContext>(handleCommandModeToken),
+  beforeComposer: (context, token, { now }) => guardCommandPaste(context, token, now),
   afterShortcut: refreshCommandAutocomplete,
   expandPastes: (context, text) => expandTextPastes(context.pasteRegistry, text),
 });

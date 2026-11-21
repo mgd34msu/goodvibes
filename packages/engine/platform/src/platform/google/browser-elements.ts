@@ -298,36 +298,18 @@ function appPasswordPageByLabels(page: GooglePageCapture, label: string): { read
 }
 
 /**
- * Read the page text until `found` recognises what an action produced, a few
- * times with a short pause between reads. A result dialog appears after the
- * network round trip its click starts, so the read straight after the click
- * often comes too early. Returns null when it never appears.
+ * What an action produced, read once the page has settled after it. A result
+ * dialog appears after the network round trip its click starts, so the page
+ * is awaited until that round trip has answered (see `GoogleBrowserPort.settle`)
+ * and then read. Returns null when `found` does not recognise the result.
  */
-export async function readTextUntil<T>(
+export async function readTextAfterSettle<T>(
   browser: GoogleBrowserPort,
   found: (text: string) => T | null,
-  options: { readonly attempts?: number; readonly delayMs?: number; readonly signal?: AbortSignal | undefined } = {},
+  options: { readonly signal?: AbortSignal | undefined } = {},
 ): Promise<T | null> {
-  const attempts = options.attempts ?? RESULT_READ_ATTEMPTS;
-  const delayMs = options.delayMs ?? RESULT_READ_DELAY_MS;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    if (attempt > 0) await pause(delayMs, options.signal);
-    const result = found(await browser.readText());
-    if (result !== null) return result;
-  }
-  return null;
-}
-
-const RESULT_READ_ATTEMPTS = 5;
-const RESULT_READ_DELAY_MS = 250;
-
-function pause(ms: number, signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (signal?.aborted) { reject(signal.reason); return; }
-    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
-    const onAbort = (): void => { clearTimeout(timer); reject(signal?.reason); };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+  await browser.settle({ signal: options.signal });
+  return found(await browser.readText());
 }
 
 /** Best-effort DOM tag guessed from an accessible role. */

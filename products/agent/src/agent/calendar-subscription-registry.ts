@@ -1,7 +1,7 @@
 import { revealOrNull, type Secret } from '@goodvibes/engine/platform/platform/security';
 import { postToPublicWebhook } from '@goodvibes/engine/platform/platform/utils';
 import type { ShellPathService } from '@/runtime/index.ts';
-import { readJsonStore, runStoreFileUpdate, writeJsonStore, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
+import { prepareJsonStoreWrite, readJsonStore, runStoreFileUpdate, writeJsonStore, writeStoreFile, type JsonStoreContents, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import {
   SubscriptionStore,
   expandEvents,
@@ -409,7 +409,6 @@ export class CalendarSubscriptionRegistry {
       if (clash) {
         return { ok: false, stage: 'duplicate', detail: `A subscription named '${clash.name}' already exists and would share its stored address with '${sub.name}': unsubscribe first or pass a different --name.` };
       }
-      await this.secrets.set(secretKey, url, { scope: resolveCredentialWriteScope(secretKey) });
       const meta: SubscriptionMeta = {
         name: sub.name,
         secretKey,
@@ -425,7 +424,17 @@ export class CalendarSubscriptionRegistry {
         eventCount: events.length,
         events: [...events],
       };
-      this.writeStore(read, [...file.subscriptions, meta]);
+      // Everything that can refuse the write (a file a newer build wrote, one
+      // that cannot be copied aside) runs before the feed URL is stored, so a
+      // refusal leaves no URL in the secret store with no subscription naming it.
+      const prepared = prepareJsonStoreWrite(read, SUBSCRIPTION_STORE, { entries: [...file.subscriptions, meta] });
+      await this.secrets.set(secretKey, url, { scope: resolveCredentialWriteScope(secretKey) });
+      try {
+        writeStoreFile(read.path, prepared.text);
+      } catch (error) {
+        try { await this.secrets.delete?.(secretKey); } catch { /* the write error below is the one to report */ }
+        throw error;
+      }
       return { ok: true as const, name: sub.name, eventCount: events.length, refreshIntervalMs: sub.refreshIntervalMs };
     });
   }
@@ -452,6 +461,8 @@ export class CalendarSubscriptionRegistry {
       const file = toStoreFile(read);
       const target = file.subscriptions.find((s) => s.name.toLowerCase() === name.trim().toLowerCase());
       if (!target) return { removed: false, secret: 'none' as const };
+      // The list is written first: a refused write leaves the subscription and its feed URL as they were.
+      this.writeStore(read, file.subscriptions.filter((s) => s !== target));
       let secret: UnsubscribeReport['secret'] = 'unsupported';
       let secretError: string | undefined;
       if (this.secrets.delete) {
@@ -462,7 +473,6 @@ export class CalendarSubscriptionRegistry {
         try { await this.secrets.delete(target.secretKey); secret = 'deleted'; }
         catch (error) { secret = 'failed'; secretError = error instanceof Error ? error.message : String(error); }
       }
-      this.writeStore(read, file.subscriptions.filter((s) => s !== target));
       return { removed: true, secret, secretKey: target.secretKey, ...(secretError === undefined ? {} : { secretError }) };
     });
   }

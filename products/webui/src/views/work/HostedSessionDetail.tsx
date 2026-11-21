@@ -1,7 +1,7 @@
 /**
- * Daemon-hosted sessions in the Work view: the attach lifecycle and the detail
- * pane. A hosted session's loop runs inside the daemon, so it does not end
- * when the tab that started it goes away.
+ * Daemon-hosted sessions in the Work view: the attach lifecycle, the turn stop
+ * and sharing, used by HostedSessionWorkDetail. A hosted session's loop runs
+ * inside the daemon, so it does not end when the tab that started it goes away.
  *
  * useHostedAttachment keeps the old Hosted sessions view's rules exactly:
  *   - Selecting a hosted row attaches with a unique attachment id and
@@ -16,7 +16,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { LogOut, OctagonX, Share2, Square } from 'lucide-react';
+import { Share2, Square } from 'lucide-react';
 import { getClientLifetime, isClientLifetimeCurrent } from '../../lib/client-lifetime';
 import { hostedSessionDetachBeacon, client as platformClient } from '../../lib/goodvibes';
 import type { HostedSessionHistoryMessage, HostedSessionRecord } from '../../lib/goodvibes';
@@ -25,10 +25,7 @@ import {
   effectiveDetachPolicyLabel,
   ensureHostedClientId,
   hostedAttachResultFrom,
-  hostedAttachedClientCount,
   hostedSessionFromResult,
-  hostedStatusLabel,
-  hostedTerminationLabel,
 } from '../../lib/hosted-sessions';
 import {
   endedTurnIdFromFrame,
@@ -45,13 +42,8 @@ import { useHostedSessionRealtime } from '../../hooks/useHostedSessionRealtime';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
-import { DetailPane, DetailSection, Facts, SkeletonRows } from '../../components/data-view/DataView';
 import { Button } from '../../components/ui/Button';
 import { Field, Input } from '../../components/ui/Field';
-import { StatusDot } from '../../components/ui/StatusDot';
-import { SteerComposer } from '../sessions/SteerComposer';
-import { sentenceCase } from './work-items';
-import { nonEmpty } from '../../lib/non-empty';
 
 export interface HostedAttachment {
   readonly streamError: string | null;
@@ -432,108 +424,5 @@ export function HostedSessionShare({ sessionId }: { sessionId: string }) {
         </ul>
       )}
     </div>
-  );
-}
-
-export function HostedSessionDetail({
-  attachment,
-  fallbackTitle,
-  onClose,
-}: {
-  attachment: HostedAttachment;
-  /** The list row's title while attaching. */
-  fallbackTitle: string;
-  onClose: () => void;
-}) {
-  const { session } = attachment;
-  const closed = session?.status === 'terminated';
-
-  const actions = session ? (
-    <>
-      {!closed && (
-        <Button size="sm" variant="danger" icon={<OctagonX aria-hidden="true" />} onClick={attachment.kill} disabled={attachment.killPending}>
-          {attachment.killPending ? 'Ending…' : 'End session'}
-        </Button>
-      )}
-      <Button size="sm" icon={<LogOut aria-hidden="true" />} onClick={attachment.leave}>Leave</Button>
-    </>
-  ) : undefined;
-
-  return (
-    <DetailPane
-      title={nonEmpty(session?.title) ?? nonEmpty(session?.id) ?? fallbackTitle}
-      status={session ? (
-        <span className="work-status">
-          <StatusDot tone={closed ? 'idle' : session.status === 'running' ? 'live' : 'ok'} />
-          {sentenceCase(hostedStatusLabel(session.status))}
-        </span>
-      ) : undefined}
-      meta={session ? `Hosted · ${session.workspaceRoot}` : 'Hosted session'}
-      actions={actions}
-      onClose={onClose}
-      closeLabel="Close hosted session"
-    >
-      {attachment.confirmElement}
-      {attachment.streamError && <p className="dv-notice dv-notice--bad" role="status">{attachment.streamError}</p>}
-      {attachment.attaching && <SkeletonRows count={4} label="Attaching" />}
-      {!attachment.attaching && (Boolean(attachment.attachError) || !session) && (
-        <p className="dv-notice dv-notice--bad" role="alert">
-          Could not attach: {attachment.attachError ?? 'Could not attach to this session.'}
-        </p>
-      )}
-      {!attachment.attaching && session && (
-        <>
-          <p className="work-prose">{effectiveDetachPolicyLabel(session.effectiveDetachPolicy)}</p>
-          {closed && <p className="dv-notice" role="status">{hostedTerminationLabel(session) ?? 'terminated'}</p>}
-          <Facts
-            items={[
-              { label: 'Turns', value: String(session.turnCount) },
-              { label: 'Messages', value: String(session.messageCount) },
-              { label: 'Attached clients', value: String(hostedAttachedClientCount(session)) },
-              { label: 'When the last client leaves', value: session.effectiveDetachPolicy === 'kill' ? 'It ends' : 'It keeps running' },
-            ]}
-          />
-          <DetailSection title="Transcript">
-            <ol className="work-transcript" aria-label="Transcript">
-              {attachment.history.map((message, index) => (
-                <li key={`history-${String(index)}`} className="work-transcript__message">
-                  <span className="work-transcript__role">{message.role}</span>
-                  <span className="work-transcript__body">{message.content}</span>
-                </li>
-              ))}
-              {attachment.liveMessages.map((message, index) => (
-                <li key={`live-${String(index)}`} className="work-transcript__message">
-                  <span className="work-transcript__role">{message.role}</span>
-                  <span className="work-transcript__body">{message.content}</span>
-                </li>
-              ))}
-              {attachment.liveText && (
-                <li className="work-transcript__message work-transcript__message--streaming">
-                  <span className="work-transcript__role">assistant, writing</span>
-                  <span className="work-transcript__body">{attachment.liveText}</span>
-                </li>
-              )}
-            </ol>
-            {attachment.history.length === 0 && attachment.liveMessages.length === 0 && !attachment.liveText && (
-              <p className="work-prose work-prose--quiet">No messages yet.</p>
-            )}
-          </DetailSection>
-          {attachment.activeToolCalls.length > 0 && (
-            <ul className="work-list" aria-label="Running tools">
-              {attachment.activeToolCalls.map((call) => <li key={call.callId}>Running: {call.tool}</li>)}
-            </ul>
-          )}
-          {!closed && (
-            <DetailSection title="Share">
-              <HostedSessionShare sessionId={session.id} />
-            </DetailSection>
-          )}
-          <DetailSection title="Continue session">
-            {!closed && session.status === 'running' && <HostedTurnStop sessionId={session.id} attachment={attachment} />}
-            <SteerComposer sessionId={session.id} canSteer={!closed} closed={closed} />
-          </DetailSection>
-        </>
-      )}
-    </DetailPane>
   );
 }

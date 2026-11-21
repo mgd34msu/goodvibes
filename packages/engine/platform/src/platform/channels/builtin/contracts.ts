@@ -14,6 +14,7 @@ import type {
   ChannelDoctorReport,
   ChannelDoctorStatus,
   ChannelLifecycleState,
+  ChannelPolicyRecord,
   ChannelRenderPolicy,
   ChannelRepairAction,
   ChannelResolvedTarget,
@@ -510,13 +511,12 @@ export async function editBuiltinAllowlist(
   // The group is the one matching EVERY scope field given: matching on any one
   // of them would let an edit scoped to (group A, workspace W) rewrite another
   // group's policy that merely shares W.
-  const match = scoped
-    ? existing.groupPolicies.find((entry) => (
-      (!input.groupId || entry.groupId === input.groupId)
-      && (!input.channelId || entry.channelId === input.channelId)
-      && (!input.workspaceId || entry.workspaceId === input.workspaceId)
-    ))
-    : undefined;
+  const scopedGroupOf = (policy: ChannelPolicyRecord) => policy.groupPolicies.find((entry) => (
+    (!input.groupId || entry.groupId === input.groupId)
+    && (!input.channelId || entry.channelId === input.channelId)
+    && (!input.workspaceId || entry.workspaceId === input.workspaceId)
+  ));
+  const match = scoped ? scopedGroupOf(existing) : undefined;
   const before: ChannelAllowlists = scoped
     ? { allowlistUserIds: match?.allowlistUserIds ?? [], allowlistChannelIds: match?.allowlistChannelIds ?? [], allowlistGroupIds: match?.allowlistGroupIds ?? [] }
     : existing;
@@ -561,31 +561,39 @@ export async function editBuiltinAllowlist(
     allowlistChannelIds: applyAllowlistChanges(current.allowlistChannelIds, ids(added, 'channel'), ids(removed, 'channel')),
     allowlistGroupIds: applyAllowlistChanges(current.allowlistGroupIds, ids(added, 'group'), ids(removed, 'group')),
   });
-  const after = nextLists(before);
-  if (input.force !== true) assertCallerStaysAdmitted(surface, input, before, after);
-
-  if (scoped) {
-    const scopeKey = [input.groupId, input.channelId, input.workspaceId].filter(Boolean).join(':') || 'scope';
+  // The lists are recomputed from the policy as it stands when the write runs,
+  // not from the read above: the directory lookup awaited the network, and a
+  // claim accepted or another edit saved meanwhile is kept, not overwritten.
+  const scopeKey = [input.groupId, input.channelId, input.workspaceId].filter(Boolean).join(':') || 'scope';
+  let groupPolicyId = '';
+  const updated = await context.channelPolicy.upsertPolicy(surface, (current) => {
+    const currentMatch = scoped ? scopedGroupOf(current) : undefined;
+    const currentBefore: ChannelAllowlists = scoped
+      ? { allowlistUserIds: currentMatch?.allowlistUserIds ?? [], allowlistChannelIds: currentMatch?.allowlistChannelIds ?? [], allowlistGroupIds: currentMatch?.allowlistGroupIds ?? [] }
+      : current;
+    const after = nextLists(currentBefore);
+    if (input.force !== true) assertCallerStaysAdmitted(surface, input, currentBefore, after);
+    if (!scoped) return after;
     const nextGroup = {
-      id: match?.id ?? `allowlist:${surface}:${scopeKey}`,
-      ...(match?.label ? { label: match.label } : {}),
-      ...(input.groupId ? { groupId: input.groupId } : match?.groupId ? { groupId: match.groupId } : {}),
-      ...(input.channelId ? { channelId: input.channelId } : match?.channelId ? { channelId: match.channelId } : {}),
-      ...(input.workspaceId ? { workspaceId: input.workspaceId } : match?.workspaceId ? { workspaceId: match.workspaceId } : {}),
+      id: currentMatch?.id ?? `allowlist:${surface}:${scopeKey}`,
+      ...(currentMatch?.label ? { label: currentMatch.label } : {}),
+      ...(input.groupId ? { groupId: input.groupId } : currentMatch?.groupId ? { groupId: currentMatch.groupId } : {}),
+      ...(input.channelId ? { channelId: input.channelId } : currentMatch?.channelId ? { channelId: currentMatch.channelId } : {}),
+      ...(input.workspaceId ? { workspaceId: input.workspaceId } : currentMatch?.workspaceId ? { workspaceId: currentMatch.workspaceId } : {}),
       ...after,
-      metadata: match?.metadata ?? {},
+      metadata: currentMatch?.metadata ?? {},
     };
-    const updated = await context.channelPolicy.upsertPolicy(surface, {
+    groupPolicyId = nextGroup.id;
+    return {
       groupPolicies: [
-        ...existing.groupPolicies.filter((entry) => entry.id !== nextGroup.id),
+        ...current.groupPolicies.filter((entry) => entry.id !== nextGroup.id),
         nextGroup,
       ],
-    });
-    return { surface, updatedPolicy: updated, resolution, metadata: { scoped: true, groupPolicyId: nextGroup.id, rule: ALLOWLIST_RULE } };
-  }
-
-  const updated = await context.channelPolicy.upsertPolicy(surface, after);
-  return { surface, updatedPolicy: updated, resolution, metadata: { scoped: false, rule: ALLOWLIST_RULE } };
+    };
+  });
+  return scoped
+    ? { surface, updatedPolicy: updated, resolution, metadata: { scoped: true, groupPolicyId, rule: ALLOWLIST_RULE } }
+    : { surface, updatedPolicy: updated, resolution, metadata: { scoped: false, rule: ALLOWLIST_RULE } };
 }
 
 /** The rule the edited lists are applied by (admitByAllowlists), stated in every edit result. */

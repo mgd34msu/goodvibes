@@ -1,10 +1,5 @@
 import type { AgentWorkspaceAction, AgentWorkspaceCategory } from './agent-workspace-types.ts';
 
-// These are WIZARD-STEP ids (AgentSetupWizardStep.id), NOT normalized plan ids.
-// Do NOT cross-check these against SetupPlanItem ids or PLAN_ITEM_CATEGORY_MAP keys.
-// (Compare: agent-workspace-onboarding-state.ts normalises 'provider-model' → 'provider-access' for plan-layer lookups.)
-export const ONBOARDING_CRITICAL_STEP_IDS = ['runtime', 'connected-host-auth', 'provider-model'] as const;
-
 export const ONBOARDING_COMPLETE_SYNTHETIC_ACTION: AgentWorkspaceAction = {
   id: 'onboarding-apply-close',
   label: 'Apply & close',

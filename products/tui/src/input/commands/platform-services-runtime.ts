@@ -52,7 +52,7 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
           ...review.apiFamilies.map((family) => `    - ${family}`),
           '  routes:',
           ...review.routes.map((route) => `    - ${route}`),
-          '  For a support thread these are in /setup support-bundle <dir> (platform-review.json).',
+          '  For a support thread these are in /startup support-bundle <dir> (platform-review.json).',
         ].join('\n');
       },
     })],

@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from 'fs';
 import { dirname } from 'path';
 import type { HookDefinition, HookChain, HookEvent, HookEventPath, HookResult, HookType } from './types.js';
 import { matchesEventPath, matchesMatcher } from './matcher.js';
-import { getHookPointContract, hookPatternProblem } from './contracts.js';
+import { getHookPointContract, hookPatternProblem, patternReachesDecisionPoint } from './contracts.js';
 import { withHookWorkObserver } from './live-work.js';
 import { HookActivityTracker } from './activity.js';
 import { logger } from '../utils/logger.js';
@@ -17,7 +17,7 @@ import * as promptRunner from './runners/prompt.js';
 import * as agentRunner from './runners/agent.js';
 import * as httpRunner from './runners/http.js';
 import * as tsRunner from './runners/typescript.js';
-import { ChainEngine } from './chain-engine.js';
+import { ChainEngine, DECISION_RANK } from './chain-engine.js';
 import { fireHookActions } from '../workflow/hook-action-executor.js';
 import { guardExecCommand } from '../tools/exec/ast-guard.js';
 import type { FeatureFlagManager } from '../runtime/feature-flags/index.js';
@@ -106,7 +106,10 @@ export function hookDefinitionProblem(def: unknown, pattern?: string): string | 
     return 'hook "timeout" must be a number of seconds, 0 or more';
   }
   if (d.timeout === 0 && d.async !== true) {
-    return 'hook "timeout" is 0 (no deadline), which only a background hook may have; give it a timeout in seconds or set "async": true';
+    return 'hook "timeout" is 0 (no deadline), which only a background hook may have; give it a timeout in seconds or, at a point that does not wait for its hooks, set "async": true';
+  }
+  if (d.async === true && pattern !== undefined && patternReachesDecisionPoint(pattern)) {
+    return `hook is "async" but "${pattern}" is a point that waits for its hooks to deny, ask or rewrite the call; a background hook's answer would be discarded, so remove "async" (an observer belongs under a Post or Fail point)`;
   }
   return null;
 }
@@ -130,6 +133,14 @@ export class HookDispatcher {
   /** Hooks and chains that came from a hooks file, so a reload replaces only those. */
   private readonly loadedHooks = new WeakSet<HookDefinition>();
   private readonly loadedChains = new WeakSet<HookChain>();
+  /**
+   * Once hooks from a hooks file that have run, keyed by their key in the file
+   * and the entry's text, so a reload does not arm them again while an edited
+   * entry is armed afresh. Held for this run only.
+   */
+  private readonly spentOnce = new Set<string>();
+  /** The spent-once key of each once hook loaded from a file, taken from the entry as it was read. */
+  private readonly onceKeys = new WeakMap<HookDefinition, string>();
   /** True while hooks or chains loaded from a hooks file are registered. */
   private holdsFileHooks = false;
   /** Run before a dispatch while hooks from a file are registered; see {@link setLoadedHooksCheck}. */
@@ -250,6 +261,14 @@ export class HookDispatcher {
                 continue;
               }
               const loaded = def as HookDefinition;
+              if (loaded.once) {
+                const onceKey = `${pattern}\u0000${JSON.stringify(def)}`;
+                if (this.spentOnce.has(onceKey)) {
+                  logger.debug('HookDispatcher: once hook already ran in this run, not armed again', { filePath, pattern, hook: loaded.name });
+                  continue;
+                }
+                this.onceKeys.set(loaded, onceKey);
+              }
               this.register(pattern, loaded);
               this.loadedHooks.add(loaded);
               this.holdsFileHooks = true;
@@ -339,9 +358,10 @@ export class HookDispatcher {
   /**
    * Fire an event and run all matching hooks.
    *
-   * All matching hooks run sequentially. For Pre phase, the first deny sets
-   * the aggregated decision; subsequent hooks still execute (for
-   * logging/auditing) but their deny decisions don't change the outcome.
+   * All matching hooks run sequentially. At a point that can deny, decisions
+   * fold by rank, deny > ask > allow: one replaces the outcome (with its
+   * reason) only when it ranks higher, so the first deny wins and a later
+   * allow never erases an earlier ask. Every hook still runs.
    * For all hooks: additionalContext strings are concatenated.
    * At a point whose contract is `fail_closed`, a hook that fails without a decision denies.
    * Once hooks are removed as they are selected to run, so two overlapping fires run one once.
@@ -398,15 +418,12 @@ export class HookDispatcher {
         if (!aggregated.code) aggregated.code = result.code;
       }
 
-      // For Pre hooks: first deny wins
-      if (canDeny && result.decision === 'deny') {
-        if (aggregated.decision !== 'deny') {
-          aggregated.decision = 'deny';
-          aggregated.reason = result.reason;
-        }
-      } else if (result.decision && canDeny && aggregated.decision !== 'deny') {
+      // Decisions fold by rank, deny > ask > allow: a decision replaces the
+      // outcome only when it ranks higher, and its reason travels with it, so
+      // the first deny wins and a later allow never erases an earlier ask.
+      if (canDeny && result.decision && DECISION_RANK[result.decision] > (aggregated.decision ? DECISION_RANK[aggregated.decision] : 0)) {
         aggregated.decision = result.decision;
-        if (result.reason) aggregated.reason = result.reason;
+        aggregated.reason = result.reason;
       } else if (!result.ok && result.decision === undefined && failClosed && aggregated.decision !== 'deny') {
         aggregated.decision = 'deny';
         aggregated.reason = `Hook ${hookName ? `'${hookName}' ` : ''}at ${event.path} failed (${result.error ?? 'no reason given'}), so the call was refused. Fix or remove the hook, then retry.`;
@@ -517,13 +534,19 @@ export class HookDispatcher {
     return aggregated;
   }
 
-  /** Removes a once hook from the registry; false when another fire already took it. */
+  /**
+   * Removes a once hook from the registry; false when another fire already took
+   * it. A hook read from a hooks file is also marked spent, so reloading the
+   * file does not arm it again.
+   */
   private claimOnce(pattern: string, hook: HookDefinition): boolean {
     const defs = this.hooks.get(pattern);
     const idx = defs?.indexOf(hook) ?? -1;
     if (!defs || idx === -1) return false;
     defs.splice(idx, 1);
     if (defs.length === 0) this.hooks.delete(pattern);
+    const onceKey = this.onceKeys.get(hook);
+    if (onceKey !== undefined) this.spentOnce.add(onceKey);
     return true;
   }
 

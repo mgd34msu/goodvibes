@@ -186,6 +186,13 @@ export interface GoogleBrowserPort {
   click(ref: string, ownership?: { readonly signal?: AbortSignal | undefined; readonly assertCurrent: () => void }): Promise<void>;
   type(ref: string, text: string, options?: { readonly submit?: boolean; readonly signal?: AbortSignal | undefined; readonly assertCurrent?: () => void }): Promise<void>;
   readText(options?: { readonly maxChars?: number }): Promise<string>;
+  /**
+   * Resolves when the page's network has gone quiet after an action (the
+   * request a click started has answered and its result is on the page), or
+   * when the page is still loading at the browser's own wait deadline, so what
+   * it shows then is read as the answer. Rejects only when `signal` aborts.
+   */
+  settle(options?: { readonly signal?: AbortSignal | undefined }): Promise<void>;
 }
 
 /** Outcome of running a subprocess. */

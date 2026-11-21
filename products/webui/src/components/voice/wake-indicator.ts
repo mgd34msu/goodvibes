@@ -29,6 +29,21 @@ export function wakeIndicatorVisible(state: WakeHostState): boolean {
 }
 
 export function wakeIndicatorCopy(state: WakeHostState): WakeIndicatorCopy {
+  const copy = phaseCopy(state);
+  // Words heard while no chat was open wait for one: the indicator says so until
+  // a chat takes them into its draft. The microphone state still drives `live`.
+  if (state.undelivered) {
+    return {
+      ...copy,
+      label: `Heard: "${state.undelivered}"`,
+      detail: 'Open a chat to use it; it will be placed in the draft.',
+      attention: true,
+    };
+  }
+  return copy;
+}
+
+function phaseCopy(state: WakeHostState): WakeIndicatorCopy {
   const device = state.deviceLabel ? ` Device: ${state.deviceLabel}.` : '';
   switch (state.phase) {
     case 'listening':

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
+import { atomicWriteFileSync, listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
 import { commandRefusal } from './command-confirmation.js';
@@ -359,8 +359,22 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
             throw commandRefusal(`${values.path} already exists; nothing was written.`, `Write over it: /update save-review ${values.path} --replace`);
           }
           const review = buildUpdateReview(install, context, policy.version, await readLatestRelease());
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, JSON.stringify(review, null, 2) + '\n', 'utf-8');
+          const text = JSON.stringify(review, null, 2) + '\n';
+          if (values.replace === 'yes') {
+            // Replaced whole or not at all: a crash leaves the earlier record readable.
+            atomicWriteFileSync(targetPath, text, { mkdirp: true, mode: 0o644 });
+          } else {
+            // The check above answers before the release is fetched; this one, at the write, holds for a file made during the fetch.
+            mkdirSync(dirname(targetPath), { recursive: true });
+            try {
+              writeFileSync(targetPath, text, { encoding: 'utf-8', flag: 'wx' });
+            } catch (error) {
+              if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+                throw commandRefusal(`${values.path} already exists; nothing was written.`, `Write over it: /update save-review ${values.path} --replace`);
+              }
+              throw error;
+            }
+          }
           return `Saved this install's update state to ${targetPath}. It records the update state for support or before an upgrade; nothing applies it.`;
         },
       },

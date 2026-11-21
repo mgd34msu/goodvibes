@@ -33,6 +33,7 @@ export async function runOwnerToolCall(ctx: CommandContext, tool: string, args: 
     result = await registry.executeOwnerConfirmed(`command-${tool}`, tool, { ...args }, {
       goal: request,
       criteria: [`Run ${tool} with exactly the values the owner gave.`],
+      sessionId: ctx.session.runtime.sessionId || undefined,
     });
   } catch (error) {
     result = { success: false, error: error instanceof Error ? error.message : String(error) };

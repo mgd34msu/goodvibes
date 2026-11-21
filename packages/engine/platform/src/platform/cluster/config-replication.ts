@@ -233,6 +233,8 @@ export class ConfigReplicationService {
   private readonly divergentPeers = new Set<string>();
   private readonly lastExchange = new Map<string, number>();
   private readonly held = new Map<string, HeldChange>();
+  /** The release of held changes running now, shared by every caller until it settles. */
+  private releasing: Promise<void> | null = null;
   private lastMissingSecretRequestAt: number | null = null;
   private readonly secretMutations = new Map<string, Promise<void>>();
   /** Per path, the member whose value differs from this machine's, and that entry's revision. */
@@ -523,24 +525,34 @@ export class ConfigReplicationService {
     }
   }
 
-  /** Publish what was held, once this copy holds the group's settings. Each goes out at a revision above everything merged. */
-  private async releaseHeld(): Promise<void> {
-    if (this.held.size === 0 || !this.inStep) return;
-    const held = [...this.held];
-    this.held.clear();
-    for (let index = 0; index < held.length; index++) {
-      const [path, change] = held[index]!;
+  /**
+   * Publish what was held, once this copy holds the group's settings. Each goes
+   * out at a revision above everything merged. A change stays held until its own
+   * publish succeeded, so a group value applied meanwhile never overwrites it;
+   * one release runs at a time, and a second caller shares the one running.
+   */
+  private releaseHeld(): Promise<void> {
+    if (this.releasing) return this.releasing;
+    if (this.held.size === 0 || !this.inStep) return Promise.resolve();
+    const run = this.releaseHeldOnce().finally(() => { if (this.releasing === run) this.releasing = null; });
+    this.releasing = run;
+    return run;
+  }
+
+  private async releaseHeldOnce(): Promise<void> {
+    for (const [path, change] of [...this.held]) {
       try {
         if (change.kind === 'delete') await this.publishDelete(path, change.secret, this.host.captureAuthority(), change.applyLocal);
         else if (change.kind === 'secret') await this.announceLocalSecret(path);
         else await this.announceLocalChange(path);
       } catch (error) {
-        // Keep it, and the ones after it, for the next pass.
-        for (const [rest, restChange] of held.slice(index)) if (!this.held.has(rest)) this.held.set(rest, restChange);
+        // It, and the ones after it, are still held for the next pass.
         this.persistHeld();
         this.host.logger.debug('cluster: a held setting change could not be sent yet', { path, error: error instanceof Error ? error.message : String(error) });
         return;
       }
+      // A newer hold of the same path made while this one was sent stays held.
+      if (this.held.get(path) === change) this.held.delete(path);
     }
     this.persistHeld();
   }

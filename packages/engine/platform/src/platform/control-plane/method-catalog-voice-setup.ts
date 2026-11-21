@@ -31,6 +31,7 @@ import {
   methodDescriptor,
   objectSchema,
 } from './method-catalog-shared.js';
+import { WAKE_MODEL_COMPONENTS } from '../runtime/wake-setup.js';
 
 const NULLABLE_NUMBER = { anyOf: [NUMBER_SCHEMA, { type: 'null' }] };
 const NULLABLE_STRING = { anyOf: [STRING_SCHEMA, { type: 'null' }] };
@@ -223,7 +224,7 @@ const WAKE_PROVISION_RESULT_SCHEMA = objectSchema({
 const WAKE_MODEL_CHUNK_SCHEMA = objectSchema({
   component: {
     type: 'string',
-    enum: ['classifier', 'tflite', 'embedding', 'notice', 'embedding-notice', 'vad', 'vad-notice'],
+    enum: [...WAKE_MODEL_COMPONENTS],
   },
   offset: NUMBER_SCHEMA,
   bytes: NUMBER_SCHEMA,
@@ -350,7 +351,7 @@ export const builtinGatewayVoiceSetupMethodDescriptors: readonly GatewayMethodDe
     inputSchema: objectSchema({
       component: {
         type: 'string',
-        enum: ['classifier', 'tflite', 'embedding', 'notice', 'embedding-notice', 'vad', 'vad-notice'],
+        enum: [...WAKE_MODEL_COMPONENTS],
       },
       offset: NUMBER_SCHEMA,
       maxBytes: NUMBER_SCHEMA,

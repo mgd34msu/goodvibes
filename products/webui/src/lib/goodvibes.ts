@@ -897,7 +897,7 @@ function configSetValue(key: string, value: unknown): JsonValue {
 /** Optional deny payload: `note` rides the audit trail; `reason` is the broker's structured user-declined feedback. */
 export type ApprovalDenyInput = Pick<OperatorMethodInput<'approvals.deny'>, 'expectedRevision' | 'note' | 'reason'>;
 
-/** One durable approval rule (permissions.rules.list): a remembered decision at a generalizing tier. Deleting it makes matching asks prompt again. */
+/** One durable approval rule (permissions.rules.list): a remembered decision at a generalizing tier. Deleting it hands matching calls back to the permission mode: an allow rule's calls may prompt again, a deny rule's calls are no longer refused by it. */
 export type PermissionRuleRecord = OperatorMethodOutput<'permissions.rules.list'>['rules'][number];
 
 // ─── Tasks and watchers ──────────────────────────────────────────────────────

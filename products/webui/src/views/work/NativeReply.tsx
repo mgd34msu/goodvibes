@@ -10,15 +10,31 @@ import { asRecord, firstString } from "../../lib/object";
 import { MarkdownMessage } from "../../components/MarkdownMessage";
 import { DetailSection } from "../../components/data-view/DataView";
 
-/** The last thing the assistant said in the transcript: the reply to the newest request. */
-function lastReply(value: unknown): string {
+interface FoundReply {
+  readonly content: string;
+  /** True when the row names this request; false when the transcript names no request at all and this is only its newest reply. */
+  readonly attributed: boolean;
+}
+
+/**
+ * The last assistant row the turn `turnKey` wrote. A transcript saved before
+ * rows named their request carries no correlation id on any row; then the
+ * newest reply is returned, marked as not attributed.
+ */
+function replyFor(value: unknown, turnKey: string): FoundReply | undefined {
   const history = asRecord(value).history;
-  if (!Array.isArray(history)) return "";
+  if (!Array.isArray(history)) return undefined;
+  let newest: string | undefined;
+  let anyAttributed = false;
   for (let index = history.length - 1; index >= 0; index -= 1) {
     const row = history[index];
-    if (firstString(row, ["role"]) === "assistant" && firstString(row, ["content"]).trim()) return firstString(row, ["content"]);
+    const correlationId = firstString(row, ["correlationId"]);
+    if (correlationId) anyAttributed = true;
+    if (firstString(row, ["role"]) !== "assistant" || !firstString(row, ["content"]).trim()) continue;
+    if (correlationId === turnKey) return { content: firstString(row, ["content"]), attributed: true };
+    newest ??= firstString(row, ["content"]);
   }
-  return "";
+  return !anyAttributed && newest !== undefined ? { content: newest, attributed: false } : undefined;
 }
 
 /** `turnKey` names the finished turn (its correlation id), so each reply of a session is read once. */
@@ -29,13 +45,13 @@ export function NativeReply({ sessionId, turnKey }: { sessionId: string; turnKey
     staleTime: Infinity,
     retry: false,
   });
-  const reply = lastReply(history.data);
+  const reply = replyFor(history.data, turnKey);
   if (history.isPending) return null;
   if (history.isError) return <p className="dv-muted" role="note">The reply could not be read here: {formatError(history.error)}</p>;
   if (!reply) return null;
   return (
-    <DetailSection title="Reply">
-      <div className="lib-markdown"><MarkdownMessage content={reply} /></div>
+    <DetailSection title={reply.attributed ? "Reply" : "Newest reply in this session"}>
+      <div className="lib-markdown"><MarkdownMessage content={reply.content} /></div>
     </DetailSection>
   );
 }

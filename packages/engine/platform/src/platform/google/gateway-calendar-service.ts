@@ -190,6 +190,7 @@ function toDetail(record: CalendarEventRecord): CalendarGatewayEventDetail {
     uid: record.id,
     ...(record.recurrence === undefined || record.recurrence.length === 0 ? {} : { recurrence: record.recurrence.join('\n') }),
     ...(record.etag === undefined ? {} : { revision: record.etag }),
+    ...(record.cancelled === true ? { cancelled: true } : {}),
   };
 }
 
@@ -393,9 +394,35 @@ export function createGoogleCalendarGatewayService(
         ...(input.calendarId === undefined ? {} : { calendarId: input.calendarId }),
       });
       if (!result.ok && eventId !== undefined && result.status === 409) {
-        const existing = unwrap(await client.getEvent(eventId, calendarId));
-        recordEventsRead(input.calendarId, [existing]);
-        return { eventId: existing.id, uid: input.uid ?? existing.id, createdAt: new Date(now()).toISOString() };
+        const read = await client.getEvent(eventId, calendarId);
+        if (!read.ok && (read.status === 404 || read.status === 410)) {
+          throw new GatewayVerbError(
+            `Google refused event UID ${input.uid ?? eventId} as taken but returns no event under it, so nothing was created. Create the event without a UID, or with a new one.`,
+            'CALENDAR_REQUEST_FAILED',
+            409,
+          );
+        }
+        const existing = unwrap(read);
+        if (existing.cancelled !== true) {
+          recordEventsRead(input.calendarId, [existing]);
+          return { eventId: existing.id, uid: input.uid ?? existing.id, createdAt: new Date(now()).toISOString() };
+        }
+        // Google keeps a deleted event's id taken, so the event this UID names
+        // is put back on the calendar with the fields of this create.
+        const restored = await client.patchEvent(eventId, calendarId, {
+          summary: input.title,
+          start: input.start,
+          end: input.end,
+          location: input.location ?? '',
+          description: input.description ?? '',
+          attendees: input.attendees ?? [],
+          ...(input.attendees === undefined || input.attendees.length === 0 ? {} : { notifyAttendees: true }),
+          ...(existing.etag === undefined ? {} : { ifMatch: existing.etag }),
+          status: 'confirmed',
+        });
+        if (!restored.ok && restored.status === 412) throw changedMeanwhile(eventId);
+        const event = unwrap(restored);
+        return { eventId: event.id, uid: input.uid ?? event.id, createdAt: new Date(now()).toISOString() };
       }
       if (!result.ok && result.transport === 'unreachable') {
         throw new GatewayVerbError(

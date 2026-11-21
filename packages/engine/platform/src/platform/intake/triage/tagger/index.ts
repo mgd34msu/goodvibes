@@ -8,6 +8,7 @@ import { TAGS, current, cutOff, interruption, notTried, supersededLabels, type T
   type TriageProviderTag, type TriageTagWrite } from './shared.js';
 import { captureTriageData } from '../evidence.js';
 import { captureTagNames, readCustomTagMeaning, TriageTagMeaningHeld } from './meaning.js';
+import { isGmailEmailItemId } from '../../email-item-id.js';
 export type { TriageProviderTag, TaggerGuard, TriageEffectResult, TriageTagWrite } from './shared.js';
 export type { ImapStoreArgs, ImapStoreFlag, ImapStoreResult, ImapRetryOptions } from './imap.js';
 export interface TriageTaggerOptions {
@@ -63,7 +64,25 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
   // An unsettled identical custom name cannot be resampled into a lucky answer.
   // Only bounded digests remain; scope ends with this account tagger's lifetime.
   const heldMeanings = new Set<string>();
-  const pendingMeanings = new Set<string>();
+  // One reading per custom name for this account tagger's lifetime: callers of
+  // the same name share the reading in flight, and a settled meaning is reused.
+  // The reading runs under the tagger's own lifetime, so one caller stopping
+  // does not stop it for the others.
+  const meaningReadings = new Map<string, Promise<CustomTagMeaning>>();
+  const readingGuard: TaggerGuard = { signal: AbortSignal.any([lifetime.signal, options.signal]), assertCurrent: options.assertCurrent };
+  const meaningOf = (tag: string): Promise<CustomTagMeaning> => {
+    const known = meaningReadings.get(tag);
+    if (known) return known;
+    if (heldMeanings.size + meaningReadings.size >= 1024) throw new TriageTagMeaningHeld('full');
+    const reading = readCustomTagMeaning(tag, options.port, readingGuard);
+    meaningReadings.set(tag, reading);
+    const settled = reading.then(() => undefined, (error: unknown) => {
+      if (meaningReadings.get(tag) === reading) meaningReadings.delete(tag);
+      if (error instanceof TriageTagMeaningHeld) heldMeanings.add(tag);
+    });
+    active.add(settled); void settled.then(() => active.delete(settled));
+    return reading;
+  };
   let closing: Promise<void> | undefined;
   const store = makeRetryingImapStoreFlag(options.imapStoreFlag ?? imapStoreFlagWithMailClient());
   const owner: TriageTagger = {
@@ -83,6 +102,7 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
         if (options.provider === 'slack' && !/^slack:([A-Z0-9]+):([0-9]+\.[0-9]+)$/.test(itemId)) throw new Error('Slack triage target unavailable');
         if (options.provider === 'discord' && !/^discord:([0-9]+):([0-9]+)$/.test(itemId)) throw new Error('Discord triage target unavailable');
         if (options.provider === 'email') {
+          if (isGmailEmailItemId(itemId)) throw new Error('This message was read through the Gmail API; labels are written to IMAP mailboxes only, so set this account up for IMAP to label it');
           const parts = itemId.split(':');
           if (parts.length !== 4 || parts[0] !== 'email' || parts[1] !== options.accountScopeId || !options.imap
             || !/^\d+$/.test(parts[2]!) || !/^\d+$/.test(parts[3]!)
@@ -110,16 +130,8 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
         if (options.provider !== 'email' && !discordForumOnly) for (const tag of tags) {
           if (Object.hasOwn(TAGS, tag)) { meanings.set(tag, tag as TriageProviderTag); continue; }
           if (heldMeanings.has(tag)) throw new TriageTagMeaningHeld();
-          if (heldMeanings.size + pendingMeanings.size >= 1024) throw new TriageTagMeaningHeld('full');
-          if (pendingMeanings.has(tag)) throw new Error('Triage tag interpretation is already pending');
-          pendingMeanings.add(tag);
-          try {
-            const result = await readCustomTagMeaning(tag, options.port, guarded);
-            current(guarded); meanings.set(tag, result.canonical); decisions.push(result.decisionId);
-          } catch (error) {
-            if (error instanceof TriageTagMeaningHeld) heldMeanings.add(tag);
-            throw error;
-          } finally { pendingMeanings.delete(tag); }
+          const result = await settledOrStopped(meaningOf(tag), guarded);
+          current(guarded); meanings.set(tag, result.canonical); decisions.push(result.decisionId);
         }
         const keyword = (tag: string) => tag.replace(/[^A-Za-z0-9_]+/g, '_');
         const effects: readonly TriageTagEffect[] = Object.freeze(tags.map(tag => Object.freeze(options.provider === 'email'
@@ -197,9 +209,24 @@ export function createTriageTagger(input: TriageTaggerOptions): TriageTagger {
       let done!: () => void;
       closing = new Promise<void>(resolveClose => { done = resolveClose; });
       lifetime.abort();
-      void Promise.allSettled([...active]).then(() => { heldMeanings.clear(); done(); });
+      void Promise.allSettled([...active]).then(() => { heldMeanings.clear(); meaningReadings.clear(); done(); });
       return closing;
     },
   };
   return owner;
+}
+
+type CustomTagMeaning = Awaited<ReturnType<typeof readCustomTagMeaning>>;
+
+/** The shared reading's answer, or this caller's own stop, whichever comes first. */
+function settledOrStopped<T>(work: Promise<T>, guard: TaggerGuard): Promise<T> {
+  current(guard);
+  return new Promise<T>((resolve, reject) => {
+    const stop = (): void => { try { guard.signal.throwIfAborted(); } catch (error) { reject(error); } };
+    guard.signal.addEventListener('abort', stop, { once: true });
+    work.then(
+      value => { guard.signal.removeEventListener('abort', stop); resolve(value); },
+      (error: unknown) => { guard.signal.removeEventListener('abort', stop); reject(error); },
+    );
+  });
 }

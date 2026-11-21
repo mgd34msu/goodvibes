@@ -5,7 +5,7 @@
  * Routing choices are fully explainable from capability records.
  */
 
-import { getCacheCapability, type CacheType } from './cache-capability.js';
+import { getCacheCapability, type CacheType, type ProviderCacheCapability } from './cache-capability.js';
 import { FALLBACK_CONTEXT_WINDOW } from './context-window-fallback.js';
 import { documentedMaxOutput } from './anthropic-output-caps.js';
 import { providerAdapterKind, speaksAnthropicMessages } from './adapter-kind.js';
@@ -432,6 +432,11 @@ const MODEL_REASONING_FALLBACKS: Readonly<Record<string, boolean>> = {
 // ProviderCapabilityRegistry
 // ---------------------------------------------------------------------------
 
+/** What the registry reads from a provider instance: its self-declared capabilities and, when it carries one, its own cache capability. */
+export type CapabilitySourceProvider = Pick<LLMProvider, 'capabilities'> & {
+  readonly cacheCapability?: ProviderCacheCapability | undefined;
+};
+
 /**
  * Registry that resolves and caches capability records per provider/model,
  * and provides explainable routing decisions.
@@ -444,12 +449,13 @@ const MODEL_REASONING_FALLBACKS: Readonly<Record<string, boolean>> = {
  * 5. live per-model facts, when a facts source is wired
  * 6. `MODEL_QUIRKS`, per-model behaviour the other layers do not carry
  *
- * Exception: the `caching` field is always sourced from `getCacheCapability(providerId)`
- * (a `MODEL_QUIRKS` entry for the model wins if present),
- * so self-declared caching from `LLMProvider.capabilities` is intentionally ignored.
+ * Exception: the `caching` field is sourced from the provider instance's own
+ * `cacheCapability` when it has one (a discovered local server), otherwise from
+ * `getCacheCapability(providerId)` (a `MODEL_QUIRKS` entry for the model wins if
+ * present), so self-declared caching from `LLMProvider.capabilities` is intentionally ignored.
  *
- * The cache key is `${providerId}::${modelId}`. Call `invalidate()` after dynamic
- * provider registration to avoid stale entries.
+ * The cache key is `${providerId}::${modelId}` plus the instance's declarations. Call
+ * `invalidate()` after dynamic provider registration to avoid stale entries.
  */
 export class ProviderCapabilityRegistry {
   private readonly cache = new Map<string, ProviderCapability>();
@@ -478,13 +484,14 @@ export class ProviderCapabilityRegistry {
   getCapability(
     providerId: string,
     modelId: string,
-    provider?: Pick<LLMProvider, 'capabilities'>,
+    provider?: CapabilitySourceProvider,
   ): ProviderCapability {
-    // Self-declared capabilities (custom/discovered providers) change the
-    // resolved record, so they must participate in the cache key. Otherwise a
-    // call WITHOUT a provider instance could poison the entry a later call WITH
-    // one, or with different declarations, reads back.
-    const key = `${providerId}::${modelId}::${this._selfCapabilitiesKey(provider?.capabilities)}`;
+    // Self-declared capabilities (custom/discovered providers) and the
+    // provider's own cache capability change the resolved record, so they must
+    // participate in the cache key. Otherwise a call WITHOUT a provider instance
+    // could poison the entry a later call WITH one, or with different
+    // declarations, reads back.
+    const key = `${providerId}::${modelId}::${this._selfCapabilitiesKey(provider?.capabilities)}::${provider?.cacheCapability?.type ?? ''}`;
     const cached = this.cache.get(key);
     if (cached) return cached;
 
@@ -540,7 +547,7 @@ export class ProviderCapabilityRegistry {
     providerId: string,
     modelId: string,
     request: RequestProfile,
-    provider?: Pick<LLMProvider, 'capabilities'>,
+    provider?: CapabilitySourceProvider,
   ): RouteExplanation {
     const capability = this.getCapability(providerId, modelId, provider);
     const rejections = this._collectRejections(capability, request);
@@ -573,7 +580,7 @@ export class ProviderCapabilityRegistry {
   private _resolve(
     providerId: string,
     modelId: string,
-    provider?: Pick<LLMProvider, 'capabilities'>,
+    provider?: CapabilitySourceProvider,
   ): ProviderCapability {
     const providerDefaults = PROVIDER_DEFAULTS[providerId] ?? {};
     const selfDeclared: Partial<ProviderCapability> = provider?.capabilities ?? {};
@@ -593,8 +600,10 @@ export class ProviderCapabilityRegistry {
     if (facts?.maxOutputTokens !== undefined) liveFacts.maxOutputTokens = facts.maxOutputTokens;
     if (facts?.reasoningControls !== undefined) liveFacts.reasoningControls = facts.reasoningControls;
 
-    // Resolve caching separately via cache-capability module
-    const cacheType = getCacheCapability(providerId).type;
+    // Caching: the registered provider's own capability when it carries one (a
+    // discovered local server knows it by server type, not by its display name),
+    // otherwise the name's row in the cache capability table.
+    const cacheType = (provider?.cacheCapability ?? getCacheCapability(providerId)).type;
 
     // Merge: GLOBAL_DEFAULTS < provider defaults < self-declared
     //        < static per-model limits < live per-model facts < quirks.

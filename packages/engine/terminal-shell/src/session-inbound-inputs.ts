@@ -35,7 +35,8 @@
  * for: the session and the daemon client current when the pass began. An input
  * is injected only while this terminal is still on that session; one claimed
  * for a session the terminal has switched away from is kept for that session
- * and given to it when the terminal returns.
+ * and given to it when the terminal returns within the claim lease; past the
+ * lease it is let go, and claimed again on the wire if nobody else took it.
  */
 
 import { logger } from '@goodvibes/engine/platform/platform/utils';
@@ -106,6 +107,8 @@ interface BoundSteer {
   readonly steer: InboundSteer;
   readonly binding: SessionBinding;
   readonly claimEpoch?: number | undefined;
+  /** When the claim was asked for (before the daemon granted it), so its lease is never taken to run longer than the daemon's. */
+  readonly claimedAt: number;
 }
 
 /** An injected input waiting to be reported done, with its answer once its turn has given one. */
@@ -303,6 +306,13 @@ export class SessionInboundInputPoller {
     let delivered = 0;
     try {
       for (const [inputId, held] of this.claimedNotInjected) {
+        // Past its lease the claim may be another surface's, which may already
+        // have run it. Unclaimed, it is still delivered with no agent, so the
+        // sweep below claims it again with a fresh epoch and runs it once.
+        if (this.now() - held.claimedAt >= CLAIM_LEASE_MS) {
+          this.claimedNotInjected.delete(inputId);
+          continue;
+        }
         if (!this.bindings.isSameSession(held.binding)) continue;
         if (this.injectClaimed(held.steer, held.claimEpoch)) this.claimedNotInjected.delete(inputId);
       }
@@ -330,6 +340,7 @@ export class SessionInboundInputPoller {
           if (!stillHere()) { cursorHeld = true; break; }
           if (client.claimInput) {
             let claimEpoch: number | undefined;
+            const claimedAt = this.now();
             try {
               claimEpoch = grantedEpoch(await client.claimInput(sessionId, input.id));
             } catch (error) {
@@ -342,7 +353,7 @@ export class SessionInboundInputPoller {
             }
             delivered += 1;
             settle(input.createdAt);
-            if (!stillHere() || !this.injectClaimed(steer, claimEpoch)) this.claimedNotInjected.set(input.id, { steer, binding, claimEpoch });
+            if (!stillHere() || !this.injectClaimed(steer, claimEpoch)) this.claimedNotInjected.set(input.id, { steer, binding, claimEpoch, claimedAt });
             continue;
           }
           if (!this.injected.has(input.id)) {
@@ -395,6 +406,7 @@ export class SessionInboundInputPoller {
       if (this.now() - input.updatedAt < CLAIM_LEASE_MS) continue;
       if (!stillHere()) break;
       let claimEpoch: number | undefined;
+      const claimedAt = this.now();
       try {
         claimEpoch = grantedEpoch(await client.claimInput!(sessionId, input.id));
       } catch {
@@ -402,7 +414,7 @@ export class SessionInboundInputPoller {
       }
       const steer = steerOf(input, sessionId);
       reclaimed += 1;
-      if (!stillHere() || !this.injectClaimed(steer, claimEpoch)) this.claimedNotInjected.set(input.id, { steer, binding, claimEpoch });
+      if (!stillHere() || !this.injectClaimed(steer, claimEpoch)) this.claimedNotInjected.set(input.id, { steer, binding, claimEpoch, claimedAt });
     }
     return reclaimed;
   }

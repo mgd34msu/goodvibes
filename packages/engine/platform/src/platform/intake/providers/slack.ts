@@ -16,6 +16,10 @@ import { describeInboxHttpFailure, type InboxHttpResult } from './inbox-http.js'
 
 const PROVIDER = 'slack';
 const CREDENTIAL_KEY = 'surfaces.slack.botToken';
+/** A Slack bot or user token as the HTTP owner (slack-http.ts) sends it: nothing before, after or inside it but its own characters. */
+export const SLACK_TOKEN_PATTERN = /^xox[bp]-[A-Za-z0-9-]{1,4096}$/;
+/** What the reader says when the stored token does not match {@link SLACK_TOKEN_PATTERN}. */
+export const SLACK_TOKEN_REFUSAL = `${CREDENTIAL_KEY} is not a Slack bot (xoxb-) or user (xoxp-) token, or it holds a space, line break or other character a token does not have; set it again`;
 const MAX_LIST_PAGES = 50;
 const HISTORY_PAGE_SIZE = 200;
 /** History requests one tick may make across all conversations. */
@@ -154,9 +158,7 @@ export function createSlackInboxAdapter(ctx: AdapterContext, ports: SlackInboxPo
         const token = await ctx.credentials.resolveConfigSecret(CREDENTIAL_KEY);
         if (signal?.aborted) return cancelled();
         if (!token || !token.trim()) return { items: [], state: 'unavailable', error: `${CREDENTIAL_KEY} is not set; add a Slack bot or user token to read this inbox`, configured: false };
-        if (!token.startsWith('xoxb-') && !token.startsWith('xoxp-')) {
-          return { items: [], state: 'unavailable', error: `${CREDENTIAL_KEY} is not a Slack bot (xoxb-) or user (xoxp-) token`, configured: false };
-        }
+        if (!SLACK_TOKEN_PATTERN.test(token)) return { items: [], state: 'unavailable', error: SLACK_TOKEN_REFUSAL, configured: false };
         configured = true;
         const get = async (method: 'auth.test' | 'conversations.list' | 'conversations.history', params: Record<string, string>, channel?: string) => {
           const url = new URL(`https://slack.com/api/${method}`);

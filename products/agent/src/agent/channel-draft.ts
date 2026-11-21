@@ -217,10 +217,16 @@ function parseDraft(value: unknown): ChannelDraft | null {
   const message = readString(value.message);
   if (!id || !createdAt || !updatedAt || !message) return null;
   if (Number.isNaN(Date.parse(createdAt)) || Number.isNaN(Date.parse(updatedAt))) return null;
+  // A reference that is neither the draft's id nor a native one makes the row unreadable;
+  // the store keeps it as found and every other draft stays usable.
+  let wireReference: string | undefined;
+  if (value.wireReference !== undefined) {
+    try { wireReference = channelDraftWireReference(id, readString(value.wireReference)); } catch { return null; }
+  }
   return {
     version: DRAFT_VERSION,
     id,
-    ...(value.wireReference === undefined ? {} : { wireReference: channelDraftWireReference(id, readString(value.wireReference)) }),
+    ...(wireReference === undefined ? {} : { wireReference }),
     createdAt,
     updatedAt,
     status: parseDraftStatus(value.status),
@@ -519,20 +525,35 @@ export async function saveDraft(
   // the meantime (a draft marked sent, saved or deleted). Merge this one draft
   // into the file as it is now rather than writing back the snapshot from before
   // the await, which would undo their changes.
-  const { stored, dropped } = runStoreFileUpdateSync(path, () => {
-    const fresh = writableDraftSnapshot(shellPaths);
-    const freshIndex = fresh.drafts.findIndex((d) => d.id === id);
-    const current = freshIndex >= 0 ? fresh.drafts[freshIndex]! : null;
-    // A delivery recorded during the await is a fact; this save must not undo it.
-    const merged: ChannelDraft = current?.status === 'sent' && draft.status !== 'sent'
-      ? { ...draft, status: 'sent', ...(current.sentResponseId ? { sentResponseId: current.sentResponseId } : {}) }
-      : draft;
-    const updatedDrafts = freshIndex >= 0
-      ? fresh.drafts.map((d, i) => (i === freshIndex ? merged : d))
-      // Prepend new draft (most recent first)
-      : [merged, ...fresh.drafts];
-    return { stored: merged, dropped: writeDrafts(fresh, updatedDrafts, assertCurrent, options) };
-  });
+  let written: { readonly stored: ChannelDraft; readonly dropped: readonly ChannelDraft[] };
+  try {
+    written = runStoreFileUpdateSync(path, () => {
+      const fresh = writableDraftSnapshot(shellPaths);
+      const freshIndex = fresh.drafts.findIndex((d) => d.id === id);
+      const current = freshIndex >= 0 ? fresh.drafts[freshIndex]! : null;
+      // A delivery recorded during the await is a fact; this save must not undo it.
+      const merged: ChannelDraft = current?.status === 'sent' && draft.status !== 'sent'
+        ? { ...draft, status: 'sent', ...(current.sentResponseId ? { sentResponseId: current.sentResponseId } : {}) }
+        : draft;
+      const updatedDrafts = freshIndex >= 0
+        ? fresh.drafts.map((d, i) => (i === freshIndex ? merged : d))
+        // Prepend new draft (most recent first)
+        : [merged, ...fresh.drafts];
+      return { stored: merged, dropped: writeDrafts(fresh, updatedDrafts, assertCurrent, options) };
+    });
+  } catch (error) {
+    // A webhook secret this save created has no draft pointing at it once the write is refused.
+    if (webhook.secretKey !== undefined && webhook.secretKey !== existing?.webhookSecretKey) {
+      try { await options.webhookSecrets?.delete?.(webhook.secretKey); } catch { /* a leftover secret is harmless */ }
+    }
+    if (!daemon.synced) throw error;
+    const reason = error instanceof Error ? error.message : String(error);
+    const held = new Error(`${reason} The daemon already holds this draft under reference ${draft.wireReference ?? id}; it shows in the daemon draft list, where you can adopt or delete it. Do not save it again, or the daemon will hold a second copy.`, { cause: error });
+    // An interruption stays recognisable as one.
+    if (error instanceof Error) held.name = error.name;
+    throw held;
+  }
+  const { stored, dropped } = written;
   // Secrets the drafts no longer reference; a leftover one is harmless, so a failed delete is not an error.
   const discard = [
     ...(webhook.discardKey && webhook.discardKey !== stored.webhookSecretKey ? [webhook.discardKey] : []),

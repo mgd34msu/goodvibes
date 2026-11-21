@@ -932,7 +932,30 @@ export async function inboxTriageHandoff(
     };
   }
   const body = result.body && typeof result.body === 'object' ? result.body as Record<string, unknown> : {};
-  const receipts = Array.isArray(body.receipts) ? body.receipts : [];
+  const nextCursor = body.hasMore === true && typeof body.nextCursor === 'string' ? { nextCursor: body.nextCursor } : {};
+  if (!Array.isArray(body.receipts)) {
+    return {
+      mode: 'inbox_triage',
+      status: 'not_applied',
+      done: false,
+      error: `The daemon's ${INBOX_TRIAGE_METHOD} answer carried no receipts, so nothing can be said to be labelled. Check that the daemon is the same release as this Agent.`,
+    };
+  }
+  const receipts: readonly unknown[] = body.receipts;
+  if (receipts.length === 0) {
+    return {
+      mode: 'inbox_triage',
+      status: 'nothing_to_label',
+      done: true,
+      dryRun,
+      settled: 0,
+      unsettled: 0,
+      receipts,
+      ...nextCursor,
+      policy: 'This page held no stored message to score, so nothing was labelled.'
+        + (nextCursor.nextCursor ? ' Run again with the nextCursor for the next page.' : ''),
+    };
+  }
   const settled = receipts.filter(receipt => receipt && typeof receipt === 'object' && (receipt as Record<string, unknown>).status === 'settled').length;
   return {
     mode: 'inbox_triage',
@@ -942,7 +965,7 @@ export async function inboxTriageHandoff(
     settled,
     unsettled: receipts.length - settled,
     receipts,
-    ...(body.hasMore === true && typeof body.nextCursor === 'string' ? { nextCursor: body.nextCursor } : {}),
+    ...nextCursor,
     policy: dryRun
       ? 'Readings only: nothing was stored. Run again without dryRun to keep the labels.'
       : 'Settled labels are stored beside their messages and shown by every inbox read; a held, unavailable or withheld message is scored again after a later poll. Labels stay in GoodVibes until inbox_labels_apply writes them to the provider.',

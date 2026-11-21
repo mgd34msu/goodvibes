@@ -7,7 +7,7 @@
  * registered with). One listing reads the secret stores once.
  */
 import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadata } from './interface.js';
-import { isProviderAuthRouteUsable } from './runtime-snapshot.js';
+import { isProviderAuthRouteUsable } from './runtime-metadata.js';
 import { BUILTIN_COMPAT_PROVIDERS } from './builtin-catalog.js';
 import { BUILTIN_PROVIDER_ENV_KEYS } from '../config/provider-credential-catalog.js';
 import { BEDROCK_PROVIDER_LABELS, hasAwsCredentials } from './amazon-bedrock.js';

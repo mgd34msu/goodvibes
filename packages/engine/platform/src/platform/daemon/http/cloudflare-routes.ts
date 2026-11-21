@@ -1,7 +1,6 @@
-import { CloudflareControlPlaneManager } from '../../cloudflare/manager.js';
+import type { CloudflareControlPlaneManager } from '../../cloudflare/manager.js';
 import { CloudflareControlPlaneError } from '../../cloudflare/types.js';
 import type {
-  CloudflareControlPlaneOptions,
   CloudflareDiscoverInput,
   CloudflareDisableInput,
   CloudflareOperationalTokenInput,
@@ -11,7 +10,9 @@ import type {
   CloudflareVerifyInput,
 } from '../../cloudflare/types.js';
 
-export interface DaemonCloudflareRouteContext extends CloudflareControlPlaneOptions {
+export interface DaemonCloudflareRouteContext {
+  /** The router's one manager: every request goes through it, so its write chain serializes them. */
+  readonly manager: CloudflareControlPlaneManager;
   readonly parseJsonBody: (req: Request) => Promise<Record<string, unknown> | Response>;
   readonly parseOptionalJsonBody: (req: Request) => Promise<Record<string, unknown> | null | Response>;
 }
@@ -42,7 +43,7 @@ export async function dispatchCloudflareRoutes(
   const { pathname } = url;
   if (!pathname.startsWith('/api/cloudflare')) return null;
 
-  const manager = new CloudflareControlPlaneManager(context);
+  const { manager } = context;
 
   if ((pathname === '/api/cloudflare' || pathname === '/api/cloudflare/status') && req.method === 'GET') {
     return handleCloudflareError(async () => Response.json(await manager.describeStatus()));

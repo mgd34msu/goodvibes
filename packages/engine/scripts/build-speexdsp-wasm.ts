@@ -17,7 +17,7 @@
 // native/speexdsp-wasm/README.md.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { copyFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -101,15 +101,33 @@ function pacmanVersion(pkg: string): string {
 function download(): string {
   mkdirSync(WORK_DIR, { recursive: true });
   const archive = join(WORK_DIR, `speexdsp-${UPSTREAM.version}.tar.gz`);
-  if (!existsSync(archive)) {
+  // The independently recorded upstream archive pin is the checksum boundary. A
+  // download lands in `<archive>.part` and takes the archive's name only once it
+  // matches the pin, so an error page or a cut-off transfer is never cached.
+  let actual: string;
+  if (existsSync(archive)) {
+    actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
+    if (actual !== UPSTREAM.sha256) {
+      console.error(`ERROR: the cached archive ${archive} has sha256 ${actual}, not the pin ${UPSTREAM.sha256}. Delete it and run this script again.`);
+      process.exit(1);
+    }
+  } else {
+    const partial = `${archive}.part`;
     console.log(`downloading ${UPSTREAM.url}`);
-    execFileSync('curl', ['-sSL', '--max-time', '300', '-o', archive, UPSTREAM.url], { stdio: 'inherit' });
-  }
-  // The independently recorded upstream archive pin is the checksum boundary.
-  const actual = createHash('sha256').update(readFileSync(archive)).digest('hex');
-  if (actual !== UPSTREAM.sha256) {
-    console.error(`ERROR: archive sha256 ${actual} does not match the pin ${UPSTREAM.sha256}`);
-    process.exit(1);
+    try {
+      execFileSync('curl', ['-fsSL', '--max-time', '300', '-o', partial, UPSTREAM.url], { stdio: 'inherit' });
+    } catch (error) {
+      rmSync(partial, { force: true });
+      console.error(`ERROR: the download of ${UPSTREAM.url} failed and was discarded: ${error instanceof Error ? error.message : String(error)}`);
+      process.exit(1);
+    }
+    actual = createHash('sha256').update(readFileSync(partial)).digest('hex');
+    if (actual !== UPSTREAM.sha256) {
+      rmSync(partial, { force: true });
+      console.error(`ERROR: the downloaded archive's sha256 ${actual} does not match the pin ${UPSTREAM.sha256}; the download was discarded.`);
+      process.exit(1);
+    }
+    renameSync(partial, archive);
   }
   console.log(`archive sha256 ${actual} matches the pin`);
   const sourceRoot = join(WORK_DIR, UPSTREAM.root);

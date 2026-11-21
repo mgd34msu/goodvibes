@@ -26,6 +26,7 @@
  * (method-catalog-route-reconcile.ts), so it is deliberately omitted.
  */
 import type { GatewayMethodDescriptor } from './method-catalog-shared.js';
+import type { ContractErrorCode } from '../types/foundation-contract.js';
 import { IDEMPOTENCY_KEY_REPLAY } from './idempotent-replay.js';
 import {
   BOOLEAN_SCHEMA,
@@ -70,6 +71,8 @@ const PUSH_DELIVERY_RECEIPT_SCHEMA = objectSchema({
   httpStatus: NUMBER_SCHEMA,
   detail: STRING_SCHEMA,
 }, ['subscriptionId', 'endpointOrigin', 'outcome']);
+
+const SUBSCRIPTION_NOT_FOUND: ContractErrorCode = { code: 'SUBSCRIPTION_NOT_FOUND', status: 404, meaning: 'No push subscription of this operator has that id; list them with push.subscriptions.list and use an id it shows.' };
 
 export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -130,7 +133,7 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
     id: 'push.subscriptions.delete',
     repeat: 'safe',
     title: 'Delete Web Push Subscription',
-    description: 'Permanently remove one of the authenticated operator\'s push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.',
+    description: 'Permanently remove one of the authenticated operator\'s push subscriptions: the stored record (endpoint + keys) is dropped and cannot be listed afterward, and the removal is a terminal entry on the authority record, so no machine of the group pushes to that device again. The removal is in force on this machine at once; when the authority record cannot be written it waits in this machine\'s push file and reaches the other machines with the next write that succeeds. While the authority record exists but cannot be read, the delete is refused with its error and nothing changes. An unknown id, or one owned by another principal, is a 404 SUBSCRIPTION_NOT_FOUND, never a 200-noop.',
     category: 'push',
     effects: ['push.write'],
     transport: ['ws'],
@@ -139,6 +142,7 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
       subscriptionId: STRING_SCHEMA,
       deleted: BOOLEAN_SCHEMA,
     }, ['subscriptionId', 'deleted']),
+    errorCodes: [SUBSCRIPTION_NOT_FOUND],
   }),
   methodDescriptor({
     id: 'push.subscriptions.verify',
@@ -150,5 +154,6 @@ export const builtinGatewayPushMethodDescriptors: readonly GatewayMethodDescript
     transport: ['ws'],
     inputSchema: objectSchema({ subscriptionId: STRING_SCHEMA }, ['subscriptionId']),
     outputSchema: objectSchema({ receipt: PUSH_DELIVERY_RECEIPT_SCHEMA }, ['receipt']),
+    errorCodes: [SUBSCRIPTION_NOT_FOUND],
   }),
 ];

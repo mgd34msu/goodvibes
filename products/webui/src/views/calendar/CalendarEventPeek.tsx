@@ -11,7 +11,7 @@ import { formatError } from '../../lib/errors';
 import { Button } from '../../components/ui';
 import { EmptyState, Facts, DetailSection, SkeletonRows } from '../../components/data-view/DataView';
 import { AlertCircle } from 'lucide-react';
-import { isAllDayEvent } from './calendar-time';
+import { allDayFlagOf, isAllDayEvent } from './calendar-time';
 
 export type CalendarEventDetailData = Awaited<ReturnType<typeof platformClient.operator.calendar.events.get>>;
 
@@ -23,11 +23,11 @@ export function useCalendarEventDetail(eventId: string, calendarId?: string): Us
   });
 }
 
-function formatRange(start: string, end: string): string {
+function formatRange(start: string, end: string, allDay: boolean | undefined): string {
   const from = new Date(start);
   const to = new Date(end);
   if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return `${start} to ${end}`;
-  if (isAllDayEvent(start, end)) {
+  if (isAllDayEvent(start, end, allDay)) {
     // The end of an all-day event is the day after its last day.
     const dayOpts = { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' } as const;
     const last = new Date(to.getTime() - 86_400_000);
@@ -64,7 +64,7 @@ export function CalendarEventBody({ detail }: { detail: UseQueryResult<CalendarE
     <div className="calendar-detail" data-testid="calendar-event-detail">
       <Facts
         items={[
-          { label: 'When', value: formatRange(event.start, event.end) },
+          { label: 'When', value: formatRange(event.start, event.end, allDayFlagOf(event)) },
           { label: 'Location', value: event.location },
           { label: 'Attendees', value: event.attendees && event.attendees.length > 0 ? event.attendees.join(', ') : undefined },
           { label: 'Repeats', value: event.recurrence },

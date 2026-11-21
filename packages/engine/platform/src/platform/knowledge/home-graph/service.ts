@@ -105,6 +105,8 @@ export class HomeGraphService {
   private readonly resettingSpaces = new Set<string>();
   private readonly spaceWrites = new Map<string, Set<Promise<unknown>>>();
   private readonly foregroundRuns = new Set<Promise<unknown>>();
+  /** The newest sync request per space, read by the queued enrichment pass when it starts. */
+  private readonly latestSyncRequests = new Map<string, { readonly installationId: string; readonly snapshot: HomeGraphSnapshotInput }>();
   /** What each space is doing: foreground verbs first, background items when the space is idle. */
   private readonly work: HomeGraphSpaceWork;
   constructor(
@@ -147,6 +149,7 @@ export class HomeGraphService {
     // drained. Its caller retains the outcome; disposal only waits for release.
     await Promise.all([...this.foregroundRuns].map(run => run.then(() => undefined, () => undefined)));
     await this.work.cancel();
+    this.latestSyncRequests.clear();
   }
 
   async status(input: { readonly installationId?: string; readonly knowledgeSpaceId?: string } = {}): Promise<HomeGraphStatus> {
@@ -684,6 +687,7 @@ export class HomeGraphService {
         this.resettingSpaces.delete(spaceId);
         // Nothing is left to enrich or repair in a space that was just deleted.
         await this.work.cancel(spaceId);
+        this.latestSyncRequests.delete(spaceId);
       }
     });
   }
@@ -998,18 +1002,23 @@ export class HomeGraphService {
 
   /**
    * The model-read part of a sync, after the sync returned. One pass per space
-   * is queued at a time and reads the stored state when it runs, so it covers
-   * any newer sync; gap repair follows a finished pass.
+   * is queued at a time; it reads the stored state and the newest sync request
+   * (its snapshot and page-automation options) when it runs, so it covers any
+   * newer sync coalesced into it; gap repair follows a finished pass.
    */
   private queueSyncEnrichment(spaceId: string, installationId: string, snapshot: HomeGraphSnapshotInput): void {
     if (this.autoLinkController.signal.aborted) return;
+    this.latestSyncRequests.set(spaceId, { installationId, snapshot });
     this.work.enqueue(spaceId, {
       key: SYNC_ENRICH_ITEM,
       run: async (signal) => {
+        const request = this.latestSyncRequests.get(spaceId) ?? { installationId, snapshot };
+        this.latestSyncRequests.delete(spaceId);
         await withConfiguredDecisionModelPolicy(() => runHomeGraphSyncEnrichment({
-          store: this.store, artifactStore: this.artifactStore, spaceId, installationId, snapshot, signal,
+          store: this.store, artifactStore: this.artifactStore, spaceId,
+          installationId: request.installationId, snapshot: request.snapshot, signal,
         }));
-        if (!signal.aborted) this.scheduleSyncSelfImprovement(spaceId, installationId);
+        if (!signal.aborted) this.scheduleSyncSelfImprovement(spaceId, request.installationId);
       },
     });
   }

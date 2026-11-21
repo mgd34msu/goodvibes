@@ -26,10 +26,11 @@ export const SLO_METRICS = {
 const WINDOW_SIZE = 200;
 
 /**
- * Maximum age for a pending map entry before it is swept as stale.
- * Entries that never receive a follow-up event (a turn that ends without
- * output, a gate request whose decision is never published) are evicted after
- * this duration so the maps stay bounded.
+ * Maximum age for a pending gate request before it is swept as stale. A gate
+ * request whose decision is never published is evicted after this duration so
+ * the map stays bounded. Pending turn starts are not swept: each one is
+ * removed at its turn's first delta or at its turn's end, so a late first
+ * output is still measured at its true latency.
  */
 const PENDING_TTL_MS = 60_000;
 
@@ -78,7 +79,7 @@ export class SloCollector {
   /** Rolling window of permission_decision_ms samples (GATE_REQUESTED → DECISION_EMITTED). */
   private readonly _permissionSamples: number[] = [];
 
-  /** Pending turn start timestamps keyed by turnId, removed at the first delta or the turn's end. */
+  /** Pending turn start timestamps keyed by turnId; each lives until its turn's first delta or its turn's end. */
   private readonly _pendingTurnStart = new Map<string, number>();
   /** Pending permission request timestamps keyed by callId. */
   private readonly _pendingPermission = new Map<string, number>();
@@ -151,13 +152,10 @@ export class SloCollector {
   }
 
   /**
-   * Sweep the pending maps and evict entries older than PENDING_TTL_MS.
+   * Sweep the pending gate requests and evict entries older than PENDING_TTL_MS.
    */
   private _sweepPending(): void {
     const cutoff = Date.now() - PENDING_TTL_MS;
-    for (const [key, ts] of this._pendingTurnStart) {
-      if (ts < cutoff) this._pendingTurnStart.delete(key);
-    }
     for (const [key, ts] of this._pendingPermission) {
       if (ts < cutoff) this._pendingPermission.delete(key);
     }

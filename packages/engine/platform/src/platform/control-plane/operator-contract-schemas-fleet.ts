@@ -126,7 +126,7 @@ const PROCESS_SCHEDULE_CADENCE_SCHEMA: Record<string, unknown> = {
 const PROCESS_SCHEDULE_FACTS_SCHEMA = objectSchema({
   cadence: PROCESS_SCHEDULE_CADENCE_SCHEMA,
   lastRunAt: NUMBER_SCHEMA,
-  lastOutcome: enumSchema(['delivered', 'not-delivered', 'inbox', 'failed']),
+  lastOutcome: enumSchema(['delivered', 'partly-delivered', 'not-delivered', 'inbox', 'failed']),
   firedCount: NUMBER_SCHEMA,
   lastFiredAt: NUMBER_SCHEMA,
   since: NUMBER_SCHEMA,

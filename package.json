@@ -80,7 +80,6 @@
     "llms:generate": "bun packages/engine/scripts/generate-llms-full.ts",
     "llms:check": "bun packages/engine/scripts/generate-llms-full.ts --check",
     "pack:check": "bun packages/engine/scripts/pack-check.ts",
-    "prepare": "git config core.hooksPath .githooks 2>/dev/null || true",
     "platform-console:check": "bun packages/engine/scripts/no-platform-console.ts",
     "publint:check": "bun packages/engine/scripts/publint-check.ts",
     "refresh:contracts:check": "bun packages/engine/scripts/refresh-contract-artifacts.ts --check",

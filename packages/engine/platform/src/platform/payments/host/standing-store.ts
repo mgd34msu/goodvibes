@@ -30,7 +30,7 @@
  */
 import { randomBytes } from 'node:crypto';
 import { readDocument, writeDocument } from '../../utils/atomic-json-store.js';
-import { registrableDomain } from '../../security/public-suffix.js';
+import { merchantDomain } from '../merchant-domain.js';
 import { minorUnitExponent, parseRequestedMaximum } from '../money-parsing.js';
 import { formatMinorUnits } from '../message.js';
 import type { CurrencyCode } from '../types.js';
@@ -91,13 +91,6 @@ export type StandingUseCounter = (use: StandingAuthorizationUse) => number;
 export class StandingAuthorizationError extends Error {
   override readonly name = 'StandingAuthorizationError';
   constructor(message: string, readonly kind: 'invalid' | 'full' | 'unavailable') { super(message); }
-}
-
-/** A merchant as an owner or an agent may type it: a domain or a URL, compared by registrable domain. */
-export function standingMerchant(value: string): string {
-  let host = value.trim().toLowerCase();
-  try { if (/^[a-z][a-z0-9+.-]*:\/\//.test(host)) host = new URL(host).hostname; } catch { /* Compared as typed. */ }
-  return registrableDomain(host) ?? host;
 }
 
 /** An item compared by meaning, not spelling: case and spacing folded. */
@@ -223,7 +216,7 @@ export class DaemonStandingAuthorizations {
     const nowMs = this.now();
     const item = input.item.replace(/\s+/g, ' ').trim();
     if (item.length === 0 || item.length > MAX_ITEM_LENGTH) throw new StandingAuthorizationError(`item must be your words for what may be bought, at most ${String(MAX_ITEM_LENGTH)} characters. Nothing was added.`, 'invalid');
-    const merchants = [...new Set(input.merchants.map(standingMerchant).filter(merchant => merchant.length > 0))];
+    const merchants = [...new Set(input.merchants.map(merchantDomain).filter(merchant => merchant.length > 0))];
     if (merchants.length === 0 || merchants.length > MAX_STANDING_MERCHANTS || merchants.some(merchant => !merchant.includes('.') || /\s/.test(merchant))) {
       throw new StandingAuthorizationError(`merchants must be 1 to ${String(MAX_STANDING_MERCHANTS)} shop domains such as shop.example. Nothing was added.`, 'invalid');
     }
@@ -279,8 +272,9 @@ export class DaemonStandingAuthorizations {
     if (entry.currency !== String(request.currency)) {
       return { ok: false, reason: `Standing authorisation ${entry.id} was written in ${entry.currency}, and purchases are now made in ${String(request.currency)}. Ask the owner to add it again in ${String(request.currency)}.` };
     }
-    const merchant = standingMerchant(request.merchantDomain);
-    if (!entry.merchants.includes(merchant)) {
+    const merchant = merchantDomain(request.merchantDomain);
+    // Stored merchants are read again the same way, so an entry saved by an earlier reading still matches.
+    if (!entry.merchants.some(stored => merchantDomain(stored) === merchant)) {
       return { ok: false, reason: `Standing authorisation ${entry.id} covers ${entry.merchants.join(', ')}, not ${merchant}. Buy from one of those, or ask the owner.` };
     }
     if (standingItem(request.item) !== standingItem(entry.item)) {

@@ -25,18 +25,37 @@ const requireHookApi = (ctx: HooksCommandContext): HookApi => requireContextValu
 
 const TERMINAL_ONLY = 'Managed hooks are kept in this machine\'s hooks file.';
 
+const managedHookRows = (ctx: HooksCommandContext): ListRow[] => requireHookApi(ctx).workbench.listManagedHooks()
+  .flatMap(({ pattern, hook }): ListRow[] => hook.name ? [{ value: hook.name, label: hook.name, detail: `${pattern} (${hook.type})`, state: hook.enabled === false ? 'off' : 'on' }] : []);
+/** The managed hooks alone: the entries that can be switched on or off. */
 const MANAGED_HOOKS = defineList<HooksCommandContext>({
   name: 'hooks.managed',
   async read(ctx) {
-    const workbench = requireHookApi(ctx).workbench;
+    return managedHookRows(ctx);
+  },
+  operator: { terminalOnly: TERMINAL_ONLY },
+});
+/** The managed hooks and chains: the entries that can be removed. */
+const MANAGED_ENTRIES = defineList<HooksCommandContext>({
+  name: 'hooks.managed-entries',
+  async read(ctx) {
     return [
-      ...workbench.listManagedHooks().flatMap(({ pattern, hook }): ListRow[] => hook.name ? [{ value: hook.name, label: hook.name, detail: `${pattern} (${hook.type})`, state: hook.enabled === false ? 'off' : 'on' }] : []),
-      ...workbench.listManagedChains().map((chain): ListRow => ({ value: chain.name, label: chain.name, detail: `chain of ${chain.steps.length} step(s)` })),
+      ...managedHookRows(ctx),
+      ...requireHookApi(ctx).workbench.listManagedChains().map((chain): ListRow => ({ value: chain.name, label: chain.name, detail: `chain of ${chain.steps.length} step(s)` })),
     ];
   },
   operator: { terminalOnly: TERMINAL_ONLY },
 });
-const HOOK = listInput({ id: 'hook', label: 'Hook', help: 'The managed hooks and chains', list: MANAGED_HOOKS });
+const HOOK = listInput({ id: 'hook', label: 'Hook', help: 'The managed hooks', list: MANAGED_HOOKS });
+const ENTRY = listInput({ id: 'hook', label: 'Hook', help: 'The managed hooks and chains', list: MANAGED_ENTRIES });
+
+/** The refusal for a name `/hooks enable` or `disable` did not find among the managed hooks. */
+function toggleRefusal(ctx: HooksCommandContext, name: string): ReturnType<typeof commandRefusal> {
+  if (requireHookApi(ctx).workbench.listManagedChains().some((chain) => chain.name === name)) {
+    return commandRefusal(`${name} is a chain; a chain cannot be switched on or off.`, `/hooks remove ${name} takes it out of the hooks file`);
+  }
+  return commandRefusal(`No managed hook named ${name}.`, '/hooks contracts lists the managed hooks file and its entries', 'NOT_FOUND');
+}
 const FILE = textInput({ id: 'path', label: 'File', help: 'A hooks bundle file', why: 'a file path on this machine', kind: 'path', typed: { position: 1 } });
 const HOOK_TYPES = [
   { value: 'command', label: 'Run a command' },
@@ -73,9 +92,10 @@ export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: 
           for (const contract of contracts) {
             // The decision model could not say whether this entry fits the filter; it is listed, marked, rather than dropped.
             lines.push(`  ${contract.pattern}${contract.unsure ? ' (unsure match)' : ''}`);
-            lines.push(`    authority=${contract.authority} mode=${contract.executionMode} deny=${contract.canDeny ? 'yes' : 'no'} mutate=${contract.canMutateInput ? 'yes' : 'no'} inject=${contract.canInjectContext ? 'yes' : 'no'} timeout=${contract.timeoutMs}ms policy=${contract.failurePolicy}`);
+            lines.push(`    authority=${contract.authority} mode=${contract.executionMode} deny=${contract.canDeny ? 'yes' : 'no'} mutate=${contract.canMutateInput ? 'yes' : 'no'} inject=${contract.canInjectContext ? 'yes' : 'no'} policy=${contract.failurePolicy}`);
             lines.push(`    ${contract.description}`);
           }
+          lines.push('Each hook runs under its own "timeout" (default 30 s, 60 s for an agent hook).');
           lines.push('', `Managed hooks file: ${workbench.getFilePath()}`, `Managed entries: hooks=${workbench.listManagedHooks().length} chains=${workbench.listManagedChains().length}`);
           return lines.join('\n');
         },
@@ -126,7 +146,7 @@ export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: 
         touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'disable',
         operator: { terminalOnly: TERMINAL_ONLY }, example: { hook: 'lint-before-commit' },
         async run(values, ctx) {
-          if (!(await requireHookApi(ctx).workbench.toggle(values.hook!, true))) throw commandRefusal(`No managed hook named ${values.hook}.`, '/hooks contracts lists the managed hooks file and its entries', 'NOT_FOUND');
+          if (!(await requireHookApi(ctx).workbench.toggle(values.hook!, true))) throw toggleRefusal(ctx, values.hook!);
           return `Switched on managed hook ${values.hook}.`;
         },
       },
@@ -136,12 +156,12 @@ export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: 
         touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'enable',
         operator: { terminalOnly: TERMINAL_ONLY }, example: { hook: 'lint-before-commit' },
         async run(values, ctx) {
-          if (!(await requireHookApi(ctx).workbench.toggle(values.hook!, false))) throw commandRefusal(`No managed hook named ${values.hook}.`, '/hooks contracts lists the managed hooks file and its entries', 'NOT_FOUND');
+          if (!(await requireHookApi(ctx).workbench.toggle(values.hook!, false))) throw toggleRefusal(ctx, values.hook!);
           return `Switched off managed hook ${values.hook}.`;
         },
       },
       {
-        id: 'remove', label: 'Remove a hook or chain', word: 'remove', inputs: [HOOK],
+        id: 'remove', label: 'Remove a hook or chain', word: 'remove', inputs: [ENTRY],
         sentence: 'The managed hook or chain {hook} is deleted from the hooks file; export first with /hooks export to keep a copy.', done: '',
         touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
         operator: { terminalOnly: TERMINAL_ONLY }, example: { hook: 'lint-before-commit' },

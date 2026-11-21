@@ -504,7 +504,10 @@ export function Composer({
         }
         if (event.key === 'Enter' || event.key === 'Tab') {
           const selected = filteredSlashCommands[slashActiveIndex];
-          if (selected) {
+          // Enter on a command typed out in full runs it; Tab, or Enter on a prefix, completes it.
+          const typedInFull = event.key === 'Enter' && selected !== undefined
+            && draft.slice(1).toLowerCase() === selected.name.toLowerCase();
+          if (selected && !typedInFull) {
             event.preventDefault();
             onDraftChange(`/${selected.name} `);
             return;
@@ -519,7 +522,7 @@ export function Composer({
       }
       onComposerKeyDown(event);
     },
-    [showSlashMenu, filteredSlashCommands, slashActiveIndex, onDraftChange, onComposerKeyDown],
+    [showSlashMenu, filteredSlashCommands, slashActiveIndex, draft, onDraftChange, onComposerKeyDown],
   );
 
   function handleSlashSelect(name: string) {

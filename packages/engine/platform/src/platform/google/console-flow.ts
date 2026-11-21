@@ -19,7 +19,7 @@ import { readConsoleStatus } from './console-reading.js';
  */
 
 import { AUTH_AUDIENCE_URL, AUTH_CLIENTS_URL } from './setup-plan.js';
-import { captureGooglePage, findElement, looksLikeGoogleSignIn, readTextUntil, requireElement } from './browser-elements.js';
+import { captureGooglePage, findElement, looksLikeGoogleSignIn, readTextAfterSettle, requireElement } from './browser-elements.js';
 import { consumeGoogleElement } from './browser-elements.js';
 import { ownGoogleBrowser } from './browser-readings.js';
 import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
@@ -346,7 +346,7 @@ export async function createDesktopOAuthClient(
     // The id and secret appear in a dialog once Google has created the client,
     // a network round trip after the click.
     const known = `${clientsListText}\n${textBeforeCreate}`;
-    const credentials = await readTextUntil(browser, (text) => extractClientCredentials(text, known), { signal: options.signal });
+    const credentials = await readTextAfterSettle(browser, (text) => extractClientCredentials(text, known), { signal: options.signal });
     if (!credentials) {
       return {
         kind: 'failed',

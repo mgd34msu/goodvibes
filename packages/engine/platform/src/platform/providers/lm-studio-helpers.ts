@@ -230,46 +230,51 @@ export async function consumeSSE(
   };
 
   const reader = body.getReader();
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (!value) continue;
-    buffer += decoder.decode(value, { stream: true });
-    const lines = buffer.split(/\r?\n/);
-    buffer = lines.pop() ?? '';
-    for (const line of lines) {
-      if (!line) {
-        flush();
-        continue;
-      }
-      if (line.startsWith('event:')) {
-        currentEvent = line.slice('event:'.length).trim();
-        continue;
-      }
-      if (line.startsWith('data:')) {
-        currentData.push(line.slice('data:'.length).trim());
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split(/\r?\n/);
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line) {
+          flush();
+          continue;
+        }
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice('event:'.length).trim();
+          continue;
+        }
+        if (line.startsWith('data:')) {
+          currentData.push(line.slice('data:'.length).trim());
+        }
       }
     }
-  }
 
-  buffer += decoder.decode();
-  if (buffer) {
-    const lines = buffer.split(/\r?\n/);
-    for (const line of lines) {
-      if (!line) {
-        flush();
-        continue;
-      }
-      if (line.startsWith('event:')) {
-        currentEvent = line.slice('event:'.length).trim();
-        continue;
-      }
-      if (line.startsWith('data:')) {
-        currentData.push(line.slice('data:'.length).trim());
+    buffer += decoder.decode();
+    if (buffer) {
+      const lines = buffer.split(/\r?\n/);
+      for (const line of lines) {
+        if (!line) {
+          flush();
+          continue;
+        }
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice('event:'.length).trim();
+          continue;
+        }
+        if (line.startsWith('data:')) {
+          currentData.push(line.slice('data:'.length).trim());
+        }
       }
     }
+    flush();
+  } finally {
+    // A throwing handler or a malformed event releases the connection before the error propagates.
+    await reader.cancel().catch(() => undefined);
   }
-  flush();
 }
 
 export async function buildHttpError(

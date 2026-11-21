@@ -222,6 +222,10 @@ silently ignored. A tab can score only the pinned model: when
 microphone. With several tabs or an installed window open, one of them listens
 and the others show "Wake detection is running in another tab"; when that one
 closes or stops, the next takes over, so one wake phrase is heard and sent once.
+Words heard while no chat is open are kept: the indicator reads `Heard:
+"<words>"` with "Open a chat to use it; it will be placed in the draft.", and
+the next chat that opens puts them in its composer to review, never sending
+them by itself.
 
 ## Work
 
@@ -241,7 +245,9 @@ same counts. The platform's own services (heartbeats, pollers, the code index)
 sit behind one line, "Background services: 4 healthy", which opens to each one
 and its state; a service that stalls or fails becomes a row under Needs
 attention, with Restart when it can be restarted. Open sessions between turns
-are behind their own line. A search box narrows the rows, and the Show select
+are behind their own line. When the inbox cannot be read, the list keeps the
+asks it last read and says so above them: "Questions and purchase windows could
+not be read: <reason>." with Retry. A search box narrows the rows, and the Show select
 switches between Active (the default) and Archive. Select a row to open its
 detail beside the list (over the page on a phone). An ask opens as its card:
 who asked and when, the question, what it acts on, what it will do, the
@@ -304,7 +310,9 @@ and a background poll keeps the list fresh while it is down.
 
 Open sessions between turns sit behind their own line; the daemon sends them a
 page at a time, and "Show older sessions" at the end of the list loads the next
-page, back to the first. In a session's detail you can:
+page, back to the first. When a page cannot be read, the same line says why
+("Older sessions could not be read: ...") and selecting it tries again. In a
+session's detail you can:
 
 - read its transcript
 - steer a live session (on a phone, plain Enter sends); a steer sent while the

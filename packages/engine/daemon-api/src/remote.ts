@@ -30,7 +30,7 @@ async function dispatchRemoteRoutesInner(
       ? handlers.approveRemotePairRequest(safeDecodeURIComponent(pairActionMatch[1]!), req)
       : handlers.rejectRemotePairRequest(safeDecodeURIComponent(pairActionMatch[1]!), req);
   }
-  if (pathname === '/api/remote/peers' && method === 'GET') return handlers.getRemotePeers();
+  if (pathname === '/api/remote/peers' && method === 'GET') return handlers.getRemotePeers(req);
   const peerMatch = pathname.match(/^\/api\/remote\/peers\/([^/]+)$/);
   if (peerMatch && method === 'GET') return handlers.getRemotePeer(safeDecodeURIComponent(peerMatch[1]!));
   const peerTokenActionMatch = pathname.match(/^\/api\/remote\/peers\/([^/]+)\/token\/(rotate|revoke)$/);

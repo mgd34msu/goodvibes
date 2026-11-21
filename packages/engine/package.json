@@ -1803,6 +1803,11 @@
       "types": "./terminal-shell/dist/session-focus.d.ts",
       "import": "./terminal-shell/dist/session-focus.js"
     },
+    "./terminal-shell/turn-anchor-recording": {
+      "bun": "./terminal-shell/src/turn-anchor-recording.ts",
+      "types": "./terminal-shell/dist/turn-anchor-recording.d.ts",
+      "import": "./terminal-shell/dist/turn-anchor-recording.js"
+    },
     "./terminal-shell/process-output-log": {
       "bun": "./terminal-shell/src/process-output-log.ts",
       "types": "./terminal-shell/dist/process-output-log.d.ts",

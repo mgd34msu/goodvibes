@@ -198,18 +198,11 @@ export class AutoHealer {
     const warnings: string[] = [];
     if (hasCapturedToolInvocation() && !this.execution) throw new Error('Captured repair requires its construction-owned backend');
     await this.check();
+    // Repair switched off, or nothing to repair: nothing is attempted and nothing is said.
+    if (!this.configManager.get('tools.autoHeal') || !errors.length) return { healed: false, content };
     if (isClassicOperation()) return { healed: false, content,
       warnings: ['Automatic semantic repair is unavailable without a decision model. The original validation errors are retained; submit an explicit corrected edit.'] };
     try {
-      // Config gate: only run when tools.autoHeal is enabled
-      if (!this.configManager.get('tools.autoHeal')) {
-        return { healed: false, content };
-      }
-
-      if (!errors.length) {
-        return { healed: false, content };
-      }
-
       // Each stage starts from the content the agent wrote; a change that was
       // not accepted is dropped, never handed to the next stage.
       let result: HealResult = await this._tryFormatter(filePath, content, errors, warnings);

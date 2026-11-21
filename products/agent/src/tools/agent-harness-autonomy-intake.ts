@@ -2,7 +2,7 @@ import type { AutonomyIntakeOptions, AutonomyIntakeSchedule, AutonomyIntents } f
 import { getOperatorContract } from '@goodvibes/engine/platform/contracts';
 import type { CommandContext } from '../input/command-registry.ts';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
-import { watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
+import { watcherReadModelPublication, type WatcherRecordLane } from './agent-harness-autonomy-watcher-read-models.ts';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
 
 interface AgentHarnessAutonomyIntakeArgs {
@@ -28,11 +28,15 @@ interface AutonomyRouteCandidate {
   readonly policy?: string;
 }
 
-type WatcherEvidenceContractStatus = 'contract-needed' | 'ready';
-type WatcherEvidenceCheckStatus = 'published-route' | 'published-records' | 'missing';
+type WatcherEvidenceContractStatus = 'contract-needed' | 'records-unreadable' | 'ready';
+type WatcherEvidenceCheckStatus = 'published-route' | 'published-records' | 'unreadable' | 'missing';
 
-/** Which watcher record lanes the host publishes right now. */
-interface WatcherPublication { readonly runs: boolean; readonly providerSources: boolean }
+/** Which watcher record lanes the host publishes right now, and which of them could not be read this time. */
+interface WatcherPublication {
+  readonly runs: boolean;
+  readonly providerSources: boolean;
+  readonly unavailable: readonly WatcherRecordLane[];
+}
 
 interface WatcherEvidenceContractRoute {
   readonly id: string;
@@ -52,14 +56,14 @@ interface WatcherEvidenceContractCheck {
 }
 
 interface WatcherEvidenceReceiptContract {
-  readonly status: 'missing' | 'published-records';
+  readonly status: 'missing' | 'unreadable' | 'published-records';
   readonly appliesTo: readonly string[];
   readonly requiredFields: readonly string[];
   readonly nextWhenPublished: string;
 }
 
 interface WatcherProviderSourceContract {
-  readonly status: 'missing' | 'published-records';
+  readonly status: 'missing' | 'unreadable' | 'published-records';
   readonly supportedSourceKinds: readonly string[];
   readonly requiredFields: readonly string[];
   readonly policy: string;
@@ -159,6 +163,9 @@ function triggerWorkflowSummary(workflows: readonly TriggerWorkflow[]): Record<s
     watcherEvidenceMissing: watcherContract?.contractChecklist
       .filter((check) => check.status === 'missing')
       .map((check) => check.id) ?? [],
+    watcherEvidenceUnreadable: watcherContract?.contractChecklist
+      .filter((check) => check.status === 'unreadable')
+      .map((check) => check.id) ?? [],
     primaryNextStep: workflows.find((workflow) => workflow.status !== 'ready')?.nextStep
       ?? 'Trigger routes are published; require explicit source, scope, task, success criteria, and confirmation before creating anything.',
   };
@@ -180,10 +187,23 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>, published: Watc
   const watcherListPublished = methodIds.has('watchers.list');
   const watcherRunPublished = methodIds.has('watchers.run');
   const watcherStartStopPublished = methodIds.has('watchers.start') && methodIds.has('watchers.stop');
+  const runsUnreadable = published.unavailable.includes('runs');
+  const sourcesUnreadable = published.unavailable.includes('providerSources');
+  // A lane whose read failed is unknown this time, never "not published".
+  const runsStatus = published.runs ? 'published-records' : runsUnreadable ? 'unreadable' : 'missing';
+  const sourcesStatus = published.providerSources ? 'published-records' : sourcesUnreadable ? 'unreadable' : 'missing';
+  const unreadableLanes = [
+    ...(runsUnreadable ? ['watcher run-history'] : []),
+    ...(sourcesUnreadable ? ['provider-source'] : []),
+  ];
   return {
-    status: published.runs && published.providerSources ? 'ready' : 'contract-needed',
+    status: published.runs && published.providerSources
+      ? 'ready'
+      : unreadableLanes.length > 0 ? 'records-unreadable' : 'contract-needed',
     userOutcome: 'Show durable watcher run history and provider-source records in the autonomy queue without hiding trigger ownership.',
-    currentState: published.runs && published.providerSources
+    currentState: unreadableLanes.length > 0
+      ? `The connected host's ${unreadableLanes.join(' and ')} records could not be read this time, so whether they are published is unknown; read autonomy action:"queue" again.`
+      : published.runs && published.providerSources
       ? 'The connected host publishes watcher run-history and provider-source records; the autonomy queue shows them.'
       : published.runs || published.providerSources
         ? `The connected host publishes ${published.runs ? 'watcher run-history' : 'provider-source'} records but not ${published.runs ? 'provider-source' : 'watcher run-history'} records yet.`
@@ -249,7 +269,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>, published: Watc
       {
         id: 'durable-run-history-records',
         label: 'Durable watcher run history records',
-        status: published.runs ? 'published-records' : 'missing',
+        status: runsStatus,
         requiredFor: 'Show past watcher runs, checkpoints, errors, and next recovery routes in the autonomy queue.',
         owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'autonomy action:"queue"',
@@ -257,7 +277,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>, published: Watc
       {
         id: 'provider-source-records',
         label: 'Provider-source records',
-        status: published.providerSources ? 'published-records' : 'missing',
+        status: sourcesStatus,
         requiredFor: 'Show source-scoped Gmail/email/webhook/file records without polling or exposing raw provider payloads.',
         owner: 'goodvibes-platform-or-daemon',
         inspectRoute: 'personal_ops action:"lane" laneId:"inbox"',
@@ -280,7 +300,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>, published: Watc
       },
     ],
     receiptContract: {
-      status: published.runs ? 'published-records' : 'missing',
+      status: runsStatus,
       appliesTo: [
         'watchers.create',
         'watchers.patch',
@@ -295,7 +315,7 @@ function watcherEvidenceContract(methodIds: ReadonlySet<string>, published: Watc
       nextWhenPublished: 'autonomy action:"queue" and autonomy action:"item" should expose watcher run/source receipts with exact recovery and replay routes.',
     },
     providerSourceContract: {
-      status: published.providerSources ? 'published-records' : 'missing',
+      status: sourcesStatus,
       supportedSourceKinds: ['webhook', 'github-webhook', 'file-watcher', 'gmail', 'email', 'calendar'],
       requiredFields: WATCHER_PROVIDER_SOURCE_FIELDS,
       policy: 'Provider-source records must be scoped, permission-aware, redacted, and source-owned; Agent only consumes published records and never polls personal providers silently.',
@@ -310,7 +330,8 @@ function compactWatcherEvidenceContract(contract: WatcherEvidenceContract): Reco
     userOutcome: contract.userOutcome,
     owner: contract.owner,
     missing: contract.contractChecklist.filter((check) => check.status === 'missing').map((check) => check.id),
-    publishedRoutes: contract.contractChecklist.filter((check) => check.status !== 'missing').map((check) => check.id),
+    unreadable: contract.contractChecklist.filter((check) => check.status === 'unreadable').map((check) => check.id),
+    publishedRoutes: contract.contractChecklist.filter((check) => check.status === 'published-route' || check.status === 'published-records').map((check) => check.id),
     requiredReceiptFields: contract.receiptContract.requiredFields,
     providerSourceKinds: contract.providerSourceContract.supportedSourceKinds,
     inspectRoute: 'host action:"methods" query:"watchers"',

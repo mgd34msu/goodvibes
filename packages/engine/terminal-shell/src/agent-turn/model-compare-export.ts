@@ -4,6 +4,7 @@ import { DEFAULT_SIDE_BY_SIDE_PREVIEW_BYTES, MAX_HANDOFF_ARTIFACT_BYTES } from '
 import { formatComparisonDimensionLines, formatUsage, toSavedComparisonArtifact } from './model-compare-run.js';
 import { isTextLike, readString, previewText } from './model-compare-utils.js';
 import { fencedBlock } from './markdown-fence.js';
+import { assertRelatedArtifactKeepsBlind } from './model-compare-handoff.js';
 
 export function markdownBlock(value: string): string {
   return fencedBlock(value || '(empty)');
@@ -109,9 +110,11 @@ export async function saveComparisonExportArtifact(input: {
   return toSavedComparisonArtifact(descriptor);
 }
 
+/** `reveal` false: a related artifact that names the models is refused before its text is taken (assertRelatedArtifactKeepsBlind). */
 export async function loadHandoffRelatedArtifacts(
   artifactStore: AgentModelCompareArtifactStore | undefined,
   artifactIds: readonly string[],
+  reveal: boolean,
   maxBytes = MAX_HANDOFF_ARTIFACT_BYTES,
 ): Promise<readonly { readonly artifact: SavedComparisonArtifact; readonly text?: string; readonly truncatedBytes: number }[]> {
   if (!artifactStore?.readContent) {
@@ -120,6 +123,7 @@ export async function loadHandoffRelatedArtifacts(
   const related: { readonly artifact: SavedComparisonArtifact; readonly text?: string; readonly truncatedBytes: number }[] = [];
   for (const artifactId of artifactIds) {
     const { record, buffer } = await artifactStore.readContent(artifactId);
+    assertRelatedArtifactKeepsBlind(record, reveal);
     const artifact = toSavedComparisonArtifact(record);
     if (!isTextLike(record.mimeType)) {
       related.push({ artifact, truncatedBytes: 0 });

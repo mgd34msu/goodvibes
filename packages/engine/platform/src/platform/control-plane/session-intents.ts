@@ -6,6 +6,7 @@ import type {
 } from '../automation/types.js';
 import type { ExecutionIntent } from '../runtime/execution-intents.js';
 import { resolveModelReference, type ModelIdCandidate } from '../providers/model-id-resolution.js';
+import { sameProviderCatalog } from '../providers/provider-aliases.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 
 export const SHARED_SESSION_INPUT_INTENTS = ['submit', 'steer', 'follow-up'] as const;
@@ -154,10 +155,11 @@ export interface SharedSessionAgentSpawnRoutingInput {
  * When `modelCandidates` (the live registry's model list) is supplied, a
  * bare id with no provider hint resolves via the shared resolver (unique
  * across the registry -> auto-qualify; ambiguous/unknown -> a rich error
- * naming real candidates) instead of the old abstract format lecture. A
- * bare id WITH a provider hint keeps qualifying by concatenation, that
- * path already correctly implements "provider in context -> qualify"
- * without needing registry access.
+ * naming real candidates) instead of the old abstract format lecture. With
+ * a provider hint the id is kept when it already starts with `provider:` or
+ * is a registryKey of that provider, refused when it is a registryKey of a
+ * different provider, and otherwise qualified as `provider:id`, so an id
+ * that itself holds a colon (Ollama's `llama3:8b`) qualifies correctly.
  */
 function normalizeSharedSessionModelId(
   modelId: string | undefined,
@@ -167,15 +169,15 @@ function normalizeSharedSessionModelId(
   const trimmedModelId = modelId?.trim();
   if (!trimmedModelId) return undefined;
   const trimmedProviderId = providerId?.trim();
-  const separatorIndex = trimmedModelId.indexOf(':');
-  if (separatorIndex > 0) {
-    const modelProviderId = trimmedModelId.slice(0, separatorIndex);
-    if (trimmedProviderId && trimmedProviderId !== modelProviderId) {
+  if (trimmedProviderId) {
+    if (trimmedModelId.startsWith(`${trimmedProviderId}:`)) return trimmedModelId;
+    const keyed = modelCandidates?.find((candidate) => candidate.registryKey === trimmedModelId);
+    if (keyed) {
+      if (keyed.provider === trimmedProviderId || sameProviderCatalog(keyed.provider, trimmedProviderId)) return trimmedModelId;
       throw new Error(`Shared-session routing model '${trimmedModelId}' conflicts with provider '${trimmedProviderId}'.`);
     }
-    return trimmedModelId;
+    return `${trimmedProviderId}:${trimmedModelId}`;
   }
-  if (trimmedProviderId) return `${trimmedProviderId}:${trimmedModelId}`;
   if (modelCandidates) {
     try {
       return resolveModelReference(trimmedModelId, modelCandidates);
@@ -183,6 +185,7 @@ function normalizeSharedSessionModelId(
       throw new Error(`Shared-session routing model: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
+  if (trimmedModelId.includes(':')) return trimmedModelId;
   throw new Error(`Shared-session routing model '${trimmedModelId}' must be provider-qualified.`);
 }
 
@@ -194,7 +197,6 @@ function normalizeSharedSessionFallbackModels(
     .filter((model): model is string => typeof model === 'string' && model.trim().length > 0)
     .map((model) => {
       const trimmed = model.trim();
-      if (trimmed.includes(':')) return trimmed;
       if (modelCandidates) {
         try {
           return resolveModelReference(trimmed, modelCandidates);
@@ -202,6 +204,7 @@ function normalizeSharedSessionFallbackModels(
           throw new Error(`Shared-session fallback model: ${err instanceof Error ? err.message : String(err)}`);
         }
       }
+      if (trimmed.includes(':')) return trimmed;
       throw new Error(`Shared-session fallback model '${model}' must be provider-qualified.`);
     });
 }

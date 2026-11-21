@@ -87,6 +87,8 @@ export class LocalStreamingAudioPlayer implements StreamingAudioPlayer {
     const label = this.command.label;
     const proc = this.spawnProcess(this.command.command, buildPlayerArgs(this.command, options.format));
     this.live.add(proc);
+    // The player went away while a chunk was being written; the write callback and its exit carry the failure.
+    proc.stdin.on('error', () => {});
     const lastError = trackLastErrorLine(proc);
     const abort = () => {
       try { proc.stdin.destroy(); } catch { /* ignore */ }

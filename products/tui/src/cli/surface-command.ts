@@ -204,18 +204,11 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
       if (enabled) config.setDynamic('daemon.enabled', true);
     }
     else {
-      if (enabled) {
-        // An external surface receives its traffic on the HTTP listener, so enabling one opens that listener.
-        const listenerError = applyTargetEndpointFlagsOrDefault(runtime, 'httpListener');
-        if (listenerError) return refuse(listenerError);
-        reached.push('httpListener');
-        enableFeatureFlags(config, getServerSurfaceFeatureFlags({ serverBacked: true, externalSurfaces: [resolved.id] }));
-        config.setDynamic('danger.httpListener', true);
-      }
-      config.setDynamic(`surfaces.${resolved.id}.enabled` as ConfigKey, enabled);
       if (enabled && resolved.id === 'ntfy') {
         // On the public server a topic name is the only secret: each unset inbound topic gets an unguessable one.
         // Each name is a credential: it goes to the daemon's secret tier and the setting holds its reference.
+        // The topics are stored before anything is switched on, so a failed store leaves the listener and channel as they were;
+        // a topic stored before a later one failed is kept and reused, as only unset topics are filled.
         const secrets = ntfyTopicSecrets(runtime);
         try {
           generatedNtfyTopics.push(...await ensureNtfyTopics({
@@ -226,10 +219,21 @@ async function surfacesCommand(runtime: CliCommandRuntime): Promise<{ readonly o
               config.setDynamic(key as ConfigKey, buildGoodVibesSecretRef(secretKey));
             },
           }));
+        } catch (error) {
+          return { output: `Surface not enabled: ntfy. Its topic name could not be stored: ${summarizeError(error)}. Nothing else was changed.`, exitCode: 1 };
         } finally {
           secrets.close();
         }
       }
+      if (enabled) {
+        // An external surface receives its traffic on the HTTP listener, so enabling one opens that listener.
+        const listenerError = applyTargetEndpointFlagsOrDefault(runtime, 'httpListener');
+        if (listenerError) return refuse(listenerError);
+        reached.push('httpListener');
+        enableFeatureFlags(config, getServerSurfaceFeatureFlags({ serverBacked: true, externalSurfaces: [resolved.id] }));
+        config.setDynamic('danger.httpListener', true);
+      }
+      config.setDynamic(`surfaces.${resolved.id}.enabled` as ConfigKey, enabled);
     }
     if (enabled) {
       enableServicePosture(config);

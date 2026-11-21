@@ -1,11 +1,13 @@
 /**
  * method-catalog-contracts.ts, the `contracts.*` operator methods: list,
- * summarize, read, poll, start, dispatch, cancel, reply to and remove contracts, over every contract
- * runner this daemon holds (its own and each hosted-session workspace
- * floor's). Handlers are in routes/contracts.ts; each method except summaries,
- * status, dispatch and remove also has a REST path, served through the daemon-api REST route
- * table (gateway-rest-routes.ts) by the same handler; those four are
- * reached by invoke.
+ * summarize, read, poll, start, dispatch, cancel, reply to and remove
+ * contracts, retry a unit and set a budget, over every contract runner this
+ * daemon holds (its own and each hosted-session workspace floor's). Handlers
+ * are in routes/contracts.ts. Every method is reached by invoke; a method whose
+ * descriptor has an `http` binding is also served on that REST path through
+ * the daemon-api REST route table (gateway-rest-routes.ts) by the same
+ * handler. Today those are list, get, start, cancel and reply; summaries,
+ * status, dispatch, remove, retryUnit and budget are invoke only.
  *
  * Scopes follow the fleet methods: reading is `read:fleet`, acting is
  * `write:fleet`.

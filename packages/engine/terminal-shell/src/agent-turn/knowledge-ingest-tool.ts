@@ -8,13 +8,17 @@ import type { ConnectedHostConfigReader as AgentConnectedHostConfigReader } from
 import type { AgentInProcessHost } from './in-process-host.js';
 import {
   classifyKnowledgeError,
-  postAgentKnowledgeJson,
-  postAgentKnowledgeUpload,
+  connectionIsThisMachine,
+  localFileIngestSend,
+  MAX_KNOWLEDGE_INGEST_FILE_BYTES,
   resolveConnectedHostConnection,
+  sendAgentKnowledgeIngest,
   type AgentKnowledgeFailure,
+  type AgentKnowledgeIngestSend,
+  type AgentKnowledgeLocalFileKind,
 } from './knowledge-runtime.js';
 import { AGENT_KNOWLEDGE_METHODS } from './knowledge-methods.js';
-import { formatBatchIngest, formatFailure, formatIngest } from './knowledge-format.js';
+import { batchIngestState, formatBatchIngest, formatFailure, formatIngest } from './knowledge-format.js';
 import { readString } from './tool-args.js';
 import { confirmParameter, requestParameter } from './effect-admission.js';
 
@@ -65,8 +69,6 @@ interface AgentKnowledgeIngestRequest {
 
 /** The daemon clamps a browser-history import to this many rows. */
 const BROWSER_HISTORY_LIMIT_MAX = 500;
-/** A local file is read once into memory and sent as bytes; this bounds that read. */
-const MAX_INGEST_FILE_BYTES = 64 * 1024 * 1024;
 
 /** Every source kind the tool accepts; the connected-host capability map lists the same set. */
 export const SOURCE_KINDS: readonly AgentKnowledgeIngestSourceKind[] = [
@@ -376,40 +378,29 @@ function readIngestFile(shellPaths: ShellPathService, path: string): Buffer {
     if (named.dev !== stat.dev || named.ino !== stat.ino) {
       throw new IngestArgumentError('Nothing was ingested: the file changed while it was being opened (it was replaced or a link was put in its place). Check the path and call again.');
     }
-    if (stat.size > MAX_INGEST_FILE_BYTES) throw new IngestArgumentError(`The file is larger than the ${MAX_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
+    if (stat.size > MAX_KNOWLEDGE_INGEST_FILE_BYTES) throw new IngestArgumentError(`The file is larger than the ${MAX_KNOWLEDGE_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
     return readFileSync(fd);
   } finally { closeSync(fd); }
 }
 
-/** What leaves for the host: the JSON body, or the file bytes for an upload. */
-type IngestSend =
-  | { readonly kind: 'json'; readonly route: string; readonly payload: JsonRecord }
-  | { readonly kind: 'upload'; readonly route: string; readonly bytes: Buffer; readonly filename: string; readonly fields: JsonRecord };
-
 /**
- * Local files are read here and sent as bytes, never as a path the host would
- * open on its own machine. A single file becomes an uploaded artifact; a URL
- * or bookmarks list and a connector's file go as the connector's content.
+ * Local files are read here, inside the workspace, and sent as bytes
+ * (localFileIngestSend), never as a path the host would open on its own
+ * machine. A browser profile home is sent as the absolute directory the
+ * workspace check admitted, which only a host on this machine can read.
  */
-function sendFor(request: AgentKnowledgeIngestRequest, shellPaths: ShellPathService, sourceKind: string): IngestSend {
-  const payload = request.payload;
-  const homeOverride = readOptionalString(payload.homeOverride);
-  if (homeOverride) workspacePath(shellPaths, homeOverride, 'homeOverride');
+function sendFor(request: AgentKnowledgeIngestRequest, shellPaths: ShellPathService, sourceKind: string): AgentKnowledgeIngestSend {
+  const homeOverride = readOptionalString(request.payload.homeOverride);
+  const payload = homeOverride
+    ? { ...request.payload, homeOverride: workspacePath(shellPaths, homeOverride, 'homeOverride') }
+    : request.payload;
   const selected = readOptionalString(payload.path);
   if (!selected) return { kind: 'json', route: request.method.route, payload };
   const path = workspacePath(shellPaths, selected, 'path');
   const bytes = readIngestFile(shellPaths, path);
-  if (request.method === AGENT_KNOWLEDGE_METHODS.ingestArtifact) {
-    const { path: _path, ...fields } = payload;
-    return { kind: 'upload', route: request.method.route, bytes, filename: basename(path), fields };
-  }
   const { path: _path, ...rest } = payload;
-  if (request.method === AGENT_KNOWLEDGE_METHODS.ingestConnector) {
-    return { kind: 'json', route: request.method.route, payload: { ...rest, ...(rest.content === undefined && rest.input === undefined ? { content: bytes.toString('utf8') } : {}) } };
-  }
-  return { kind: 'json', route: AGENT_KNOWLEDGE_METHODS.ingestConnector.route, payload: {
-    ...rest, connectorId: sourceKind === 'bookmarks_file' ? 'bookmark' : 'url-list', content: bytes.toString('utf8'),
-  } };
+  const kind: AgentKnowledgeLocalFileKind = sourceKind === 'file' || sourceKind === 'urls_file' || sourceKind === 'bookmarks_file' ? sourceKind : 'connector';
+  return localFileIngestSend(kind, rest, { bytes, filename: basename(path) });
 }
 
 /**
@@ -422,8 +413,8 @@ export function createAgentKnowledgeIngestInputProjector(shellPaths: ShellPathSe
     try {
       const ingest = requestForArgs(captureStrictJudgmentJson(request.args) as AgentKnowledgeIngestToolArgs);
       const path = readOptionalString(ingest.payload.path), homeOverride = readOptionalString(ingest.payload.homeOverride);
-      if (path && statSync(workspacePath(shellPaths, path, 'path')).size > MAX_INGEST_FILE_BYTES) {
-        throw new IngestArgumentError(`The file is larger than the ${MAX_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
+      if (path && statSync(workspacePath(shellPaths, path, 'path')).size > MAX_KNOWLEDGE_INGEST_FILE_BYTES) {
+        throw new IngestArgumentError(`The file is larger than the ${MAX_KNOWLEDGE_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
       }
       if (homeOverride) workspacePath(shellPaths, homeOverride, 'homeOverride');
     } catch (error) {
@@ -505,7 +496,7 @@ export function createAgentKnowledgeIngestTool(
           },
           homeOverride: {
             type: 'string',
-            description: 'Optional browser profile home override for browser_history ingest; must be inside the workspace.',
+            description: 'Optional browser profile home override for browser_history ingest; must be inside the workspace. The knowledge host reads the directory itself, so it is refused when that host is another machine.',
           },
           limit: {
             type: 'number',
@@ -534,10 +525,13 @@ export function createAgentKnowledgeIngestTool(
       if (!wasAdmitted) {
         return failure(`${preview(request)}\n\nNothing was ingested: this call ran without the owner's admission of an ingest. Ask the owner to allow it, then call again.`);
       }
-      let send: IngestSend;
+      const connection = resolveConnectedHostConnection({ configManager, homeDirectory: shellPaths.homeDirectory, ...(inProcess ? { inProcess } : {}) });
+      if (readOptionalString(request.payload.homeOverride) && !connectionIsThisMachine(connection)) {
+        return failure(`Nothing was imported: homeOverride names a directory on this machine, but the knowledge host is ${connection.baseUrl}, another machine, which cannot read it. Omit homeOverride to import that host's own browsers.`);
+      }
+      let send: AgentKnowledgeIngestSend;
       try { send = sendFor(request, shellPaths, readString(args.sourceKind) || 'url'); }
       catch (error) { return failure(error instanceof IngestArgumentError ? error.message : `The file could not be read: ${error instanceof Error ? error.message : String(error)}`); }
-      const connection = resolveConnectedHostConnection({ configManager, homeDirectory: shellPaths.homeDirectory, ...(inProcess ? { inProcess } : {}) });
       if (!connection.token) return failure(formatKnowledgeFailure({ ok: false, kind: 'auth_required',
         error: connection.unavailable?.reason ?? 'No connected-host operator token found.', baseUrl: connection.baseUrl, route: send.route,
         ...(connection.unavailable ? { next: connection.unavailable.next } : {}) }));
@@ -548,9 +542,7 @@ export function createAgentKnowledgeIngestTool(
       const restrictions = { ...(options?.signal ? { signal: options.signal } : {}), assertCurrent };
       let data: unknown;
       try {
-        data = send.kind === 'upload'
-          ? await postAgentKnowledgeUpload(connection, send.route, { bytes: send.bytes, filename: send.filename }, send.fields, restrictions)
-          : await postAgentKnowledgeJson(connection, send.route, send.payload, restrictions);
+        data = await sendAgentKnowledgeIngest(connection, send, restrictions);
       } catch (error) {
         try {
           return failure(formatKnowledgeFailure(await classifyKnowledgeError(error, connection, send.route, restrictions.signal ? { signal: restrictions.signal } : {})));
@@ -558,9 +550,10 @@ export function createAgentKnowledgeIngestTool(
           return failure('Agent Knowledge ingest was cancelled. The request may already have reached the host. List the Agent Knowledge sources before retrying, so the same source is not ingested twice.');
         }
       }
-      const text = request.batch ? formatBatchIngest(data, request.label)
-        : formatIngest(data, request.target, request.label, request.method.route, request.targetLabel);
-      return output([text, ...(request.notes ?? [])].join('\n'));
+      const text = [request.batch ? formatBatchIngest(data, request.label)
+        : formatIngest(data, request.target, request.label, request.method.route, request.targetLabel), ...(request.notes ?? [])].join('\n');
+      // A batch that imported nothing and reported failures stored nothing: it is a failure, not a save.
+      return request.batch && batchIngestState(data) === 'failed' ? failure(text) : output(text);
     },
   };
 }

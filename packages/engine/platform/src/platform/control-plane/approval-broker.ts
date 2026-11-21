@@ -625,7 +625,7 @@ export class ApprovalBroker {
     this.log?.close();
     const log = openRecordLog<Record<string, unknown>>(this.logPath, { fsync: 'each' });
     this.log = log;
-    if (log.size === 0) this.#carryForwardSnapshotFile(log);
+    this.#carryForwardSnapshotFile(log);
     // The newest line of each id is its record.
     const newest = new Map<string, unknown>();
     let position = 0;
@@ -658,10 +658,12 @@ export class ApprovalBroker {
 
   /**
    * 3.3.1 kept approvals in one snapshot file, `approvals.json` beside this
-   * log. While the log is empty and that file is there, its records are
-   * appended to the log in this version's form, each line synced, and only
-   * then is the file removed. It runs once: afterwards the log has lines or
-   * the file is gone. A file that cannot be read is left where it is, named.
+   * log. While that file is there, each of its records the log does not
+   * already hold (by id) is appended in this version's form, each line synced,
+   * and only then is the file removed. A carry-forward stopped part way (the
+   * process died, an append failed) resumes on the next start from the first
+   * record the log lacks, without duplicating any. A file that cannot be read
+   * is left where it is, named.
    */
   #carryForwardSnapshotFile(log: RecordLog<Record<string, unknown>>): void {
     const snapshotPath = this.logPath.endsWith('.jsonl') ? this.logPath.slice(0, -1) : null;
@@ -675,10 +677,14 @@ export class ApprovalBroker {
       logger.warn('Approvals saved by an earlier version could not be read and were left in place', { file: snapshotPath, error: failureText(error) });
       return;
     }
+    const held = new Set<string>();
+    for (const line of log.scan()) {
+      if (typeof line['id'] === 'string') held.add(line['id']);
+    }
     let carried = 0;
     for (const record of records) {
       const upgraded = approvalFromSnapshotFile(record, this.homeNode);
-      if (!upgraded) continue;
+      if (!upgraded || (typeof upgraded['id'] === 'string' && held.has(upgraded['id']))) continue;
       log.append(upgraded);
       carried += 1;
     }
@@ -719,27 +725,27 @@ export class ApprovalBroker {
    * (`expired-while-down`) rather than being extended: silence for the full
    * window is silence whether or not we were running to hear it.
    *
-   * There are no local resolvers for a restored record (the awaiting caller
-   * died with the previous process), so this settles the RECORD, which is what
-   * every surface reads. An in-process ask with no deadline, and a change put
-   * to the owner, are cancelled (`requester-restarted`): their waiter died, so
-   * an answer would reach nobody. An ask raised over the wire belongs to a
-   * caller in another process that may still be watching it, so it stays open
-   * for that caller with its holds as recorded.
+   * There are no local resolvers for a restored record, so this settles the
+   * RECORD, which is what every surface reads. One rule decides: an in-process
+   * ask's waiter died with the process, so every restored in-process ask
+   * (with or without a deadline, a change put to the owner included) is
+   * cancelled (`requester-restarted`), since an answer would reach nobody. A
+   * wire ask's caller lives in another process and may still be watching, so
+   * it stays open for that caller with its holds as recorded: with no timer
+   * when it has no deadline, with its deadline re-armed when it has one.
    */
   private rearmRestoredTimers(): void {
     const now = Date.now();
     for (const approval of this.approvals.values()) {
       if (!isOpenApprovalStatus(approval.status)) continue;
       if (this.pendingResolvers.has(approval.id)) continue;
-      const wire = approval.requester.kind !== 'in-process';
-      if (approval.expiresAt === undefined || (approval.metadata['ownerAct'] === true && !wire)) {
-        if (wire) {
-          this.pendingResolvers.set(approval.id, { resolvers: [], externallyOwned: true });
-          continue;
-        }
+      if (approval.requester.kind === 'in-process') {
         this.#internal(approval.id, { to: 'cancelled', actor: BROKER_ACTOR, cause: 'requester-restarted',
           note: 'the process that asked restarted, so nothing is waiting for this answer' }, 'Restored approval cancellation failed');
+        continue;
+      }
+      if (approval.expiresAt === undefined) {
+        this.pendingResolvers.set(approval.id, { resolvers: [], externallyOwned: true });
         continue;
       }
       const remaining = approval.expiresAt - now;
@@ -831,8 +837,11 @@ export class ApprovalBroker {
    * it runs in the answer's write unit before the approval is recorded, so the
    * approver's resolve returns only after it ran, and a failure leaves the ask
    * waiting and comes back to the approver as the answer's error with the
-   * reason. Any end of the ask (approved, denied, expired, cancelled) lets it
-   * go. Returns the unregister.
+   * reason. It runs at most once: once it ran it is let go even when the
+   * approval record could not then be saved, so the approve that records it
+   * does not run it again, and a handler need not be idempotent. Any end of
+   * the ask (approved, denied, expired, cancelled) lets it go. Returns the
+   * unregister.
    *
    * `effect` must not write an approval (raise, answer, claim, cancel, update):
    * such a write would wait for the unit it runs in, so it is refused at once
@@ -1052,7 +1061,12 @@ export class ApprovalBroker {
    * (`keep`, one request) saves that rule first, in the same unit: a rule that
    * cannot be saved changes nothing and the approver is told. An approve that
    * puts a change in effect (`effect`) runs it next, in the same unit: a change
-   * that fails leaves the ask waiting and the approver is told. The deny direction (denied,
+   * that fails leaves the ask waiting and the approver is told. When the rule
+   * was saved or the change ran and the approval record then cannot be
+   * written, the rule and the change stay in force (a saved rule may already
+   * have replaced rules it covers, which no undo restores), the ask still
+   * shows waiting, and the error says exactly that: approving again records
+   * it, rewriting the same rule and not running the change a second time. The deny direction (denied,
    * cancelled, expired) keeps the fail-closed rule: its waiters are refused
    * even when the write fails, and the error says so. After the unit, waiters
    * are answered (an approve's typed answer goes to its own waiter only) and
@@ -1065,6 +1079,7 @@ export class ApprovalBroker {
     // Set inside the write unit: the write's failure, a remembered rule that was not saved, an approved change that could not be put in effect, and an owner decision that went stale after it landed.
     const ended: { failed?: { readonly error: unknown }; notKept?: { readonly error: unknown }; notApplied?: { readonly error: unknown }; staleOwner?: OwnerDecisionStaleError } = {};
     let effectRan = false;
+    let ruleKept = false;
     const committed: PlannedTransition[] = [];
     await this.writes.run(async () => {
       const working = new Map<string, SharedApprovalRecord>();
@@ -1088,6 +1103,7 @@ export class ApprovalBroker {
       if (keep && changing.some((plan) => plan.refusal === undefined && (plan.next!.status === 'approved' || plan.next!.status === 'denied'))) {
         try {
           await keep();
+          ruleKept = true;
         } catch (error) {
           ended.notKept = { error };
           for (const plan of changing) if (plan.ownerCheck) this.#ownerApprovals.settle(plan.request.id);
@@ -1096,8 +1112,8 @@ export class ApprovalBroker {
       }
       // The approved change is put in effect before the approval is recorded: a record never says approved for a change that is not in force.
       if (effect && changing.some((plan) => plan.refusal === undefined && plan.next!.status === 'approved')) {
+        const approvalId = changing.find((plan) => plan.next!.status === 'approved')!.request.id;
         try {
-          const approvalId = changing.find((plan) => plan.next!.status === 'approved')!.request.id;
           await approvedChangeScope.run({ approvalId, handler: effect.handler }, effect.run);
           effectRan = true;
         } catch (error) {
@@ -1111,6 +1127,12 @@ export class ApprovalBroker {
         await this.#append(changing.map((plan) => plan.next!));
       } catch (error) {
         ended.failed = { error };
+        // The change is in force: the approve the error asks for records it and does not run it a second time.
+        if (effectRan) {
+          for (const plan of changing) {
+            if (plan.next?.status === 'approved' && this.#approvedEffects.get(plan.request.id) === effect) this.#approvedEffects.delete(plan.request.id);
+          }
+        }
         // Deny direction: a refusal can never do what nobody agreed to, so its
         // waiters are refused and the record moves in memory; the next write saves it.
         for (const plan of changing) {
@@ -1156,8 +1178,13 @@ export class ApprovalBroker {
       const failure = ended.failed.error;
       const plan = planned.find((entry) => entry.next !== undefined);
       const id = plan?.request.id ?? requests[0]?.id ?? 'the approval';
-      if (effectRan) {
-        throw new Error(`The approved change to ${id} is in effect, but the approval could not be saved (${failureText(failure)}). The ask still shows as waiting; approve it again to record it.`, { cause: failure });
+      const ruleInForce = ruleKept && plan?.next !== undefined && !denyDirection(plan.next.status);
+      if (effectRan || ruleInForce) {
+        const inForce = [
+          ...(effectRan ? [`the approved change to ${id} is in effect`] : []),
+          ...(ruleInForce ? ['the rule you chose to remember is saved and in force'] : []),
+        ].join(' and ');
+        throw new Error(`${inForce.charAt(0).toUpperCase()}${inForce.slice(1)}, but the approval itself could not be saved (${failureText(failure)}). The ask still shows as waiting; approve it again to record it.`, { cause: failure });
       }
       if (plan?.next && denyDirection(plan.next.status)) {
         throw new Error(`The ${plan.next.status === 'denied' ? 'denial' : plan.next.status === 'expired' ? 'expiry' : 'cancellation'} of ${id} was applied and the waiting call was refused, but it could not be saved (${failureText(failure)}). It is saved with the next approvals write.`, { cause: failure });

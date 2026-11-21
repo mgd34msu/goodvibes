@@ -13,6 +13,7 @@ export interface ModelPickerOpenDeps<Info> {
     beginCatalogLoad(): number;
     isCatalogLoadCurrent(ticket: number): boolean;
     fillCatalog(ticket: number, fill: ModelPickerCatalogFill<Info>, done?: boolean | undefined): boolean;
+    onSessionEnded(listener: (chosen: boolean) => void): void;
   };
   readonly render: () => void;
   /** The selectable models from the cached catalog (synchronous). */
@@ -47,7 +48,11 @@ export interface ModelPickerOpenDeps<Info> {
  * or the provider list (/provider). The returned promise settles when every
  * fill has landed or been dropped; callers do not need to await it.
  */
-export function openModelPickerNow<Info>(deps: ModelPickerOpenDeps<Info>, mode: 'models' | 'providers' = 'models'): Promise<void> {
+export function openModelPickerNow<Info>(
+  deps: ModelPickerOpenDeps<Info>,
+  mode: 'models' | 'providers' = 'models',
+  onClosed?: ((chosen: boolean) => void) | undefined,
+): Promise<void> {
   const { picker } = deps;
   const configured = new Set(deps.configuredProviderIds());
   const models = deps.listModels();
@@ -58,6 +63,8 @@ export function openModelPickerNow<Info>(deps: ModelPickerOpenDeps<Info>, mode: 
   picker.setTargetInfos(deps.buildTargets(picker.embeddingProviders ?? []));
   if (mode === 'providers') picker.openProviders(providers, deps.currentProviderId());
   else picker.openAllModels(models, deps.currentModelId());
+  // After the open, which ends any earlier session unchosen.
+  if (onClosed) picker.onSessionEnded(onClosed);
   const ticket = picker.beginCatalogLoad();
   deps.render();
   const ownsCatalog = () => picker.isCatalogLoadCurrent(ticket);
@@ -103,8 +110,8 @@ export function createModelPickerCommandOpeners<Info, Target>(
   },
 ) {
   return {
-    openModelPicker: (): void => {
-      void openModelPickerNow(deps, 'models');
+    openModelPicker: (onClosed?: ((chosen: boolean) => void) | undefined): void => {
+      void openModelPickerNow(deps, 'models', onClosed);
     },
     openProviderPicker: (): void => {
       void openModelPickerNow(deps, 'providers');

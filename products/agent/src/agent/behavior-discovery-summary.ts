@@ -2,7 +2,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
+import { markdownRecordName, parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
+import { PERSONA_DIRECTORY_MARKERS, getPersonaDirectories } from './persona-discovery.ts';
+import { ROUTINE_DIRECTORY_MARKERS, getRoutineDirectories } from './routine-discovery.ts';
 
 type DiscoveryOrigin = 'project-local' | 'global';
 
@@ -58,9 +60,8 @@ function readDiscoveryCandidate(path: string, origin: DiscoveryOrigin, definitio
     ? (frontmatter[definition.frontmatterBodyKey] ?? stripMarkdownFrontmatter(content)).trim()
     : stripMarkdownFrontmatter(content);
   if (body.length === 0) return null;
-  const name = frontmatter.name ?? path.split(/[\\/]/).pop()?.replace(/\.md$/i, '') ?? '';
-  const normalized = name.trim();
-  return normalized ? { name: normalized, origin } : null;
+  const name = markdownRecordName(frontmatter, path);
+  return name ? { name, origin } : null;
 }
 
 function candidatePaths(root: string, entry: string, markers: readonly string[]): readonly string[] {
@@ -109,13 +110,8 @@ function definitions(shellPaths: Pick<ShellPathService, 'workingDirectory' | 'ho
   const cwd = shellPaths.workingDirectory;
   const homeDir = shellPaths.homeDirectory;
   const personas: DiscoveryKindDefinition = {
-    roots: [
-      { root: join(cwd, '.goodvibes', 'personas'), origin: 'project-local' },
-      { root: join(cwd, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'personas'), origin: 'project-local' },
-      { root: join(homeDir, '.goodvibes', 'personas'), origin: 'global' },
-      { root: join(homeDir, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'personas'), origin: 'global' },
-    ],
-    markers: ['PERSONA.md', 'persona.md'],
+    roots: getPersonaDirectories(cwd, homeDir),
+    markers: PERSONA_DIRECTORY_MARKERS,
     frontmatterBodyKey: 'system_prompt',
   };
   const skills: DiscoveryKindDefinition = {
@@ -128,13 +124,8 @@ function definitions(shellPaths: Pick<ShellPathService, 'workingDirectory' | 'ho
     markers: ['SKILL.md'],
   };
   const routines: DiscoveryKindDefinition = {
-    roots: [
-      { root: join(cwd, '.goodvibes', 'routines'), origin: 'project-local' },
-      { root: join(cwd, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'routines'), origin: 'project-local' },
-      { root: join(homeDir, '.goodvibes', 'routines'), origin: 'global' },
-      { root: join(homeDir, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'routines'), origin: 'global' },
-    ],
-    markers: ['ROUTINE.md', 'routine.md'],
+    roots: getRoutineDirectories(cwd, homeDir),
+    markers: ROUTINE_DIRECTORY_MARKERS,
     frontmatterBodyKey: 'steps',
   };
 

@@ -101,11 +101,11 @@ export function createConversationRewindPort(
       }
       return shared.preview(anchor);
     },
-    async rewind(anchor: RewindAnchor): Promise<RewindConversationOutcome> {
+    async rewind(anchor: RewindAnchor, expectedRevision?: string): Promise<RewindConversationOutcome> {
       if (!resolveConversation(anchor.sessionId)) {
         return { droppedMessages: 0, undoSnapshotId: '', available: false, unavailableReason: NO_LIVE_CONVERSATION };
       }
-      return shared.rewind(anchor);
+      return shared.rewind(anchor, expectedRevision);
     },
   };
 }

@@ -1,4 +1,5 @@
-import type { LLMProvider, ChatRequest, ChatResponse, ProviderModelSource, StreamDelta } from './interface.js';
+import type { LLMProvider, ChatRequest, ChatResponse, ProviderModelSource } from './interface.js';
+import { trackDeliveredOutput } from './stream-delivery.js';
 import { ProviderError, isBillingOrCreditError, isRateLimitOrQuotaError, readRetryWait } from '../types/errors.js';
 import { logger } from '../utils/logger.js';
 import type { BenchmarkEntry } from './model-benchmarks.js';
@@ -305,15 +306,22 @@ export class SyntheticProvider implements LLMProvider {
       attempt += 1;
       params.onRetry?.(attempt, Math.max(maxAttempts, attempt), delayMs, new Error(message, cause === undefined ? undefined : { cause }));
     };
-    const backendRequest = (modelId: string, onDelivered: () => void): ChatRequest => ({
-      ...params,
-      model: modelId,
-      maxRetries: 0,
-      onRetry: undefined,
-      ...(params.onDelta
-        ? { onDelta: (delta: StreamDelta) => { onDelivered(); params.onDelta!(delta); } }
-        : {}),
-    });
+    // One backend attempt: its request, and whether answer or reasoning text has
+    // reached the caller yet (tool-call previews do not count, as in every
+    // provider's retry), which is what decides whether a failure may rotate.
+    const backendAttempt = (modelId: string): { readonly request: ChatRequest; readonly canRetry: () => boolean } => {
+      const tracked = trackDeliveredOutput(params.onDelta);
+      return {
+        request: {
+          ...params,
+          model: modelId,
+          maxRetries: 0,
+          onRetry: undefined,
+          ...(tracked.onDelta ? { onDelta: tracked.onDelta } : {}),
+        },
+        canRetry: tracked.canRetry,
+      };
+    };
 
     // Resolve 'best-free' alias
     if (syntheticId === 'best-free') {
@@ -414,12 +422,12 @@ export class SyntheticProvider implements LLMProvider {
         continue;
       }
 
-      // Attempt the call. Once a backend has delivered any delta the caller
-      // holds that text, so a later backend would append a second answer to it:
-      // from that point the failure is surfaced instead of rotated past.
-      let delivered = false;
+      // Attempt the call. Once a backend has delivered answer or reasoning text
+      // the caller holds it, so a later backend would append a second answer to
+      // it: from that point the failure is surfaced instead of rotated past.
+      const backendCall = backendAttempt(backend.modelId);
       try {
-        const response = await provider.chat(backendRequest(backend.modelId, () => { delivered = true; }));
+        const response = await provider.chat(backendCall.request);
 
         // Success, update active backend
         this.activeBackend.set(syntheticId, idx);
@@ -429,7 +437,7 @@ export class SyntheticProvider implements LLMProvider {
       } catch (err) {
         // A cancel is not a backend fault: no cooldown, no rotation.
         if (isAbort(err, params.signal)) throw err;
-        if (delivered) {
+        if (!backendCall.canRetry()) {
           logger.warn(`[Synthetic] ${backend.providerName} failed mid-stream for ${syntheticId}; not rotating after partial output`, { error: summarizeError(err) });
           throw err;
         }
@@ -547,10 +555,10 @@ export class SyntheticProvider implements LLMProvider {
       });
 
       // Single retry attempt on the backend that just came off cooldown
-      let retryDelivered = false;
+      const retryCall = backendAttempt(waitBackend.modelId);
       try {
         const waitProvider = this.resolveProvider(waitBackend.providerName);
-        const response = await waitProvider.chat(backendRequest(waitBackend.modelId, () => { retryDelivered = true; }));
+        const response = await waitProvider.chat(retryCall.request);
         this.activeBackend.set(syntheticId, waitIdx);
         logger.info(
           `[Synthetic] ${syntheticId} served by ${waitBackend.providerName} (${waitBackend.modelId}) after auto-wait`,
@@ -559,7 +567,7 @@ export class SyntheticProvider implements LLMProvider {
       } catch (retryErr) {
         if (isAbort(retryErr, params.signal)) throw retryErr;
         // The caller already holds this backend's partial text; a fallback model would append a second answer.
-        if (retryDelivered) throw retryErr;
+        if (!retryCall.canRetry()) throw retryErr;
         // Retry failed, fall through to throw below
         logger.debug(
           `[Synthetic] Auto-wait retry failed for ${syntheticId} via ${
@@ -587,10 +595,10 @@ export class SyntheticProvider implements LLMProvider {
         report(attempt + 1, 0, `Every provider for ${syntheticId} is unavailable; trying the free model ${fallbackId}.`);
 
         for (const backend of fallbackResult.backends) {
-          let fallbackDelivered = false;
+          const fallbackCall = backendAttempt(backend.modelId);
           try {
             const provider = this.resolveProvider(backend.providerName);
-            const response = await provider.chat(backendRequest(backend.modelId, () => { fallbackDelivered = true; }));
+            const response = await provider.chat(fallbackCall.request);
 
             this.activeBackend.set(fallbackId, 0);
             logger.info(`[Synthetic] ${syntheticId} exhausted, fell back to ${fallbackId} via ${backend.providerName}`);
@@ -613,7 +621,7 @@ export class SyntheticProvider implements LLMProvider {
 
             return response;
           } catch (err) {
-            if (isAbort(err, params.signal) || fallbackDelivered) throw err;
+            if (isAbort(err, params.signal) || !fallbackCall.canRetry()) throw err;
             logger.debug(`[Synthetic] Fallback ${fallbackId} via ${backend.providerName} failed: ${summarizeError(err)}`);
             continue;
           }

@@ -254,7 +254,8 @@ export function renderDiscovered(groups: readonly DiscoveredGroup[], now: number
       '',
       'if the machine you want to join is switched on and has clustering enabled,',
       'check that both machines are on the same network and that it is not blocking',
-      'multicast. You can also join by id directly: cluster join --group <id> --key <key>',
+      'multicast. You can also join by id directly: cluster join --group <id>, and give',
+      'the key when asked (or pipe it in: echo "$JOIN_KEY" | cluster join --group <id> --key -)',
     ];
   }
   const width = Math.max(...groups.map((group) => printableName(group.displayName).length), 10);
@@ -310,7 +311,8 @@ export function renderJoinKey(result: JoinKeyResult, isTerminal: boolean): JoinK
           'if nothing was copied, the key is printed above.']
         : ['(not a terminal, so no clipboard copy was attempted)']),
       '',
-      `to add a machine: run  cluster join --group ${result.groupId} --key <the key above>`,
+      `to add a machine: run  cluster join --group ${result.groupId}  on it and give the key above when asked`,
+      `(in a script, pipe it in: echo "$JOIN_KEY" | cluster join --group ${result.groupId} --key -)`,
     ],
     clipboardSequence: isTerminal ? clipboardEscapeSequence(result.joinKey) : null,
   };

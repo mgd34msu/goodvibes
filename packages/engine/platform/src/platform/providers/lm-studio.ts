@@ -14,6 +14,7 @@ import type {
 import type { ToolCall, ToolDefinition } from '../types/tools.js';
 import { OpenAICompatProvider, type OpenAICompatOptions } from './openai-compat.js';
 import { LOCAL_SERVER_EFFORT } from './discovered-traits.js';
+import { getCacheCapability, type ProviderCacheCapability } from './cache-capability.js';
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { ProviderError } from '../types/errors.js';
 import { withRetry } from '../utils/retry.js';
@@ -57,6 +58,8 @@ export class LMStudioProvider implements LLMProvider {
   readonly credentialAuthority = 'anonymous' as const;
   readonly models: string[];
   readonly capabilities?: Partial<ProviderCapability> | undefined;
+  /** How this server caches prompts; the capability registry reports it as this provider's caching. */
+  readonly cacheCapability: ProviderCacheCapability;
 
   private readonly defaultModel: string;
   private readonly nativeChatUrl: string;
@@ -70,6 +73,7 @@ export class LMStudioProvider implements LLMProvider {
     this.name = opts.name;
     this.models = [...(opts.models ?? [])];
     this.capabilities = opts.capabilities;
+    this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
     this.defaultModel = opts.defaultModel;
     this.nativeChatUrl = deriveNativeChatUrl(opts.baseURL);
     this.nativeFetch = opts.nativeFetch ?? instrumentedFetch;

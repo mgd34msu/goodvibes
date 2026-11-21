@@ -88,20 +88,30 @@ export function findPlaybooksByTag(...tags: string[]): Playbook[] {
 
 /**
  * The playbooks for a symptom in the person's own words, best first: an exact
- * id, then playbooks a word of the symptom tags, then word overlap with names,
- * descriptions and symptoms. Empty when nothing matches.
+ * id, then playbooks a word of the symptom tags (most distinct words tagged
+ * first, ties by word overlap), then the rest by word overlap with names,
+ * descriptions, symptoms and tags. Empty when nothing matches.
  */
 export function findPlaybooksBySymptom(query: string): Playbook[] {
   const text = query.trim().toLowerCase();
   if (!text) return [];
   const exact = getPlaybook(text);
   if (exact) return [exact];
-  const words = text.split(/[^a-z0-9]+/).filter(Boolean);
-  const tagged = findPlaybooksByTag(...words);
+  const words = new Set(text.split(/[^a-z0-9]+/).filter(Boolean));
   const ranked = rankClassicCatalog(ALL_PLAYBOOKS, text, (playbook) => ({
     id: playbook.id,
     description: `${playbook.name} ${playbook.description} ${playbook.symptoms.join(' ')} ${playbook.tags.join(' ')}`,
   })).map((match) => match.entry);
+  const rankOf = (playbook: Playbook): number => {
+    const index = ranked.indexOf(playbook);
+    return index === -1 ? ranked.length : index;
+  };
+  const tagHits = new Map<Playbook, number>();
+  for (const playbook of ALL_PLAYBOOKS) {
+    const hits = new Set(playbook.tags.map((tag) => tag.toLowerCase()).filter((tag) => words.has(tag))).size;
+    if (hits > 0) tagHits.set(playbook, hits);
+  }
+  const tagged = [...tagHits.keys()].sort((a, b) => (tagHits.get(b) ?? 0) - (tagHits.get(a) ?? 0) || rankOf(a) - rankOf(b));
   return [...new Set([...tagged, ...ranked])];
 }
 

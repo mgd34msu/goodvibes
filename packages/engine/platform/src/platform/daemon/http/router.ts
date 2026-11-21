@@ -97,13 +97,14 @@ import { dispatchCompanionChatRoutes, isCompanionChatPath } from '../../companio
 import { dispatchModelRoutes } from './model-routes.js';
 import { dispatchBatchRoutes } from './batch-routes.js';
 import { gateGatewayBinding } from './gateway-binding-gate.js';
-import { assertDaemonRouteManifest } from './route-manifest.js';
+import { assertDaemonRouteManifest, catalogPathname } from './route-manifest.js';
 import { IdempotentReplayStore, replayKeyedRequest, takesIdempotencyKey } from '../../control-plane/idempotent-replay.js';
 import { deriveRequestWithBody } from '../derived-request.js';
 import { ownBrowserOrigins, refuseCookieWriteFromOtherOrigin } from './browser-origin.js';
 import { handleBrowserNodeSession, handleBrowserSession } from './browser-session.js';
 import { isSurfaceIngressEnabled } from '../surface-policy.js';
 import { dispatchCloudflareRoutes } from './cloudflare-routes.js';
+import { CloudflareControlPlaneManager } from '../../cloudflare/manager.js';
 import { dispatchMcpRoutes } from './mcp-routes.js';
 import { HomeAssistantConversationRoutes } from './homeassistant-routes.js';
 import { HomeGraphRoutes } from './home-graph-routes.js';
@@ -313,7 +314,7 @@ export class DaemonHttpRouter {
         const store = context.idempotentReplay;
         const raw = req.headers.get('idempotency-key');
         if (!store || raw === null) return null;
-        const descriptor = context.gatewayMethods.findByHttpBinding(req.method, new URL(req.url).pathname);
+        const descriptor = context.gatewayMethods.findByHttpBinding(req.method, catalogPathname(new URL(req.url).pathname));
         if (!takesIdempotencyKey(descriptor)) return null;
         const principalId = context.authenticateRequest(req)?.principal.principalId;
         if (!descriptor || principalId === undefined) return null;
@@ -336,6 +337,7 @@ export class DaemonHttpRouter {
       secrets: () => {
         const owner = context.secretsManager;
         return owner?.prepareImport && owner.inspectPreparedImport && owner.assertPreparedImport && owner.withPreparedImport && owner.assertCompletedImport
+          && owner.prepareScopedDeletion && owner.inspectPreparedScopedDeletion && owner.assertPreparedScopedDeletion && owner.applyPreparedScopedDeletion && owner.assertCompletedScopedDeletion
           ? owner as import('./settings-import-precondition.js').ServingSettingsImportSecrets : null;
       },
       host: () => context.nativeMutationHost,
@@ -429,32 +431,7 @@ export class DaemonHttpRouter {
         const closed = asset === null ? this.context.workAdmission?.refusalResponse() ?? null : null;
         const refused = closed !== null && startsWork(req.method) && !this.holdsInboundDelivery(new URL(req.url).pathname, req.method) ? closed : null;
         // An error leaves as the route wrote it: its code is the fact a client reads, so nothing is attached for a model to read.
-        const response = asset ?? (refused ?? await this.requests.route(req).catch((error: unknown) => {
-          if (error instanceof DecisionModelPolicyChangedError) throw error;
-          // Decision models are off (no decision model) and this feature needs one: the owner's setting, not a daemon fault.
-          if (error instanceof DecisionModelsDisabledError) {
-            return jsonErrorResponse({
-              error: error.message,
-              code: 'DECISION_MODELS_DISABLED',
-              category: 'bad_request',
-              state: 'no decision model is in use (none is chosen, or decision models are turned off)',
-              next: ['Choose a Decision model in settings, with "When the decision model is missing or fails" set to Hybrid or Decision Model Only, to use this; or use the alternative the message names'],
-            }, { status: 409 });
-          }
-          // A route that throws must still answer: a bare rejection reaches the
-          // listener as a dropped connection with nothing for the caller to act on.
-          logger.error('[daemon-http] request handler failed', { method: req.method, path: new URL(req.url).pathname, error: summarizeError(error) });
-          const status = serviceFailureStatus(error, 500);
-          // An error the daemon raised on purpose names itself; anything else may carry a path or a query, so it gets a fixed sentence.
-          const classified = typeof error === 'object' && error !== null && typeof (error as { readonly category?: unknown }).category === 'string';
-          return classified
-            ? jsonErrorResponse(error, { status })
-            : Response.json({
-              error: 'The daemon could not complete this request.',
-              code: 'INTERNAL_ERROR',
-              guidance: status === 503 ? 'Retry shortly.' : 'The failure is in the daemon log; retrying the same request is unlikely to help.',
-            }, { status });
-        }));
+        const response = asset ?? (refused ?? await this.requests.route(req).catch((error: unknown) => this.routeFailureResponse(req, error)));
         if (response.status === 101) return response;
         // A success answers with the status its method declares (201 created, 202 accepted):
         // one declaration, read here and by the generated specs.
@@ -480,6 +457,37 @@ export class DaemonHttpRouter {
         return serving.cors.enabled ? applyCorsHeaders(req, observed, serving) : observed;
       },
     ));
+  }
+
+  /**
+   * The answer to a route that threw, the same for an HTTP request and a
+   * WebSocket call: a bare rejection reaches the caller as a dropped connection
+   * or an unanswered call with nothing to act on. A changed decision-model
+   * policy is rethrown for the request scope that owns it.
+   */
+  private routeFailureResponse(req: Request, error: unknown): Response {
+    if (error instanceof DecisionModelPolicyChangedError) throw error;
+    // Decision models are off (no decision model) and this feature needs one: the owner's setting, not a daemon fault.
+    if (error instanceof DecisionModelsDisabledError) {
+      return jsonErrorResponse({
+        error: error.message,
+        code: 'DECISION_MODELS_DISABLED',
+        category: 'bad_request',
+        state: 'no decision model is in use (none is chosen, or decision models are turned off)',
+        next: ['Choose a Decision model in settings, with "When the decision model is missing or fails" set to Hybrid or Decision Model Only, to use this; or use the alternative the message names'],
+      }, { status: 409 });
+    }
+    logger.error('[daemon-http] request handler failed', { method: req.method, path: new URL(req.url).pathname, error: summarizeError(error) });
+    const status = serviceFailureStatus(error, 500);
+    // An error the daemon raised on purpose names itself; anything else may carry a path or a query, so it gets a fixed sentence.
+    const classified = typeof error === 'object' && error !== null && typeof (error as { readonly category?: unknown }).category === 'string';
+    return classified
+      ? jsonErrorResponse(error, { status })
+      : Response.json({
+        error: 'The daemon could not complete this request.',
+        code: 'INTERNAL_ERROR',
+        guidance: status === 503 ? 'Retry shortly.' : 'The failure is in the daemon log; retrying the same request is unlikely to help.',
+      }, { status });
   }
 
   /** The 401 for a request without a valid credential; a refused credential the daemon knows is told why. */
@@ -700,7 +708,7 @@ export class DaemonHttpRouter {
 
   /** The route that serves this request, for a caller that already established who is asking. */
   async dispatchApiRoutes(req: Request): Promise<Response | null> {
-    return this.requests.dispatch(req);
+    return this.requests.dispatch(req).catch((error: unknown) => this.routeFailureResponse(req, error));
   }
 
   /**
@@ -725,11 +733,15 @@ export class DaemonHttpRouter {
     const batch: Parameters<typeof dispatchBatchRoutes>[1] | null = context.batchManager
       ? { batchManager: context.batchManager, parseJsonBody, parseOptionalJsonBody }
       : null;
+    // One manager for the router's life: its write chain serializes token
+    // creation, provision and disable across requests.
     const cloudflare: Parameters<typeof dispatchCloudflareRoutes>[1] = {
-      configManager: context.configManager,
-      secretsManager: context.secretsManager,
-      authToken: context.authToken,
-      ...(context.cloudflareTunnel ? { tunnelConnector: context.cloudflareTunnel } : {}),
+      manager: new CloudflareControlPlaneManager({
+        configManager: context.configManager,
+        secretsManager: context.secretsManager,
+        authToken: context.authToken,
+        ...(context.cloudflareTunnel ? { tunnelConnector: context.cloudflareTunnel } : {}),
+      }),
       parseJsonBody,
       parseOptionalJsonBody,
     };

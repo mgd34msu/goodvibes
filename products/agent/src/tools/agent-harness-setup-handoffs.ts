@@ -51,7 +51,7 @@ export function connectedHostReadinessHandoffs(item: SetupPlanItem): readonly Se
       effect: 'user-run',
       userRoute: item.userRoute,
       modelRoute: 'setup action:"item" setupItemId:"connected-host-readiness"',
-      nextStep: 'Show the Bun install, service start, binary verification, and reconnect commands for the user to run on the owning host.',
+      nextStep: 'Show the release installer, binary verification, host service status/install/start, and Agent reconnect commands for the user to run on the owning host.',
       safety: item.bootstrapPlan.policy,
     })]
     : [];

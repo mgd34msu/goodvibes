@@ -67,13 +67,10 @@ export function normalizeBaseUrl(baseUrl: string): string {
     });
   }
   // Only a genuinely public http origin keeps the wall; the server-side env
-  // override remains for an intentional public-http deployment.
-  const privateNetwork = isPrivateNetworkHost(parsed.hostname);
-  const runtimeProcess = (globalThis as { readonly process?: { readonly env?: Record<string, string | undefined> } }).process;
-  // Same switch grammar as the platform envFlag (1/true on, anything else off); kept inline because this package imports no platform code.
-  const insecureSwitch = runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT?.trim().toLowerCase();
-  const allowInsecure = insecureSwitch === '1' || insecureSwitch === 'true';
-  if ((protocol === 'http:' || protocol === 'ws:') && !privateNetwork && !allowInsecure) {
+  // override remains for an intentional public-http deployment. A secure
+  // origin never asks the private-network question (nor starts its Tailscale probe).
+  const plain = protocol === 'http:' || protocol === 'ws:';
+  if (plain && !allowsInsecureTransport() && !isPrivateNetworkHost(parsed.hostname)) {
     throw new ConfigurationError('Refusing insecure PUBLIC GoodVibes transport baseUrl.', {
       code: 'ENGINE_TRANSPORT_INSECURE_BASE_URL',
       source: 'transport',
@@ -81,6 +78,13 @@ export function normalizeBaseUrl(baseUrl: string): string {
     });
   }
   return normalized.replace(/\/+$/, '');
+}
+
+// Same switch grammar as the platform envFlag (1/true on, anything else off); kept inline because this package imports no platform code.
+function allowsInsecureTransport(): boolean {
+  const runtimeProcess = (globalThis as { readonly process?: { readonly env?: Record<string, string | undefined> } }).process;
+  const insecureSwitch = runtimeProcess?.env?.GOODVIBES_ALLOW_INSECURE_TRANSPORT?.trim().toLowerCase();
+  return insecureSwitch === '1' || insecureSwitch === 'true';
 }
 
 export function buildUrl(baseUrl: string, path: string): string {

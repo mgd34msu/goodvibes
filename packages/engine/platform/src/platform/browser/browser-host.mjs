@@ -417,12 +417,16 @@ function receiveMessage(message) {
     .catch((error) => finish({ ok: false, error: error?.message ?? String(error), ...(error?.name === 'TimeoutError' ? { timedOut: true } : {}) }));
 }
 
-createInterface({ input: process.stdin }).on('line', (line) => {
+const commands = createInterface({ input: process.stdin });
+commands.on('line', (line) => {
   if (!line.trim()) return;
   let message;
   try { message = JSON.parse(line); } catch { return; }
   receiveMessage(message);
 });
+// Stdin ends when the parent closes it or is gone. Exiting drops the debugger
+// connection, which ends request interception without closing the browser.
+commands.on('close', () => process.exit(0));
 
 /**
  * This host only works under real Node.

@@ -3,6 +3,7 @@ import type { ArtifactStore } from '@goodvibes/engine/platform/platform/artifact
 import type { OnboardingStep1CapabilityItem, OnboardingSurfaceRecord } from '../runtime/onboarding/index.ts';
 import type { AgentHarnessVibeHealth } from './agent-harness-vibe-health.ts';
 import type { AgentHarnessSudoPosture } from './agent-harness-sudo-posture.ts';
+import type { ConnectedHostCredentialSource } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 
 export interface AgentHarnessSetupArgs {
   readonly setupItemId?: unknown;
@@ -119,6 +120,8 @@ export interface SetupConnectedHostAuthPosture {
   readonly operatorToken: {
     readonly present: boolean;
     readonly usable: boolean;
+    /** Where the token was read from; the path below is a display label only. */
+    readonly source: ConnectedHostCredentialSource;
     readonly path: string;
     readonly error?: string;
   };

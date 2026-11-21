@@ -5,6 +5,8 @@ export interface RunOptions {
   args: string[];
   cwd?: string | undefined;
   env?: Record<string, string> | undefined;
+  /** Which of this process's environment variables the child inherits (every one when unset); `env` is applied on top. */
+  inheritEnv?: ((name: string) => boolean) | undefined;
   stdin?: string | undefined;
   timeoutMs: number;
   signal?: AbortSignal | undefined;
@@ -117,9 +119,13 @@ export async function runProcess(options: RunOptions): Promise<RunResult> {
   }
   if (options.signal?.aborted) throw new DOMException('Process execution aborted.', 'AbortError');
   const spawn = getBunSpawn();
+  const inherit = options.inheritEnv;
+  const inherited = inherit === undefined
+    ? process.env
+    : Object.fromEntries(Object.entries(process.env).filter(([name]) => inherit(name)));
   const child = spawn(options.args, {
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    env: { ...process.env, ...(options.env ?? {}) },
+    env: { ...inherited, ...(options.env ?? {}) },
     stdin: options.stdin !== undefined ? 'pipe' : 'ignore',
     stdout: 'pipe',
     stderr: 'pipe',

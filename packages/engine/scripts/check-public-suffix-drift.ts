@@ -35,11 +35,18 @@
  * a stranger's domain as the authorized one. That is reported as MISSING and
  * fails the run.
  *
+ * Both sections of the list are compared, ICANN and PRIVATE, each against its
+ * own bundled tables: a private-section suffix (`weebly.com`, `onrender.com`)
+ * the snapshot lacks makes two tenants of one host compare equal, which is the
+ * same hole.
+ *
  * A suffix we carry that upstream has REMOVED is the opposite error: the
  * comparison becomes needlessly narrow and a legitimate link is refused. That
- * is a correctness bug rather than a security hole, so it is reported as STALE
- * and also fails, but the message says which kind it is so whoever picks it up
- * knows whether they are fixing a hole or an annoyance.
+ * is a correctness bug rather than a security hole, so it is reported as STALE.
+ * In the ICANN section it also fails. In the private section, which churns by
+ * the week, it is reported and does not fail, so that churn never keeps the
+ * check red for the safe direction. Every message says which kind it is, so
+ * whoever picks it up knows whether they are fixing a hole or an annoyance.
  *
  * Fixing either is a DATA-ONLY change: regenerate the tables with
  * `bun packages/engine/scripts/generate-public-suffix-data.ts`.
@@ -50,12 +57,13 @@
  */
 
 import {
-  bundledMultiLabelSuffixes,
-  bundledWildcardSuffixParents,
+  bundledPublicSuffixRules,
+  type BundledPublicSuffixRules,
+  type BundledPublicSuffixSnapshot,
 } from '../platform/src/platform/security/public-suffix.ts';
-import { PUBLIC_SUFFIX_EXCEPTIONS } from '../platform/src/platform/security/generated/public-suffix-data.ts';
-import { CURATED_PRIVATE_SUFFIXES, parsePublicSuffixList, UPSTREAM_URL } from './public-suffix-source.ts';
+import { parsePublicSuffixList, UPSTREAM_URL, type PublicSuffixRules } from './public-suffix-source.ts';
 
+/** One section's drift. */
 export interface PublicSuffixDrift {
   /** Plain multi-label suffixes upstream has and the snapshot lacks (security-relevant). */
   readonly missing: readonly string[];
@@ -72,35 +80,46 @@ export interface PublicSuffixDrift {
   readonly upstreamMultiLabelCount: number;
 }
 
+/** The drift of both sections of the list. */
+export interface PublicSuffixListDrift {
+  readonly icann: PublicSuffixDrift;
+  readonly private: PublicSuffixDrift;
+}
+
 function difference(from: Iterable<string>, other: ReadonlySet<string>): string[] {
   return [...from].filter((value) => !other.has(value)).sort();
 }
 
-/**
- * Compares the bundled data with an upstream list text. The private section is
- * excluded: it is thousands of churning entries, so only the hand-kept
- * CURATED_PRIVATE_SUFFIXES are carried, and those are exempt from "stale".
- */
-export function comparePublicSuffixList(
-  text: string,
-  bundled: {
-    readonly multiLabel: ReadonlySet<string>;
-    readonly wildcardParents: ReadonlySet<string>;
-    readonly exceptions: ReadonlySet<string>;
-  },
-): PublicSuffixDrift {
-  const upstream = parsePublicSuffixList(text);
-  const curated = new Set(CURATED_PRIVATE_SUFFIXES);
+function compareSection(upstream: PublicSuffixRules, bundled: BundledPublicSuffixRules): PublicSuffixDrift {
   return {
     // An upstream plain rule that the snapshot keeps as a wildcard parent is covered.
     missing: difference(upstream.multiLabel, bundled.multiLabel).filter((suffix) => !bundled.wildcardParents.has(suffix)),
-    stale: difference(bundled.multiLabel, upstream.multiLabel).filter((suffix) => !curated.has(suffix)),
+    stale: difference(bundled.multiLabel, upstream.multiLabel),
     missingWildcards: difference(upstream.wildcardParents, bundled.wildcardParents),
     staleWildcards: difference(bundled.wildcardParents, upstream.wildcardParents),
     missingExceptions: difference(upstream.exceptions, bundled.exceptions),
     staleExceptions: difference(bundled.exceptions, upstream.exceptions),
     upstreamMultiLabelCount: upstream.multiLabel.size,
   };
+}
+
+/** Compares the bundled data with an upstream list text, each section against its own tables. */
+export function comparePublicSuffixList(text: string, bundled: BundledPublicSuffixSnapshot): PublicSuffixListDrift {
+  const upstream = parsePublicSuffixList(text);
+  return {
+    icann: compareSection(upstream.icann, bundled.icann),
+    private: compareSection(upstream.private, bundled.private),
+  };
+}
+
+/** Rules upstream has that the snapshot lacks, or an exception it keeps that upstream dropped: a widened comparison. */
+function securityRelevant(drift: PublicSuffixDrift): number {
+  return drift.missing.length + drift.missingWildcards.length + drift.staleExceptions.length;
+}
+
+/** The opposite direction: a needlessly narrow comparison. */
+function correctness(drift: PublicSuffixDrift): number {
+  return drift.stale.length + drift.staleWildcards.length + drift.missingExceptions.length;
 }
 
 function printGroup(title: string, detail: string, sign: '+' | '-', values: readonly string[]): void {
@@ -113,12 +132,7 @@ function printGroup(title: string, detail: string, sign: '+' | '-', values: read
 
 async function main(): Promise<void> {
   const reportOnly = process.argv.includes('--report');
-  const bundledMultiLabel = bundledMultiLabelSuffixes();
-  const bundled = {
-    multiLabel: bundledMultiLabel,
-    wildcardParents: new Set(bundledWildcardSuffixParents()),
-    exceptions: new Set(PUBLIC_SUFFIX_EXCEPTIONS),
-  };
+  const bundled = bundledPublicSuffixRules();
 
   let text: string;
   try {
@@ -136,39 +150,46 @@ async function main(): Promise<void> {
   }
 
   const drift = comparePublicSuffixList(text, bundled);
-  console.log(
-    `public-suffix drift: bundled ${String(bundledMultiLabel.size)} multi-label, `
-    + `${String(bundled.wildcardParents.size)} wildcard, ${String(bundled.exceptions.size)} exception; `
-    + `upstream ICANN multi-label ${String(drift.upstreamMultiLabelCount)}.`,
-  );
+  for (const [name, rules, sectionDrift] of [
+    ['ICANN', bundled.icann, drift.icann],
+    ['PRIVATE', bundled.private, drift.private],
+  ] as const) {
+    console.log(
+      `public-suffix drift: ${name} bundled ${String(rules.multiLabel.size)} multi-label, `
+      + `${String(rules.wildcardParents.size)} wildcard, ${String(rules.exceptions.size)} exception; `
+      + `upstream multi-label ${String(sectionDrift.upstreamMultiLabelCount)}.`,
+    );
+  }
 
-  const clean = drift.missing.length === 0 && drift.stale.length === 0
-    && drift.missingWildcards.length === 0 && drift.staleWildcards.length === 0
-    && drift.missingExceptions.length === 0 && drift.staleExceptions.length === 0;
-  if (clean) {
-    console.log('public-suffix drift: OK, the bundled multi-label, wildcard and exception rules match upstream\'s ICANN section.');
+  const failing = securityRelevant(drift.icann) + securityRelevant(drift.private) + correctness(drift.icann);
+  const reported = failing + correctness(drift.private);
+  if (reported === 0) {
+    console.log('public-suffix drift: OK, the bundled multi-label, wildcard and exception rules match both sections upstream.');
     return;
   }
 
-  printGroup('SECURITY-RELEVANT', 'multi-label suffix(es) upstream has and the snapshot does not (two different registrants compare equal)', '+', drift.missing);
-  printGroup('SECURITY-RELEVANT', 'wildcard rule(s) upstream has and the snapshot does not (every label under the parent is a suffix)', '+', drift.missingWildcards);
-  printGroup('SECURITY-RELEVANT', 'exception rule(s) the snapshot carries that upstream dropped (a suffix would look registrable)', '-', drift.staleExceptions);
-  printGroup('CORRECTNESS', 'suffix(es) the snapshot carries that upstream no longer lists (a legitimate link may be refused)', '-', drift.stale);
-  printGroup('CORRECTNESS', 'wildcard rule(s) the snapshot carries that upstream dropped', '-', drift.staleWildcards);
-  printGroup('CORRECTNESS', 'exception rule(s) upstream has and the snapshot does not (a wildcard over-matches)', '+', drift.missingExceptions);
+  for (const [name, sectionDrift] of [['ICANN', drift.icann], ['PRIVATE', drift.private]] as const) {
+    printGroup(`SECURITY-RELEVANT (${name})`, 'multi-label suffix(es) upstream has and the snapshot does not (two different registrants compare equal)', '+', sectionDrift.missing);
+    printGroup(`SECURITY-RELEVANT (${name})`, 'wildcard rule(s) upstream has and the snapshot does not (every label under the parent is a suffix)', '+', sectionDrift.missingWildcards);
+    printGroup(`SECURITY-RELEVANT (${name})`, 'exception rule(s) the snapshot carries that upstream dropped (a suffix would look registrable)', '-', sectionDrift.staleExceptions);
+  }
+  printGroup('CORRECTNESS (ICANN)', 'suffix(es) the snapshot carries that upstream no longer lists (a legitimate link may be refused)', '-', drift.icann.stale);
+  printGroup('CORRECTNESS (ICANN)', 'wildcard rule(s) the snapshot carries that upstream dropped', '-', drift.icann.staleWildcards);
+  printGroup('CORRECTNESS (ICANN)', 'exception rule(s) upstream has and the snapshot does not (a wildcard over-matches)', '+', drift.icann.missingExceptions);
+  printGroup('CORRECTNESS (PRIVATE, does not fail the check)', 'suffix(es) the snapshot carries that upstream no longer lists (a legitimate link may be refused)', '-', drift.private.stale);
+  printGroup('CORRECTNESS (PRIVATE, does not fail the check)', 'wildcard rule(s) the snapshot carries that upstream dropped', '-', drift.private.staleWildcards);
+  printGroup('CORRECTNESS (PRIVATE, does not fail the check)', 'exception rule(s) upstream has and the snapshot does not (a wildcard over-matches)', '+', drift.private.missingExceptions);
 
   console.error('');
   console.error('This is a DATA-ONLY fix: regenerate the tables with');
   console.error('  bun packages/engine/scripts/generate-public-suffix-data.ts');
   console.error('Do not edit the generated file by hand, and do not delete an entry to quiet this check.');
-  console.error('A hosting suffix kept on purpose belongs in CURATED_PRIVATE_SUFFIXES in');
-  console.error('  packages/engine/scripts/public-suffix-source.ts');
   console.error('');
   console.error('Note the blast radius before treating this as urgent: the module falls back to a');
   console.error('single-label suffix for anything it does not know, which is CORRECT for com, dev,');
   console.error('app and every new gTLD. Staleness narrows coverage; it does not break resolution.');
 
-  if (!reportOnly) process.exit(1);
+  if (!reportOnly && failing > 0) process.exit(1);
 }
 
 if (import.meta.main) await main();

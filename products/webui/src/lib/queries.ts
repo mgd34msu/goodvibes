@@ -27,7 +27,7 @@ export const queryKeys = {
   ownerInbox: ['owner-inbox'] as const,
   // Durable approval rules (permissions.rules.list), remembered decisions at a
   // generalizing tier. Invalidate alongside approvals: a decision can mint a
-  // rule, a deletion makes matching asks prompt again.
+  // rule, a deletion hands matching calls back to the permission mode.
   permissionRules: ['permissions', 'rules'] as const,
   sessions: ['sessions'] as const,
   sessionList: (revision: number) => ['sessions', 'list', revision] as const,

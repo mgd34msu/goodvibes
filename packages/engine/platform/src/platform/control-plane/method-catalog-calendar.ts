@@ -34,6 +34,7 @@ const CALENDAR_EVENT_DETAIL_SCHEMA = objectSchema({
   attendees: arraySchema(STRING_SCHEMA),
   recurrence: STRING_SCHEMA,
   revision: STRING_SCHEMA,
+  cancelled: BOOLEAN_SCHEMA,
 }, ['id', 'title', 'start', 'end']);
 
 /**
@@ -85,7 +86,7 @@ export const builtinGatewayCalendarMethodDescriptors: readonly GatewayMethodDesc
   methodDescriptor({
     id: 'calendar.events.get',
     title: 'Get Calendar Event',
-    description: 'Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar\'s version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series.',
+    description: 'Return the full event object including attendees, recurrence, raw iCalendar UID and revision (the calendar\'s version of it, to send back as expectedRevision on calendar.events.update). An occurrence id from calendar.events.list returns that occurrence (its own start, end and any change made to it), not the first of its series. On Google Calendar an event deleted from the calendar is still returned by its id, with cancelled: true; it is not on the calendar.',
     category: 'calendar',
     effects: ['calendar.read'],
     http: { method: 'GET', path: '/api/calendar/events/{eventId}' },

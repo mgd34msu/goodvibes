@@ -325,7 +325,10 @@ export class RemoteRunnerRegistry {
   }
 
   registerContract(contract: RemoteRunnerContract): RemoteRunnerContract {
+    const previousPoolId = this.contracts.get(contract.runnerId)?.poolId;
     this.contracts.set(contract.runnerId, contract);
+    // A contract that names another pool takes the runner out of the one the replaced contract named.
+    if (previousPoolId !== undefined && previousPoolId !== contract.poolId) this.dropFromPoolList(previousPoolId, contract.runnerId);
     if (contract.poolId) {
       this.assignRunnerToPool(contract.poolId, contract.runnerId);
     }
@@ -369,6 +372,17 @@ export class RemoteRunnerRegistry {
     return [...this.pools.values()].sort((a, b) => b.lastUpdatedAt - a.lastUpdatedAt);
   }
 
+  /** Takes `runnerId` out of one pool's list; the contract is left to the caller. */
+  private dropFromPoolList(poolId: string, runnerId: string): void {
+    const pool = this.pools.get(poolId);
+    if (!pool || !pool.runnerIds.includes(runnerId)) return;
+    this.pools.set(poolId, Object.freeze({
+      ...pool,
+      runnerIds: pool.runnerIds.filter((id) => id !== runnerId),
+      lastUpdatedAt: Date.now(),
+    }));
+  }
+
   assignRunnerToPool(poolId: string, runnerId: string): RemoteRunnerPool | null {
     const contract = this.contracts.get(runnerId);
     const pool = this.pools.get(poolId) ?? this.createPool({ id: poolId, label: poolId });
@@ -385,6 +399,8 @@ export class RemoteRunnerRegistry {
     });
     this.pools.set(poolId, nextPool);
     if (contract && contract.poolId !== poolId) {
+      // A runner is in at most one pool: moving it takes it out of the pool its contract named.
+      if (contract.poolId !== undefined) this.dropFromPoolList(contract.poolId, runnerId);
       this.contracts.set(runnerId, Object.freeze({ ...contract, poolId, lastUpdatedAt: Date.now() }));
     }
     return nextPool;
@@ -448,7 +464,13 @@ export class RemoteRunnerRegistry {
     return { artifact, path };
   }
 
-  async importArtifact(path: string): Promise<RemoteExecutionArtifact> {
+  /** Whether a record held under an id would be replaced by `next`; holding the same record under the id is no replacement. */
+  private differs(held: unknown, next: unknown): boolean {
+    return held !== undefined && JSON.stringify(held) !== JSON.stringify(next);
+  }
+
+  /** Import one artifact; one that would replace a different artifact held under its id is refused unless `replace` is set. */
+  async importArtifact(path: string, options: { readonly replace?: boolean | undefined } = {}): Promise<RemoteExecutionArtifact> {
     const value = await readImportFile(path, 'a remote artifact');
     const problem = artifactProblem(value, '');
     if (problem) {
@@ -458,6 +480,9 @@ export class RemoteRunnerRegistry {
     const conflict = this.importedCeilingConflict(parsed.runnerContract);
     if (conflict) {
       throw new Error(`Cannot import a remote artifact from ${path}: ${conflict}. Nothing was imported; export the runner's current contract, or import into a session that does not know this runner.`);
+    }
+    if (this.differs(this.artifacts.get(parsed.id), parsed) && options.replace !== true) {
+      throw new Error(`Not imported: ${path} would replace artifact ${parsed.id}. Nothing was changed; run the import again with --yes to replace it.`);
     }
     this.storeArtifact(parsed);
     this.storeImportedContract(parsed.runnerContract);
@@ -505,8 +530,7 @@ export class RemoteRunnerRegistry {
     const problem = bundleProblem(value);
     if (problem) return { ok: false, problem: `it has no valid ${problem}` };
     const bundle = value as unknown as RemoteSessionBundle;
-    // Holding the same record under the id is no replacement.
-    const differs = (held: unknown, next: unknown): boolean => held !== undefined && JSON.stringify(held) !== JSON.stringify(next);
+    const differs = (held: unknown, next: unknown): boolean => this.differs(held, next);
     const replaces = [
       ...bundle.pools.filter((pool) => differs(this.pools.get(pool.id), pool)).map((pool) => `pool ${pool.id}`),
       ...bundle.contracts.filter((contract) => !this.agentManager.getStatus(contract.runnerId) && differs(this.contracts.get(contract.runnerId), contract)).map((contract) => `runner contract ${contract.runnerId}`),

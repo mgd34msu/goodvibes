@@ -72,11 +72,14 @@ export function contained(parent: string, child: string): boolean {
   const path = relative(parent, child);
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path));
 }
-/** Keep runtime files needed by a terminal or agent that is still running the previous release. */
-export function isReleaseInUse(release: string, procRoot = '/proc'): boolean {
+/**
+ * Whether a process of this user runs a program from `release` (its executable, or an absolute argument inside it).
+ * Processes in `skip` are not counted. An unreadable process table counts as in use.
+ */
+export function isReleaseInUse(release: string, procRoot = '/proc', skip: ReadonlySet<number> = new Set()): boolean {
   try {
     for (const entry of readdirSync(procRoot)) {
-      if (!/^[0-9]+$/.test(entry)) continue;
+      if (!/^[0-9]+$/.test(entry) || skip.has(Number(entry))) continue;
       const directory = join(procRoot, entry);
       try {
         if (process.getuid && lstatSync(directory).uid !== process.getuid()) continue;
@@ -406,6 +409,12 @@ export async function uninstall(prefix: string, purge: boolean, execute: Run = r
           stopService(receipt, execute);
           execute('systemctl', ['--user', 'disable', serviceUnit(receipt)]);
         }
+      }
+      // The uninstaller itself runs on the release's bun (its wrappers exec it), so its own pid is skipped.
+      if (isReleaseInUse(receipt.prefix, '/proc', new Set([process.pid]))) {
+        throw new Error(`A GoodVibes program from ${receipt.prefix} is still running (a daemon started with \`goodvibes-daemon serve\`, a terminal or an agent); quit it, then run the uninstall again.`);
+      }
+      if (receipt.service) {
         rmSync(unitPath(receipt), { force: true });
         execute('systemctl', ['--user', 'daemon-reload']);
       }

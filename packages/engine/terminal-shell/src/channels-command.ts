@@ -151,6 +151,14 @@ function renderPolicy(policy: ChannelPolicy, enabledInSettings: boolean | undefi
   return lines.join('\n');
 }
 
+/** A profile change that loosens a channel's permission mode, put to the owner instead of applied: what is true and what to do. */
+function ownerPendingText(result: object): string {
+  const answer = result as { readonly approvalId?: unknown; readonly state?: unknown };
+  const approval = typeof answer.approvalId === 'string' ? ` as approval ${answer.approvalId}` : '';
+  const state = typeof answer.state === 'string' ? answer.state : 'nothing was changed yet; this loosens the permission mode, which only the owner does';
+  return `Not applied: ${state}. It was put to the owner${approval}; he approves it from his own app (/approvals).`;
+}
+
 function renderProfileBinding(binding: ChannelProfileBinding): string {
   const scope = binding.channelId ? `${binding.surfaceKind}:${binding.channelId}` : `${binding.surfaceKind} (the whole channel kind)`;
   const lines = [`  ${scope}`];
@@ -380,13 +388,26 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
       example: { channel: 'slack', mode: 'ask-me' },
       async run(values, ctx) {
         if (!values.model && !values.provider && !values.mode) throw commandRefusal(`Nothing to give ${values.channel}: name a model, a provider or a permission mode.`);
-        const { binding } = await h.invoke(ctx, 'channels.profiles.set', {
-          ...profileTarget(values),
-          ...(values.model ? { model: values.model } : {}),
-          ...(values.provider ? { provider: values.provider } : {}),
-          ...(values.mode ? { permissionMode: values.mode as (typeof SESSION_GATE_PRESET_NAMES)[number] } : {}),
+        // A set replaces the whole binding, so a field left blank ("unchanged") carries the bound value over.
+        const target = profileTarget(values);
+        const { bindings } = await h.invoke(ctx, 'channels.profiles.list', {});
+        const bound = bindings.find((b) => b.surfaceKind === target.surfaceKind.trim().toLowerCase()
+          && (b.channelId ?? '') === (target.channelId?.trim() ?? ''));
+        // A model and its provider are one choice: a new model does not keep the old model's provider.
+        const model = values.model || bound?.model;
+        const provider = values.provider || (values.model ? undefined : bound?.provider);
+        // A stored mode this build cannot use is not carried over; the set clears it.
+        const mode = values.mode || (bound?.invalid ? undefined : bound?.permissionMode);
+        const result = await h.invoke(ctx, 'channels.profiles.set', {
+          ...target,
+          ...(model ? { model } : {}),
+          ...(provider ? { provider } : {}),
+          ...(mode ? { permissionMode: mode as (typeof SESSION_GATE_PRESET_NAMES)[number] } : {}),
+          ...(bound?.metadata ? { metadata: bound.metadata } : {}),
         });
-        return `Set.\n${renderProfileBinding(binding)}`;
+        // A looser mode from a credential that is not the owner's is put to the owner (202 OWNER_APPROVAL_PENDING).
+        if (!('binding' in result) || !result.binding) return ownerPendingText(result);
+        return `Set.\n${renderProfileBinding(result.binding)}`;
       },
     },
     {
@@ -397,6 +418,7 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
       example: { channel: 'slack' },
       async run(values, ctx) {
         const result = await h.invoke(ctx, 'channels.profiles.delete', profileTarget(values));
+        if (!('deleted' in result) || typeof result.deleted !== 'boolean') return ownerPendingText(result);
         const scope = `${values.channel}${values.id ? `:${values.id}` : ''}`;
         return result.deleted ? `Removed the profile of ${scope}.` : `${scope} had no profile; nothing changed.`;
       },

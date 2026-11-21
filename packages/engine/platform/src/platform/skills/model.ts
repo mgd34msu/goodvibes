@@ -264,11 +264,56 @@ export function toSkillIndexEntry(skill: SkillIndexEntry): SkillIndexEntry {
  * An index read stops reading the file as soon as this is true.
  */
 export function frontmatterIsComplete(text: string): boolean {
-  const normalized = text.startsWith('\uFEFF') ? text.slice(1) : text;
-  if (!normalized.startsWith('---')) return normalized.length > 0;
-  const open = normalized.match(FRONTMATTER_FENCE);
-  if (!open) return normalized.includes('\n');
-  return /\r?\n---[ \t]*\r?\n/.test(normalized.slice(open[0].length - 1));
+  return followFrontmatter().add(text);
+}
+
+/** A fence line with its line break, tested where a line starts. */
+const FENCE_LINE_AT = /---[ \t]*\r?\n/y;
+
+/**
+ * Follows the start of a skill document as it arrives in pieces. `add` appends a piece
+ * and answers `frontmatterIsComplete` for all the text so far; `text` is that text. Each
+ * line is tested once, when its line break arrives, so following a document costs time
+ * in proportion to its length however long its frontmatter runs.
+ */
+export function followFrontmatter(): { readonly add: (piece: string) => boolean; readonly text: () => string } {
+  let text = '';
+  let complete = false;
+  let openingRead = false;
+  // The next line to test starts here; text before `searched` holds no line break left to look at.
+  let lineStart = 0;
+  let searched = 0;
+  const add = (piece: string): boolean => {
+    text += piece;
+    if (complete) return true;
+    if (!openingRead) {
+      const start = text.startsWith('\uFEFF') ? 1 : 0;
+      if (!text.startsWith('---', start)) return complete = text.length > start;
+      const lineBreak = text.indexOf('\n', searched);
+      if (lineBreak === -1) {
+        searched = text.length;
+        return false;
+      }
+      FENCE_LINE_AT.lastIndex = start;
+      // A first line that starts with --- but is not a fence means the document has no frontmatter.
+      if (!FENCE_LINE_AT.test(text)) return complete = true;
+      openingRead = true;
+      lineStart = lineBreak + 1;
+      searched = lineStart;
+    }
+    for (;;) {
+      const lineBreak = text.indexOf('\n', searched);
+      if (lineBreak === -1) {
+        searched = text.length;
+        return false;
+      }
+      FENCE_LINE_AT.lastIndex = lineStart;
+      if (FENCE_LINE_AT.test(text)) return complete = true;
+      lineStart = lineBreak + 1;
+      searched = lineStart;
+    }
+  };
+  return { add, text: () => text };
 }
 
 function serializeBody(body: string): string {

@@ -69,9 +69,10 @@ function verificationJournalPath(root: string, sessionId: string): string {
 }
 
 /**
- * Removes a session's verification journal and the copies set aside from it.
- * Called when the session is deleted: the journal holds that session's tool
- * output and file contents. Returns how many files were removed.
+ * Removes a session's verification journal, the copies set aside from it, and
+ * any rewrite of it left by a process stopped part way. Called when the
+ * session is deleted: each holds that session's tool output and file contents.
+ * Returns how many files were removed.
  */
 export function removeVerificationJournal(root: string, sessionId: string): number {
   const path = verificationJournalPath(root, sessionId);
@@ -81,7 +82,7 @@ export function removeVerificationJournal(root: string, sessionId: string): numb
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error; }
   let removed = 0;
   for (const entry of names) {
-    if (entry !== name && !entry.startsWith(`${name}.held-`)) continue;
+    if (entry !== name && !entry.startsWith(`${name}.held-`) && !entry.startsWith(`${name}.rewrite-`)) continue;
     rmSync(join(directory, entry), { force: true });
     removed++;
   }

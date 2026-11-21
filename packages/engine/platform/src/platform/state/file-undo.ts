@@ -29,6 +29,12 @@ export interface FileOperation {
    * one call are one undo entry: undone and redone together.
    */
   call?: number | undefined;
+  /**
+   * The id of the tool call that made the change (the model's call id), when
+   * the tool was given one: what ties this undo entry to the execution record
+   * of that call, so recovery is offered on that record and no other.
+   */
+  toolCallId?: string | undefined;
 }
 
 /**

@@ -73,16 +73,21 @@ export async function writeSupportedRepairSubjectLinks(input: {
       readString(fact.metadata.sourceId), fact.sourceId, sourceId,
     ]) });
   }
+  const passSubjectIds = new Set(subjects.map((subject) => subject.id));
   const drafts = [...byFact.values()].map(({ fact, sources, fallback }) => {
-    const subjectIds = exactKnowledgeIds([
+    // Every stored subject is read through the guard, so one deleted or created
+    // before the write still invalidates the pass. A stored subject that no
+    // longer exists is pruned from the links this write records; only a missing
+    // subject of this pass holds it.
+    const allSubjects = exactKnowledgeIds([
       ...readStringArray(fact.metadata.subjectIds), ...readStringArray(fact.metadata.linkedObjectIds),
       ...subjects.map((subject) => subject.id),
-    ]);
-    const allSubjects = subjectIds.map((id) => {
+    ]).flatMap((id) => {
       const subject = guard.node(id);
-      if (!subject) throw new KnowledgeGeneratedFactSupportHeldError('missing-evidence');
-      return subject;
+      if (!subject && passSubjectIds.has(id)) throw new KnowledgeGeneratedFactSupportHeldError('missing-evidence');
+      return subject ? [subject] : [];
     });
+    const subjectIds = allSubjects.map((subject) => subject.id);
     const targetHints = repairSubjectHints(allSubjects);
     const subject = readString(fact.metadata.subject) ?? subjects[0]?.title;
     const key = support.add(spaceId, { id: fact.id, kind: readString(fact.metadata.factKind) ?? fact.kind,

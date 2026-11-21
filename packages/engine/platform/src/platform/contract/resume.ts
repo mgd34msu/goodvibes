@@ -36,7 +36,7 @@ import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { loadWorkstreamSnapshot } from '../orchestration/persistence.js';
 import { awaitNativeResumeConditions, nativeDecisionState } from './native-decisions.js';
 import { logger } from '../utils/logger.js';
-import type { Refusal } from '@goodvibes/engine/errors';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
 import { queueSessionNudge, type UnitCheckLoop } from './agent-hooks.js';
 import { engineItem, type GroupRunner } from './group-runner.js';
 import type { ContractRun } from './run-context.js';
@@ -211,78 +211,92 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     const refused: { contractId: string; refusal: Refusal }[] = [];
     const pending: ContractRun[] = [];
     for (const contractId of deps.store.listStoredIds()) {
-      if (deps.isLive(contractId)) {
-        skipped.push(contractId);
-        continue;
-      }
-      // An ended contract is known from its small summary and stays on disk: its checkpoint is not read.
-      if (deps.store.endedSummary(contractId) !== undefined) continue;
-      const read = deps.store.load(contractId);
-      // A refused checkpoint is quarantined and never started again from its admission; the report carries why.
-      if (read.kind === 'failed') { refused.push({ contractId, refusal: read.refusal }); continue; }
-      if (read.kind !== 'present') continue;
-      const contract = read.value;
-      if (isTerminalContractStatus(contract.status) && ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined) || contract.durableAdmission !== undefined)) {
-        deps.store.noteEnded(contract); continue;
-      }
-      if ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined)) { deps.store.hold(contract); skipped.push(contractId); continue; }
-      // Native authority is never reconstructed from disk. Only resumeDurable may adopt this binding.
-      if (contract.durableAdmission !== undefined) { deps.store.hold(contract); skipped.push(contractId); continue; }
-      // A terminal verifier failure has already exhausted its operation. Never
-      // restart it during startup; recovery requires explicit owner action.
-      if (isTerminalContractStatus(contract.status)) {
-        deps.store.noteEnded(contract);
-        continue;
-      }
-      // A contract another live process runs is its to continue; two runners over one contract would both drive it.
-      // The claim comes first, so nothing below (input restore, a hold, a cancel of the hold) touches a contract
-      // another process owns.
-      await deps.beforeClaim?.(contractId);
-      const claim = deps.claim?.(contractId) ?? 'claimed';
-      if (claim === 'elsewhere') {
-        deps.store.hold(contract);
-        skipped.push(contractId);
-        logger.info('contract runner: contract is run by another process, left to it', { contractId });
-        continue;
-      }
-      if (claim !== 'claimed') {
-        // A claim that cannot be made at all does not run the contract: another process may be running it.
-        holdContract(contract, 'claim-unavailable', claim.unavailable);
-        skipped.push(contractId);
-        continue;
-      }
-      if (contract.inputSnapshot !== undefined) {
-        try {
-          contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
-        } catch (error) {
-          // Do not spawn workers with an invalid input lease, or discard their
-          // retained work merely because this startup could not verify it. The
-          // contract is held under this process's claim: its status says so, and cancel ends it.
-          holdContract(contract, 'input-unavailable', `its recorded input could not be restored: ${error instanceof Error ? error.message : String(error)}`);
+      // One contract that throws (a checkpoint of a newer schema, one changed while it was read) is reported
+      // for itself and left on disk; the contracts after it still resume.
+      try {
+        if (deps.isLive(contractId)) {
           skipped.push(contractId);
           continue;
         }
-      }
-      const run = deps.adopt(contract);
-      try {
-        prepareResume(run);
+        // An ended contract is known from its small summary and stays on disk: its checkpoint is not read.
+        if (deps.store.endedSummary(contractId) !== undefined) continue;
+        const read = deps.store.load(contractId);
+        // A refused checkpoint is quarantined and never started again from its admission; the report carries why.
+        if (read.kind === 'failed') { refused.push({ contractId, refusal: read.refusal }); continue; }
+        if (read.kind !== 'present') continue;
+        const contract = read.value;
+        if (isTerminalContractStatus(contract.status) && ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined) || contract.durableAdmission !== undefined)) {
+          deps.store.noteEnded(contract); continue;
+        }
+        if ((deps.nativeOnly === true) !== (contract.nativeSource !== undefined)) { deps.store.hold(contract); skipped.push(contractId); continue; }
+        // Native authority is never reconstructed from disk. Only resumeDurable may adopt this binding.
+        if (contract.durableAdmission !== undefined) { deps.store.hold(contract); skipped.push(contractId); continue; }
+        // A terminal verifier failure has already exhausted its operation. Never
+        // restart it during startup; recovery requires explicit owner action.
+        if (isTerminalContractStatus(contract.status)) {
+          deps.store.noteEnded(contract);
+          continue;
+        }
+        // A contract another live process runs is its to continue; two runners over one contract would both drive it.
+        // The claim comes first, so nothing below (input restore, a hold, a cancel of the hold) touches a contract
+        // another process owns.
+        await deps.beforeClaim?.(contractId);
+        const claim = deps.claim?.(contractId) ?? 'claimed';
+        if (claim === 'elsewhere') {
+          deps.store.hold(contract);
+          skipped.push(contractId);
+          logger.info('contract runner: contract is run by another process, left to it', { contractId });
+          continue;
+        }
+        if (claim !== 'claimed') {
+          // A claim that cannot be made at all does not run the contract: another process may be running it.
+          holdContract(contract, 'claim-unavailable', claim.unavailable);
+          skipped.push(contractId);
+          continue;
+        }
+        if (contract.inputSnapshot !== undefined) {
+          try {
+            contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
+          } catch (error) {
+            // Do not spawn workers with an invalid input lease, or discard their
+            // retained work merely because this startup could not verify it. The
+            // contract is held under this process's claim: its status says so, and cancel ends it.
+            holdContract(contract, 'input-unavailable', `its recorded input could not be restored: ${error instanceof Error ? error.message : String(error)}`);
+            skipped.push(contractId);
+            continue;
+          }
+        }
+        const run = deps.adopt(contract);
+        try {
+          prepareResume(run);
+        } catch (error) {
+          // One contract whose saved state cannot be migrated must not stop the others from resuming.
+          const reason = `contract ${contract.id} could not resume: ${error instanceof Error ? error.message : String(error)}`;
+          run.decide('reaped', contract.id, reason);
+          deps.fail(run, 'zombie', reason, true);
+          reaped.push({ contractId, reason });
+          continue;
+        }
+        const zombie = findZombieCause(contract);
+        if (zombie !== null) {
+          const reason = `contract ${contract.id} could not resume: ${zombie}`;
+          run.decide('reaped', contract.id, reason);
+          deps.fail(run, 'zombie', reason, true);
+          reaped.push({ contractId, reason });
+          continue;
+        }
+        pending.push(run);
       } catch (error) {
-        // One contract whose saved state cannot be migrated must not stop the others from resuming.
-        const reason = `contract ${contract.id} could not resume: ${error instanceof Error ? error.message : String(error)}`;
-        run.decide('reaped', contract.id, reason);
-        deps.fail(run, 'zombie', reason, true);
-        reaped.push({ contractId, reason });
-        continue;
+        const detail = error instanceof Error ? error.message : String(error);
+        logger.warn('contract runner: contract could not be resumed', { contractId, error: detail });
+        refused.push({ contractId, refusal: refusal({
+          code: 'CONTRACT_NOT_RESUMED',
+          state: `contract ${contractId} is left on disk unchanged`,
+          reason: `Contract ${contractId} could not be resumed at start-up (${detail}).`,
+          next: [`See it with /agents contract ${contractId}, then restart to try again.`, `Or cancel it: goodvibes-contract cancel ${contractId}.`],
+          retryable: true,
+        }) });
       }
-      const zombie = findZombieCause(contract);
-      if (zombie !== null) {
-        const reason = `contract ${contract.id} could not resume: ${zombie}`;
-        run.decide('reaped', contract.id, reason);
-        deps.fail(run, 'zombie', reason, true);
-        reaped.push({ contractId, reason });
-        continue;
-      }
-      pending.push(run);
     }
     // A contract waiting on its owner keeps the slot it had; the rest take slots oldest first.
     const ordered = [

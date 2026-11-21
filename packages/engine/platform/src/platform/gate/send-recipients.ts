@@ -24,9 +24,12 @@
  *    addresses or phone numbers. A tool that only saves a draft sends nothing.
  *
  * A send these rules recognise whose recipients cannot be read (`sendmail -t`,
- * a body read from a file, a body that is not JSON or a form), and a command
- * nested too deeply or a script too large to read, is reported as
- * unreadable, and the caller treats it as a recipient nobody allowed. What no
+ * `mail -t`, an SMTP session on standard input with `sendmail -bs`, a body
+ * read from a file, a body that is not JSON or a form), and a command nested
+ * too deeply, a script too large to read or a script that cannot be read
+ * (missing, read from a shell's standard input), is reported as unreadable,
+ * and the caller treats it as a recipient nobody allowed. A host is matched
+ * without a trailing dot (`api.telegram.org.` is `api.telegram.org`). What no
  * rule names (a URL or address held in a shell variable or a file, a script
  * that sends from inside a program, a page the browser types into) is not
  * recognised here.
@@ -181,7 +184,9 @@ function sendEndpointOf(raw: string): { readonly url: URL; readonly endpoint: Se
   try { url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(text) ? text : `https://${text}`); }
   catch { return undefined; }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') return undefined;
-  const host = url.hostname.toLowerCase();
+  // A trailing dot names the same host (`api.telegram.org.`); the URL kept is the canonical one, so an allowed webhook compares equal either way.
+  const host = url.hostname.toLowerCase().replace(/\.+$/, '');
+  if (host !== url.hostname) url.hostname = host;
   const endpoint = SEND_ENDPOINTS.find((candidate) => candidate.host(host) && candidate.path.test(url.pathname));
   return endpoint ? { url, endpoint } : undefined;
 }
@@ -278,11 +283,15 @@ function mailRecipients(name: string, args: readonly string[]): SendRecipients |
   if (MAIL_PROGRAMS.has(name)) {
     // Reading a mailbox (`-f`, `-u`, `-e`, `-H`) or no recipient at all sends nothing.
     if (args.some((word) => word === '-f' || word === '-u' || word === '-e' || word === '-H' || word.startsWith('--file'))) return null;
+    // `-t` adds the recipients the message's own headers on standard input name: they cannot be read here.
+    if (args.includes('-t')) return undefined;
     const { words, values } = operands(args, new Set(['-s', '-c', '-b', '-r', '-a', '-A', '-S', '-q', '-T', '-j', '--subject', '--cc', '--bcc', '--attach', '--append', '--return-address', '--content-type']));
     const found = [...split(words), ...split(values.get('-c') ?? []), ...split(values.get('-b') ?? []), ...split(values.get('--cc') ?? []), ...split(values.get('--bcc') ?? [])];
     return found.length > 0 ? found : null;
   }
   if (SENDMAIL_PROGRAMS.has(name)) {
+    // `-bs` and `-bS` run an SMTP session on standard input: a send whose recipients cannot be read here.
+    if (args.some((word) => word === '-bs' || word === '-bS')) return undefined;
     // `-t` takes the recipients from the message on standard input: they cannot be read here.
     if (args.some((word) => word === '-t' || word === '--read-recipients' || (/^-[A-Za-z]*t[A-Za-z]*$/.test(word) && !word.startsWith('--')))) {
       // `-bp`, `-bt` and the like are queue and test modes, not sends.
@@ -461,7 +470,7 @@ export function commandRecipients(commands: readonly string[], directory: string
     if (found === undefined) unreadable = true;
     else if (found !== null) out.push(...found);
     return undefined;
-  }, { directory, tooDeep: cannotRead, onScriptTooLarge: cannotRead });
+  }, { directory, tooDeep: cannotRead, onScriptTooLarge: cannotRead, onUnread: cannotRead });
   return unreadable ? undefined : out;
 }
 

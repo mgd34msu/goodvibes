@@ -685,6 +685,7 @@ export async function persistProfileText(
   await io.mkdir(dirname(path));
   lifetime.onEffect?.(); lifetime.assertCurrent?.();
   if (io === NODE_PERSIST_IO) await sweepStaleProfileTemps(path);
+  let published = false;
   try {
     lifetime.assertCurrent?.();
     await io.writeFile(tmpPath, text, mode);
@@ -696,11 +697,22 @@ export async function persistProfileText(
       if (io === NODE_PERSIST_IO && lifetime.withPublication) renameSync(tmpPath, path);
       else await io.rename(tmpPath, path);
       assertPublished?.(path);
+      // The new text is the profile now: whatever stops the request after this cannot undo it.
+      published = true;
       lifetime.onEffect?.(true); lifetime.assertCurrent?.(); assertPublicationCurrent();
     });
   } catch (error) {
+    if (published) throw new ProfilePublishedThenStoppedError(error);
     await io.remove(tmpPath).catch(() => undefined);
     throw error;
+  }
+}
+
+/** The new profile text was renamed into place, and then the request was cancelled or its owner lapsed: the change is saved. */
+export class ProfilePublishedThenStoppedError extends Error {
+  constructor(cause: unknown) {
+    super(`Your profile was saved, and then the request was stopped (${cause instanceof Error ? cause.message : String(cause)}).`, { cause });
+    this.name = 'ProfilePublishedThenStoppedError';
   }
 }
 

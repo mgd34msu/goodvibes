@@ -62,6 +62,11 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
 
   const providerMessageId = eventId;
   const surfaceId = readString(context.configManager.get('surfaces.matrix.userId')) ?? 'matrix';
+  // A room event does not say whether the room is a direct chat (that is the
+  // account's m.direct data); the bridge that delivers it does, as is_direct /
+  // isDirect. Without it the room counts as shared. The policy and the binding
+  // both read this one test.
+  const direct = payload.is_direct === true || payload.isDirect === true;
   const outcome = await runSurfaceMessage(context, {
     ingress: {
       surface: 'matrix',
@@ -70,7 +75,8 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
       groupId: roomId,
       threadId,
       workspaceId: readString(payload.homeserver) ?? readString(context.configManager.get('surfaces.matrix.homeserverUrl')),
-      conversationKind: threadId ? 'thread' : 'channel',
+      conversationKind: threadId ? 'thread' : direct ? 'direct' : 'channel',
+      ...(direct ? { parentConversationKind: 'direct' as const } : {}),
       text,
       mentioned: matrixMentioned(payload, content, readString(context.configManager.get('surfaces.matrix.userId')), text),
       metadata: { ...payload, ...(replyToMessageId ? { replyToMessageId } : {}) },
@@ -87,10 +93,8 @@ export async function handleMatrixSurfaceWebhook(req: Request, context: SurfaceA
         ...(eventId ? { eventId } : {}),
         ...(msgtype ? { msgtype } : {}),
         // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
-        // A room event does not say whether the room is a direct chat (that is the account's m.direct data);
-        // the bridge that delivers it does, as is_direct / isDirect. Without it the room counts as shared.
         ...(sender ? { userId: sender } : {}),
-        conversationKind: threadId ? 'thread' : (payload.is_direct === true || payload.isDirect === true) ? 'direct' : 'channel',
+        conversationKind: threadId ? 'thread' : direct ? 'direct' : 'channel',
         ...(replyToMessageId ? { replyToMessageId } : {}),
       },
     },

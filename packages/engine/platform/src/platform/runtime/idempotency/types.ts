@@ -61,13 +61,15 @@ export interface IdempotencyStoreConfig {
    * Time-to-live for completed/failed records in milliseconds.
    *
    * Records older than this value are eligible for eviction.
-   * In-flight records are never evicted.
+   * An in-flight record is evicted only once it is older than `inFlightTimeoutMs`.
    *
    * @default 300_000 (5 minutes)
    */
   ttlMs?: number | undefined;
   /**
-   * Maximum number of records retained before a sweep evicts TTL-expired entries.
+   * Maximum number of records retained. A sweep runs when the store reaches 80%
+   * of it, evicting TTL-expired and abandoned entries, and also drops the oldest
+   * finalized records beyond it.
    *
    * @default 5_000
    */

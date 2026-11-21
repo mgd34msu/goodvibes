@@ -99,14 +99,17 @@ export function renderMarkdownTracked(
     // its tabs (a copied block must paste back unchanged).
     const raw = expandTabs(original);
 
-    const fenceMatch = raw.match(/^(\s*)(`{3,}|~{3,})\s*([\w-]*)/);
-    if (fenceMatch && !inCodeBlock) {
+    // Open fence: a backtick fence's info text may hold no backtick, so a line
+    // such as "```code``` text" is an inline span, not an opener.
+    const fenceMatch = raw.match(/^(\s*)(`{3,}|~{3,})(.*)$/);
+    const opensFence = fenceMatch !== null && !(requireDefined(fenceMatch[2]).startsWith('`') && requireDefined(fenceMatch[3]).includes('`'));
+    if (fenceMatch && opensFence && !inCodeBlock) {
       if (inQuote) { inQuote = false; closeBlock(); }
       inCodeBlock = true;
       fenceIndent = requireDefined(fenceMatch[1]).length;
       fenceChar = requireDefined(requireDefined(fenceMatch[2])[0]); // '`' or '~'
       fenceLength = requireDefined(fenceMatch[2]).length;
-      codeBlockLang = fenceMatch[3] || '';
+      codeBlockLang = requireDefined(fenceMatch[3]).trim().split(/\s+/)[0] ?? '';
       codeBlockLines = [];
       continue;
     }

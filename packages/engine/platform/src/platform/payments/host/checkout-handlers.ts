@@ -3,7 +3,7 @@ import { PostalAddressHeldError } from '../../config/postal-address.js';
 import { mapLimit } from '@goodvibes/judgment';
 import { retainCheckoutInvocation, retainDetachedCheckout } from './checkout-invocation.js';
 import { PaymentCheckoutJournalUnavailableError } from './checkout-journal-store.js';
-import { PaymentPurchaseLedgerError } from './purchase-ledger.js';
+import { PaymentPurchaseLedgerError, type OwedOwnerNotice } from './purchase-ledger.js';
 import { captureCheckoutOwnership, CheckoutOwnershipError, type CheckoutOperationOwnership } from '../checkout-ownership.js';
 import { OwnedScope } from '../../utils/owned-work.js';
 import { CheckoutOperations, type DetachedCheckoutOwner, type DetachedCheckoutSource } from './checkout-operations.js';
@@ -63,7 +63,8 @@ import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { PaymentApprovalStoreError, type DaemonApprovalStore } from './approval-store.js';
 import type { DaemonCardStore } from './card-store.js';
 import type { PaymentsHandlerDeps } from './register.js';
-import { plainAmount, plainAmountExample, readOwnerAmount, standingItem, standingMerchant, StandingAuthorizationError, type DaemonStandingAuthorizations } from './standing-store.js';
+import { plainAmount, plainAmountExample, readOwnerAmount, standingItem, StandingAuthorizationError, type DaemonStandingAuthorizations } from './standing-store.js';
+import { merchantDomain } from '../merchant-domain.js';
 import { standingUseCounter } from './standing-handlers.js';
 
 /**
@@ -480,18 +481,18 @@ export class CheckoutServiceHolder {
   }
 
   /**
-   * Reports of purchases the owner is owed and never got (the process stopped
-   * between recording the purchase and sending its report): sent now, each
-   * settled once a channel took it. One read of the purchases file; one write
-   * per report sent.
+   * Notices the owner is owed and never got (a purchase report, or a refund or
+   * settlement read from shop mail, whose send failed or reached no channel, or
+   * the process stopped before it): sent now, each settled once a channel took
+   * it. One read of the purchases file; one write per notice sent.
    */
   private async sendOwedPurchaseReports(): Promise<void> {
-    let owed: ReadonlyMap<string, string>;
+    let owed: readonly OwedOwnerNotice[];
     try { owed = this.deps.purchases.owedOwnerNotices(); } catch { return; }
-    for (const [purchaseId, message] of owed) {
+    for (const { purchaseId, kind, message } of owed) {
       try {
         const deliveries = await this.deps.checkout.notifier.deliver({ kind: 'notice', message });
-        if (deliveries.some((delivery) => delivery.delivered)) await this.deps.purchases.settleOwnerNotice(purchaseId);
+        if (deliveries.some((delivery) => delivery.delivered)) await this.deps.purchases.settleOwnerNotice(purchaseId, kind);
       } catch {
         // Still owed: the next start tries again, and payments.purchases.list holds the purchase meanwhile.
       }
@@ -634,7 +635,7 @@ export function checkoutApprovalContent(input: {
   readonly item: string;
   readonly amount: Money | undefined;
 }): Readonly<Record<string, string | undefined>> {
-  return { merchant: standingMerchant(input.merchantDomain), item: standingItem(input.item),
+  return { merchant: merchantDomain(input.merchantDomain), item: standingItem(input.item),
     amount: input.amount === undefined ? undefined : String(input.amount.minor),
     currency: input.amount?.currency };
 }

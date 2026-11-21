@@ -210,7 +210,56 @@ function readAudience(value: unknown): AuthorityAudience | undefined {
   return undefined;
 }
 
-/** Parse one untrusted entry (from disk or the wire). Malformed entries are dropped one by one. */
+function text(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function textList(value: unknown): boolean {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function finiteNumberOrAbsent(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value));
+}
+
+/**
+ * Whether one kind's public part carries the fields the merge, the view and
+ * the stores read and index on. An entry without them is dropped like any
+ * other malformed entry, so a member's bad write cannot break every view.
+ */
+function publicPartReadable(kind: AuthorityKind, part: Record<string, unknown>): boolean {
+  switch (kind) {
+    case 'member':
+      return text(part['nodeId']) && text(part['identityKey']) && nonNegativeInteger(part['gen']);
+    case 'key-epoch':
+      return nonNegativeInteger(part['epoch']) && text(part['mintedBy']);
+    case 'device-token':
+      return text(part['tokenHash']);
+    case 'user':
+      return text(part['username']) && textList(part['roles']);
+    case 'peer-token':
+      return text(part['tokenHash']);
+    case 'device-grant':
+      return text(part['nodeId']) && text(part['capabilityId']);
+    case 'relay-route':
+      return text(part['routeHash']);
+    case 'push-endpoint':
+      return text(part['endpointHash']) && text(part['principalId']);
+    case 'passkey':
+      return text(part['credentialId']) && text(part['publicKeyCose']) && text(part['rpId']) && textList(part['origins']);
+    case 'budget-spend':
+      return text(part['dayKey']) && typeof part['currency'] === 'string' && isRecord(part['spentByNode'])
+        && Object.values(part['spentByNode']).every((pools) => isRecord(pools) && Object.values(pools).every((spent) => typeof spent === 'number' && Number.isFinite(spent)));
+    case 'occasion-state':
+      return text(part['occasionId']) && isRecord(part['state']);
+    case 'job':
+      return (part['family'] === 'automation' || part['family'] === 'watcher') && isRecord(part['definition']) && finiteNumberOrAbsent(part['lastOccurrenceAt']);
+    case 'group':
+      return text(part['groupId']) && typeof part['displayName'] === 'string';
+  }
+}
+
+/** Parse one untrusted entry (from disk or the wire). Malformed entries, a public part included, are dropped one by one. */
 export function readAuthorityEntry(value: unknown): AnyAuthorityEntry | null {
   if (!isRecord(value)) return null;
   const kind = value['kind'];
@@ -225,7 +274,7 @@ export function readAuthorityEntry(value: unknown): AnyAuthorityEntry | null {
   if (parent !== null && (typeof parent !== 'string' || !parent.includes(':'))) return null;
   const revoked = readRevocation(value['revoked'] ?? null);
   if (revoked === undefined) return null;
-  if (!isRecord(value['public'])) return null;
+  if (!isRecord(value['public']) || !publicPartReadable(kind as AuthorityKind, value['public'])) return null;
   const privatePart = value['private'];
   if (privatePart !== null && privatePart !== undefined && !isRecord(privatePart)) return null;
   return {

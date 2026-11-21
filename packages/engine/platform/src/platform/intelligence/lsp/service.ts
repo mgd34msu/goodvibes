@@ -267,14 +267,15 @@ export class LspService {
       const reason = `The ${config.command} language server did not start: ${summarizeError(err)}${stderr ? ` (${stderr.split('\n').slice(-3).join(' ')})` : ''}`;
       this.startFailures.set(key, { reason, at: Date.now(), program: programStamp(resolvedCommand) });
       logger.error('LspService: failed to start server', { langId, err: summarizeError(err) });
-      try {
-        await client.stop();
-      } catch (stopError) {
+      // A server that failed its handshake has nothing to save: it is killed
+      // outright and not awaited, so this failed start returns at once. The
+      // language service scope owns its exit from the spawn above.
+      void client.stop('SIGKILL').catch((stopError: unknown) => {
         logger.warn('LspService: failed to stop server after startup failure', {
           langId,
           error: summarizeError(stopError),
         });
-      }
+      });
       return { status: 'failed', reason, next: [startRetryStep(config.command)] };
     }
   }

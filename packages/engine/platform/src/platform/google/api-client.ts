@@ -313,6 +313,12 @@ export interface CalendarEventRecord {
   readonly etag?: string;
   /** For one occurrence of a recurring event (as a list hands them out), the id of its series. */
   readonly recurringEventId?: string;
+  /**
+   * True when Google holds the event as deleted (`status: 'cancelled'`). Google
+   * still answers a read by id with a deleted event, and keeps its id taken, so
+   * a record read by id is on the calendar only when this is not set.
+   */
+  readonly cancelled?: boolean;
 }
 
 /** The fields a patch changes; a field left out keeps its current value. */
@@ -333,6 +339,8 @@ export interface PatchEventInput {
   readonly notifyAttendees?: boolean;
   /** The etag the event was read with; Google refuses the write with 412 when the event changed since. */
   readonly ifMatch?: string;
+  /** `'confirmed'` puts an event Google holds as deleted back on the calendar. */
+  readonly status?: 'confirmed';
 }
 
 /** One calendar in the account's calendar list. */
@@ -989,6 +997,7 @@ export class GoogleApiClient {
       ...(input.end === undefined ? {} : { end: when(input.end) }),
       ...(attendees === undefined ? {} : { attendees: attendees.map((email) => ({ email })) }),
       ...(input.recurrence === undefined ? {} : { recurrence: input.recurrence }),
+      ...(input.status === undefined ? {} : { status: input.status }),
     };
     const query = input.notifyAttendees === true ? '?sendUpdates=all' : '';
     const result = await this.request(`${CALENDAR_BASE}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(id)}${query}`, {
@@ -1102,6 +1111,7 @@ function toCalendarEvent(value: unknown): CalendarEventRecord | null {
       : {}),
     ...(readString(value.etag).length > 0 ? { etag: readString(value.etag) } : {}),
     ...(readString(value.recurringEventId).length > 0 ? { recurringEventId: readString(value.recurringEventId) } : {}),
+    ...(value.status === 'cancelled' ? { cancelled: true } : {}),
   };
 }
 

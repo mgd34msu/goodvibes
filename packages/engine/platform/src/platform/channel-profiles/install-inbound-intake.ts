@@ -81,9 +81,9 @@ export interface InboundIntakeEnrichmentDeps {
   readonly channelProfiles: Pick<ChannelProfileRegistry, 'resolve'> & Partial<Pick<ChannelProfileRegistry, 'resolveLoaded' | 'preload'>>;
   /**
    * Optional: the channel ingress-policy manager. When present, a sender who
-   * is not a named principal but whom this surface's owner allowlist already
-   * authorizes is attributed to the honest owner principal instead of the
-   * unknown one, see `attributeInboundSession`.
+   * is not a named principal but is the surface's recorded owner is attributed
+   * to the owner principal instead of the unknown one; any other admitted
+   * sender is not, see `attributeInboundSession`.
    */
   readonly channelPolicy?: Pick<ChannelPolicyManager, 'getPolicy'> | undefined;
 }

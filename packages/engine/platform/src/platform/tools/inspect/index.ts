@@ -89,7 +89,7 @@ export class InspectTool implements Tool {
       if (!written) return { ok: false, error: 'this agent has no write tool, so scaffold cannot create files. Nothing was written. Use dryRun:true for the plan.' };
       return written.success ? { ok: true, output: written.output } : { ok: false, error: written.error ?? 'the write tool refused the files; nothing was written' };
     };
-    const rawResult = await executeInspectMode(input, projectRoot, format, current, writeFiles, options?.signal);
+    const rawResult = await executeInspectMode(input, projectRoot, format, current, writeFiles, options?.signal, this.allowOutsideProject());
     const shaped = this._fingerprintResult(rawResult, input.mode, format);
     if (!shaped.success || shaped.output === undefined) return shaped;
     // The schema advertises output.max_tokens; without one the shared default ceiling still applies.

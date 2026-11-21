@@ -57,6 +57,8 @@ export interface CalendarGatewayEventDetail extends CalendarGatewayEventSummary 
    * `calendar.events.update` so a change made elsewhere since is refused.
    */
   readonly revision?: string;
+  /** True when the event was deleted: the calendar still returns it by id, but it is not on the calendar. */
+  readonly cancelled?: boolean;
 }
 
 export interface CalendarGatewayListInput {

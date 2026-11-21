@@ -13,16 +13,21 @@ export interface ChannelAccountActionEffect {
  */
 export const CHANNEL_ACCOUNT_ACTION_EFFECTS: Readonly<Record<ChannelAccountLifecycleAction, ChannelAccountActionEffect>> = {
   inspect: { changesCredentials: false },
+  setup: { changesCredentials: true },
   retest: { changesCredentials: false },
+  connect: { changesCredentials: true },
+  disconnect: { changesCredentials: true },
   start: { changesCredentials: false },
   stop: { changesCredentials: false },
-  setup: { changesCredentials: true },
-  connect: { changesCredentials: true },
   login: { changesCredentials: true },
-  wait_login: { changesCredentials: true },
-  disconnect: { changesCredentials: true },
   logout: { changesCredentials: true },
+  wait_login: { changesCredentials: true },
 };
+
+/** Every account action name, in the order schemas and messages list them. */
+export const CHANNEL_ACCOUNT_LIFECYCLE_ACTIONS = Object.freeze(
+  Object.keys(CHANNEL_ACCOUNT_ACTION_EFFECTS) as ChannelAccountLifecycleAction[],
+);
 
 /** The account action named by `value`, or null when no action has that name. */
 export function readAccountLifecycleAction(value: unknown): ChannelAccountLifecycleAction | null {

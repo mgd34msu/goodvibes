@@ -18,7 +18,7 @@ export const { wireWakeRuntime, startWakeRuntime } = createTerminalWakeRuntime({
   missingModels: (reason) =>
     `[Wake] Wake detection is on, but the wake models are not on this host (${reason}), ` +
     'so nothing is listening. /voice wake-setup fetches and checks them.',
-  draftNotice: '[Wake] What you said is in the composer; press Enter to send it ("Send a spoken request without review" is off).',
+  draftNotice: '[Wake] What you said was added to the composer; press Enter to send it ("Send a spoken request without review" is off).',
   captureFailure: (error, detail) => `[Wake] The capture stream ended (${error}), ${detail}.`,
   describeBlockers: describeWakeBlockers,
   describeLimitations: describeWakeLimitations,

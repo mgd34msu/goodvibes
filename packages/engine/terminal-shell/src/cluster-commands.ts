@@ -203,6 +203,39 @@ export interface RunClusterCommandInput {
   readonly prompt?: ((question: string) => Promise<string>) | undefined;
   /** Like `prompt`, for a secret: the real one does not echo what is typed. Defaults to `prompt` when that is injected. */
   readonly promptSecret?: ((question: string) => Promise<string>) | undefined;
+  /**
+   * Reads everything piped to standard input, for a secret given as `-`
+   * (`--key -`, `--passphrase -`, `--token -`) or a join key piped to `cluster join`.
+   * Absent where standard input is not the command's own (a terminal app's `/cluster`).
+   */
+  readonly readStdin?: (() => Promise<string>) | undefined;
+  /** Whether standard input is a terminal; a secret is read from it only when something is piped in. */
+  readonly stdinIsTty?: boolean | undefined;
+}
+
+/** The flags whose value `-` means the first line of standard input, so the secret stays off the command line. */
+const STDIN_SECRET_FLAGS = ['key', 'passphrase', 'token'] as const;
+
+/** The first line of what was piped in, without its line ending. */
+function firstLine(text: string): string {
+  return (text.split(/\r?\n/, 1)[0] ?? '').trim();
+}
+
+/**
+ * Replaces a secret given as `-` with the first line of standard input. At most
+ * one flag can take it, and only when something is piped in.
+ */
+async function readStdinSecrets(parsed: ParsedClusterCommand, input: RunClusterCommandInput): Promise<ParsedClusterCommand | string> {
+  const fromStdin = STDIN_SECRET_FLAGS.filter((flag) => parsed[flag] === '-');
+  if (fromStdin.length === 0) return parsed;
+  if (fromStdin.length > 1) return `only one of ${fromStdin.map((flag) => `--${flag}`).join(', ')} can be read from standard input`;
+  const flag = fromStdin[0]!;
+  if (!input.readStdin || input.stdinIsTty === true) {
+    return `--${flag} - reads the ${flag} from standard input, and nothing is piped in; pipe it in, or leave --${flag} out to be asked without it showing`;
+  }
+  const value = firstLine(await input.readStdin());
+  if (!value) return `--${flag} - read nothing from standard input; pipe the ${flag} in as its first line`;
+  return { ...parsed, [flag]: value };
 }
 
 /**
@@ -294,10 +327,15 @@ export function describeIrreversibleClusterCommand(parsed: ParsedClusterCommand)
 }
 
 export async function runClusterCommand(input: RunClusterCommandInput): Promise<ClusterCommandResult> {
-  const parsed = parseClusterCommand(input.argv);
-  if (parsed.errors.length > 0) {
-    return failure('usage', parsed.errors[0] as string, `usage: goodvibes-daemon cluster <${CLUSTER_SUBCOMMANDS.join('|')}>`, parsed.json);
+  const typed = parseClusterCommand(input.argv);
+  if (typed.errors.length > 0) {
+    return failure('usage', typed.errors[0] as string, `usage: goodvibes-daemon cluster <${CLUSTER_SUBCOMMANDS.join('|')}>`, typed.json);
   }
+  const withSecrets = await readStdinSecrets(typed, input);
+  if (typeof withSecrets === 'string') {
+    return failure('usage', withSecrets, 'echo "$JOIN_KEY" | goodvibes-daemon cluster join --group <id> --key -', typed.json);
+  }
+  const parsed = withSecrets;
   if (!parsed.subcommand) {
     return failure(
       'usage',
@@ -424,16 +462,16 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
         : refused(result, parsed.json);
     }
     case 'join':
-      return runJoin(parsed, call, now, input, isTerminal);
+      return runJoin(parsed, call, now, input, isTerminal, parsed !== typed);
   }
 }
 
 /**
  * `cluster join`.
  *
- * Two shapes, and both matter. With `--group` and `--key` it is a scriptable
- * one-liner, which is what provisioning a machine from a config-management tool
- * needs. Without them it lists the groups advertising themselves on this
+ * Two shapes, and both matter. With `--group` and the key piped in (`--key -`,
+ * or `--key` left out with standard input piped) it is a scriptable one-liner,
+ * which is what provisioning a machine from a config-management tool needs. Without them it lists the groups advertising themselves on this
  * network and asks, which is what a person adding their second machine needs,
  * because they do not know the group id and should not have to.
  */
@@ -443,9 +481,20 @@ async function runJoin(
   now: number,
   input: RunClusterCommandInput,
   isTerminal: boolean,
+  stdinTaken: boolean,
 ): Promise<ClusterCommandResult> {
   let groupId = parsed.group;
   let joinKey = parsed.key;
+
+  // A join key piped in is read from standard input, so it never sits on the command line.
+  // Not when another secret was already read from it with `-`.
+  if (groupId !== null && joinKey === null && !stdinTaken && input.prompt === undefined && input.readStdin && input.stdinIsTty === false) {
+    joinKey = firstLine(await input.readStdin());
+    if (!joinKey) {
+      return failure('usage', 'no join key was given and standard input held none',
+        'pipe the join key in: echo "$JOIN_KEY" | cluster join --group <id> --key -', parsed.json);
+    }
+  }
 
   if (groupId === null || joinKey === null) {
     const interactive = input.prompt !== undefined || (isTerminal && Boolean(process.stdin.isTTY));
@@ -453,7 +502,7 @@ async function runJoin(
       return failure(
         'not-interactive',
         'a group and a join key are both needed, and this is not an interactive terminal',
-        'pass them directly: cluster join --group <id> --key <join key>',
+        'pipe the key in: echo "$JOIN_KEY" | cluster join --group <id> --key - (or, less safely, --key <join key>, which shows it to other users of this machine)',
         parsed.json,
       );
     }
@@ -468,7 +517,7 @@ async function runJoin(
           'no-group-found',
           'no goodvibes groups are advertising themselves on this network',
           'check the other machine is switched on with clustering enabled, or join by id: '
-            + 'cluster join --group <id> --key <join key>',
+            + 'echo "$JOIN_KEY" | cluster join --group <id> --key -',
           parsed.json,
         );
       }

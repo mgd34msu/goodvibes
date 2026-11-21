@@ -335,6 +335,12 @@ export interface ToolExecuteOptions {
    * silent one. Additive and optional; a tool that never calls it behaves as before.
    */
   readonly onProgress?: ((note?: string) => void) | undefined;
+  /**
+   * The id of the tool call being run (the model's call id). A tool that
+   * records something for that call, such as the file undo entry of a write,
+   * stores it so the record is tied to the call that made it.
+   */
+  readonly callId?: string | undefined;
 }
 
 /** A registered tool with its definition and executor. */

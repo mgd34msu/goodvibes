@@ -165,10 +165,11 @@ async function promoteMemory(
     assertOwnership(); assertLearningCandidateCollection(collection, context, options);
     const record = await spine.add(input, { signal: options.signal, assertCurrent: () => { options.assertCurrent?.(); assertOwnership(); } });
     onDurable?.();
-    markNotePromotion(paths, candidate, 'memory', record.id);
     // The memory lives in the daemon's store, which the next curator read here may not show:
     // the curation store keeps the promotion so the candidate is not offered or made again.
+    // It is recorded before the note is marked, so a failed note write cannot lose it.
     if (paths) recordLearningPromotion(paths, candidate.id, record.id);
+    markNotePromotion(paths, candidate, 'memory', record.id);
     return reviewRoute(record.id);
   }
   let transition: ReturnType<LearningCandidateCollection['prepareTransition']> | undefined;
@@ -368,7 +369,15 @@ async function runAutoPromoterOnce(
     } catch (error) {
       if (error instanceof PromotionRestrictionFailure) throw withPartialProgress(error.failure, ledger());
       if (error instanceof ToolInputProjectionError || signal?.aborted) throw withPartialProgress(error, ledger());
-      assertCurrent(); skipped++; log.push(`Promotion of ${candidate.id} did not complete (${failureKind(error)}).`);
+      assertCurrent();
+      if (durable) {
+        // The record landed; only marking it on the note failed. It is promoted, and saying so keeps it in view.
+        promoted++; bump(candidate.proposalTarget ?? 'unknown');
+        log.push(`wrote ${candidate.proposalTarget} for ${candidate.id}; it could not be recorded on the note (${failureKind(error)})`);
+        durable = false;
+      } else {
+        skipped++; log.push(`Promotion of ${candidate.id} did not complete (${failureKind(error)}).`);
+      }
     }
   }
   for (const candidate of consolidations) {

@@ -50,7 +50,8 @@ export function closeModelPickerRoute(state: {
 export function createModelPickerTokenHandler<Context extends ModelPickerCommandContext, Picker extends ModelPickerModal>(policy: {
   readonly chromeLines: number;
   readonly commitBeforeClose: boolean;
-  readonly commit: (state: ModelPickerTokenState<Context, Picker>, selection: PickerSelection<Picker>) => void;
+  /** Apply the selection; call `applied` once it is (never, when the selection is dropped, e.g. a key prompt cancelled). */
+  readonly commit: (state: ModelPickerTokenState<Context, Picker>, selection: PickerSelection<Picker>, applied: () => void) => void;
   readonly commitEmbedding?: ((state: ModelPickerTokenState<Context, Picker>, provider: string) => void) | undefined;
   readonly selectSpecial?:
     | ((state: ModelPickerTokenState<Context, Picker>, model: PickerSelection<Picker>['model']) => boolean)
@@ -59,13 +60,26 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
   type State = ModelPickerTokenState<Context, Picker>;
   function commitSelection(state: State, selection: PickerSelection<Picker>): void {
     const handled = state.onModelPickerCommit?.() ?? false;
+    // The session's listener hears the outcome once the selection is applied, not the close before it.
+    // It is told after the picker has closed, whichever order the program commits and closes in.
+    const sessionEnded = state.modelPicker.takeSessionEnded();
+    let closed = false;
+    let appliedBeforeClose = false;
+    const applied = (): void => {
+      if (closed) sessionEnded?.(selection.target === 'main');
+      else appliedBeforeClose = true;
+    };
     if (policy.commitBeforeClose) {
-      if (!handled) policy.commit(state, selection);
+      if (!handled) policy.commit(state, selection, applied);
       closeModelPickerRoute(state);
+      closed = true;
     } else {
       closeModelPickerRoute(state);
-      if (!handled) policy.commit(state, selection);
+      closed = true;
+      if (!handled) policy.commit(state, selection, applied);
     }
+    if (handled) sessionEnded?.(false);
+    else if (appliedBeforeClose) sessionEnded?.(selection.target === 'main');
   }
   function readRequestedEffort(state: State): string | undefined {
     const configManager = state.commandContext?.platform?.configManager;

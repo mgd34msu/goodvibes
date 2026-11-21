@@ -135,6 +135,10 @@ async function handleChannelProfilesSet(runtime: CliCommandRuntime, args: readon
   if (!result.ok) {
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
   }
+  // A looser mode asked with a credential that is not the owner's is put to the owner (202 OWNER_APPROVAL_PENDING).
+  if (!('binding' in result.data) || !result.data.binding) {
+    return { output: jsonOrText(runtime, result, ownerPendingText(result.data)), exitCode: 1 };
+  }
   return {
     output: jsonOrText(
       runtime,
@@ -143,6 +147,14 @@ async function handleChannelProfilesSet(runtime: CliCommandRuntime, args: readon
     ),
     exitCode: 0,
   };
+}
+
+/** A profile change put to the owner instead of applied: what is true and what to do. */
+function ownerPendingText(data: object): string {
+  const answer = data as { readonly approvalId?: unknown; readonly state?: unknown };
+  const approval = typeof answer.approvalId === 'string' ? ` as approval ${answer.approvalId}` : '';
+  const state = typeof answer.state === 'string' ? answer.state : 'nothing was changed yet; this loosens the permission mode, which only the owner does';
+  return `Not applied: ${state}. It was put to the owner${approval}; he approves it from his own app.`;
 }
 
 async function handleChannelProfilesDelete(runtime: CliCommandRuntime, args: readonly string[]): Promise<CliCommandOutput> {
@@ -160,6 +172,9 @@ async function handleChannelProfilesDelete(runtime: CliCommandRuntime, args: rea
   const result = await invokeOperatorGatewayMethod(connection, 'channels.profiles.delete', CHANNEL_PROFILE_ROUTE, payload);
   if (!result.ok) {
     return { output: jsonOrText(runtime, result, formatOperatorGatewayFailure(result)), exitCode: 1 };
+  }
+  if (!('deleted' in result.data) || typeof result.data.deleted !== 'boolean') {
+    return { output: jsonOrText(runtime, result, ownerPendingText(result.data)), exitCode: 1 };
   }
   return {
     output: jsonOrText(

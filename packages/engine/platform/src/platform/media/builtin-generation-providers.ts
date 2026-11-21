@@ -22,8 +22,8 @@ import { fetchFailurePhase } from '../state/operation.js';
 export interface MediaGenerationDeps {
   /** A key saved here is used when its environment variable is unset. */
   readonly secrets?: Pick<SecretsManager, 'get' | 'revisionSource'> | undefined;
-  /** Outputs are streamed here; without it an output is returned as the provider's URL. */
-  readonly artifactStore?: Pick<ArtifactStore, 'createFromStream'> | undefined;
+  /** Outputs are streamed here; without it an output is returned as the provider's URL. A delivery that fails part way deletes what it stored. */
+  readonly artifactStore?: Pick<ArtifactStore, 'createFromStream' | 'delete'> | undefined;
 }
 
 /** How long a request waits for the job by default before answering pending. */
@@ -81,11 +81,16 @@ function deliveryStillCurrent(lifetime: DeliveryLifetime): boolean {
 /** A job the provider itself reported as failed or cancelled, or finished without a usable output: nothing is left running. */
 class ProviderTaskEnded extends Error {}
 
+/** Errors from a job the provider finished whose outputs could not all be downloaded: nothing is running and nothing of this attempt stays stored. */
+const outputsUndelivered = new WeakSet<object>();
+
 /**
  * Runs everything that follows a successful submission. The job is paid for and
  * keeps running remotely, so any failure names the provider and task id (the
- * only handle for finding or cancelling it) on the thrown error, and an abort
- * cancels the remote job when the provider has a cancel call.
+ * only handle for finding or cancelling it) on the thrown error. `cancel` is
+ * passed only by the generate request that submitted the job: when that
+ * request is aborted the remote job is cancelled, while an aborted collect
+ * only stops waiting. A finished job is never cancelled.
  */
 async function afterSubmission<T>(
   label: string,
@@ -98,7 +103,9 @@ async function afterSubmission<T>(
     return await work();
   } catch (error) {
     let note: string | undefined;
-    if (!(error instanceof ProviderTaskEnded)) {
+    if (typeof error === 'object' && error !== null && outputsUndelivered.has(error)) {
+      note = `${label} task ${task.taskId} finished; its outputs could not be downloaded; collect it again with this task id`;
+    } else if (!(error instanceof ProviderTaskEnded)) {
       note = `${label} task ${task.taskId} was submitted and may still be running; collect it with this task id`;
       if (signal?.aborted && cancel) {
         try { await cancel(); note = `${label} task ${task.taskId} was cancelled because the request was aborted`; }
@@ -496,8 +503,9 @@ function createGenerationProvider(spec: GenerationSpec, deps: MediaGenerationDep
     };
   };
 
-  const finish = async (task: MediaProviderTask, keyValue: string | null, transport: Transport, waitMs: number, model: string | undefined): Promise<MediaGenerationResult> =>
-    afterSubmission(spec.label, task, transport.signal, spec.cancel ? () => spec.cancel!(task, keyValue) : undefined, async () => {
+  /** `cancelOnAbort`: true for the generate request that submitted the job, false for a collect, which only asks for its outputs. */
+  const finish = async (task: MediaProviderTask, keyValue: string | null, transport: Transport, waitMs: number, model: string | undefined, cancelOnAbort: boolean): Promise<MediaGenerationResult> =>
+    afterSubmission(spec.label, task, transport.signal, cancelOnAbort && spec.cancel ? () => spec.cancel!(task, keyValue) : undefined, async () => {
       const waited = await pollTask(async () => {
         const step = await spec.poll(task, { key: keyValue, transport });
         return step.state === 'done' ? { state: 'done' as const, value: step.outputs } : step;
@@ -507,8 +515,19 @@ function createGenerationProvider(spec: GenerationSpec, deps: MediaGenerationDep
         return { providerId: spec.id, artifacts: [], pending: task, metadata: { ...metadata, state: 'pending' } };
       }
       const artifacts: MediaArtifact[] = [];
-      for (const [index, output] of waited.value.entries()) {
-        artifacts.push(await deliverOutput(spec.id, output, index, transport, deps.artifactStore));
+      try {
+        for (const [index, output] of waited.value.entries()) {
+          artifacts.push(await deliverOutput(spec.id, output, index, transport, deps.artifactStore));
+        }
+      } catch (error) {
+        // All or nothing: a later collect stores every output once, so what this attempt stored is removed.
+        for (const artifact of artifacts) {
+          if (!artifact.artifactId) continue;
+          try { deps.artifactStore?.delete(artifact.artifactId); } catch { /* retention removes it; the download failure is what is reported */ }
+        }
+        const marked = typeof error === 'object' && error !== null ? error : new Error(String(error));
+        outputsUndelivered.add(marked);
+        throw marked;
       }
       return { providerId: spec.id, artifacts, metadata };
     });
@@ -532,7 +551,7 @@ function createGenerationProvider(spec: GenerationSpec, deps: MediaGenerationDep
       const task: MediaProviderTask = { providerId: spec.id, taskId: submitted.taskId, resume: { ...submitted.resume, output: kind } };
       // Cancelled while the provider was answering: the job was accepted, so the result carries its task id instead of an error.
       if (!deliveryStillCurrent(lifetime)) return await acceptedThenCancelled(task, keyValue, submitted.model);
-      return finish(task, keyValue, transportFor(spec.label, lifetime), waitMsFrom(options['waitSeconds']), submitted.model);
+      return finish(task, keyValue, transportFor(spec.label, lifetime), waitMsFrom(options['waitSeconds']), submitted.model, true);
     },
     async collect(task: MediaProviderTask, options: MediaCollectOptions = {}, lifetime: DeliveryLifetime = {}): Promise<MediaGenerationResult> {
       const taskId = trimString(task.taskId);
@@ -550,7 +569,7 @@ function createGenerationProvider(spec: GenerationSpec, deps: MediaGenerationDep
       const resume = { ...(task.resume ?? {}) };
       const output = OUTPUT_KINDS.find((kind) => kind === resume['output']) ?? spec.outputs[0]!;
       if (!spec.outputs.includes(output)) throw refuseOutput(spec, output);
-      return finish({ providerId: spec.id, taskId, resume: { ...resume, output } }, keyValue, transportFor(spec.label, lifetime), waitMsFrom(options.waitSeconds), resume['model']);
+      return finish({ providerId: spec.id, taskId, resume: { ...resume, output } }, keyValue, transportFor(spec.label, lifetime), waitMsFrom(options.waitSeconds), resume['model'], false);
     },
   };
 }

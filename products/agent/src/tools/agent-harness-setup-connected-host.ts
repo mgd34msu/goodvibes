@@ -84,6 +84,7 @@ export async function connectedHostAuthPosture(
     operatorToken: {
       present: token.present,
       usable,
+      source: token.source,
       path: homeRelativePath(token.path, shellPaths.homeDirectory),
       ...(token.error ? { error: token.error } : {}),
     },
@@ -120,7 +121,7 @@ export type ConnectedHostAuthState =
   | 'needs-host';
 
 export function connectedHostAuthState(posture: SetupConnectedHostAuthPosture): ConnectedHostAuthState {
-  if (posture.operatorToken.path === 'Agent host-bound pairing store' && !posture.operatorToken.usable) return 'review-pairing-store';
+  if (posture.operatorToken.source === 'pairing' && !posture.operatorToken.usable) return 'review-pairing-store';
   switch (posture.nativeIntake.status) {
     case 'ready': return posture.compatibilityAuth.bootstrapCredentialPresent ? 'review-bootstrap-credential' : 'ready';
     case 'unsupported-principal': return 'needs-owner-pairing';

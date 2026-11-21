@@ -25,6 +25,8 @@ const MAX_WAIT_TIMEOUT_MS = 10 * 60_000;
 type JsonRecord = Record<string, unknown>;
 
 interface HomeAssistantMessageIndex {
+  /** The message's key: its installation, conversation and messageId (see messageKey). */
+  readonly key: string;
   readonly messageId: string;
   readonly assistantMessageId?: string | undefined;
   readonly sessionId: string;
@@ -35,6 +37,8 @@ interface HomeAssistantMessageIndex {
   readonly chatMessageId?: string | undefined;
   /** The turn that answers it, once the chat manager has started it; a cancel by messageId targets only this turn. */
   readonly turnId?: string | undefined;
+  /** Set when that turn's end (completed, error or cancelled) was seen. */
+  readonly ended?: true | undefined;
   /** How an earlier attempt ended when it ended badly, so a retry with the same messageId reports it instead of posting again. */
   readonly failure?: { readonly status: 'failed' | 'cancelled'; readonly error: string } | undefined;
 }
@@ -100,7 +104,21 @@ export const HOME_ASSISTANT_CONVERSATION_ROUTES: readonly { readonly method: str
   { method: 'POST', path: '/api/homeassistant/conversation/cancel' },
 ];
 
+/** How many messages the in-memory index keeps before it drops the oldest that have ended. */
+const MESSAGE_INDEX_LIMIT = 500;
+const MESSAGE_INDEX_PRUNE = 100;
+
+/**
+ * One message's key: a messageId is the caller's and only unique within its
+ * Home Assistant installation and conversation, so two installations (or two
+ * conversations) using the same messageId are different messages.
+ */
+function messageKey(address: { readonly surfaceId: string; readonly conversationId: string }, messageId: string): string {
+  return [address.surfaceId, address.conversationId, messageId].join('\u0000');
+}
+
 export class HomeAssistantConversationRoutes {
+  /** By messageKey. Restart-safe dedupe lives in the chat transcript (the message keeps the caller's id); this is the running view. */
   private readonly messageIndex = new Map<string, HomeAssistantMessageIndex>();
   private readonly inflight = new Map<string, Promise<HomeAssistantSubmitResult>>();
   /** The HTTP status a rejected submit answers with, kept off the wire body. */
@@ -243,14 +261,15 @@ export class HomeAssistantConversationRoutes {
     }
 
     if (!input.clientMessageId) return this.postTurn(input, onTurnEvent, onSessionResolved);
-    const key = [input.surfaceId, input.conversationId, input.messageId].join('\u0000');
+    const key = messageKey(input, input.messageId);
     // A retry of a submit that is still waiting shares its outcome; a retry of one that already
     // returned (a 202 timeout, say) is answered from the transcript. Neither posts the utterance again.
+    // After a restart the chat transcript answers instead (postTurn finds the message by its id there).
     const running = this.inflight.get(key);
     if (running) return this.markDuplicate(await running);
-    const known = this.messageIndex.get(input.messageId);
+    const known = this.messageIndex.get(key);
     // An entry with no chat message id is only the provisional one made before posting: that attempt never posted, so this one may.
-    if (known?.chatMessageId && known.conversationId === input.conversationId) return this.describeKnownMessage(input, known);
+    if (known?.chatMessageId) return this.describeKnownMessage(input, known);
     const turn = this.postTurn(input, onTurnEvent, onSessionResolved);
     const settle = (): void => { this.inflight.delete(key); };
     this.inflight.set(key, turn);
@@ -304,6 +323,7 @@ export class HomeAssistantConversationRoutes {
     onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined,
     onSessionResolved?: ((sessionId: string) => void) | undefined,
   ): Promise<HomeAssistantSubmitResult> {
+    const key = messageKey(input, input.messageId);
     let posted: HomeAssistantChatPostResult;
     try {
       posted = await postHomeAssistantChatMessage(
@@ -319,8 +339,10 @@ export class HomeAssistantConversationRoutes {
           wait: input.wait,
           timeoutMs: input.waitTimeoutMs,
           clientId: `homeassistant:${input.surfaceId}:${input.conversationId}`,
+          ...(input.clientMessageId ? { clientMessageId: input.messageId } : {}),
           onTurnEvent: (event) => {
-            if (event.type === 'turn.started') this.rememberTurn(input.messageId, event.turnId);
+            if (event.type === 'turn.started') this.rememberTurn(key, event.turnId);
+            if (event.type === 'turn.completed' || event.type === 'turn.error' || event.type === 'turn.cancelled') this.rememberTurnEnded(key);
             onTurnEvent?.(event);
           },
           // Indexed as soon as the session is known, so a cancel by messageId works while the turn runs.
@@ -333,7 +355,7 @@ export class HomeAssistantConversationRoutes {
     } catch (error) {
       // The error's own status stays (a rate limit is 429, a closed session 409); an error that
       // names none is a server fault, not a mistake in the request.
-      if (!this.messageIndex.get(input.messageId)?.chatMessageId) this.messageIndex.delete(input.messageId);
+      if (!this.messageIndex.get(key)?.chatMessageId) this.messageIndex.delete(key);
       const httpStatus = serviceFailureStatus(error, 500);
       const result: HomeAssistantSubmitResult = {
         ok: false,
@@ -353,6 +375,11 @@ export class HomeAssistantConversationRoutes {
     }
 
     this.indexMessage(input, posted);
+    // The chat already held this message (a retry after a restart): it was not posted again.
+    if (posted.replayed) {
+      const known = this.messageIndex.get(key);
+      if (known) return this.describeKnownMessage(input, known);
+    }
     const base = {
       ok: true,
       acknowledged: true as const,
@@ -489,9 +516,11 @@ export class HomeAssistantConversationRoutes {
    * reply, cancelled or failed), a sessionId alone reports `not-running`.
    */
   private async cancelConversation(body: JsonRecord): Promise<Response> {
-    const indexed = readString(body.messageId ?? body.message_id)
-      ? this.messageIndex.get(readString(body.messageId ?? body.message_id)!)
-      : undefined;
+    // The message is found by the same installation and conversation a submit
+    // used, with the same defaults, so one installation on the defaults still
+    // cancels by messageId alone.
+    const cancelMessageId = readString(body.messageId ?? body.message_id);
+    const indexed = cancelMessageId ? this.messageIndex.get(messageKey(this.parseAddress(body), cancelMessageId)) : undefined;
     const sessionId = readString(body.sessionId ?? body.session_id) ?? indexed?.sessionId;
     if (!sessionId) {
       return Response.json({ ok: false, error: 'sessionId or known messageId is required.' }, { status: 400 });
@@ -559,13 +588,7 @@ export class HomeAssistantConversationRoutes {
     const modelId = readString(body.modelId ?? body.model);
     const tools = readStringList(body.tools);
     const haContext = readRecord(body.context);
-    const conversationId = readString(body.conversationId ?? body.conversation_id)
-      ?? threadId
-      ?? readString(body.deviceId ?? body.device_id)
-      ?? String(this.context.configManager.get('surfaces.homeassistant.defaultConversationId') || 'goodvibes');
-    const surfaceId = readString(body.surfaceId ?? body.instanceId ?? body.instance_id)
-      ?? readString(body.hassInstanceId ?? body.hass_instance_id)
-      ?? 'homeassistant';
+    const { conversationId, surfaceId } = this.parseAddress(body);
     const channelId = readString(body.areaId ?? body.area_id)
       ?? readString(body.entityId ?? body.entity_id)
       ?? conversationId;
@@ -592,6 +615,18 @@ export class HomeAssistantConversationRoutes {
     };
   }
 
+  /** The installation and conversation a request names, with the defaults a submit and a cancel both apply. */
+  private parseAddress(body: JsonRecord): { readonly conversationId: string; readonly surfaceId: string } {
+    const conversationId = readString(body.conversationId ?? body.conversation_id)
+      ?? readString(body.threadId ?? body.thread_id)
+      ?? readString(body.deviceId ?? body.device_id)
+      ?? String(this.context.configManager.get('surfaces.homeassistant.defaultConversationId') || 'goodvibes');
+    const surfaceId = readString(body.surfaceId ?? body.instanceId ?? body.instance_id)
+      ?? readString(body.hassInstanceId ?? body.hass_instance_id)
+      ?? 'homeassistant';
+    return { conversationId, surfaceId };
+  }
+
   /**
    * Read an optional grounding reference, the pre-registered home-graph
    * knowledge space / Home Assistant installation this turn should consult.
@@ -611,15 +646,23 @@ export class HomeAssistantConversationRoutes {
     };
   }
 
-  private rememberTurn(messageId: string, turnId: string): void {
-    const entry = this.messageIndex.get(messageId);
-    if (entry) this.messageIndex.set(messageId, { ...entry, turnId });
+  private rememberTurn(key: string, turnId: string): void {
+    const entry = this.messageIndex.get(key);
+    if (entry) this.messageIndex.set(key, { ...entry, turnId });
+  }
+
+  private rememberTurnEnded(key: string): void {
+    const entry = this.messageIndex.get(key);
+    if (entry) this.messageIndex.set(key, { ...entry, ended: true });
   }
 
   private indexMessage(input: ParsedHomeAssistantInput, posted: HomeAssistantChatPostResult): void {
-    const previous = this.messageIndex.get(input.messageId);
-    this.messageIndex.set(input.messageId, {
+    const key = messageKey(input, input.messageId);
+    const previous = this.messageIndex.get(key);
+    this.messageIndex.set(key, {
       ...(previous?.turnId ? { turnId: previous.turnId } : {}),
+      ...(previous?.ended ? { ended: true as const } : {}),
+      key,
       messageId: input.messageId,
       ...(posted.assistantMessageId ? { assistantMessageId: posted.assistantMessageId } : {}),
       sessionId: posted.session.id,
@@ -631,9 +674,23 @@ export class HomeAssistantConversationRoutes {
         ? { failure: { status: posted.cancelled ? 'cancelled' as const : 'failed' as const, error: posted.error } }
         : {}),
     });
-    if (this.messageIndex.size > 500) {
-      const oldest = [...this.messageIndex.values()].sort((a, b) => a.createdAt - b.createdAt).slice(0, 100);
-      for (const entry of oldest) this.messageIndex.delete(entry.messageId);
+    if (this.messageIndex.size > MESSAGE_INDEX_LIMIT) this.pruneMessageIndex();
+  }
+
+  /**
+   * Drops the oldest entries whose turn has ended. One still being submitted
+   * or still running stays, so a retry still shares it and a cancel by its
+   * messageId still names its turn.
+   */
+  private pruneMessageIndex(): void {
+    let dropped = 0;
+    for (const entry of [...this.messageIndex.values()].sort((a, b) => a.createdAt - b.createdAt)) {
+      if (dropped >= MESSAGE_INDEX_PRUNE) return;
+      if (this.inflight.has(entry.key) || !entry.chatMessageId) continue;
+      // An end seen as an event is enough; otherwise the transcript says whether it still runs.
+      if (!entry.ended && !entry.failure && this.messageOutcome(entry).status === 'running') continue;
+      this.messageIndex.delete(entry.key);
+      dropped += 1;
     }
   }
 

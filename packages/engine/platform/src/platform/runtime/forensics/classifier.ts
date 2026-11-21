@@ -82,6 +82,16 @@ export async function classifyFailure(input: ClassifierInput, options?: OwnedJud
     return 'max_tokens';
   }
 
+  // A stop reason that names the LLM call as what ended the turn decides, whatever
+  // tool failures or denials the turn recovered from before it (they stay in the causal chain).
+  if (
+    input.stopReason === 'provider_error'
+    || input.stopReason === 'provider_exhausted'
+    || input.stopReason === 'content_filter'
+  ) {
+    return 'llm_error';
+  }
+
   // Compaction failure
   if (input.hasCompactionError) {
     return 'compaction_error';
@@ -102,13 +112,10 @@ export async function classifyFailure(input: ClassifierInput, options?: OwnedJud
     return 'cascade_failure';
   }
 
-  // A stop reason that already says the LLM call failed: no reading of the text
+  // A generic stop reason that still says the LLM call failed: no reading of the text
   if (
-    input.stopReason === 'provider_exhausted' ||
-    input.stopReason === 'provider_error' ||
     input.stopReason === 'error' ||
-    input.stopReason === 'stop_sequence' ||
-    input.stopReason === 'content_filter'
+    input.stopReason === 'stop_sequence'
   ) {
     return 'llm_error';
   }

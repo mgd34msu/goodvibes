@@ -61,15 +61,16 @@ export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () 
   const daemon = createOwnerInboxClient(verbs);
   const home = homeOwnerInbox(services.shellPaths);
   const daemonReachable = (): boolean => verbs.probe().available;
+  const daemonAddress = (): string | undefined => configuredDaemonOrigin(services.configManager)?.baseUrl;
   const inbox = withAnswerDelivery(
-    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'tui'), daemonReachable,
-      daemonAddress: () => configuredDaemonOrigin(services.configManager)?.baseUrl }),
+    routeOwnerInbox({ daemon, home: homeInboxClient(home, 'tui'), daemonReachable, daemonAddress }),
     {
       home,
       sessionWatch: () => sessionWatches.get(services),
       // The session's identity (app, project store and id), and what any process reads to tell a closed session from a deleted one.
       askerFacts: (id) => ({ [OWNER_ASKER_SESSION_FILE_METADATA]: sessionIdentityFile(services.surface, id) }),
       daemonReachable,
+      daemonAddress,
       daemon,
       // Only for a question a daemon on another machine holds: its update stream while one is open.
       watch: async (onItem, onEnd) => {

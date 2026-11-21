@@ -410,7 +410,7 @@ export function ownerMessageForFailure(
         + 'sign-ins are how an account gets locked.';
     case 'mailbox-unavailable':
       return `Sign-in worked, but the folder '${mailbox}' could not be opened. `
-        + 'Nothing will be read from it until email.mailbox names a folder that '
+        + 'Nothing will be read from it until surfaces.email.imap.mailbox names a folder that '
         + 'exists on the server.';
     case 'bodies-unfetchable':
       return `This account can sign in and open '${mailbox}' but is not `
@@ -479,6 +479,40 @@ export function imapConnection(client: ImapClient): ImapConnection {
 }
 
 /**
+ * The failure for a stored value that cannot be written to an IMAP connection
+ * (a CR or LF, or a character outside printable US-ASCII). The server never saw
+ * it, so the owner is told what to change rather than that a sign-in was refused.
+ */
+function unsendableValueFailure(errorText: string, mailbox: string): ImapOpenError {
+  const why = /must not contain carriage return or newline/.test(errorText)
+    ? 'contains a line break'
+    : 'contains characters that cannot be sent to an IMAP server (only printable ASCII is supported)';
+  if (errorText.startsWith('Invalid IMAP mailbox name:')) {
+    return new ImapOpenError({
+      reason: 'mailbox-unavailable',
+      summary: `The mailbox name '${mailbox}' cannot be sent to a mail server.`,
+      serverMessage: '',
+      mailbox,
+      ownerMessage: `The configured folder name ${why}, so the server was never asked to open it. `
+        + 'Nothing will be read until surfaces.email.imap.mailbox names a folder that exists on the server.',
+    });
+  }
+  const username = errorText.startsWith('Invalid IMAP username:');
+  return new ImapOpenError({
+    reason: 'authentication-rejected',
+    summary: 'The stored mail credentials cannot be sent to a mail server.',
+    serverMessage: '',
+    mailbox,
+    ownerMessage: username
+      ? `The configured mail user name ${why}, so the server was never contacted with it. `
+        + 'Set surfaces.email.imap.user to the mailbox sign-in name, and reconnect.'
+      : `The stored mail password ${why}, so the server was never contacted with it. `
+        + 'Store a mailbox password made of printable ASCII characters, such as an app password, '
+        + 'as surfaces.email.password at daemon scope, and reconnect.',
+  });
+}
+
+/**
  * Compose a named open failure without retaining private server wording.
  *
  * `refusedReason` is what the failing phase means when the SERVER said no. A
@@ -499,15 +533,11 @@ export async function composeOpenFailure(input: {
   assertImapReadingCurrent(options);
   const serverMessage = imapFailureText(input.error);
 
-  // A credential that cannot be put on the wire at all never reached the
-  // server, so there is no refusal to read: it is the credential, terminally.
+  // A value that cannot be put on the wire at all never reached the server, so
+  // there is no refusal to read: it is the stored value, terminally. The owner
+  // sentence names which value it was and never repeats it.
   if (serverMessage.startsWith('Invalid IMAP ')) {
-    return new ImapOpenError({
-      reason: 'authentication-rejected',
-      summary: 'The stored mail credentials cannot be sent to a mail server.',
-      serverMessage: '',
-      mailbox: input.mailbox,
-    });
+    return unsendableValueFailure(serverMessage, input.mailbox);
   }
 
   // The server said no. What it said is the authority on what it meant, the

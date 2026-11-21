@@ -888,6 +888,8 @@ export class CompanionChatManager {
       readonly attachments?: readonly CompanionChatMessageAttachmentInput[] | undefined;
       /** In-process tap for this turn's incremental events; independent of the gateway SSE fan-out. */
       readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
+      /** Sender-chosen id for this send, kept with the message so the sender finds it again, also after a restart. */
+      readonly clientMessageId?: string | undefined;
     } = {},
   ): Promise<CompanionChatReplyResult> {
     return awaitCompanionReply(
@@ -896,6 +898,7 @@ export class CompanionChatManager {
         pendingReply,
         attachments: options.attachments,
         ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
+        ...(options.clientMessageId !== undefined ? { clientMessageId: options.clientMessageId } : {}),
       }),
       (messageId) => this.pendingReplies.delete(messageId),
     );
@@ -1330,8 +1333,17 @@ export class CompanionChatManager {
       ...(effort === undefined ? {} : { reasoningEffort: effort }) });
   }
 
+  /**
+   * Whether this chat's files may be written: a chat that was deleted writes
+   * nothing, so a turn or send still finishing for it never creates its
+   * transcript again as a file no chat lists.
+   */
+  private persists(session: InternalSession): boolean {
+    return this.persistence !== null && this.sessions.get(session.meta.id) === session;
+  }
+
   private markTurn(session: InternalSession, userMessageId: string, phase: 'started' | 'ended'): void {
-    if (!this.persistence) return;
+    if (!this.persistence || !this.persists(session)) return;
     try {
       this.persistence.markTurn(session.meta.id, { userMessageId, phase, at: Date.now() });
     } catch (error) {
@@ -1825,13 +1837,14 @@ export class CompanionChatManager {
 
   /**
    * Regenerate and edit replace the conversation and start a turn of their
-   * own, so they cannot run beside a reply, a message being prepared, or
-   * queued sends: the older turn would keep streaming into the new branch.
+   * own, so they cannot run beside a reply, a message being prepared or saved,
+   * or queued sends: the older turn would keep streaming into the new branch,
+   * and a send still being saved would land in the transcript the branch replaced.
    */
   private _assertNoTurnInFlight(session: InternalSession, action: string): void {
     const queued = session.pendingTurns?.length ?? 0;
-    if (!session.activeTurn && !session.preparingTurns && !queued) return;
-    const state = session.activeTurn ? 'is still replying' : queued ? `has ${String(queued)} queued message${queued === 1 ? '' : 's'} waiting` : 'is still preparing a message';
+    if (!session.activeTurn && !session.preparingTurns && !session.acceptingSends && !queued) return;
+    const state = session.activeTurn ? 'is still replying' : queued ? `has ${String(queued)} queued message${queued === 1 ? '' : 's'} waiting` : 'is still preparing or saving a message';
     throw Object.assign(
       new Error(`This chat ${state}, so it cannot ${action} now. Stop the current reply (or wait for it and any queued messages to finish), then try again.`),
       { code: 'CHAT_TURN_BUSY', status: 409 },
@@ -1917,8 +1930,8 @@ export class CompanionChatManager {
 
       switch (action.kind) {
         case 'evict-memory':
-          // A long reply, queued work or a change not yet saved keeps the chat in memory.
-          if (session.activeTurn || session.preparingTurns || session.pendingTurns?.length || session.unsaved?.size || session.metaUnsaved) break;
+          // A long reply, a send still being prepared or saved, queued work or a change not yet saved keeps the chat in memory.
+          if (session.activeTurn || session.preparingTurns || session.acceptingSends || session.pendingTurns?.length || session.unsaved?.size || session.metaUnsaved) break;
           // The summary catches up with the transcript once, as the chat leaves memory; a failed write keeps it in memory.
           if (session.countBehind) {
             this.saveInBackground(session, [], true);
@@ -2023,7 +2036,7 @@ export class CompanionChatManager {
 
   /** Write changes already in memory; a failure is kept for the chat's next save. Returns whether the write was made. */
   private saveInBackground(session: InternalSession, changed: readonly CompanionChatMessage[], metaChanged: boolean): boolean {
-    if (!this.persistence) return false;
+    if (!this.persists(session)) return false;
     try {
       this.write(session, changed, metaChanged || session.metaUnsaved ? session.meta : undefined);
       return true;

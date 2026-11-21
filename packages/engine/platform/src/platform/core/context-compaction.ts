@@ -52,6 +52,8 @@ import {
   buildReinjectedInstructions,
   stripReinjectedInstructions,
   extractText,
+  isCompactionHandoff,
+  handoffCurrentTask,
 } from './compaction-sections.js';
 import { isActiveAgent } from '../tools/agent/predicates.js';
 
@@ -536,6 +538,12 @@ async function runCompaction(
       const msg = messages[i];
       if (msg?.role === 'user') {
         const text = extractText(msg.content);
+        // A previous compaction's handoff stands for the request it carried forward, not for itself.
+        if (isCompactionHandoff(text)) {
+          const carried = handoffCurrentTask(text);
+          if (carried) return carried;
+          continue;
+        }
         if (text.trim()) return text.trim();
       }
     }

@@ -315,15 +315,19 @@ export function attachHostedSessionCloseSync(
  * may or may not read is how a silent loss stays silent.
  */
 export function reportHostedSessionRestore(report: HostedSessionLoadReport): void {
-  if (report.restored.length === 0 && report.rejected.length === 0
+  if (report.restored.length === 0 && report.rejected.length === 0 && report.unread.length === 0
     && report.swept.length === 0 && report.evicted.length === 0) return;
   logger.info('DaemonServer: hosted sessions restored', {
     restored: report.restored.length,
     rejected: report.rejected.length,
+    unread: report.unread.length,
     swept: report.swept.length,
     evicted: report.evicted.length,
     ...(report.rejected.length > 0
       ? { rejectedFiles: report.rejected.map((entry) => `${entry.file}: ${entry.reason}`) }
+      : {}),
+    ...(report.unread.length > 0
+      ? { unreadFiles: report.unread.map((entry) => `${entry.file}: ${entry.reason}`) }
       : {}),
   });
 }

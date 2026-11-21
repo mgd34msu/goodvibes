@@ -24,14 +24,14 @@
  * naming a file that does not exist. A file that runs no test, skips a
  * test, tries the network, or leaves a process running is a failure.
  */
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { availableParallelism, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, join, relative, resolve, sep } from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 import { isolatedTestEnvironment } from '../toolchain/src/test-runner/test-isolation.ts';
-import { RUN_TMP_PREFIX, sweepStaleTmpDirs, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
+import { RUN_TMP_PREFIX, STALE_RUN_MS, sweepStaleTmpDirs, TEMP_ROOT_OWNER_FILE, tempRootOwnerAlive, TEST_TMP_ROOT_ENV } from '../toolchain/src/test-runner/temp.ts';
 import { missingProofFiles, readRiskTable, scanBunfig, scanTestFiles, type ScanFinding } from './test-scan.ts';
 
 const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -229,8 +229,10 @@ interface FileOutcome { readonly file: TestFile; readonly seconds: number; reado
 
 /** Run the run's temp root, signal relays and clean-up around `body`. */
 async function withRunRoot<T>(cwds: readonly string[], body: (root: string, signalled: () => keyof typeof SIGNAL_NUMBERS | undefined, children: Set<ReturnType<typeof Bun.spawn>>) => Promise<T>): Promise<T> {
-  sweepStaleTmpDirs(tmpdir(), RUN_TMP_PREFIX);
+  // A run root carries its runner's pid, so a run whose last files take longer than the sweep age keeps its root.
+  sweepStaleTmpDirs(tmpdir(), RUN_TMP_PREFIX, STALE_RUN_MS, { preserve: tempRootOwnerAlive });
   const root = realpathSync(mkdtempSync(join(tmpdir(), RUN_TMP_PREFIX)));
+  writeFileSync(join(root, TEMP_ROOT_OWNER_FILE), String(process.pid));
   let signalled: keyof typeof SIGNAL_NUMBERS | undefined;
   const children = new Set<ReturnType<typeof Bun.spawn>>();
   const relays = (Object.keys(SIGNAL_NUMBERS) as (keyof typeof SIGNAL_NUMBERS)[]).map((name) => {

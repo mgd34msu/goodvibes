@@ -1719,7 +1719,10 @@ get it back.
 
 **The list is owner-editable and nothing learns its way onto it.**
 `payments.majorRetailersAdditional` and `payments.majorRetailersExcluded` take
-comma-separated registrable domains. No page, agent or inference adds an entry, a page that could argue itself onto the list could buy from itself unattended. A domain the owner adds is trusted as the merchant,
+comma-separated shop domains; an entry written as a `www.` host or a shop URL is
+read as its registrable domain (`https://www.shop.biz/cart` is `shop.biz`), and a
+list with an entry that names no shop (`shop`, a bare `co.uk`) is refused when it
+is set. No page, agent or inference adds an entry, a page that could argue itself onto the list could buy from itself unattended. A domain the owner adds is trusted as the merchant,
 but not as a sale format: an auction, a Best Offer or a listing not confirmed as
 fixed-price on an owner-added marketplace is still refused (§9.1.1), because there is
 no final total to show before paying. The seller-reputation bar is the owner's to waive.

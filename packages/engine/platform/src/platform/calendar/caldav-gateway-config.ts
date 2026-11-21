@@ -128,20 +128,21 @@ function readConfigString(config: CalDavConfigPort, key: string): string | undef
  * in an optional setting.
  */
 export function parseCollectionMap(raw: string | undefined): Record<string, string> {
-  if (!raw) return {};
+  // No prototype: a configured id such as '__proto__' is an ordinary entry,
+  // and no inherited name reads as a configured calendar.
+  const map: Record<string, string> = Object.create(null) as Record<string, string>;
+  if (!raw) return map;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const map: Record<string, string> = {};
       for (const [id, path] of Object.entries(parsed as Record<string, unknown>)) {
         if (typeof path === 'string' && path.length > 0) map[id] = path;
       }
-      return map;
     }
   } catch {
     // Ignore malformed config; fall back to default-calendar-only behaviour.
   }
-  return {};
+  return map;
 }
 
 /**
@@ -289,7 +290,8 @@ export function collectionPathFor(
   calendarId: string | undefined,
 ): string {
   const id = calendarId && calendarId.length > 0 ? calendarId : config.defaultCalendarId;
-  const mapped = config.collectionMap[id];
+  // Own entries only: an id such as 'constructor' names no configured calendar.
+  const mapped = Object.hasOwn(config.collectionMap, id) ? config.collectionMap[id] : undefined;
   if (mapped) return mapped;
   if (id === config.defaultCalendarId) return '';
   // Unknown logical id with no mapping: treat the id as a child collection name.

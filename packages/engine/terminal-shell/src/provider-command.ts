@@ -7,7 +7,8 @@
  * Each app says how it reaches its services and whether its sign-in waits for
  * the browser to come back (the Agent always finishes with a pasted code).
  */
-import { readFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
+import { dirname } from 'node:path';
 import {
   atomicWriteFileSync,
   createOAuthLocalListener,
@@ -621,7 +622,14 @@ export const PROVIDER_COMMAND: CommandDescription<ProviderCommandContext> = {
     }),
     {
       id: 'save-sign-ins', label: 'Save your sign-ins to a file', word: 'export',
-      inputs: [PATH('Where to write them, such as sign-ins.json')],
+      inputs: [
+        PATH('Where to write them, such as sign-ins.json'),
+        choiceInput({
+          id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
+          choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+          optional: { default: 'no', means: 'keep it and stop' },
+        }),
+      ],
       sentence: 'Your subscription sign-ins, with their tokens, are written to {path} and stay there until you change it: anyone who reads the file can use them, so delete it once it has been used.', done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection',
       ownerOnly: { reason: 'it writes your sign-in tokens out of the secret store into a plain file', instead: 'Ask the owner to run /provider export <file>.' },
@@ -630,8 +638,32 @@ export const PROVIDER_COMMAND: CommandDescription<ProviderCommandContext> = {
       async run(values, ctx) {
         const target = host().requireShellPaths(ctx).resolveWorkspacePath(values.path!);
         const file: SubscriptionFile = { version: 1, exportedAt: Date.now(), subscriptions: host().requireSubscriptionManager(ctx).list().map(subscriptionExportForm) };
+        const text = `${JSON.stringify(file, null, 2)}\n`;
         // Owner-only (0600): the file holds access and refresh tokens.
-        atomicWriteFileSync(target, `${JSON.stringify(file, null, 2)}\n`, { mkdirp: true });
+        if (values.replace === 'yes') {
+          atomicWriteFileSync(target, text, { mkdirp: true });
+        } else {
+          // The check is the write itself: an existing file, even one made a moment ago, is never replaced.
+          mkdirSync(dirname(target), { recursive: true });
+          let fd: number;
+          try {
+            fd = openSync(target, 'wx', 0o600);
+          } catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+              throw commandRefusal(`${values.path} already exists; nothing was written.`, `Write over it: /provider export ${values.path} --replace`);
+            }
+            throw error;
+          }
+          try {
+            writeSync(fd, text);
+            fsyncSync(fd);
+          } catch (error) {
+            closeSync(fd);
+            rmSync(target, { force: true });
+            throw error;
+          }
+          closeSync(fd);
+        }
         return `Wrote ${file.subscriptions.length} sign-in${file.subscriptions.length === 1 ? '' : 's'} to ${target}. The file holds working sign-in tokens: keep it private and delete it after use.`;
       },
     },

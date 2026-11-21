@@ -437,8 +437,15 @@ export async function handleOpenAiSubscriptionStartForHandler(handler: InputHand
     try {
       const oauth = openAiSubscriptionOAuth();
       const callback = oauth.localCallback;
+      // A listener an earlier start left waiting holds the fixed port and the earlier attempt's state: release it first.
+      handler.onboardingOpenAiListener?.close();
+      handler.onboardingOpenAiListener = null;
+      let bindFailure: string | null = null;
       listener = callback
-        ? await createOAuthLocalListener({ expectedState: '', host: callback.host, port: callback.port, path: callback.path }).catch(() => null)
+        ? await createOAuthLocalListener({ expectedState: '', host: callback.host, port: callback.port, path: callback.path }).catch((error: unknown) => {
+          bindFailure = `port ${callback.port} could not be opened: ${summarizeError(error)}`;
+          return null;
+        })
         : null;
       const manager = handler.uiServices.platform.subscriptionManager;
       const started = await manager.beginOAuthLogin('openai', listener ? { ...oauth, redirectUri: listener.redirectUri } : oauth);
@@ -451,24 +458,26 @@ export async function handleOpenAiSubscriptionStartForHandler(handler: InputHand
       handler.requestRender();
 
       if (listener && callback && browserOpened) {
-        const serial = ++handler.onboardingOpenAiListenerSerial;
+        handler.onboardingOpenAiListener = listener;
         handler.commandContext?.print?.([
           'OpenAI subscription sign-in started from onboarding.',
           `  callback listener: waiting on ${callback.host}:${callback.port}`,
           '  authorizationUrl: shown in the wizard provider step',
           'You can also paste the callback code or URL into the OpenAI callback field.',
         ].join('\n'));
-        void handler.completeOpenAiSubscriptionFromListener(listener, started.pending.verifier, serial);
+        void handler.completeOpenAiSubscriptionFromListener(listener, started.pending.verifier);
         listener = null;
         handler.requestRender();
         return;
       }
 
+      const listenerLine = listener ? 'not used (the browser did not open)' : callback ? `unavailable (${bindFailure ?? 'not started'})` : 'unavailable';
       listener?.close();
+      listener = null;
       handler.commandContext?.print?.([
         'OpenAI subscription sign-in started from onboarding.',
         `  browser: ${browserOpened ? 'opened' : 'open failed'}`,
-        `  callback listener: ${listener ? 'ready' : 'unavailable'}`,
+        `  callback listener: ${listenerLine}`,
         '  authorizationUrl: shown in the wizard provider step',
         'Paste the callback code or URL into the OpenAI callback field after sign-in.',
       ].join('\n'));
@@ -489,18 +498,19 @@ export async function completeOpenAiSubscriptionFromListenerForHandler(
   handler: InputHandler,
     listener: Awaited<ReturnType<typeof createOAuthLocalListener>>,
     verifier: string,
-    serial: number,
   ): Promise<void> {
     try {
       const callback = await listener.waitForCode();
       const manager = handler.uiServices.platform.subscriptionManager;
       const pending = manager.getPending('openai');
-      if (!pending || pending.verifier !== verifier || serial !== handler.onboardingOpenAiListenerSerial) return;
+      // A newer start or a manual finish replaced or released this listener: its code is not this attempt's to use.
+      if (!pending || pending.verifier !== verifier || listener !== handler.onboardingOpenAiListener) return;
       const record = await manager.completeOAuthLogin('openai', openAiSubscriptionOAuth(), callback.code);
-      handler.onboardingOpenAiListenerSerial += 1;
       printSignInCompleted(handler, record);
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'provider-access' });
     } catch (error) {
+      // Closed because a newer start or a manual finish took over: nothing to report.
+      if (listener !== handler.onboardingOpenAiListener) return;
       handler.commandContext?.print?.([
         'OpenAI subscription listener could not complete automatically.',
         `  listener: ${summarizeError(error)}`,
@@ -508,6 +518,7 @@ export async function completeOpenAiSubscriptionFromListenerForHandler(
       ].join('\n'));
       handler.requestRender();
     } finally {
+      if (handler.onboardingOpenAiListener === listener) handler.onboardingOpenAiListener = null;
       listener.close();
     }
   }
@@ -537,6 +548,10 @@ export async function handleOpenAiSubscriptionFinishForHandler(handler: InputHan
     handler.onboardingOperation = 'Finish OpenAI sign-in';
     try {
       const record = await manager.completeOAuthLogin('openai', openAiSubscriptionOAuth(), authorization.code);
+      // Finished by hand: the callback listener has nothing left to wait for, and its port is freed for a later start.
+      const held = handler.onboardingOpenAiListener;
+      handler.onboardingOpenAiListener = null;
+      held?.close();
       printSignInCompleted(handler, record);
       await handler.refreshOnboardingHydration({ preserveValues: true, targetStepId: 'provider-access' });
     } catch (error) {

@@ -50,6 +50,29 @@ export class ModelPickerModal {
   ) {}
 
   public active = false;
+  /**
+   * Told once how the current picker session ended: true when it committed a
+   * main-model selection and that selection was applied, false when it closed
+   * or was opened again without one.
+   */
+  private sessionEnded: ((chosen: boolean) => void) | null = null;
+  /** Hear how the picker session just opened ends (see sessionEnded). */
+  onSessionEnded(listener: (chosen: boolean) => void): void {
+    this.sessionEnded = listener;
+  }
+  /**
+   * The commit route takes the session's listener before it closes the picker,
+   * so the close does not report the session abandoned; it reports the outcome
+   * itself once the selection has been applied.
+   */
+  takeSessionEnded(): ((chosen: boolean) => void) | null {
+    const listener = this.sessionEnded;
+    this.sessionEnded = null;
+    return listener;
+  }
+  private endSessionUnchosen(): void {
+    this.takeSessionEnded()?.(false);
+  }
   public mode: PickerMode = 'model';
   /** Which config target this picker session will write to on commit. */
   public target: ModelPickerTarget = 'main';
@@ -312,6 +335,7 @@ export class ModelPickerModal {
    * still blurs search into list navigation (see handleModelPickerToken).
    */
   openAllModels(models: ModelDefinition[], currentModelId: string): void {
+    this.endSessionUnchosen();
     this.models = models;
     this.backStack.length = 0;
     this.mode = 'model';
@@ -335,6 +359,7 @@ export class ModelPickerModal {
 
   /** Open showing providers first, entry point for /provider. Search starts focused, see openAllModels(). */
   openProviders(providers: string[], currentProvider: string): void {
+    this.endSessionUnchosen();
     this.backStack.length = 0;
     this.providers = providers;
     this.mode = 'provider';
@@ -360,6 +385,7 @@ export class ModelPickerModal {
    * reusing either existing opener would mislabel or drop unrecognized ids.
    */
   openEmbeddingProviders(providers: EmbeddingProviderPickerEntry[], currentId: string): void {
+    this.endSessionUnchosen();
     this.backStack.length = 0;
     this.embeddingProviders = providers;
     this.mode = 'embeddingProvider';
@@ -454,6 +480,7 @@ export class ModelPickerModal {
     this.categoryFilter = 'all';
     this.capabilityFilter = 'none';
     this.clearCaches();
+    this.endSessionUnchosen();
   }
 
   // ── Search helpers ─────────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import { createSetupReviewCollector, type TerminalSetupReviewSnapshot } from '@g
 import type { CommandContext } from '../command-registry.ts';
 import { discoverSkills } from '../../agent/skill-discovery.ts';
 import {
+  requireHookWorkbench,
   requireProviderApi,
   requireReadModels,
   requireServiceRegistry,
@@ -12,7 +13,7 @@ import {
 export type SetupReviewSnapshot = Omit<TerminalSetupReviewSnapshot, 'serviceIssues'> & { readonly hostIntegrationIssues: string[] };
 
 const collectSetupReview = createSetupReviewCollector<CommandContext, Record<never, never>>(
-  { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, discoverSkills },
+  { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, requireHookWorkbench, discoverSkills },
   {
     serviceArea: 'host',
     serviceNoun: 'host integration',

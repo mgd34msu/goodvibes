@@ -15,8 +15,10 @@
  * `status: expired`, not silently dropped from the projection.
  *
  * `sync` records what it wrote in `.projection-manifest.json` (record id to a
- * hash of the file it wrote). That manifest is how an unreviewed edit or a
- * deletion is told apart from a record the store gained since the last sync:
+ * hash of the file it wrote, and to a hash of each field value in it). That
+ * manifest is how an unreviewed edit or a deletion is told apart from a record
+ * the store gained since the last sync, and how a field the user edited is told
+ * apart from one the store changed after the sync (never proposed back):
  * `sync` keeps a file the user changed, `diffProjectionToProposals` proposes a
  * delete only for an id the manifest says was projected. A file whose record
  * left the store (or the projected scopes) is removed by `sync` when the user
@@ -172,10 +174,45 @@ export interface MemoryProjectionWriteReport {
 
 const MANIFEST_NAME = '.projection-manifest.json';
 
-type ProjectionManifest = Readonly<Record<string, string>>;
+/** The record fields a projected file can change, each compared against what the last sync wrote. */
+const PROJECTED_FIELDS = ['summary', 'detail', 'tags', 'scope', 'validFrom', 'validUntil'] as const;
+type ProjectedField = typeof PROJECTED_FIELDS[number];
+/** Per field, a hash of the value the last sync wrote into the file. */
+type FieldBases = Readonly<Partial<Record<ProjectedField, string>>>;
+
+/**
+ * The manifest: `files` maps each projected id to a hash of the whole file
+ * sync wrote, and (version 2) `fields` maps it to a hash of each field value
+ * sync wrote. A version 1 manifest has no `fields`; its ids carry no field
+ * bases until the next sync writes them. `files` keeps its version 1 shape,
+ * so an earlier release still reads which ids were projected.
+ */
+interface ProjectionManifest {
+  readonly files: Readonly<Record<string, string>>;
+  readonly fields: Readonly<Record<string, FieldBases>>;
+}
 
 function contentHash(text: string): string {
   return createHash('sha256').update(text).digest('hex');
+}
+
+/** One field's value in the form both sides are compared in. */
+function canonicalField(field: ProjectedField, value: { readonly summary?: string | undefined; readonly detail?: string | undefined; readonly tags?: readonly string[] | undefined; readonly scope?: string | undefined; readonly validFrom?: number | undefined; readonly validUntil?: number | undefined }): string {
+  switch (field) {
+    case 'summary': return normalizeSummary(value.summary ?? '');
+    // Line endings are not content: a CRLF detail must not read as edited after a sync.
+    case 'detail': return (value.detail ?? '').replace(/\r\n/g, '\n').trim();
+    case 'tags': return JSON.stringify([...new Set(value.tags ?? [])].sort());
+    case 'scope': return value.scope ?? '';
+    case 'validFrom': return value.validFrom === undefined ? '' : String(value.validFrom);
+    case 'validUntil': return value.validUntil === undefined ? '' : String(value.validUntil);
+  }
+}
+
+function fieldBasesOf(record: MemoryRecord): FieldBases {
+  const bases: Partial<Record<ProjectedField, string>> = {};
+  for (const field of PROJECTED_FIELDS) bases[field] = contentHash(canonicalField(field, record));
+  return bases;
 }
 
 function readManifest(dir: string): ProjectionManifest | null {
@@ -185,7 +222,20 @@ function readManifest(dir: string): ProjectionManifest | null {
     if (typeof files !== 'object' || files === null) return null;
     const out: Record<string, string> = {};
     for (const [id, hash] of Object.entries(files)) if (typeof hash === 'string') out[id] = hash;
-    return out;
+    const rawFields = (parsed as { fields?: unknown }).fields;
+    const fields: Record<string, FieldBases> = {};
+    if (typeof rawFields === 'object' && rawFields !== null) {
+      for (const [id, entry] of Object.entries(rawFields)) {
+        if (out[id] === undefined || typeof entry !== 'object' || entry === null) continue;
+        const bases: Partial<Record<ProjectedField, string>> = {};
+        for (const field of PROJECTED_FIELDS) {
+          const hash = (entry as Record<string, unknown>)[field];
+          if (typeof hash === 'string') bases[field] = hash;
+        }
+        fields[id] = bases;
+      }
+    }
+    return { files: out, fields };
   } catch {
     return null;
   }
@@ -199,7 +249,7 @@ function readManifest(dir: string): ProjectionManifest | null {
  */
 export function readProjectedMemoryIds(dir: string): ReadonlySet<string> | null {
   const manifest = readManifest(dir);
-  return manifest ? new Set(Object.keys(manifest)) : null;
+  return manifest ? new Set(Object.keys(manifest.files)) : null;
 }
 
 function selectStandingRecords(records: readonly MemoryRecord[], options: MemoryProjectionOptions): MemoryRecord[] {
@@ -213,9 +263,13 @@ function toIso(ms: number | undefined): string | undefined {
   return ms === undefined ? undefined : new Date(ms).toISOString();
 }
 
-/** The file holds a summary on one `# ` line, so a multi-line summary is compared and written collapsed. */
-function normalizeSummary(summary: string): string {
-  return summary.replace(/\s*\n\s*/g, ' ').trim();
+/**
+ * A summary on one line: every run of whitespace holding a line break becomes
+ * one space. A projected file holds the summary on one `# ` line, and an
+ * injected knowledge block holds it in one bullet, so neither can be split.
+ */
+export function normalizeSummary(summary: string): string {
+  return summary.replace(/\s*[\r\n\x85\p{Zl}\p{Zp}]\s*/gu, ' ').trim();
 }
 
 /** Tags are written comma-separated; a tag the comma format cannot carry exactly switches the line to a JSON array. */
@@ -289,18 +343,25 @@ export function projectMemoryToFiles(
   const now = options.now ?? Date.now();
   mkdirSync(dir, { recursive: true });
   const standing = selectStandingRecords(records, options);
-  const previous: ProjectionManifest = readManifest(dir) ?? {};
+  const previous: ProjectionManifest = readManifest(dir) ?? { files: {}, fields: {} };
   const next: Record<string, string> = {};
+  const nextFields: Record<string, FieldBases> = {};
+  // A kept file keeps the bases it was written with, so review still tells its edits from the store's.
+  const keepEntry = (id: string, lastHash: string): void => {
+    next[id] = lastHash;
+    const bases = previous.fields[id];
+    if (bases !== undefined) nextFields[id] = bases;
+  };
   const written: string[] = [];
   const kept: string[] = [];
   for (const record of standing) {
     const path = join(dir, recordFileName(record.id));
     const markdown = projectMemoryRecordToMarkdown(record, now);
-    const lastHash = previous[record.id];
+    const lastHash = previous.files[record.id];
     if (lastHash !== undefined && !existsSync(path)) {
       // Projected before, and the file is gone: the user deleted it. Writing it
       // back would undo that before `review` can propose the deletion.
-      next[record.id] = lastHash;
+      keepEntry(record.id, lastHash);
       kept.push(record.id);
       continue;
     }
@@ -321,26 +382,27 @@ export function projectMemoryToFiles(
           || (parsed.confidence !== undefined && parsed.confidence !== record.confidence)
           || (parsed.reviewState !== undefined && parsed.reviewState !== record.reviewState)));
       if (changedSinceSync && unreviewedEdit) {
-        if (lastHash !== undefined) next[record.id] = lastHash;
+        if (lastHash !== undefined) keepEntry(record.id, lastHash);
         kept.push(record.id);
         continue;
       }
     }
     writeFileSync(path, markdown, 'utf-8');
     next[record.id] = contentHash(markdown);
+    nextFields[record.id] = fieldBasesOf(record);
     written.push(path);
   }
   const standingIds = new Set(standing.map((record) => record.id));
   const removed: string[] = [];
   const orphaned: string[] = [];
   let unchecked = 0;
-  for (const [id, lastHash] of Object.entries(previous)) {
+  for (const [id, lastHash] of Object.entries(previous.files)) {
     if (standingIds.has(id)) continue;
     const path = join(dir, recordFileName(id));
     if (!existsSync(path)) continue;
     if (options.complete === false) {
       // A record outside a capped read may still exist: its file is not known to be stale.
-      next[id] = lastHash;
+      keepEntry(id, lastHash);
       unchecked += 1;
       continue;
     }
@@ -349,11 +411,11 @@ export function projectMemoryToFiles(
       removed.push(id);
     } else {
       // Still tracked, so the next sync keeps it too until the user removes it.
-      next[id] = lastHash;
+      keepEntry(id, lastHash);
       orphaned.push(id);
     }
   }
-  writeFileSync(join(dir, MANIFEST_NAME), `${JSON.stringify({ version: 1, files: next }, null, 2)}\n`, 'utf-8');
+  writeFileSync(join(dir, MANIFEST_NAME), `${JSON.stringify({ version: 2, files: next, fields: nextFields }, null, 2)}\n`, 'utf-8');
   let committed = false;
   if (options.git) {
     // Ownership gate: the projection only ever commits to a repository whose
@@ -498,6 +560,8 @@ export type ProjectedMemoryFiles = MemoryProjectionFile[] & {
   readonly untouchedIds?: ReadonlySet<string>;
   /** Ids the last sync projected whose file is there but cannot be read as a memory file (its front matter was broken). */
   readonly unreadableIds?: ReadonlySet<string>;
+  /** Per id, a hash of each field value the last sync wrote; absent for an id a version 1 manifest recorded. */
+  readonly fieldBases?: ReadonlyMap<string, FieldBases>;
 };
 
 /**
@@ -509,7 +573,7 @@ export type ProjectedMemoryFiles = MemoryProjectionFile[] & {
 export function readProjectedMemoryFiles(dir: string): ProjectedMemoryFiles {
   const files: MemoryProjectionFile[] = [];
   const manifest = existsSync(dir) ? readManifest(dir) : null;
-  const idByName = new Map(Object.keys(manifest ?? {}).map((id) => [recordFileName(id), id]));
+  const idByName = new Map(Object.keys(manifest?.files ?? {}).map((id) => [recordFileName(id), id]));
   const untouched = new Set<string>();
   const unreadable = new Set<string>();
   if (existsSync(dir)) {
@@ -519,14 +583,15 @@ export function readProjectedMemoryFiles(dir: string): ProjectedMemoryFiles {
       const content = readFileSync(path, 'utf-8');
       const parsed = parseProjectedMemoryFile(path, content);
       const projectedId = idByName.get(name);
-      if (projectedId !== undefined && manifest?.[projectedId] === contentHash(content)) untouched.add(projectedId);
+      if (projectedId !== undefined && manifest?.files[projectedId] === contentHash(content)) untouched.add(projectedId);
       if (parsed) files.push(parsed);
       else if (projectedId !== undefined) unreadable.add(projectedId);
     }
   }
   Object.defineProperty(files, 'untouchedIds', { value: untouched, enumerable: false });
   Object.defineProperty(files, 'unreadableIds', { value: unreadable, enumerable: false });
-  return Object.defineProperty(files, 'projectedIds', { value: manifest ? new Set(Object.keys(manifest)) : null, enumerable: false });
+  Object.defineProperty(files, 'fieldBases', { value: new Map(Object.entries(manifest?.fields ?? {})), enumerable: false });
+  return Object.defineProperty(files, 'projectedIds', { value: manifest ? new Set(Object.keys(manifest.files)) : null, enumerable: false });
 }
 
 export type MemoryProjectionProposalKind = 'update' | 'delete';
@@ -543,6 +608,13 @@ export interface MemoryProjectionProposal {
   readonly reason: string;
   /** For 'update': the record fields the edited file would change. */
   readonly changedFields?: readonly string[] | undefined;
+  /**
+   * For 'update': fields the file edited that memory also changed since the
+   * last sync. The file's value for them is not in `desired`, so applying the
+   * proposal never reverts the newer value; correcting the record directly
+   * takes the file's value instead.
+   */
+  readonly conflictFields?: readonly string[] | undefined;
   /** The desired field values parsed from the file (for 'update'). */
   readonly desired?: {
     readonly scope?: MemoryScope | undefined;
@@ -583,6 +655,7 @@ export function diffProjectionToProposals(
   // a file that is there but cannot be read is not a deletion.
   const untouchedIds = (files as ProjectedMemoryFiles).untouchedIds;
   const unreadableIds = (files as ProjectedMemoryFiles).unreadableIds;
+  const fieldBases = (files as ProjectedMemoryFiles).fieldBases;
   const proposals: MemoryProjectionProposal[] = [];
 
   for (const record of records) {
@@ -600,6 +673,7 @@ export function diffProjectionToProposals(
     }
 
     const changedFields: string[] = [];
+    const conflictFields: string[] = [];
     const desired: {
       scope?: MemoryScope;
       summary?: string;
@@ -608,28 +682,44 @@ export function diffProjectionToProposals(
       validFrom?: number | null;
       validUntil?: number | null;
     } = {};
-    if (file.summary && normalizeSummary(file.summary) !== normalizeSummary(record.summary)) { changedFields.push('summary'); desired.summary = file.summary; }
-    // The file holds the trimmed detail, so compare trimmed on both sides.
-    // Line endings are not content: a CRLF detail must not read as edited after a sync.
-    const fileDetail = (file.detail ?? '').replace(/\r\n/g, '\n').trim();
-    if (fileDetail !== (record.detail ?? '').replace(/\r\n/g, '\n').trim()) { changedFields.push('detail'); desired.detail = fileDetail; }
-    if (!sameTags(file.tags, record.tags)) { changedFields.push('tags'); desired.tags = [...file.tags]; }
-    if (file.scope && file.scope !== record.scope) { changedFields.push('scope'); desired.scope = file.scope; }
-    if ((file.validFrom ?? undefined) !== (record.validFrom ?? undefined)) {
-      changedFields.push('validFrom');
-      desired.validFrom = file.validFrom ?? null;
-    }
-    if ((file.validUntil ?? undefined) !== (record.validUntil ?? undefined)) {
-      changedFields.push('validUntil');
-      desired.validUntil = file.validUntil ?? null;
-    }
+    const bases = fieldBases?.get(record.id);
+    // A field differing from the record is an edit only when the file's value
+    // moved from what sync wrote; when the record's value moved from it too,
+    // both sides changed it and the file's value is a conflict, not a proposal.
+    // Without a base (a version 1 manifest) every difference is proposed.
+    const differs = (field: ProjectedField): 'change' | 'conflict' | null => {
+      const fileValue = canonicalField(field, file);
+      const recordValue = canonicalField(field, record);
+      if (fileValue === recordValue) return null;
+      const base = bases?.[field];
+      if (base === undefined) return 'change';
+      if (contentHash(fileValue) === base) return null;
+      return contentHash(recordValue) === base ? 'change' : 'conflict';
+    };
+    const consider = (field: ProjectedField, take: () => void): void => {
+      const state = differs(field);
+      if (state === 'change') { changedFields.push(field); take(); }
+      else if (state === 'conflict') conflictFields.push(field);
+    };
+    if (file.summary) consider('summary', () => { desired.summary = file.summary; });
+    // The file holds the trimmed detail, so the trimmed value is what is taken.
+    consider('detail', () => { desired.detail = canonicalField('detail', file); });
+    if (!sameTags(file.tags, record.tags)) consider('tags', () => { desired.tags = [...file.tags]; });
+    if (file.scope) consider('scope', () => { desired.scope = file.scope; });
+    consider('validFrom', () => { desired.validFrom = file.validFrom ?? null; });
+    consider('validUntil', () => { desired.validUntil = file.validUntil ?? null; });
 
-    if (changedFields.length > 0) {
+    if (changedFields.length > 0 || conflictFields.length > 0) {
+      const edited = changedFields.length > 0 ? `Projected file edited (${changedFields.join(', ')}); propose updating the record (confirmation required).` : 'Projected file edited; nothing is proposed.';
+      const conflict = conflictFields.length > 0
+        ? ` Memory also changed ${conflictFields.join(', ')} since the files were written, so the file's value is left out; correct the record directly to take it.`
+        : '';
       proposals.push({
         kind: 'update',
         id: record.id,
-        reason: `Projected file edited (${changedFields.join(', ')}); propose updating the record (confirmation required).`,
+        reason: `${edited}${conflict}`,
         changedFields,
+        ...(conflictFields.length > 0 ? { conflictFields } : {}),
         desired,
       });
     }
@@ -672,7 +762,10 @@ export interface MemoryProjectionApplyReceipt {
   readonly applied: readonly MemoryProjectionProposal[];
   /** Proposals the caller did NOT confirm, left untouched (the gate). */
   readonly skipped: readonly MemoryProjectionProposal[];
-  /** Proposals confirmed but whose store mutation returned no record / false. */
+  /**
+   * Proposals confirmed but whose store mutation returned no record / false,
+   * or with nothing to apply (every field the file edited conflicts).
+   */
   readonly failed: readonly MemoryProjectionProposal[];
 }
 
@@ -710,6 +803,10 @@ export function applyMemoryProjectionProposals(
       ...(desired.validFrom !== undefined ? { validFrom: desired.validFrom } : {}),
       ...(desired.validUntil !== undefined ? { validUntil: desired.validUntil } : {}),
     };
+    if (Object.keys(patch).length === 0) {
+      failed.push(proposal);
+      continue;
+    }
     const result = registry.update(proposal.id, patch);
     (result ? applied : failed).push(proposal);
   }

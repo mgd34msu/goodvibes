@@ -147,8 +147,10 @@ interface ServicesFileRead {
   readonly problem: string | null;
 }
 
-const REFERENCE_FIELDS = ['tokenRef', 'passwordRef', 'authTokenRef', 'webhookUrlRef', 'signingSecretRef', 'publicKeyRef', 'appTokenRef'] as const;
-const KEY_FIELDS = ['tokenKey', 'passwordKey', 'authTokenKey', 'webhookUrlKey', 'signingSecretKey', 'publicKeyKey', 'appTokenKey'] as const;
+/** The service entry fields that name a credential by secret reference. */
+export const SERVICE_SECRET_REFERENCE_FIELDS = ['tokenRef', 'passwordRef', 'authTokenRef', 'webhookUrlRef', 'signingSecretRef', 'publicKeyRef', 'appTokenRef'] as const satisfies readonly (keyof ServiceConfig)[];
+/** The service entry fields that name a credential by its key in the secret store. */
+export const SERVICE_SECRET_KEY_FIELDS = ['tokenKey', 'passwordKey', 'authTokenKey', 'webhookUrlKey', 'signingSecretKey', 'publicKeyKey', 'appTokenKey'] as const satisfies readonly (keyof ServiceConfig)[];
 
 /**
  * Why a project file's entry cannot be used, or null when every credential it
@@ -158,8 +160,8 @@ function projectEntryRefusal(entry: unknown): string | null {
   if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return 'is not an object';
   const record = entry as Record<string, unknown>;
   if (record.oauth !== undefined) return 'carries an oauth block, which only your own services file may set';
-  if (REFERENCE_FIELDS.some((field) => record[field] !== undefined)) return 'names a secret reference, which only your own services file may use';
-  for (const field of KEY_FIELDS) {
+  if (SERVICE_SECRET_REFERENCE_FIELDS.some((field) => record[field] !== undefined)) return 'names a secret reference, which only your own services file may use';
+  for (const field of SERVICE_SECRET_KEY_FIELDS) {
     const value = record[field];
     if (value === undefined) continue;
     if (typeof value !== 'string' || isSecretRefInput(value) || looksLikeSecretRef(value)) return `${field} is not a plain key name in your secret store`;
@@ -179,13 +181,13 @@ function projectEntryFingerprint(entry: ServiceConfig): string {
     origin: originOf(entry.baseUrl),
     providerId: entry.providerId ?? null,
     apiKeyHeader: entry.apiKeyHeader ?? null,
-    keys: KEY_FIELDS.map((field) => [field, entry[field] ?? null]),
+    keys: SERVICE_SECRET_KEY_FIELDS.map((field) => [field, entry[field] ?? null]),
   });
 }
 
 /** The key names a project entry reads from the user's store. */
 function projectEntryKeys(entry: ServiceConfig): string[] {
-  return KEY_FIELDS.map((field) => entry[field]).filter((key): key is string => typeof key === 'string' && key.length > 0);
+  return SERVICE_SECRET_KEY_FIELDS.map((field) => entry[field]).filter((key): key is string => typeof key === 'string' && key.length > 0);
 }
 
 /** A project services entry that is admissible but not yet confirmed by the user. */
@@ -645,7 +647,8 @@ export class ServiceRegistry {
 
   /**
    * Ask the service itself, with the credential: one request to `baseUrl` (or
-   * `baseUrl` + `testPath`). Below 400 is connected; 401 and 403 mean the
+   * `baseUrl` + `testPath`), never following a redirect. A redirect is reported
+   * with where it points; other answers below 400 are connected; 401 and 403 mean the
    * credential was refused; any other status says the service was reached and
    * what it answered.
    */
@@ -687,7 +690,14 @@ export class ServiceRegistry {
         method: 'GET',
         headers: { Accept: 'application/json', ...headers },
         signal: AbortSignal.timeout(5000),
+        // The credential goes to the service's own address only, never on to where it redirects.
+        redirect: 'manual',
       });
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get('location');
+        return { ok: false, outcome: 'reached', status: response.status, testedUrl: url,
+          error: `${serviceName} was reached and redirected (HTTP ${response.status})${location ? ` to ${location}` : ''}; nothing was sent there. Set baseUrl or testPath to the final address` };
+      }
       if (response.status < 400) return { ok: true, outcome: 'connected', status: response.status, testedUrl: url };
       if (response.status === 401 || response.status === 403) {
         return { ok: false, outcome: 'credential-refused', status: response.status, testedUrl: url,

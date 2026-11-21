@@ -16,9 +16,12 @@
  * host's own words and the status, `<host message> (HTTP <status>)`, plus the
  * next step.
  */
+import { readFileSync, statSync } from 'node:fs';
+import { basename } from 'node:path';
 import { classifyFailure, httpStatusOf } from '@goodvibes/engine/errors';
 import { createBrowserAgentPlatform, type BrowserAgentPlatform } from '@goodvibes/engine/platform/browser/agent';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { isLoopbackHost } from '@goodvibes/engine/platform/platform/utils/reachable-base-url';
 import { normalizeAgentKnowledgeScopeAliases } from './knowledge-scope-alias.js';
 import { fetchConnectedHostStatus, resolveConnectedHost } from './connected-host-client.js';
 import type { AgentInProcessHost } from './in-process-host.js';
@@ -286,6 +289,70 @@ export async function postAgentKnowledgeUpload<TData>(
     throw Object.assign(new Error(message), { status: response.status, body });
   }
   return normalizeAgentKnowledgeData(body as TData);
+}
+
+/**
+ * Whether the host runs on this machine: the daemon hosting this turn (reached
+ * in process) or a loopback address. A browser profile home is a directory the
+ * host opens itself, so it is sent only to such a host.
+ */
+export function connectionIsThisMachine(connection: Pick<AgentKnowledgeConnection, 'baseUrl' | 'fetch'>): boolean {
+  if (connection.fetch) return true;
+  try { return isLoopbackHost(new URL(connection.baseUrl).hostname); } catch { return false; }
+}
+
+/** A local file is read once into memory and sent as bytes; this bounds that read. */
+export const MAX_KNOWLEDGE_INGEST_FILE_BYTES = 64 * 1024 * 1024;
+
+/** What a local file is ingested as: one file, a URL list, a bookmarks export, or a connector's content. */
+export type AgentKnowledgeLocalFileKind = 'file' | 'urls_file' | 'bookmarks_file' | 'connector';
+
+/** What leaves for the host: a JSON body, or a file's bytes for an upload. */
+export type AgentKnowledgeIngestSend =
+  | { readonly kind: 'json'; readonly route: string; readonly payload: JsonRecord }
+  | { readonly kind: 'upload'; readonly route: string; readonly file: AgentKnowledgeUploadFile; readonly fields: JsonRecord };
+
+/**
+ * A local file read on this machine becomes bytes, never a path the host would
+ * open on its own machine: a single file is uploaded as an artifact; a URL or
+ * bookmarks list goes as the matching connector's content; a connector's file
+ * goes as its content unless input or content was given. `payload` holds no path.
+ */
+export function localFileIngestSend(kind: AgentKnowledgeLocalFileKind, payload: JsonRecord, file: AgentKnowledgeUploadFile): AgentKnowledgeIngestSend {
+  if (kind === 'file') return { kind: 'upload', route: AGENT_KNOWLEDGE_METHODS.ingestArtifact.route, file, fields: payload };
+  const text = new TextDecoder().decode(file.bytes);
+  if (kind === 'connector') {
+    return { kind: 'json', route: AGENT_KNOWLEDGE_METHODS.ingestConnector.route, payload: {
+      ...payload, ...(payload.content === undefined && payload.input === undefined ? { content: text } : {}),
+    } };
+  }
+  return { kind: 'json', route: AGENT_KNOWLEDGE_METHODS.ingestConnector.route, payload: {
+    ...payload, connectorId: kind === 'bookmarks_file' ? 'bookmark' : 'url-list', content: text,
+  } };
+}
+
+/** Sends what `localFileIngestSend` (or a plain JSON request) built. */
+export async function sendAgentKnowledgeIngest<TData>(
+  connection: AgentKnowledgeConnection,
+  send: AgentKnowledgeIngestSend,
+  options: AgentKnowledgeRequestOptions = {},
+): Promise<TData> {
+  return send.kind === 'upload'
+    ? await postAgentKnowledgeUpload<TData>(connection, send.route, send.file, send.fields, options)
+    : await postAgentKnowledgeJson<TData>(connection, send.route, send.payload, options);
+}
+
+/**
+ * Reads a file the owner named on the command line, bounded. The model's tool
+ * reads through its own workspace check instead.
+ */
+export function readLocalKnowledgeFile(path: string): AgentKnowledgeUploadFile {
+  const stat = statSync(path);
+  if (!stat.isFile()) throw new Error(`${path} is not a regular file.`);
+  if (stat.size > MAX_KNOWLEDGE_INGEST_FILE_BYTES) {
+    throw new Error(`${path} is larger than the ${MAX_KNOWLEDGE_INGEST_FILE_BYTES / (1024 * 1024)} MiB limit.`);
+  }
+  return { bytes: readFileSync(path), filename: basename(path) };
 }
 
 export async function getAgentKnowledgeJson<TData>(

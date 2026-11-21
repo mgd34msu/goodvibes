@@ -183,22 +183,23 @@ function applySettingsSyncBundleLocked(
       nextSynced.splice(0, nextSynced.length, ...filtered);
       appliedCount++;
     }
+    // Inside the try: a control-plane write that fails puts the live settings back too.
+    writeStore(trimStore(withoutStaleLayers(configManager, {
+      ...store,
+      syncedSettings: nextSynced.sort((a, b) => a.key.localeCompare(b.key)),
+      conflicts: nextConflicts.sort((a, b) => a.key.localeCompare(b.key)),
+      events: [...store.events, {
+        surface: 'settings-sync',
+        direction: 'pull',
+        path,
+        timestamp: Date.now(),
+        detail: `${appliedCount} settings pulled${skippedLockedKeys.length > 0 ? `, ${skippedLockedKeys.length} skipped because managed locks own them: ${skippedLockedKeys.join(', ')}` : ''}`,
+      }],
+    })), configDir);
   } catch (error) {
     restoreWrittenSettings(configManager, written, before);
     throw error;
   }
-  writeStore(trimStore(withoutStaleLayers(configManager, {
-    ...store,
-    syncedSettings: nextSynced.sort((a, b) => a.key.localeCompare(b.key)),
-    conflicts: nextConflicts.sort((a, b) => a.key.localeCompare(b.key)),
-    events: [...store.events, {
-      surface: 'settings-sync',
-      direction: 'pull',
-      path,
-      timestamp: Date.now(),
-      detail: `${appliedCount} settings pulled${skippedLockedKeys.length > 0 ? `, ${skippedLockedKeys.length} skipped because managed locks own them: ${skippedLockedKeys.join(', ')}` : ''}`,
-    }],
-  })), configDir);
   return { appliedCount, conflictCount, ...(skippedLockedKeys.length > 0 ? { skippedLockedKeys } : {}) };
 }
 
@@ -235,36 +236,51 @@ function resolveSettingsSyncConflictLocked(
   const nextConflicts = store.conflicts.filter((entry) => !(entry.key === key && entry.source === 'synced'));
   let nextSynced = store.syncedSettings.filter((entry) => entry.key !== key);
 
-  if (resolution === 'local') {
-    configManager.setDynamic(key, structuredClone(conflict.localValue), { bypassManagedLock: true });
-  } else {
-    configManager.setDynamic(key, structuredClone(conflict.incomingValue), { bypassManagedLock: true });
-    nextSynced = [
-      ...nextSynced,
-      toLayerRecord(
-        key,
-        conflict.incomingValue,
-        'synced',
-        'settings-sync',
-        `Resolved synced conflict from ${conflict.path}`,
-        conflict.path,
-        false,
-      ),
-    ].sort((a, b) => a.key.localeCompare(b.key));
+  if (resolution === 'local' && isSecretBearingConfigKey(key) && conflict.localValue === SECRET_LITERAL_PLACEHOLDER) {
+    // The conflict stays listed, so 'incoming' can still be chosen.
+    throw new ConfigError(`The synced conflict for ${key} cannot be resolved with the local value: before the pull it held a plain-text credential, which is never recorded, so it cannot be put back. Resolve it with the incoming value, or set ${key} to a goodvibes://secrets/ reference.`);
   }
 
-  writeStore(trimStore(withoutStaleLayers(configManager, {
-    ...store,
-    conflicts: nextConflicts.sort((a, b) => a.key.localeCompare(b.key)),
-    syncedSettings: nextSynced,
-    events: [...store.events, {
-      surface: 'settings-sync',
-      direction: 'apply',
-      path: conflict.path,
-      timestamp: Date.now(),
-      detail: `Conflict resolved for ${key} using ${resolution} value`,
-    }],
-  })), configDir);
+  const before = configSnapshot(configManager);
+  const written: ConfigKey[] = [];
+  try {
+    if (resolution === 'local') {
+      configManager.setDynamic(key, structuredClone(conflict.localValue), { bypassManagedLock: true });
+      written.push(key);
+    } else {
+      configManager.setDynamic(key, structuredClone(conflict.incomingValue), { bypassManagedLock: true });
+      written.push(key);
+      nextSynced = [
+        ...nextSynced,
+        toLayerRecord(
+          key,
+          conflict.incomingValue,
+          'synced',
+          'settings-sync',
+          `Resolved synced conflict from ${conflict.path}`,
+          conflict.path,
+          false,
+        ),
+      ].sort((a, b) => a.key.localeCompare(b.key));
+    }
+
+    // The live setting and the control-plane file change together or not at all.
+    writeStore(trimStore(withoutStaleLayers(configManager, {
+      ...store,
+      conflicts: nextConflicts.sort((a, b) => a.key.localeCompare(b.key)),
+      syncedSettings: nextSynced,
+      events: [...store.events, {
+        surface: 'settings-sync',
+        direction: 'apply',
+        path: conflict.path,
+        timestamp: Date.now(),
+        detail: `Conflict resolved for ${key} using ${resolution} value`,
+      }],
+    })), configDir);
+  } catch (error) {
+    restoreWrittenSettings(configManager, written, before);
+    throw error;
+  }
   return true;
 }
 
@@ -430,45 +446,47 @@ function applyStagedManagedBundleLocked(
       });
       if (JSON.stringify(before[change.key]) !== JSON.stringify(change.nextValue)) restoredKeys.push(change.key);
     }
+    const nextStage: StagedManagedBundle | undefined = remainingChanges.length > 0
+      ? {
+          ...stage,
+          changeCount: remainingChanges.filter((entry) => entry.changed).length,
+          risk: remainingRisk ?? 'unassessed',
+          changes: remainingChanges,
+        }
+      : undefined;
+    // Inside the try: a control-plane write that fails puts the live settings back too,
+    // so no managed value stays live without its lock, layer and rollback record.
+    writeStore(trimStore(withoutStaleLayers(configManager, {
+      ...store,
+      managedSettings: nextManaged.sort((a, b) => a.key.localeCompare(b.key)),
+      managedLocks: nextLocks.sort((a, b) => a.key.localeCompare(b.key)),
+      stagedManagedBundle: nextStage,
+      rollbackHistory: [
+        ...store.rollbackHistory,
+        {
+          token: rollbackToken,
+          profileName: stage.profileName,
+          path: stage.path,
+          appliedAt: Date.now(),
+          restoredKeys,
+          previousValues,
+          appliedKeys,
+          ...(replacedLayers.length > 0 ? { replacedLayers } : {}),
+          ...(replacedLocks.length > 0 ? { replacedLocks } : {}),
+        },
+      ],
+      events: [...store.events, {
+        surface: 'managed',
+        direction: 'apply',
+        path: stage.path,
+        timestamp: Date.now(),
+        detail: `${restoredKeys.length} managed settings applied from ${stage.profileName}${remainingChanges.length > 0 ? ` (${remainingChanges.length} still staged)` : ''}`,
+      }],
+    })), configDir);
   } catch (error) {
     restoreWrittenSettings(configManager, written, before);
     throw error;
   }
-  const nextStage: StagedManagedBundle | undefined = remainingChanges.length > 0
-    ? {
-        ...stage,
-        changeCount: remainingChanges.filter((entry) => entry.changed).length,
-        risk: remainingRisk ?? 'unassessed',
-        changes: remainingChanges,
-      }
-    : undefined;
-  writeStore(trimStore(withoutStaleLayers(configManager, {
-    ...store,
-    managedSettings: nextManaged.sort((a, b) => a.key.localeCompare(b.key)),
-    managedLocks: nextLocks.sort((a, b) => a.key.localeCompare(b.key)),
-    stagedManagedBundle: nextStage,
-    rollbackHistory: [
-      ...store.rollbackHistory,
-      {
-        token: rollbackToken,
-        profileName: stage.profileName,
-        path: stage.path,
-        appliedAt: Date.now(),
-        restoredKeys,
-        previousValues,
-        appliedKeys,
-        ...(replacedLayers.length > 0 ? { replacedLayers } : {}),
-        ...(replacedLocks.length > 0 ? { replacedLocks } : {}),
-      },
-    ],
-    events: [...store.events, {
-      surface: 'managed',
-      direction: 'apply',
-      path: stage.path,
-      timestamp: Date.now(),
-      detail: `${restoredKeys.length} managed settings applied from ${stage.profileName}${remainingChanges.length > 0 ? ` (${remainingChanges.length} still staged)` : ''}`,
-    }],
-  })), configDir);
   return { rollbackToken, appliedCount: restoredKeys.length, remainingCount: remainingChanges.length };
 }
 
@@ -506,35 +524,46 @@ function rollbackManagedApplyLocked(configManager: ConfigManager, token: string,
     ...(record.replacedLocks ?? []),
   ].sort((a, b) => a.key.localeCompare(b.key));
   const notRestorable: ConfigKey[] = [];
-  for (const key of record.restoredKeys) {
-    const previousValue = record.previousValues[key]!;
-    if (isSecretBearingConfigKey(key) && previousValue === SECRET_LITERAL_PLACEHOLDER) {
-      notRestorable.push(key);
-      continue;
-    }
-    if (previousValue !== undefined) {
-      configManager.setDynamic(key, structuredClone(previousValue), { bypassManagedLock: true });
+  const before = configSnapshot(configManager);
+  const written: ConfigKey[] = [];
+  // The live settings and the control-plane file change together or not at all:
+  // a key or store write that fails puts back every key already rolled back.
+  try {
+    for (const key of record.restoredKeys) {
+      const previousValue = record.previousValues[key]!;
+      if (isSecretBearingConfigKey(key) && previousValue === SECRET_LITERAL_PLACEHOLDER) {
+        notRestorable.push(key);
+        continue;
+      }
+      if (previousValue !== undefined) {
+        configManager.setDynamic(key, structuredClone(previousValue), { bypassManagedLock: true });
+        written.push(key);
+        restored++;
+        continue;
+      }
+      const schema = CONFIG_SCHEMA.find((entry) => entry.key === key);
+      if (!schema) continue;
+      configManager.setDynamic(key, structuredClone(schema.default), { bypassManagedLock: true });
+      written.push(key);
       restored++;
-      continue;
     }
-    const schema = CONFIG_SCHEMA.find((entry) => entry.key === key);
-    if (!schema) continue;
-    configManager.setDynamic(key, structuredClone(schema.default), { bypassManagedLock: true });
-    restored++;
+    writeStore(trimStore(withoutStaleLayers(configManager, {
+      ...store,
+      managedSettings: nextManaged,
+      managedLocks: nextLocks,
+      rollbackHistory: store.rollbackHistory.filter((entry) => entry.token !== token),
+      events: [...store.events, {
+        surface: 'managed',
+        direction: 'rollback',
+        path: record.path,
+        timestamp: Date.now(),
+        detail: `${restored} managed settings rolled back from ${record.profileName}${notRestorable.length > 0 ? `; ${notRestorable.join(', ')} kept the managed value (the earlier plain-text credential was not recorded)` : ''}`,
+      }],
+    })), configDir);
+  } catch (error) {
+    restoreWrittenSettings(configManager, written, before);
+    throw error;
   }
-  writeStore(trimStore(withoutStaleLayers(configManager, {
-    ...store,
-    managedSettings: nextManaged,
-    managedLocks: nextLocks,
-    rollbackHistory: store.rollbackHistory.filter((entry) => entry.token !== token),
-    events: [...store.events, {
-      surface: 'managed',
-      direction: 'rollback',
-      path: record.path,
-      timestamp: Date.now(),
-      detail: `${restored} managed settings rolled back from ${record.profileName}${notRestorable.length > 0 ? `; ${notRestorable.join(', ')} kept the managed value (the earlier plain-text credential was not recorded)` : ''}`,
-    }],
-  })), configDir);
   if (notRestorable.length > 0) {
     throw new ConfigError(`Managed rollback ${token} restored ${restored} setting(s), but ${notRestorable.join(', ')} kept the value the apply set: before the apply ${notRestorable.length > 1 ? 'they' : 'it'} held a plain-text credential, which is never recorded. Set ${notRestorable.length > 1 ? 'each' : 'it'} to a goodvibes://secrets/ reference to change it.`);
   }

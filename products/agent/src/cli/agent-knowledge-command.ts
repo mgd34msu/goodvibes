@@ -16,7 +16,20 @@ import { parseBrowserImportScope, selectionWireValue } from '../input/commands/k
 import { formatAsk, formatAgentKnowledgeFailureKind, formatBatchIngest, formatConnector, formatConnectorDoctor, formatConnectors, formatEntityList, formatFailure, formatIngest, formatItem, formatMap, formatReindex, reindexFailures, formatSearch, formatStatus, isRecord, tallyBatchIngest } from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-format';
 import { exitCodeOfTally } from '@goodvibes/engine/errors';
 import { AGENT_KNOWLEDGE_METHODS, DELEGATION_METHOD } from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-methods';
-import { createAgentPlatform, findDisallowedKnowledgeScopeFlag, formatScopeFlagRejection, getAgentKnowledgeJson, postAgentKnowledgeJson, runKnowledgeCall } from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-runtime';
+import {
+  connectionIsThisMachine,
+  createAgentPlatform,
+  findDisallowedKnowledgeScopeFlag,
+  formatScopeFlagRejection,
+  getAgentKnowledgeJson,
+  localFileIngestSend,
+  postAgentKnowledgeJson,
+  readLocalKnowledgeFile,
+  resolveConnectedHostConnection,
+  runKnowledgeCall,
+  sendAgentKnowledgeIngest,
+  type AgentKnowledgeUploadFile,
+} from '@goodvibes/engine/terminal-shell/agent-turn/knowledge-runtime';
 import { inspectCliExternalRuntime } from './external-runtime.ts';
 import { VERSION } from '../version.ts';
 import { formatJsonOrText, yesNo } from '@goodvibes/engine/terminal-shell/cli-output';
@@ -46,6 +59,21 @@ async function batchIngestOutput(runtime: CliCommandRuntime, result: { readonly 
     },
   };
   return { output: formatJsonOrText(runtime.cli)(value, formatBatchIngest(result.data, label)), exitCode };
+}
+
+/** The named file read on this machine, or the failure output that says why it could not be; nothing is sent then. */
+function readLocalFileOrFailure(path: string, route: string, json: boolean): AgentKnowledgeUploadFile | CliCommandOutput {
+  try {
+    return readLocalKnowledgeFile(path);
+  } catch (error) {
+    const failure = {
+      ok: false,
+      kind: 'file_unreadable',
+      error: `Nothing was sent to Agent Knowledge: ${path} could not be read (${error instanceof Error ? error.message : String(error)}).`,
+      route,
+    };
+    return { output: json ? JSON.stringify(failure, null, 2) : failure.error, exitCode: 1 };
+  }
 }
 
 function itemWasFound(data: unknown): boolean {
@@ -306,24 +334,24 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
     const tags = readStringList(rest, '--tags');
     const folderPath = readOptionValue(rest, '--folder');
     const connectorId = readOptionValue(rest, '--connector') ?? 'goodvibes-agent-file';
+    const localPath = resolve(runtime.workingDirectory, path);
+    const file = readLocalFileOrFailure(localPath, AGENT_KNOWLEDGE_METHODS.ingestArtifact.route, json);
+    if ('output' in file) return file;
+    // The file is read here and uploaded, so a host on another machine ingests these bytes, never a path of its own.
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ingestArtifact, async (connection) => (
-      await postAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.ingestArtifact.route, {
-        // The host resolves a relative path against its own directory, so send
-        // the one this command was started in.
-        path: resolve(runtime.workingDirectory, path),
+      await sendAgentKnowledgeIngest(connection, localFileIngestSend('file', {
         title,
         tags,
         folderPath,
         connectorId,
-        allowPrivateHosts: hasFlag(rest, '--allow-private-hosts'),
         metadata: { originSurface: 'goodvibes-agent-cli' },
-      })
+      }, file))
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return {
       output: formatJsonOrText(runtime.cli)(result, formatIngest(
         result.data,
-        path,
+        localPath,
         'ingest-file',
         '/api/goodvibes-agent/knowledge/ingest/artifact',
         'file',
@@ -399,12 +427,14 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
         exitCode: 2,
       };
     }
-    const result = await runKnowledgeCall(runtime, method, async (connection) => (
-      await postAgentKnowledgeJson(connection, method.route, {
-        path: resolve(runtime.workingDirectory, path),
+    const file = readLocalFileOrFailure(resolve(runtime.workingDirectory, path), method.route, json);
+    if ('output' in file) return file;
+    // The list is read here and sent as the url-list or bookmark connector's content, never as a path.
+    const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ingestConnector, async (connection) => (
+      await sendAgentKnowledgeIngest(connection, localFileIngestSend(normalized === 'import-urls' ? 'urls_file' : 'bookmarks_file', {
         allowPrivateHosts: hasFlag(rest, '--allow-private-hosts'),
         metadata: { originSurface: 'goodvibes-agent-cli' },
-      })
+      }, file))
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return await batchIngestOutput(runtime, result, normalized);
@@ -433,7 +463,17 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
         exitCode: 2,
       };
     }
-    const homeOverride = readOptionValue(rest, '--home');
+    const home = readOptionValue(rest, '--home');
+    const homeOverride = home ? resolve(runtime.workingDirectory, home) : undefined;
+    if (homeOverride && !connectionIsThisMachine(resolveConnectedHostConnection(runtime))) {
+      const failure = {
+        ok: false,
+        kind: 'home_not_on_host',
+        error: `Nothing was imported: --home names a directory on this machine, but the knowledge host is another machine, which cannot read it. Omit --home to import that host's own browsers.`,
+        route: AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory.route,
+      };
+      return { output: json ? JSON.stringify(failure, null, 2) : failure.error, exitCode: 2 };
+    }
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory, async (connection) => (
       await postAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.ingestBrowserHistory.route, {
         // Not typed: omitted, so the daemon applies its default; never an empty list.
@@ -471,17 +511,24 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
         exitCode: 2,
       };
     }
+    const body = {
+      connectorId,
+      input,
+      content,
+      allowPrivateHosts: hasFlag(rest, '--allow-private-hosts'),
+      sessionId: 'goodvibes-agent-cli',
+    };
+    let file: AgentKnowledgeUploadFile | undefined;
+    if (path) {
+      const read = readLocalFileOrFailure(resolve(runtime.workingDirectory, path), AGENT_KNOWLEDGE_METHODS.ingestConnector.route, json);
+      if ('output' in read) return read;
+      file = read;
+    }
+    // A --path file is read here and sent as the connector's content, never as a path the host would open.
     const result = await runKnowledgeCall(runtime, AGENT_KNOWLEDGE_METHODS.ingestConnector, async (connection) => (
-      await postAgentKnowledgeJson(connection, AGENT_KNOWLEDGE_METHODS.ingestConnector.route, {
-        connectorId,
-        input,
-        // The host resolves a relative path against its own directory, so send
-        // the one this command was run from.
-        path: path ? resolve(runtime.workingDirectory, path) : path,
-        content,
-        allowPrivateHosts: hasFlag(rest, '--allow-private-hosts'),
-        sessionId: 'goodvibes-agent-cli',
-      })
+      await sendAgentKnowledgeIngest(connection, file
+        ? localFileIngestSend('connector', body, file)
+        : { kind: 'json', route: AGENT_KNOWLEDGE_METHODS.ingestConnector.route, payload: body })
     ));
     if (!result.ok) return { output: formatFailure(result, json), exitCode: 1 };
     return await batchIngestOutput(runtime, result, `connector ${connectorId}`);

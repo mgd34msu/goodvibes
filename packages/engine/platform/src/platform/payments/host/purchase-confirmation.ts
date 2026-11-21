@@ -20,15 +20,16 @@ export interface PurchaseConfirmationDeps {
  * recording a finding, or its operation is held by another owner right now
  * (a later mail from the shop tries again).
  */
-export async function confirmSubmittedPurchase(deps: PurchaseConfirmationDeps, purchaseId: string, merchantOrderId: string | null): Promise<boolean> {
+export async function confirmSubmittedPurchase(deps: PurchaseConfirmationDeps, purchaseId: string, merchantOrderId: string | null,
+  ownerNotice?: string): Promise<boolean> {
   // A purchase from before operation records existed has only its row.
-  if (deps.operations.get(purchaseId) === null) return deps.purchases.recordConfirmed(purchaseId, merchantOrderId);
+  if (deps.operations.get(purchaseId) === null) return deps.purchases.recordConfirmed(purchaseId, merchantOrderId, ownerNotice);
   const writer = deps.operations.recover(purchaseId);
   if (writer === null) return false;
   try {
     const operation = writer.read();
     if (writer.reconciliation() !== null || operation.state !== 'completed' || operation.outcome !== 'submitted-unverified') return false;
-    const changed = await deps.purchases.recordConfirmed(purchaseId, merchantOrderId);
+    const changed = await deps.purchases.recordConfirmed(purchaseId, merchantOrderId, ownerNotice);
     // A row moved by an earlier attempt whose operation write failed (so the
     // owner was never told) still brings its operation along.
     if (!changed && deps.purchases.get(purchaseId)?.outcome !== 'purchased') return false;

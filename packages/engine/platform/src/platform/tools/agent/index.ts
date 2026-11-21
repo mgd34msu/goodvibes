@@ -412,11 +412,15 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const heldPlan = heldPlans.get(delegationKey);
     if (heldPlan && decisionModelPolicyState().policy === 'Hybrid' && decisionModelPolicyState().operation === 'no-decision-model')
       return publish({ success: false, error: 'The previous delegation plan remains held. Availability fallback cannot override its semantic refusal.' });
+    // Only a judgement that held the plan records a hold. A cancelled or superseded call
+    // rethrows through publish; any other failure of the check is a failed check the
+    // model may simply retry, and leaves no hold behind.
     const holdPlan = (assignments: readonly { readonly task: string }[], error: unknown, mode: 'spawn' | 'batch-spawn' = 'batch-spawn') => {
+      if (!(error instanceof DelegationPlanHeldError)) return publish({ success: false, error: summarizeError(error) });
       const reason = summarizeError(error);
       const proposal = { sessionId: delegationSession, request: input.authoritativeTask!, assignments, reason, mode,
         ...(mode === 'spawn' ? { outsideContract: input.outsideContract === true } : {}),
-        ...(error instanceof DelegationPlanHeldError ? { fixes: error.fixes } : {}) };
+        fixes: error.fixes };
       heldPlans.set(delegationKey, proposal);
       return publish({ success: false, error: reason,
         output: JSON.stringify({ recovery: { kind: 'revise-delegation', ...proposal,

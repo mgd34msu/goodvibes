@@ -6,7 +6,7 @@ export const REMOTE_TRIGGER_TOOL_SCHEMA: ToolDefinition = {
   parameters: {
     type: 'object',
     properties: {
-      mode: { type: 'string', enum: ['create-pool', 'pools', 'assign', 'unassign', 'contracts', 'artifacts', 'review', 'import-artifact'], description: 'create-pool makes a runner pool; pools, contracts and artifacts list them; assign and unassign add or remove a runner in a pool; review summarizes one artifact; import-artifact reads one from a file in the project.' },
+      mode: { type: 'string', enum: ['create-pool', 'pools', 'assign', 'unassign', 'contracts', 'artifacts', 'review', 'import-artifact'], description: 'create-pool makes a runner pool; pools, contracts and artifacts list them; assign moves a runner into a pool (out of any pool it was in, named as movedFrom) and unassign removes it; review summarizes one artifact; import-artifact reads one from a file in the project.' },
       view: { type: 'string', enum: ['summary', 'full'], description: 'For pools, contracts and artifacts: summary (the default) or each full record.' },
       poolId: { type: 'string', description: 'The pool: required for create-pool, assign and unassign.' },
       label: { type: 'string', description: 'A display name for the pool create-pool makes.' },

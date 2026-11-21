@@ -776,8 +776,11 @@ export async function withholdRestrictedFiles(
   return allowed;
 }
 
+/** Files stat-ed or read at once during a search (at most this many file texts are held before scanning). */
+export const SEARCH_READ_CONCURRENCY = 16;
+
 const SEARCH_CACHE_MAX = 50;
-/** Upper bound on the file text one service keeps for cached content searches. */
+/** Upper bound, in characters, on the paths and match text one service keeps for cached content searches. */
 const SEARCH_CACHE_MAX_CHARS = 64 * 1024 * 1024;
 
 function makeSearchCacheKey(key: CacheKey): string {
@@ -843,8 +846,18 @@ export class FindRuntimeService {
 
   searchCacheSet(key: CacheKey, value: CacheValue): void {
     const cacheKey = makeSearchCacheKey(key);
+    // What the entry holds: the paths it lists, and each matched file's path, any
+    // content it kept, and its match and context line text.
     let chars = 0;
-    for (const entry of value.matchedFiles.values()) chars += entry.content.length;
+    for (const file of value.files) chars += file.length;
+    for (const [file, entry] of value.matchedFiles) {
+      chars += file.length + entry.content.length;
+      for (const match of entry.matches) {
+        chars += match.text.length;
+        for (const line of match.context_before ?? []) chars += line.length;
+        for (const line of match.context_after ?? []) chars += line.length;
+      }
+    }
     // A result this large would evict everything else and still not fit.
     if (chars > SEARCH_CACHE_MAX_CHARS) { this.searchCache.delete(cacheKey); return; }
     this.searchCache.delete(cacheKey);

@@ -393,12 +393,16 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
           setupField('phoneNumberId', 'Phone number id', 'string', false, { configKey: 'surfaces.whatsapp.phoneNumberId' }),
           setupField('businessAccountId', 'Business account id', 'string', false, { configKey: 'surfaces.whatsapp.businessAccountId' }),
           setupField('defaultRecipient', 'Default recipient', 'string', false, { configKey: 'surfaces.whatsapp.defaultRecipient' }),
-          setupField('accessToken', 'Access token', 'secret', true, { configKey: 'surfaces.whatsapp.accessToken', secretTargetId: 'primary' }),
+          setupField('accessToken', 'Access token', 'secret', false, {
+            configKey: 'surfaces.whatsapp.accessToken',
+            secretTargetId: 'primary',
+            detail: 'Required in Meta Cloud API mode; in bridge mode it is the bridge token, needed only when the bridge asks for one.',
+          }),
           setupField('verifyToken', 'Verify token', 'secret', false, { configKey: 'surfaces.whatsapp.verifyToken' }),
           setupField('signingSecret', 'Signing secret', 'secret', false, { configKey: 'surfaces.whatsapp.signingSecret', secretTargetId: 'signingSecret' }),
         ],
         secretTargets: [
-          secretTarget(surface, 'primary', 'Access token', true, 'Used for WhatsApp provider API calls.', {
+          secretTarget(surface, 'primary', 'Access token', false, 'Required in Meta Cloud API mode for WhatsApp provider API calls; in bridge mode it is the bridge token, needed only when the bridge asks for one.', {
             serviceName: 'whatsapp',
             serviceField: 'primary',
             envKeys: ['WHATSAPP_ACCESS_TOKEN'],
@@ -642,8 +646,8 @@ export function getBuiltinSetupSchema(surface: ChannelSurface): ChannelSetupSche
  * called tokenless ntfy unconfigured, Twilio degraded for want of a bridge
  * token, and Slack linked on the strength of its signing secret alone.
  *
- * `settings` carries the two values that change the answer: telephony's
- * provider and mode.
+ * `settings` carries the values that change the answer: telephony's provider
+ * and mode, and WhatsApp's provider (a bridge sends with an optional token).
  */
 export function builtinSendCredentials(
   surface: ChannelSurface,
@@ -655,9 +659,10 @@ export function builtinSendCredentials(
       return [['primary'], ['webhookUrl']];
     case 'google-chat':
       return [['webhookUrl']];
+    case 'whatsapp':
+      return settings.provider === 'bridge' ? [] : [['primary']];
     case 'homeassistant':
     case 'telegram':
-    case 'whatsapp':
     case 'mattermost':
     case 'matrix':
       return [['primary']];

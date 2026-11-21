@@ -60,7 +60,7 @@ import { foldLegacySpineStore } from '@goodvibes/engine/platform/platform/runtim
 import { reconcileMemorySpineAdoption } from './memory-spine-adoption.ts';
 import { createAgentSessionInputsClient } from './client/session-inputs.ts';
 import { AgentPromptContextReceiptStore, composeRuntimePromptWithReceipt } from '@goodvibes/engine/terminal-shell/agent-turn/prompt-context-receipts';
-import { recordCompletedTurnAnchor } from './rewind-anchor-wiring.ts';
+import { recordCompletedTurnAnchor } from '@goodvibes/engine/terminal-shell/turn-anchor-recording';
 import { extractInjectedMemoryIds } from './memory-usage-wiring.ts';
 import { installOccasionsNudging } from './occasions-boot.ts';
 import { watchOccasionAnnouncements } from './client/occasion-announcements.ts';
@@ -242,12 +242,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         terminalEvent: 'TURN_COMPLETED',
         stopReason: event.payload.stopReason,
       });
-      // The join key between conversation and files rewind (rewind-anchor-wiring.ts).
+      // The join key between conversation and files rewind (turn-anchor-recording.ts).
       recordCompletedTurnAnchor({
         sessionId: runtimeSessionIdRef.value,
         turnId: event.payload.turnId,
         conversation,
         surface: services.surface,
+        warn: (message) => conversation.addNotice(message, { level: 'warning' }),
       });
       if (activePromptTurnId === event.payload.turnId) {
         activePromptTurnId = null;
@@ -487,14 +488,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const inputHistory = shell.inputHistory;
   // A failed or refused turn is a row in the transcript with its next steps on keys:
   // alt+r sends the prompt again, alt+o picks another model for it, alt+i opens its details, alt+s the sign-ins.
-  bootstrapUnsubs.push(wireFailedTurnActions({
+  wireFailedTurnActions({
     commandContext,
-    onModelChanged: (listener) => runtimeBus.on('MODEL_CHANGED', listener),
     retry: () => retryFailedTurn(orchestrator, conversation,
       (text, content, inputOptions) => orchestrator.handleUserInput(text, content, inputOptions),
       (error) => { systemMessageRouter.high(`Not sent again: ${error instanceof Error ? error.message : String(error)}`, 'warning'); requestRender(); }),
     render: requestRender,
-  }));
+  });
   registerAgentTools({
     toolRegistry,
     commandRegistry,

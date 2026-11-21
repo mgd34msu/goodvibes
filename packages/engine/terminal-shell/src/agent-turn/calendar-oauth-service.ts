@@ -442,7 +442,16 @@ export class CalendarOAuthService {
 
   /** Disconnect a provider: revoke where possible + clear stored tokens. */
   async disconnect(provider: CalendarProviderId): Promise<{ readonly revokedRemotely: boolean }> {
-    const overrides = await this.resolveOverrides(provider);
+    // The stored token is always deleted: a client secret that cannot be read
+    // (a malformed reference) leaves the client id alone, which is all token
+    // revocation needs; revokedRemotely says whether revocation happened.
+    let overrides: OAuthClientOverrides;
+    try {
+      overrides = await this.resolveOverrides(provider);
+    } catch {
+      const clientId = this.readString(providerProfile(provider).clientIdConfigKey);
+      overrides = clientId ? { clientId } : {};
+    }
     return this.connector.disconnect(provider, overrides);
   }
 

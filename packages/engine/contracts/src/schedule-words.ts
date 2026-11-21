@@ -14,7 +14,7 @@ export type ScheduleCadence =
   | { readonly kind: 'at'; readonly at: number };
 
 /** How a scheduled job's last run ended, as the job record keeps it. */
-export type ScheduleRunOutcome = 'delivered' | 'not-delivered' | 'inbox' | 'failed';
+export type ScheduleRunOutcome = 'delivered' | 'partly-delivered' | 'not-delivered' | 'inbox' | 'failed';
 
 export type WordForm = 'full' | 'short';
 
@@ -24,12 +24,15 @@ function plural(n: number, word: string): string {
   return `${n} ${word}${n === 1 ? '' : 's'}`;
 }
 
-/** "30 min", "2 hours", "1 day", "45 s". */
+/**
+ * The interval exactly as it runs, in the largest unit that divides it:
+ * "1 day", "2 hours", "30 min", "90 min", "45 s", "90 s", "3630 s", "1.5 s".
+ * Never rounded, so the words always name the cadence the job keeps.
+ */
 export function intervalWords(ms: number): string {
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s} s`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m} min`;
+  const s = ms / 1000;
+  if (!Number.isInteger(s) || s % 60 !== 0) return `${s} s`;
+  const m = s / 60;
   if (m % (60 * 24) === 0) return plural(m / (60 * 24), 'day');
   if (m % 60 === 0) return plural(m / 60, 'hour');
   return `${m} min`;
@@ -115,6 +118,7 @@ export function describeSchedule(cadence: ScheduleCadence, form: WordForm, now: 
 
 const OUTCOME_WORDS: Readonly<Record<ScheduleRunOutcome, string>> = {
   delivered: 'delivered',
+  'partly-delivered': 'delivered to some, not all',
   'not-delivered': 'not delivered',
   inbox: 'sent to your inbox',
   failed: 'failed',

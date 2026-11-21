@@ -124,9 +124,16 @@ export async function runWorkspaceAction(
     const assertCurrent = captureHarnessLocalEffect(deps.commandContext, args, options, paths => [getOnboardingCheckMarkerPath(paths), getOnboardingCompletionMarkerPath(paths)]);
     const marker = { scope: 'user', source: 'wizard', mode: 'new', workspaceRoot: shellPaths.workingDirectory } as const;
     assertCurrent();
-    const checkMarker = writeOnboardingCheckMarker(shellPaths, marker);
-    assertCurrent();
+    // The completion marker decides whether setup is done, so it is written first:
+    // a failure before it leaves nothing that reads as done.
     const completionMarker = writeOnboardingCompletionMarker(shellPaths, marker);
+    let checkMarker: ReturnType<typeof writeOnboardingCheckMarker>;
+    try {
+      assertCurrent();
+      checkMarker = writeOnboardingCheckMarker(shellPaths, marker);
+    } catch (err) {
+      return error(`Setup was marked complete, so later starts open the conversation, but the compatibility check marker could not be written: ${formatHarnessError(err)}`);
+    }
     return output({
       status: 'onboarding_completed',
       action: describeWorkspaceAction(category, action, { lookup }),

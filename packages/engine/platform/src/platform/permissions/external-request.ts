@@ -17,6 +17,12 @@ export interface ExternalRequestScope {
   readonly destination: string;
   readonly signal: AbortSignal;
   readonly assertCurrent: () => void;
+  /**
+   * The session the connection asks for, where it has one: remembered answers
+   * are read and written under it, never under another session's or the
+   * session-less key.
+   */
+  readonly sessionId?: string | undefined;
 }
 
 export interface ExternalPermissionHost {
@@ -87,6 +93,7 @@ export async function admitExternalRequest(host: ExternalPermissionHost, transpo
       externalRequestEvidence, signal, sourceOf, assertPrepared: assertCurrent, ...(input.supportingDecisionIds ? { preparationDecisionIds: input.supportingDecisionIds } : {}),
       schemaRevision: protocol?.revision ?? requestId,
       decoratePort: () => host.port,
+      sessionId: transport.sessionId,
       ...(input.ownerAsk !== undefined ? { ownerAsk: input.ownerAsk } : {}),
     }), signal);
     assertCurrent();

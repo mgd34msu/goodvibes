@@ -12,10 +12,17 @@ export interface AgentHarnessNotificationArgs {
   readonly limit?: unknown;
 }
 
+/**
+ * `unreadable`: the stored URL could not be read from the secret store (the
+ * secret is missing, the store is locked or there is none here), so nothing is
+ * known about it; `invalid`: it was read and is not a URL.
+ */
+type NotificationTargetState = 'valid' | 'invalid' | 'unreadable';
+
 interface NotificationTargetDescriptor {
   readonly id: string;
   readonly index: number;
-  readonly validUrl: boolean;
+  readonly state: NotificationTargetState;
   readonly protocol?: string;
   readonly host?: string;
   readonly pathDepth?: number;
@@ -33,7 +40,8 @@ function readLimit(value: unknown, fallback: number): number {
   return clampReadLimit(value, fallback, 500);
 }
 
-function readConfiguredWebhookUrls(context: CommandContext): readonly string[] {
+/** Each configured target's stored URL, or null when it could not be read from the secret store. */
+function readConfiguredWebhookUrls(context: CommandContext): readonly (string | null)[] {
   const notifications = context.platform.configManager.getCategory('notifications') as { readonly webhookUrls?: unknown } | null;
   const urls = Array.isArray(notifications?.webhookUrls) ? notifications.webhookUrls : [];
   // Each member is a reference to a stored URL; only its scheme, host and shape are described below.
@@ -41,8 +49,10 @@ function readConfiguredWebhookUrls(context: CommandContext): readonly string[] {
     .filter((url): url is string => typeof url === 'string')
     .map((url) => url.trim())
     .filter((url) => url.length > 0)
-    .map((entry) => resolveNotificationWebhookLocally(entry, context.platform.secretsManager ?? undefined) ?? 'unreadable:stored-url');
+    .map((entry) => resolveNotificationWebhookLocally(entry, context.platform.secretsManager ?? undefined));
 }
+
+const UNREADABLE_TARGET_SENTENCE = 'stored webhook URL could not be read from the secret store';
 
 function pathDepth(pathname: string): number {
   return pathname
@@ -52,14 +62,15 @@ function pathDepth(pathname: string): number {
     .length;
 }
 
-function describeWebhookUrl(url: string, index: number): NotificationTargetDescriptor {
+function describeWebhookUrl(url: string | null, index: number): NotificationTargetDescriptor {
   const id = `notification-target-${index + 1}`;
+  if (url === null) return { id, index: index + 1, state: 'unreadable' };
   try {
     const parsed = new URL(url);
     return {
       id,
       index: index + 1,
-      validUrl: true,
+      state: 'valid',
       protocol: parsed.protocol.replace(/:$/, ''),
       host: parsed.host,
       pathDepth: pathDepth(parsed.pathname),
@@ -69,7 +80,7 @@ function describeWebhookUrl(url: string, index: number): NotificationTargetDescr
     return {
       id,
       index: index + 1,
-      validUrl: false,
+      state: 'invalid',
     };
   }
 }
@@ -89,10 +100,12 @@ function lookupFromArgs(args: AgentHarnessNotificationArgs): { readonly source: 
 
 // These words describe a target and are matched whole: "valid" must not select an
 // "invalid" target, nor "query" a "no-query" one.
-const TARGET_STATE_WORDS = new Set(['valid', 'invalid', 'query', 'no-query']);
+const TARGET_STATE_WORDS = new Set(['valid', 'invalid', 'unreadable', 'query', 'no-query']);
 
 function targetMatchesQuery(target: NotificationTargetDescriptor, query: string): boolean {
-  if (TARGET_STATE_WORDS.has(query)) return query === (target.validUrl ? 'valid' : 'invalid') || query === (target.hasQuery ? 'query' : 'no-query');
+  if (TARGET_STATE_WORDS.has(query)) {
+    return query === target.state || (target.hasQuery !== undefined && query === (target.hasQuery ? 'query' : 'no-query'));
+  }
   return [target.id, String(target.index), target.protocol ?? '', target.host ?? ''].join('\n').toLowerCase().includes(query);
 }
 
@@ -100,7 +113,8 @@ function describeTargetCandidate(target: NotificationTargetDescriptor): Record<s
   return {
     notificationTargetId: target.id,
     index: target.index,
-    validUrl: target.validUrl,
+    state: target.state,
+    ...(target.state === 'unreadable' ? { note: UNREADABLE_TARGET_SENTENCE } : {}),
     ...(target.host ? { host: target.host } : {}),
     modelRoute: notificationTargetModelRoute(),
   };
@@ -117,7 +131,7 @@ function describeTarget(
   return {
     id: target.id,
     index: target.index,
-    validUrl: target.validUrl,
+    state: target.state,
     ...(target.protocol ? { protocol: target.protocol } : {}),
     ...(target.host ? { host: target.host } : {}),
     ...(target.pathDepth !== undefined ? { pathDepth: target.pathDepth } : {}),
@@ -132,22 +146,35 @@ function describeTarget(
           values: 'Full webhook URLs are not returned because they can contain bearer tokens or secret path/query values.',
           delivery: 'Use agent_notify only for one explicit, confirmed notification requested by the user.',
           management: 'Use confirmed /notify mirrors only when the user explicitly asks to add, remove, clear, test, or send notification targets.',
+          ...(target.state === 'unreadable'
+            ? { repair: `This target's ${UNREADABLE_TARGET_SENTENCE}, so nothing is known about it until it reads. Repair the secret store first (unlock it, or restore the stored secret); only if the secret is gone for good does the owner remove this entry by its number and add the URL again.` }
+            : {}),
         },
         modelAccess: {
           sendTool: 'agent_notify',
           listCommand: '/notify list',
           addCommand: '/notify add <url> --yes',
-          removeCommand: '/notify remove <url> --yes',
+          removeCommand: '/notify remove <index> --yes',
           clearCommand: '/notify clear --yes',
           testCommand: '/notify test --yes',
           settingsCategory: 'notifications.webhookUrls',
-          targetValueRequiredForRemove: true,
-          targetValuePolicy: 'Ask the user for the exact webhook URL before removing one target; do not infer it from redacted metadata.',
+          targetValueRequiredForRemove: false,
+          targetValuePolicy: '/notify remove takes the target\'s number as /notify list shows it, which is this target\'s index; confirm with the user which target before removing it.',
         },
       }
       : {
-        summary: previewHarnessText(`${target.validUrl ? 'valid' : 'invalid'} notification webhook target ${target.index}`),
+        summary: previewHarnessText(target.state === 'unreadable'
+          ? `notification webhook target ${target.index}: ${UNREADABLE_TARGET_SENTENCE}`
+          : `${target.state} notification webhook target ${target.index}`),
       }),
+  };
+}
+
+function targetStateCounts(targets: readonly NotificationTargetDescriptor[]): Record<string, number> {
+  return {
+    validTargets: targets.filter((target) => target.state === 'valid').length,
+    invalidTargets: targets.filter((target) => target.state === 'invalid').length,
+    unreadableTargets: targets.filter((target) => target.state === 'unreadable').length,
   };
 }
 
@@ -156,8 +183,7 @@ export function notificationTargetCatalogStatus(context: CommandContext): Record
   return {
     modes: ['notifications', 'notification_target'],
     targets: targets.length,
-    validTargets: targets.filter((target) => target.validUrl).length,
-    invalidTargets: targets.filter((target) => !target.validUrl).length,
+    ...targetStateCounts(targets),
     readOnly: true,
     deliveryTool: 'agent_notify',
     values: 'redacted',
@@ -175,8 +201,7 @@ export function listHarnessNotificationTargets(context: CommandContext, args: Ag
     targets: filtered.map((target) => describeTarget(target, { includeParameters })),
     returned: filtered.length,
     total: targets.length,
-    validTargets: targets.filter((target) => target.validUrl).length,
-    invalidTargets: targets.filter((target) => !target.validUrl).length,
+    ...targetStateCounts(targets),
     policy: 'Read-only notification target catalog. Full webhook values are redacted; sends and target management require explicit confirmation through the owning tool or slash-command mirror.',
   };
 }

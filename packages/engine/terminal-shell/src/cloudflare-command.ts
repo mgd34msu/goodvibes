@@ -309,7 +309,9 @@ async function runCloudflare<Context>(subcommand: string, parsed: ParsedCloudfla
           `  ok: ${result.ok ? 'yes' : 'no'}`,
           `  remote: ${result.remote === 'disabled' ? 'disabled at Cloudflare' : 'not fully disabled at Cloudflare; see the steps below'}`,
           ...formatProvisionSteps(result.steps),
-          '  /cloudflare provision sets it up again; nothing was deleted at Cloudflare.',
+          result.steps.some((entry) => entry.name === 'revoke-operational-token' && entry.status === 'ok')
+            ? '  The operational token was revoked: run /cloudflare create-token before /cloudflare provision sets it up again.'
+            : '  /cloudflare provision sets it up again.',
         ].join('\n');
       }
 
@@ -360,8 +362,8 @@ const ZONE = (step?: number): InputDescription[] => [
   text('zoneId', '--zone-id', 'Zone id', 'The DNS zone, by id', step),
   text('zone', '--zone', 'Zone', 'The DNS zone, by name', step),
 ];
-const BOOTSTRAP = (step?: number): InputDescription[] => [
-  secret('bootstrap', '--bootstrap-token', 'Bootstrap token', 'A short-lived token allowed to create API tokens', step),
+const BOOTSTRAP = (step?: number, help = 'A short-lived token allowed to create API tokens'): InputDescription[] => [
+  secret('bootstrap', '--bootstrap-token', 'Bootstrap token', help, step),
   text('bootstrapEnv', '--bootstrap-env', 'Bootstrap variable', 'The environment variable that holds the bootstrap token', step),
 ];
 const DAEMON_SIDE = { terminalOnly: 'The web UI sets Cloudflare up on its own Cloudflare screen.' } as const;
@@ -420,7 +422,7 @@ export function createCloudflareCommand<Context extends CommandActionContext>(po
     text('workerTokenRef', '--worker-token-ref', 'Worker token reference', 'A goodvibes://secrets/ reference to it'),
   ];
   const disableInputs = [
-    ...AUTH(1), text('workerName', '--worker-name', 'Worker name', 'The worker to turn off', 1), ...BOOTSTRAP(2),
+    ...AUTH(1), text('workerName', '--worker-name', 'Worker name', 'The worker to turn off', 1), ...BOOTSTRAP(2, 'A short-lived token allowed to edit API tokens; given, it revokes the operational token this daemon made'),
     toggle('keepCron', '--keep-cron', 'The worker schedule', 'Whether the worker\'s cron trigger stays', 'Turn it off', 'Keep it', 2),
     toggle('keepSubdomain', '--keep-worker-subdomain', 'The workers.dev address', 'Whether the worker keeps answering on workers.dev', 'Turn it off', 'Keep it', 2),
   ];
@@ -474,8 +476,8 @@ export function createCloudflareCommand<Context extends CommandActionContext>(po
     }),
     {
       id: 'disable', label: 'Turn the Cloudflare integration off', word: 'disable', inputs: disableInputs,
-      sentence: 'The integration is turned off here and its worker schedule and workers.dev address are turned off at Cloudflare, until you change it; nothing is deleted at Cloudflare.',
-      done: '', touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'provision',
+      sentence: 'The integration is turned off here, its worker schedule and workers.dev address are turned off at Cloudflare and the worker\'s daemon credential is removed, until you change it; with a bootstrap token the operational token this daemon made is revoked, which cannot be undone.',
+      done: '', touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone', undoneBy: 'provision',
       ownerOnly: { reason: `${OUTWARD} and can revoke its token`, instead: 'Ask the owner to run /cloudflare disable.' },
       operator: DAEMON_SIDE, example: { keepCron: 'yes' }, run: step('disable', disableInputs),
     },

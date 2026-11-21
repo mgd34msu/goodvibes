@@ -187,9 +187,13 @@ export class ReadTool implements Tool {
         usedTokens += Math.ceil((r.content?.length ?? 0) / 4);
       }
     }
-    const truncated = results.flatMap((r, index) => {
+    const truncated: NonNullable<ReadOutput['summary']['truncated']> = results.flatMap((r, index) => {
       const observation = r.readObservation;
-      if (!observation) return [];
+      // A clipped outline, symbols, ast, PDF, notebook or archive result has no line observation:
+      // it is listed with how much was returned, so it is never mistaken for the whole result.
+      if (!observation) {
+        return clipped.has(r) ? [{ path: r.path, returned_characters: r.content?.length ?? 0, reason: 'max_tokens' as const }] : [];
+      }
       const range = filesToProcess[index]?.range;
       const requestedEnd = Math.min(r.lineCount, range?.end ?? r.lineCount);
       const nextStart = observation.startLine + observation.completeLines;

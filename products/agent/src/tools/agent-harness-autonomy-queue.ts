@@ -7,8 +7,9 @@ import { buildAgentWorkspaceRoutineCounters } from '../input/agent-workspace-sna
 import { buildAgentWorkspaceResearchRunSnapshot, buildAgentWorkspaceRoutineScheduleReceiptsSnapshot } from '../input/agent-workspace-snapshot-builders.ts';
 import { buildAgentWorkspaceChannels } from '../input/agent-workspace-channels.ts';
 import { autonomyLiveNativeFacts, captureAutonomyLiveRecords, controlAvailable, firstAvailableControlRoute,
-  type AutonomyLiveRecordBundle, type AutonomyLiveNativeFacts } from './agent-harness-autonomy-live-records.ts';
-import { watcherReadModelLiveRecords, watcherReadModelNativeFacts, watcherReadModelPublication } from './agent-harness-autonomy-watcher-read-models.ts';
+  type AutonomyLiveRecordBundle, type AutonomyLiveNativeFacts, type LiveSourceName } from './agent-harness-autonomy-live-records.ts';
+import { watcherReadModelLiveRecords, watcherReadModelNativeFacts, watcherReadModelPublication,
+  type WatcherRecordLane } from './agent-harness-autonomy-watcher-read-models.ts';
 import type { AgentHarnessAutonomyQueueArgs, AutonomyQueueItem, AutonomyQueueLiveRecord, AutonomyQueueRecordControl, AutonomyQueueRecordOutput, AutonomyQueueResolution, AutonomyQueueStatus } from './agent-harness-autonomy-queue-types.ts';
 import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';
@@ -148,6 +149,7 @@ export function describeItem(item: AutonomyQueueItem, includeParameters: boolean
     ...(item.active !== undefined ? { active: item.active } : {}),
     ...(item.needsOwner !== undefined ? { needsOwner: item.needsOwner } : {}),
     ...(item.methodsAvailable !== undefined ? { methodsAvailable: item.methodsAvailable } : {}),
+    ...(item.unreadSources ? { unreadSources: item.unreadSources } : {}),
     current: previewHarnessText(item.current, includeParameters ? 180 : 96),
     next: previewHarnessText(item.next, includeParameters ? 180 : 96),
     modelRoute: item.modelRoute,
@@ -174,8 +176,55 @@ export function describeItem(item: AutonomyQueueItem, includeParameters: boolean
 }
 
 const emptyLiveRecords: AutonomyLiveRecordBundle = {
-  tasks: [], approvals: [], automationRuns: [], watcherReceipts: [], schedules: [], researchRuns: [],
+  tasks: [], approvals: [], automationRuns: [], watcherReceipts: [], schedules: [], researchRuns: [], unavailable: [],
 };
+
+/** A source the queue reads, as named in `unreadSources`. */
+type QueueSourceName = LiveSourceName | 'watcherRuns' | 'watcherSources';
+
+/** Which lanes each source feeds, so a source that could not be read marks exactly those lanes unknown. */
+const LANES_BY_SOURCE: Readonly<Record<QueueSourceName, readonly string[]>> = {
+  tasks: ['connected-host-tasks'],
+  approvals: ['pending-approvals'],
+  automation: ['automation-runs', 'connected-schedules'],
+  artifacts: ['automation-runs'],
+  researchRuns: ['research-runs'],
+  watcherRuns: ['automation-runs'],
+  watcherSources: ['automation-runs'],
+};
+
+const SOURCE_LABELS: Readonly<Record<QueueSourceName, string>> = {
+  tasks: 'the host task records',
+  approvals: 'the approval records',
+  automation: 'the automation run and schedule records',
+  artifacts: 'the durable watcher receipts',
+  researchRuns: 'the research run store',
+  watcherRuns: 'the watcher run history',
+  watcherSources: 'the watcher provider sources',
+};
+
+/** Every source that could not be read for this answer, in a stable order. */
+function unreadQueueSources(facts: AutonomyLiveNativeFacts, supervised: QueueSideFacts): readonly QueueSourceName[] {
+  const watcher: QueueSourceName[] = supervised.watcherLanesUnavailable.map((lane) => lane === 'runs' ? 'watcherRuns' : 'watcherSources');
+  return [...new Set<QueueSourceName>([...facts.unavailable, ...watcher])];
+}
+
+/**
+ * A lane fed by a source that could not be read is `blocked`: its status and
+ * counts are unknown, and saying "ready" or "needs setup" from zero rows would
+ * read as an empty lane.
+ */
+function markUnreadLane(item: AutonomyQueueItem, unread: readonly QueueSourceName[]): AutonomyQueueItem {
+  const sources = unread.filter((source) => LANES_BY_SOURCE[source].includes(item.id));
+  if (sources.length === 0) return item;
+  return {
+    ...item,
+    status: 'blocked',
+    unreadSources: sources,
+    current: `${sources.map((source) => SOURCE_LABELS[source]).join(', ')} could not be read this time, so this lane is unknown rather than empty. ${item.current}`,
+    next: 'Read the queue again with autonomy action:"queue"; until it reads, do not treat this lane as empty or act on its counts.',
+  };
+}
 
 function nativeFactsForRecords(records: readonly AutonomyQueueLiveRecord[]) {
   return records.map(record => ({ status: record.status, cancellable: controlAvailable(record, 'cancel') }));
@@ -194,6 +243,7 @@ function nativeFactsForBundle(records: AutonomyLiveRecordBundle): AutonomyLiveNa
     tasks: nativeFactsForRecords(records.tasks), approvals: approvalFactsForRecords(records.approvals),
     automationRuns: nativeFactsForRecords(records.automationRuns), watcherReceipts: nativeFactsForRecords(records.watcherReceipts),
     schedules: nativeFactsForRecords(records.schedules), researchRuns: nativeFactsForRecords(records.researchRuns),
+    unavailable: records.unavailable,
   };
 }
 
@@ -204,18 +254,22 @@ interface QueueSideFacts {
   readonly processesTotal: number;
   readonly processesRunning: number;
   readonly watcherRecordsOmitted: number;
+  /** Watcher record lanes that could not be read this time. */
+  readonly watcherLanesUnavailable: readonly WatcherRecordLane[];
 }
 
 function captureQueueSideFacts(context: CommandContext): QueueSideFacts {
   try {
     const agents = context.ops?.agentManager?.exportState() ?? [];
     const processes = context.workspace?.processManager?.list() ?? [];
+    const watcherPublication = watcherReadModelPublication(context);
     return {
       agentsTotal: agents.length,
       agentsActive: agents.filter((agent) => agent.status === 'pending' || agent.status === 'running').length,
       processesTotal: processes.length,
       processesRunning: processes.filter((entry) => !entry.done).length,
-      watcherRecordsOmitted: watcherReadModelPublication(context).omitted,
+      watcherRecordsOmitted: watcherPublication.omitted,
+      watcherLanesUnavailable: watcherPublication.unavailable,
     };
   } catch {
     throw new ToolInputProjectionError('unavailable');
@@ -582,12 +636,19 @@ function buildQueueItems(context: CommandContext, watcherReadModelRecords: reado
       createRoute: 'workspace action:"run" actionId:"personal-ops-channels"',
     },
   ];
-  return items.sort((left, right) => statusRank(right.status) - statusRank(left.status) || left.label.localeCompare(right.label));
+  const unread = unreadQueueSources(facts, supervised);
+  return items.map((item) => markUnreadLane(item, unread))
+    .sort((left, right) => statusRank(right.status) - statusRank(left.status) || left.label.localeCompare(right.label));
+}
+
+/** The sources named by any lane, for the answer as a whole. */
+function answerUnreadSources(items: readonly AutonomyQueueItem[]): readonly string[] {
+  return [...new Set(items.flatMap((item) => item.unreadSources ?? []))];
 }
 
 function nextActions(items: readonly AutonomyQueueItem[]): readonly string[] {
   return items
-    .filter((item) => item.status === 'attention' || item.status === 'needs-setup' || item.status === 'active')
+    .filter((item) => item.status === 'attention' || item.status === 'needs-setup' || item.status === 'active' || item.unreadSources !== undefined)
     .map((item) => `${item.label}: ${item.next}`)
     .slice(0, 5);
 }
@@ -604,6 +665,7 @@ export function autonomyQueueCatalogStatus(context: CommandContext): Record<stri
     items: items.length,
     cancellable: items.filter((item) => item.cancellable).length,
     ...counts,
+    unreadSources: answerUnreadSources(items),
     readOnly: true,
     methodReadiness: 'pending',
     // Receipt statuses are unread here, so a failed receipt can turn a row to attention in autonomy action:"queue".
@@ -657,7 +719,9 @@ export async function autonomyQueueSummary(context: CommandContext, args: AgentH
       needsSetup: all.filter((item) => item.status === 'needs-setup').length,
       active: all.filter((item) => item.status === 'active').length,
       ready: all.filter((item) => item.status === 'ready').length,
+      blocked: all.filter((item) => item.status === 'blocked').length,
     },
+    unreadSources: answerUnreadSources(all),
     queue: filtered.slice(0, limit).map(({ entry, judgment }) => ({ ...describeItem(entry, includeParameters), ...(judgment ? { judgment } : {}) })),
     judgments: selected.judgments,
     returned: Math.min(filtered.length, limit),

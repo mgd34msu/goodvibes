@@ -19,6 +19,8 @@ export interface OnboardingRuntimeStateRecord {
     readonly exists: boolean;
     readonly payload: OnboardingAcknowledgementRuntimeState | null;
     readonly parseError?: string | undefined;
+    /** The file is there but could not be read (permissions, I/O); it is left in place and nothing replaces it. */
+    readonly unreadable?: boolean | undefined;
 }
 interface WriteOnboardingAcknowledgementStateOptions {
     readonly scope?: OnboardingStateScope | undefined;
@@ -63,20 +65,29 @@ export function createOnboardingStateStorage(surfaceRoot: string) {
     }
     function readOnboardingRuntimeState(shellPaths: OnboardingShellPaths, scope: OnboardingStateScope = 'project'): OnboardingRuntimeStateRecord {
         const path = resolveStatePath(shellPaths, scope);
-        const parsed = readVersioned<OnboardingAcknowledgementRuntimeState & {
-            version: number;
-        }>(path, { currentVersion: 1, onUnknown: 'quarantine' });
+        const existedBefore = existsSync(path);
+        let parsed: (OnboardingAcknowledgementRuntimeState & { version: number }) | null;
+        try {
+            parsed = readVersioned<OnboardingAcknowledgementRuntimeState & {
+                version: number;
+            }>(path, { currentVersion: 1, onUnknown: 'quarantine' });
+        }
+        catch (error) {
+            const code = (error as NodeJS.ErrnoException | undefined)?.code ?? (error instanceof Error ? error.message : String(error));
+            return { scope, path, exists: true, payload: null, unreadable: true, parseError: `Onboarding state could not be read: ${code}` };
+        }
         if (parsed === null) {
-            // readVersioned returns null for: missing file, corrupt JSON, or
-            // unrecognised version (in which case it renames to <path>.unrecognized).
-            const nowExists = existsSync(path);
-            const quarantined = existsSync(`${path}.unrecognized`);
+            // readVersioned returns null for: a missing file, a file this read
+            // quarantined (corrupt JSON or an unrecognised version, renamed aside),
+            // or a newer version left in place. Only the quarantine of this read is
+            // a parse error; older quarantine copies beside a missing file are not.
+            const quarantinedNow = existedBefore && !existsSync(path);
             return {
                 scope,
                 path,
-                exists: nowExists || quarantined,
+                exists: existedBefore,
                 payload: null,
-                ...(quarantined
+                ...(quarantinedNow
                     ? { parseError: 'Unrecognised or corrupt onboarding state file; quarantined.' }
                     : {}),
             };
@@ -99,6 +110,9 @@ export function createOnboardingStateStorage(surfaceRoot: string) {
         mkdirSync(dirname(path), { recursive: true });
         const write = (): void => {
             const existing = readOnboardingRuntimeState(shellPaths, scope);
+            // A file that is there but could not be read is never replaced by one rebuilt without its acknowledgements.
+            if (existing.unreadable)
+                throw new Error(`${existing.parseError ?? 'Onboarding state could not be read'} (${path}); nothing was changed.`);
             const updatedAt = options.updatedAt ?? Date.now();
             const ws = options.workspaceRoot ?? shellPaths.workingDirectory;
             const payload: OnboardingAcknowledgementRuntimeState = {

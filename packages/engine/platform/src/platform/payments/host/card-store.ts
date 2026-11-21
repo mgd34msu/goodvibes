@@ -282,6 +282,13 @@ export class DaemonCardStore implements CardMaterialStore {
   private readonly cvvHandling: () => CvvHandling;
   private readonly generateId: () => string;
   private readonly now: () => Date;
+  /**
+   * Card mutations, one at a time: a create or remove starts only after the
+   * previous one finished. The daemon is the only writer of the cards file, so
+   * a repeated save finds the first card's stored number, and no mutation
+   * writes back a row list another one changed during its awaits.
+   */
+  private mutations: Promise<unknown> = Promise.resolve();
 
   constructor(options: DaemonCardStoreOptions) {
     this.filePath = options.filePath;
@@ -384,7 +391,11 @@ export class DaemonCardStore implements CardMaterialStore {
    * leaves nothing behind. Only a crash can leave the intermediate state, and
    * that state is the recoverable one by construction.
    */
-  async create(input: CardCreateInput): Promise<CardMetadata> {
+  create(input: CardCreateInput): Promise<CardMetadata> {
+    return this.oneAtATime(() => this.createNow(input));
+  }
+
+  private async createNow(input: CardCreateInput): Promise<CardMetadata> {
     const digits = input.number.replace(/\D/g, '');
     const storeCvv = this.cvvHandling() === 'stored';
 
@@ -461,7 +472,11 @@ export class DaemonCardStore implements CardMaterialStore {
    * Reads the file before it deletes anything, so a damaged store refuses here
    * rather than clearing material it is about to lose the row for.
    */
-  async remove(cardId: string): Promise<{ deleted: boolean; secretsCleared: number }> {
+  remove(cardId: string): Promise<{ deleted: boolean; secretsCleared: number }> {
+    return this.oneAtATime(() => this.removeNow(cardId));
+  }
+
+  private async removeNow(cardId: string): Promise<{ deleted: boolean; secretsCleared: number }> {
     const rows = this.list();
     // Secret keys are case-folded and punctuation-collapsed, rows are matched
     // exactly: a differently spelled id would find no row yet resolve to a live
@@ -478,15 +493,19 @@ export class DaemonCardStore implements CardMaterialStore {
         secretsCleared += 1;
       }
     }
-    // The rows are read again here, not reused from above: a `create` or another
-    // `remove` ran during the awaits, and writing the earlier list back would
-    // drop its row or bring a deleted card back. Nothing awaits between this
-    // read and the write.
+    // The rows the write starts from are read right before it, with nothing awaited between.
     const fresh = this.list();
     const remaining = fresh.filter((card) => card.id !== cardId);
     const deleted = remaining.length !== fresh.length;
     if (deleted) writeCardsFile(this.filePath, remaining);
     return { deleted, secretsCleared };
+  }
+
+  /** Runs `work` after every card mutation already started has finished, whatever its outcome. */
+  private oneAtATime<T>(work: () => Promise<T>): Promise<T> {
+    const run = this.mutations.then(work);
+    this.mutations = run.catch(() => undefined);
+    return run;
   }
 
   /** Store `cvv` as this card's security code unless that code is already stored. */

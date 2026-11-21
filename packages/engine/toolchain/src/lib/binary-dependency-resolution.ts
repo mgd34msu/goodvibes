@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { BinaryTarget } from '../config.js';
-import { consoleLogger, realExec, type Exec, type Logger } from './effects.js';
+import { realExec, type Exec } from './effects.js';
 
 interface PackageManifest {
   readonly name?: unknown;
@@ -77,16 +77,25 @@ export interface ProvideNativeAddonOptions {
   readonly sameHost: boolean;
   readonly enginePackage?: string;
   readonly exec?: Exec;
-  readonly logger?: Logger;
 }
 
-/** Stage from the installed dependency owner, or the existing pinned cross-target fetch. */
-export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean {
+/** A command's error output on one line, or a note that it printed none. */
+function errorOutput(stderr: string): string {
+  const text = stderr.trim().replace(/\s*\n\s*/g, ' ');
+  return text.length > 0 ? text : 'it printed no error';
+}
+
+/**
+ * Stage from the installed dependency owner, or the existing pinned cross-target fetch.
+ * Returns null when the addon was staged or the target needs none, else the sentence that says why it is unavailable.
+ */
+export function provideNativeAddon(options: ProvideNativeAddonOptions): string | null {
   const { root, target } = options;
   const packageName = target.nativeAddonPackage;
   const file = target.nativeAddonFile;
-  if (!packageName || !file) return true;
+  if (!packageName || !file) return null;
   const productManifest = join(root, 'package.json');
+  const searched = [productManifest];
   const product = JSON.parse(readFileSync(productManifest, 'utf8')) as PackageManifest;
   const declaredByProduct = Object.hasOwn(product.dependencies ?? {}, NATIVE_ADDON_OWNER) || Object.hasOwn(product.optionalDependencies ?? {}, NATIVE_ADDON_OWNER);
   let ownerPath = declaredByProduct ? resolveOwnedPackageManifest(productManifest, NATIVE_ADDON_OWNER) : null;
@@ -97,6 +106,7 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
     if (Object.hasOwn(product.dependencies ?? {}, engineName) || Object.hasOwn(product.optionalDependencies ?? {}, engineName)) {
       const enginePath = resolveOwnedPackageManifest(productManifest, options.enginePackage);
       if (enginePath !== null) {
+        searched.push(enginePath);
         const engine = JSON.parse(readFileSync(enginePath, 'utf8')) as PackageManifest;
         if (Object.hasOwn(engine.dependencies ?? {}, NATIVE_ADDON_OWNER) || Object.hasOwn(engine.optionalDependencies ?? {}, NATIVE_ADDON_OWNER)) {
           ownerPath = resolveOwnedPackageManifest(enginePath, NATIVE_ADDON_OWNER);
@@ -104,7 +114,9 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
       }
     }
   }
-  if (ownerPath === null) return false;
+  if (ownerPath === null) {
+    return `no installed ${NATIVE_ADDON_OWNER} is declared as a dependency of the product or of its engine package (searched ${searched.join(', ')}); run install`;
+  }
   const owner = JSON.parse(readFileSync(ownerPath, 'utf8')) as PackageManifest;
   const version = owner.optionalDependencies?.[packageName];
   // sqlite-vec declares exact per-platform versions. Do not silently replace a
@@ -124,34 +136,32 @@ export function provideNativeAddon(options: ProvideNativeAddonOptions): boolean 
   const installed = resolveOwnedPackageManifest(ownerPath, packageName);
   if (installed !== null) {
     stage(resolveNativeAddonPayload(dirname(installed), packageName, version, file));
-    return true;
+    return null;
   }
   if (options.sameHost) {
-    (options.logger ?? consoleLogger).error(`[build-binaries] native addon missing for host target ${target.key}; run install`);
-    return false;
+    return `${packageName}@${version} is not installed for host target ${target.key}; run install`;
   }
   // A package fetched for another target is trusted only against the integrity
   // the owner's lockfile records for this exact name and version.
   const pinned = lockfileIntegrity(root, `${packageName}@${version}`);
   if (pinned === null) {
-    (options.logger ?? consoleLogger).error(`[build-binaries] no pinned integrity for ${packageName}@${version} in a bun.lock at or above ${root}; run install so the lockfile records it, or build this target on its own platform`);
-    return false;
+    return `no pinned integrity for ${packageName}@${version} in a bun.lock at or above ${root}; run install so the lockfile records it, or build this target on its own platform`;
   }
   const exec = options.exec ?? realExec;
   const scratch = mkdtempSync(join(tmpdir(), 'gv-addon-'));
   try {
     const packed = exec('npm', ['pack', `${packageName}@${version}`, '--pack-destination', scratch], { timeoutMs: 120_000 });
-    if (packed.status !== 0) return false;
+    if (packed.status !== 0) return `npm pack ${packageName}@${version} failed: ${errorOutput(packed.stderr)}`;
     const tarball = packed.stdout.trim().split('\n').pop();
-    if (!tarball || basename(tarball) !== tarball) return false;
+    if (!tarball || basename(tarball) !== tarball) return `npm pack ${packageName}@${version} printed no tarball name`;
     const archive = join(scratch, tarball);
     const integrity = `sha512-${createHash('sha512').update(readFileSync(archive)).digest('base64')}`;
     if (integrity !== pinned) throw new Error(`Native package archive ${packageName}@${version} does not match the lockfile integrity`);
     const unpacked = exec('tar', ['-xzf', archive, '-C', scratch], { timeoutMs: 60_000 });
-    if (unpacked.status !== 0) return false;
+    if (unpacked.status !== 0) return `tar could not unpack ${archive}: ${errorOutput(unpacked.stderr)}`;
     const payload = resolveNativeAddonPayload(join(scratch, 'package'), packageName, version, file, scratch);
     stage(payload);
-    return true;
+    return null;
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }

@@ -64,6 +64,15 @@ export interface AutomationRun extends AutomationEntityBase {
    * drops a second copy.
    */
   readonly delivery?: { readonly state: 'owed'; readonly effect: string } | undefined;
+  /**
+   * The failure or missed-run notice is owed: written in the same save as the
+   * failed or missed run's end, and cleared once the notice was sent or reached
+   * the owner inbox. Separate from `delivery`, since a job with its own failure
+   * route owes a failed run both its answer and its notice. A run still owed
+   * after a restart has its notice sent then, under the same identity
+   * (`effect`, the notice's `announces`).
+   */
+  readonly notice?: { readonly state: 'owed'; readonly effect: string } | undefined;
   readonly modelId?: string | undefined;
   readonly providerId?: string | undefined;
   readonly telemetry?: AutomationRunTelemetry | undefined;

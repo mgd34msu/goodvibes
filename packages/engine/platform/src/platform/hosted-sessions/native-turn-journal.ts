@@ -50,9 +50,18 @@ export interface NativeHostedTurnClaimOwner {
   readonly pid: number;
   /** Random per process; distinguishes a restarted process that reused the pid. */
   readonly instance: string;
-  /** Which machine and pid namespace the pid belongs to; a pid says nothing about a process elsewhere. */
+  /** Written by 3.4.0 and earlier: `<hostname>|<pid namespace>`. Read, never written. */
   readonly host?: string;
+  /** A stable id of the machine (`/etc/machine-id` on Linux, the hostname elsewhere). */
+  readonly machine?: string;
+  /** The machine's boot (`/proc/sys/kernel/random/boot_id` on Linux; empty where none is read): no process outlives it. */
+  readonly boot?: string;
+  /** The pid namespace the pid belongs to (empty where there is none). */
+  readonly namespace?: string;
 }
+
+const validOwnerFact = (value: unknown, allowEmpty: boolean): value is string =>
+  typeof value === 'string' && value.length <= 512 && (allowEmpty || value.length > 0);
 
 export interface NativeHostedTurnJournalIO {
   readonly acquireCrossProcessLock: typeof acquireCrossProcessLock;
@@ -63,10 +72,16 @@ export interface NativeHostedTurnJournalIO {
 /** Compaction is tried once the journal holds this share of either cap. */
 const COMPACT_AT = 0.9;
 
-type JournalErrorCode = 'invalid-identity' | 'invalid-dispatch' | 'invalid-journal' | 'journal-limit' | 'conflict' | 'surface-conflict';
+/**
+ * `conflict`: the record under this input has another identity, or moved
+ * since it was read. `session-unresolved`: the session a continuation names
+ * has a turn that is not finished and is not running here.
+ */
+type JournalErrorCode = 'invalid-identity' | 'invalid-dispatch' | 'invalid-journal' | 'journal-limit' | 'conflict' | 'surface-conflict' | 'session-unresolved';
 const NEXT_STEP: Partial<Record<JournalErrorCode, string>> = {
-  'journal-limit': 'The journal is full of turns that cannot be dropped yet (still running or awaiting recovery, or not yet marked finished on intake). Cancel the stale native turns, then start again.',
+  'journal-limit': 'The journal is full of turns that cannot be dropped yet (still running, awaiting recovery, or not yet marked finished on intake). Cancel your own native turns that read recovery-required, then start again; if none are yours, the host owner must cancel theirs.',
 };
+export const NATIVE_HOSTED_TURN_JOURNAL_LIMIT_NEXT_STEP = NEXT_STEP['journal-limit']!;
 export class NativeHostedTurnJournalError extends Error {
   constructor(readonly code: JournalErrorCode) {
     super(`Native hosted turn journal: ${code}${NEXT_STEP[code] ? `. ${NEXT_STEP[code]}` : ''}`);
@@ -219,10 +234,17 @@ function readOwners(path: string): Map<string, NativeHostedTurnClaimOwner> {
     const value: unknown = JSON.parse(readFileSync(path, 'utf8'));
     if (!exact(value, ['version', 'owners']) || value.version !== 1 || !exact(value.owners, Object.keys(value.owners as object))) return owners;
     for (const [key, owner] of Object.entries(value.owners as Record<string, unknown>)) {
-      const hasHost = exact(owner, ['pid', 'instance', 'host']);
-      if ((hasHost || exact(owner, ['pid', 'instance'])) && Number.isSafeInteger(owner.pid) && (owner.pid as number) > 0 && validId(owner.instance)
-        && (!hasHost || (typeof owner.host === 'string' && owner.host.length > 0 && owner.host.length <= 512))) {
-        owners.set(key, { pid: owner.pid as number, instance: owner.instance as string, ...(hasHost ? { host: owner.host as string } : {}) });
+      const hasMachine = exact(owner, ['pid', 'instance', 'machine', 'boot', 'namespace']);
+      const hasHost = !hasMachine && exact(owner, ['pid', 'instance', 'host']);
+      if (!(hasMachine || hasHost || exact(owner, ['pid', 'instance'])) || !Number.isSafeInteger(owner.pid) || (owner.pid as number) <= 0 || !validId(owner.instance)) continue;
+      if (hasMachine) {
+        if (!validOwnerFact(owner.machine, false) || !validOwnerFact(owner.boot, true) || !validOwnerFact(owner.namespace, true)) continue;
+        owners.set(key, { pid: owner.pid as number, instance: owner.instance as string, machine: owner.machine, boot: owner.boot, namespace: owner.namespace });
+      } else if (hasHost) {
+        if (!validOwnerFact(owner.host, false)) continue;
+        owners.set(key, { pid: owner.pid as number, instance: owner.instance as string, host: owner.host });
+      } else {
+        owners.set(key, { pid: owner.pid as number, instance: owner.instance as string });
       }
     }
   } catch { owners.clear(); }
@@ -324,8 +346,8 @@ export class NativeHostedTurnJournal {
   async claim(identity: NativeHostedTurnIdentity, locallyOwnedInputs: readonly string[] = [], originSurface?: NativeHostedTurnOriginSurface, owner?: NativeHostedTurnClaimOwner): Promise<boolean> {
     const expected = copyIdentity(identity);
     if (originSurface !== undefined && originSurface !== 'webui' && originSurface !== 'agent') throw new NativeHostedTurnJournalError('invalid-dispatch');
-    if (owner !== undefined && (!Number.isSafeInteger(owner.pid) || owner.pid <= 0 || !validId(owner.instance)
-      || (owner.host !== undefined && (owner.host.length === 0 || owner.host.length > 512)))) throw new NativeHostedTurnJournalError('invalid-dispatch');
+    if (owner !== undefined && (!Number.isSafeInteger(owner.pid) || owner.pid <= 0 || !validId(owner.instance) || owner.host !== undefined
+      || !validOwnerFact(owner.machine, false) || !validOwnerFact(owner.boot, true) || !validOwnerFact(owner.namespace, true))) throw new NativeHostedTurnJournalError('invalid-dispatch');
     const surface = originSurface ?? 'webui';
     return this.locked(() => {
       const file = this.load();
@@ -346,7 +368,7 @@ export class NativeHostedTurnJournal {
       if (expected.continuationSessionId && file.records.some(record =>
         (record.sessionId === expected.continuationSessionId || record.identity.continuationSessionId === expected.continuationSessionId)
         && !terminalState(record.state) && !locallyOwnedInputs.includes(record.identity.inputId))) {
-        throw new NativeHostedTurnJournalError('conflict');
+        throw new NativeHostedTurnJournalError('session-unresolved');
       }
       file.records.push({ identity: expected, ...(originSurface ? { originSurface } : {}), state: 'preparing', sessionId: null, brokerInputId: null, correlationId: null });
       this.write(file);
@@ -362,7 +384,7 @@ export class NativeHostedTurnJournal {
       const open = new Set(file.records.filter(record => !terminalState(record.state)).map(record => keyOf(record.identity)));
       const owners = readOwners(path);
       for (const existing of [...owners.keys()]) if (!open.has(existing)) owners.delete(existing);
-      owners.set(key, { pid: owner.pid, instance: owner.instance, ...(owner.host === undefined ? {} : { host: owner.host }) });
+      owners.set(key, { pid: owner.pid, instance: owner.instance, machine: owner.machine ?? '', boot: owner.boot ?? '', namespace: owner.namespace ?? '' });
       // Deliberately not `this.io`: that seam governs the journal's own bytes.
       writeJsonFileAtomic(path, { version: 1, owners: Object.fromEntries(owners) }, { durable: true, mode: 0o600, indent: null, trailingNewline: false });
     } catch { /* The claim stands; without an owner it can only be resolved as recovery-required. */ }

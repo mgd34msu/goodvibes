@@ -1,4 +1,5 @@
 import { infoRow, runModalCommand } from './modal-surface-helpers.ts';
+import { actionKeyText } from '../../input/config-modal-keys.ts';
 import type {
   ConfigModalActionContext,
   ConfigModalRow,
@@ -94,7 +95,7 @@ class MemoryModalSurface implements ConfigModalSurface {
     { key: 'c', id: 'markContradicted', label: 'contradicted', enabledFor: this.reviewGate },
     { key: 'f', id: 'markFresh', label: 'fresh', enabledFor: this.reviewGate },
     // /memory remove asks in its own dialog, naming the record; a second press here would ask twice.
-    { key: 'd', id: 'remove', label: 'delete', enabledFor: (row: ConfigModalRow | null) => row !== null },
+    { key: 'd', id: 'remove', label: 'delete', enabledFor: (row: ConfigModalRow | null, tabId: string) => row !== null && (tabId === 'all' || tabId === 'review') },
     { key: 'r', id: 'refresh', label: 'refresh' },
     { key: 'l', id: 'showOlder', label: 'show older', enabledFor: (_row: ConfigModalRow | null, tabId: string) => tabId === 'all' && this.mayHaveOlder() },
     // Jump from a selected proposal to one of its affected records in the
@@ -294,7 +295,7 @@ class MemoryModalSurface implements ConfigModalSurface {
     if (id === 'showOlder') { this.recordLimit += RECORD_PAGE; void this.refresh(); ctx.setStatus('Reading older memory records...'); return; }
     if (id === 'jumpToReviewQueue') { this.handleJumpToReviewQueue(ctx); return; }
     const record = ctx.row ? this.recordFrom(ctx.row.id) : undefined;
-    if (!record) return;
+    if (!record) { ctx.setStatus(`That record is no longer listed; press ${actionKeyText('r')} to reload.`); return; }
     const review = (state: string, confidence: number, reason?: string): void => {
       const args = ['review', record.id, state, '--confidence', String(confidence), '--by', 'operator'];
       if (reason) args.push('--reason', reason);

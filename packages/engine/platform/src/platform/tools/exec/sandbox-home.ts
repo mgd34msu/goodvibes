@@ -127,7 +127,9 @@ export function sandboxHomeView(home: string, env: NodeJS.ProcessEnv = process.e
   const root = context.home;
   const secrets = [...HOME_SECRETS.map((relative) => join(root, relative)),
     // Cargo keeps registry tokens in its home, wherever CARGO_HOME puts it.
-    join(context.cargo, 'credentials'), join(context.cargo, 'credentials.toml')];
+    join(context.cargo, 'credentials'), join(context.cargo, 'credentials.toml'),
+    // Git's credential store keeps tokens under the XDG config folder, wherever XDG_CONFIG_HOME puts it.
+    join(context.config, 'git', 'credentials')];
   const candidates: SandboxHomeBind[] = [];
   for (const row of HOME_BINDS) {
     for (const path of row.paths(context)) {

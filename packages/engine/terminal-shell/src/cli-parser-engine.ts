@@ -376,8 +376,8 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
   const stopAt = sawCommand && rawPassthrough ? found!.index : argv.length;
 
   let ddashSeen = false;
-  // The token that set each exclusive `const` field on this line.
-  const exclusiveConstTokens = new Map<string, string>();
+  // The first token that set each exclusive `const` field on this line, and the value it set.
+  const exclusiveConstTokens = new Map<string, { readonly token: string; readonly value: CliFlagValue }>();
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!;
 
@@ -461,8 +461,8 @@ export function parseWithCatalog<TCommand extends string, TField extends string,
         if (inlineValue !== undefined && !flagSpec.allowInlineValue) { errors.push(`${name} takes no value.`); break; }
         if (flagSpec.exclusive) {
           const earlier = exclusiveConstTokens.get(flagSpec.field);
-          if (earlier !== undefined && earlier !== name) { errors.push(`${earlier} and ${name} cannot be used together; choose one.`); break; }
-          exclusiveConstTokens.set(flagSpec.field, name);
+          if (earlier !== undefined && earlier.value !== flagSpec.constValue) { errors.push(`${earlier.token} and ${name} cannot be used together; choose one.`); break; }
+          if (earlier === undefined) exclusiveConstTokens.set(flagSpec.field, { token: name, value: flagSpec.constValue });
         }
         setField(flags, flagSpec.field, flagSpec.constValue);
         break;

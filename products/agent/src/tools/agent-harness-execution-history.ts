@@ -242,13 +242,17 @@ function verificationSummary(records: readonly AgentExecutionRecord[], includePa
 
 /**
  * Undo reverts only the newest entry on the stack, so only the record whose
- * write produced that entry can be rolled back through file recovery. The entry
- * is stamped while its tool call runs, which places it inside that record's span.
+ * write produced that entry can be rolled back through file recovery. The
+ * entry carries the id of the tool call that made it, so exactly that record
+ * matches, even when writes to other files ran beside it. The entry's time
+ * must also fall inside the record's span, so a provider that reuses call ids
+ * across turns cannot match a record of an earlier turn.
  */
 function holdsNewestUndoEntry(context: CommandContext, record: AgentExecutionRecord): boolean {
   if (!isRecoverableRoute(record)) return false;
-  const stamp = fileRecoveryCatalogStatus(context).nextUndoAt;
-  const at = typeof stamp === 'string' ? Date.parse(stamp) : NaN;
+  const status = fileRecoveryCatalogStatus(context);
+  if (typeof status.nextUndoCallId !== 'string' || status.nextUndoCallId !== record.callId) return false;
+  const at = typeof status.nextUndoAt === 'string' ? Date.parse(status.nextUndoAt) : NaN;
   return Number.isFinite(at) && at >= record.receivedAt && at <= (record.completedAt ?? record.updatedAt);
 }
 

@@ -286,17 +286,18 @@ export function applyOutboundTlsToFetchInit(
   const existingTls = nextInit.tls ?? {};
   const nextTls: FetchTlsOptions = { ...existingTls };
 
-  if (context.snapshot.mode === 'custom' && !nextTls.ca && (!context.caEntries || context.caEntries.length === 0)) {
+  // In every mode that trusts a custom CA, going out with only part of the
+  // configured CA set would leave the missing CA untrusted and surface later
+  // as an unexplained TLS failure, so any load error refuses the request.
+  if (context.snapshot.mode !== 'bundled' && !nextTls.ca && context.snapshot.errors.length > 0) {
     throw new Error(
-      'network.outboundTls.mode is custom, but no custom CA entries were loaded. Configure network.outboundTls.customCaFile or network.outboundTls.customCaDir.',
+      `network.outboundTls.mode is ${context.snapshot.mode}, but a configured custom CA could not be loaded: ${context.snapshot.errors.join('; ')}. Fix the path or switch network.outboundTls.mode to bundled.`,
     );
   }
 
-  // Silently falling back to the bundled CAs would leave the configured
-  // corporate CA untrusted and surface later as an unexplained TLS failure.
-  if (context.snapshot.mode === 'bundled+custom' && !nextTls.ca && context.snapshot.errors.length > 0) {
+  if (context.snapshot.mode === 'custom' && !nextTls.ca && (!context.caEntries || context.caEntries.length === 0)) {
     throw new Error(
-      `network.outboundTls.mode is bundled+custom, but a configured custom CA could not be loaded: ${context.snapshot.errors.join('; ')}. Fix the path or switch network.outboundTls.mode to bundled.`,
+      'network.outboundTls.mode is custom, but no custom CA entries were loaded. Configure network.outboundTls.customCaFile or network.outboundTls.customCaDir.',
     );
   }
 

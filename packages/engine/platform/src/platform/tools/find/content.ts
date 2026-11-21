@@ -21,6 +21,7 @@ import {
   makeFilesResult,
   makeLocationsResult,
   readSearchFile,
+  SEARCH_READ_CONCURRENCY,
   statSearchFile,
   FindRuntimeService,
   validateSearchPath,
@@ -498,8 +499,6 @@ async function ripgrepFirstPass(
   }
 }
 
-/** Files stat-ed and read at once during a content search (at most this many file texts are held before scanning). */
-const SEARCH_READ_CONCURRENCY = 16;
 /** Characters of file text sent to the regex executor in one message. */
 const SCAN_BATCH_CHARS = 4 * 1024 * 1024;
 /** Files sent to the regex executor in one message. */

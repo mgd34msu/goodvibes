@@ -17,8 +17,8 @@ import { DecisionModelsDisabledError } from '@goodvibes/engine/errors';
  *   - `AUTHENTICATE XOAUTH2 <base64>` instead, when `ImapClientOptions.password`
  *     starts with `Bearer `. Acquiring that token is out of scope.
  *   - `CAPABILITY`, lazily and at most once, and only when the server
- *     volunteered no capabilities in its greeting, its login completion or its
- *     EXAMINE response, see `capabilities()`.
+ *     volunteered no capabilities in its login completion or its EXAMINE
+ *     response (the pre-login greeting's list is not used), see `capabilities()`.
  *   - `EXAMINE <mailbox>` (read-only SELECT; messages are never marked \Seen)
  *   - `UID SEARCH UNSEEN`, `UID SEARCH UNSEEN SINCE <date>`, `UID SEARCH ALL`
  *     and `UID SEARCH SINCE <date>`
@@ -127,6 +127,7 @@ import {
   applyImapMessageAction,
   fetchImapAttachment,
   findImapDraftByMessageId,
+  findSelectedDraftByMessageId,
   listImapDrafts,
   prepareDraftReplacement,
   removeReplacedDraft,
@@ -233,6 +234,26 @@ const COMPLETE_SEARCH_RESPONSE_BYTES = 8 * 1_048_576;
  * draft. Not "not saved": saving the same draft again under its Message-ID
  * looks for it first.
  */
+/**
+ * Why the server refused an APPEND, from its bracketed response code only
+ * (RFC 5530); the server's free text is never repeated.
+ */
+function draftRefusalCause(completionLine: string, mailbox: string): string {
+  const code = /^\S+\s+(?:NO|BAD)\s+\[([A-Za-z-]+)/i.exec(completionLine)?.[1]?.toUpperCase();
+  switch (code) {
+    case 'OVERQUOTA':
+    case 'LIMIT':
+      return 'the mailbox is full';
+    case 'TRYCREATE':
+    case 'NONEXISTENT':
+      return `the Drafts folder '${mailbox}' does not exist; set email.draftsMailbox to the name of the drafts folder`;
+    case 'TOOBIG':
+      return 'the draft is too large';
+    default:
+      return 'the mail server refused it';
+  }
+}
+
 export class DraftAppendUnconfirmedError extends Error {
   constructor() {
     super('The draft may have been saved: the mail server\'s answer to the save was not read. Saving the same draft again looks for it in the Drafts folder first, so it is not saved twice.');
@@ -306,9 +327,8 @@ export class ImapClient {
     rememberConnection(this, session);
     const reading = this.readingOptions(session);
 
-    let greeting: string;
     try {
-      greeting = await session.readGreeting();
+      await session.readGreeting();
       assertImapReadingCurrent(reading);
     } catch (err) {
       throw await composeOpenFailure({
@@ -352,7 +372,9 @@ export class ImapClient {
     assertImapReadingCurrent(reading);
     noteImapOpenAccepted(this.options.username);
     this.status = parseMailboxStatus(examineLines);
-    this.advertised = parseCapabilities([greeting, ...authLines, ...examineLines]);
+    // RFC 3501: the pre-login greeting's list may change once signed in, so
+    // only what the server said after authentication decides what it can do.
+    this.advertised = parseCapabilities([...authLines, ...examineLines]);
     this.readable = true;
     return {
       advertisedCapabilities: this.advertised,
@@ -378,8 +400,9 @@ export class ImapClient {
   /**
    * The server's capability atoms, asked for if it did not volunteer them.
    *
-   * Most servers advertise in the greeting or in the login completion, and
-   * those are read at `open()` for free. When a server advertised nothing, a
+   * Most servers advertise in the login completion, and that is read at
+   * `open()` for free; the pre-login greeting's list is not used, because it
+   * may change once signed in. When a server advertised nothing after login, a
    * `CAPABILITY` command is issued once, lazily, so ordinary mail operations
    * do not pay a round trip for an answer only a long-lived watcher needs.
    *
@@ -669,17 +692,26 @@ export class ImapClient {
     const message = buildDraftMessage(input, new Date());
     const retire = () => this.close();
     selection.signal?.addEventListener('abort', retire, { once: true });
+    let sent = false;
     try {
       current();
+      sent = true;
       const lines = await session.commandWithLiteral(
         `APPEND ${formatMailboxName(mailbox)} (\\Draft)`, message,
         { signal: selection.signal, assertCurrent: current },
       );
       current();
       return { uid: parseAppendUid(lines), uidValidity: parseAppendUidValidity(lines), mailbox };
-    } catch {
-      // Once APPEND starts the server may be waiting for literal bytes. Never
-      // reuse that transport or expose its potentially private failure text.
+    } catch (error) {
+      if (!sent) {
+        throw new Error('The draft was not saved: the save was cancelled before it was sent to the mail server.');
+      }
+      // A tagged NO or BAD to APPEND means the server stored nothing (RFC 3501),
+      // and the command completed, so the connection is still in step.
+      const refusal = error instanceof Error ? /^IMAP command failed: (.*)$/s.exec(error.message)?.[1] : undefined;
+      if (refusal !== undefined) throw new Error(`The draft was not saved: ${draftRefusalCause(refusal, mailbox)}.`);
+      // Otherwise the server may be waiting for literal bytes or may have stored
+      // the draft. Never reuse that transport or expose its failure text.
       this.close();
       throw new DraftAppendUnconfirmedError();
     } finally { selection.signal?.removeEventListener('abort', retire); }
@@ -691,8 +723,11 @@ export class ImapClient {
    * folder, then the draft it replaces (by UID, in the folder generation it
    * was listed under) is removed, so the folder holds one copy. Everything
    * that can refuse (folder reset, draft gone, no single-message removal) is
-   * checked before anything is written. When the old copy cannot be removed
-   * after the new one was saved, the error says both copies are there.
+   * checked before anything is written. With `lookFirst`, the edited draft is
+   * looked up under its Message-ID in the selected folder first (one UID
+   * SEARCH), and used instead of a second APPEND when it is there. When the old
+   * copy cannot be removed after the new one was saved, the error says both
+   * copies are there.
    */
   async replaceDraft(input: ImapReplaceDraftInput): Promise<ImapAppendDraftResult & { readonly replaced: number }> {
     input = { ...input };
@@ -705,7 +740,15 @@ export class ImapClient {
     const mailbox = selection.value;
     await prepareDraftReplacement(session, mailbox, input.uid, input.uidValidity, capabilities);
     current();
-    const appended = await this.appendDraft({ ...input, mailbox });
+    // After a replacement whose save got no answer, the edited draft may already
+    // be in the folder under its Message-ID: found there, it is not saved again.
+    const found = input.lookFirst === true && input.messageId !== undefined
+      ? await findSelectedDraftByMessageId(session, input.messageId, input.uid)
+      : null;
+    current();
+    const appended = found !== null
+      ? { uid: found, uidValidity: input.uidValidity, mailbox }
+      : await this.appendDraft({ ...input, mailbox });
     try {
       current();
       await removeReplacedDraft(session, input.uid);
@@ -781,9 +824,18 @@ export class ImapClient {
     return applyImapMessageAction(this.requireReadableMailbox(), this.mailbox, uid, uidValidity, action, capabilities);
   }
 
-  /** One attachment's bytes, by its position in the message's attachment list; null when the message is gone. */
-  async fetchAttachment(uid: number, index: number): Promise<ImapAttachmentContent | null> {
-    return fetchImapAttachment(this.requireReadableMailbox(), uid, index);
+  /**
+   * One attachment's bytes, by its position in the message's attachment list;
+   * null when the message is gone. `uidValidity` is the mailbox generation the
+   * message was listed under; when the mailbox EXAMINEd at open reports another,
+   * nothing is fetched.
+   */
+  async fetchAttachment(uid: number, index: number, uidValidity: number): Promise<ImapAttachmentContent | null> {
+    const session = this.requireReadableMailbox();
+    if (this.status?.uidValidity !== uidValidity) {
+      throw new Error('The mailbox was reset since this message was listed, so nothing was downloaded. Refresh the list and try again.');
+    }
+    return fetchImapAttachment(session, uid, index);
   }
 
   /** A draft saved under `messageId` in the Drafts folder (discovered as `appendDraft` does), or null when none is there. */

@@ -210,7 +210,13 @@ export class WorkPlanRows {
     return typeof row?.data_version === 'number' ? row.data_version : -1;
   }
 
-  #startWatching(): void {
+  /**
+   * Watch the -wal file, or the directory when that cannot be watched (or
+   * `directory` asks for it). A failed -wal watch is replaced once by the
+   * directory watch, which survives the -wal file being replaced; a failed
+   * directory watch is logged and not re-armed.
+   */
+  #startWatching(directory = false): void {
     if (this.#watcher || this.path === ':memory:') return;
     this.#open();
     const wal = `${this.path}-wal`;
@@ -221,21 +227,29 @@ export class WorkPlanRows {
       this.#settleTimer = setTimeout(() => { this.#settleTimer = null; this.#schedule(false); }, WAL_BURST_SETTLE_MS);
       this.#settleTimer.unref?.();
     };
-    try {
-      // In WAL mode every commit appends to the -wal file while any program holds the file open, as this one does.
-      this.#watcher = watch(wal, { persistent: false }, onChange);
-    } catch {
-      try {
-        this.#watcher = watch(dirname(this.path), { persistent: false }, (_event, name) => {
-          if (name === basename(this.path) || name === basename(wal)) onChange();
-        });
-      } catch (error) {
+    const watchDirectory = (): FSWatcher => watch(dirname(this.path), { persistent: false }, (_event, name) => {
+      if (name === basename(this.path) || name === basename(wal)) onChange();
+    });
+    let watchingDirectory = directory;
+    let watcher: FSWatcher | undefined;
+    // In WAL mode every commit appends to the -wal file while any program holds the file open, as this one does.
+    if (!directory) {
+      try { watcher = watch(wal, { persistent: false }, onChange); } catch { watchingDirectory = true; }
+    }
+    if (watcher === undefined) {
+      try { watcher = watchDirectory(); } catch (error) {
         // Without a watch, a surface still compares the plan's revision when it draws.
-        logger.debug('Work plan file is not watched for other programs\' edits', { path: this.path, error: summarizeError(error) });
+        logger.warn('Work plan file is not watched, so other programs\' edits to it are not announced', { path: this.path, error: summarizeError(error) });
         return;
       }
     }
-    this.#watcher.on('error', () => this.#stopWatching());
+    this.#watcher = watcher;
+    watcher.on('error', (error: unknown) => {
+      if (this.#watcher !== watcher) return;
+      logger.warn('The watch on the work plan file failed', { path: this.path, directory: watchingDirectory, error: summarizeError(error) });
+      this.#stopWatching();
+      if (!watchingDirectory && this.#listeners.size > 0) this.#startWatching(true);
+    });
   }
 
   /** Once per event-loop turn: confirm another program committed (unless a commit here is known), then call the listeners. */

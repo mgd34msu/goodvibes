@@ -166,6 +166,20 @@ export interface TokenAuditorConfig {
    * DEFAULT_ROTATION_WARNING_THRESHOLD_MS when unset.
    */
   defaultRotationWarningThresholdMs?: number | undefined;
+  /**
+   * The live settings, read on every audit, block check and managed read in
+   * place of `managed`, `defaultRotationCadenceMs` and
+   * `defaultRotationWarningThresholdMs`, so a settings change applies at once
+   * (the pairing store reads the same settings at each authentication).
+   */
+  read?: (() => TokenAuditorLiveSettings) | undefined;
+}
+
+/** The settings an auditor with a live reader takes on each call. */
+export interface TokenAuditorLiveSettings {
+  readonly managed: boolean;
+  readonly defaultRotationCadenceMs?: number | undefined;
+  readonly defaultRotationWarningThresholdMs?: number | undefined;
 }
 
 /**
@@ -223,6 +237,11 @@ export class ApiTokenAuditor {
 
   private _managedBlockingEnabled(): boolean {
     return isFeatureGateEnabled(this._config.featureFlags, 'token-scope-rotation-audit');
+  }
+
+  /** The settings in effect now: the live reader's when given, else the ones built with. */
+  private _settings(): TokenAuditorLiveSettings {
+    return this._config.read?.() ?? this._config;
   }
 
   // -------------------------------------------------------------------------
@@ -316,12 +335,13 @@ export class ApiTokenAuditor {
     token: ApiTokenMetadata,
     policy: TokenScopePolicy,
     now: number,
+    settings: TokenAuditorLiveSettings = this._settings(),
   ): TokenRotationAuditResult {
     const cadenceMs =
-      policy.rotationCadenceMs ?? this._config.defaultRotationCadenceMs ?? DEFAULT_ROTATION_CADENCE_MS;
+      policy.rotationCadenceMs ?? settings.defaultRotationCadenceMs ?? DEFAULT_ROTATION_CADENCE_MS;
     const warningThresholdMs =
       policy.rotationWarningThresholdMs
-      ?? this._config.defaultRotationWarningThresholdMs
+      ?? settings.defaultRotationWarningThresholdMs
       ?? DEFAULT_ROTATION_WARNING_THRESHOLD_MS;
 
     const ageMs = now - token.issuedAt;
@@ -371,20 +391,22 @@ export class ApiTokenAuditor {
     const scopeViolations: string[] = [];
     const rotationWarnings: string[] = [];
     const rotationOverdue: string[] = [];
+    const settings = this._settings();
+    const managedBlocking = settings.managed && this._managedBlockingEnabled();
 
     for (const [tokenId, metadata] of this._tokens) {
       const policy = this._policies.get(metadata.policyId);
       if (!policy) continue;
 
       const scope = this._auditScopeFor(metadata, policy);
-      const rotation = this._auditRotationFor(metadata, policy, now);
+      const rotation = this._auditRotationFor(metadata, policy, now, settings);
 
       const hasViolation = scope.outcome === 'violation';
       const isOverdue = rotation.outcome === 'overdue';
       const isWarning = rotation.outcome === 'warning';
 
       // In managed mode: block tokens with scope violations or overdue rotation
-      const isBlocked = this._config.managed && this._managedBlockingEnabled() && (hasViolation || isOverdue);
+      const isBlocked = managedBlocking && (hasViolation || isOverdue);
 
       results.push({ tokenId, label: metadata.label, scope, rotation, blocked: isBlocked });
       if (hasViolation) scopeViolations.push(tokenId);
@@ -470,7 +492,7 @@ export class ApiTokenAuditor {
    * Returns false when not in managed mode or when the token is not registered.
    */
   isBlocked(tokenId: string, now: number = Date.now()): boolean {
-    if (!this._config.managed || !this._managedBlockingEnabled()) return false;
+    if (!this._settings().managed || !this._managedBlockingEnabled()) return false;
     const scope = this.auditScope(tokenId);
     if (!scope) return false;
     const rotation = this.auditRotation(tokenId, now);
@@ -484,7 +506,7 @@ export class ApiTokenAuditor {
 
   /** Whether managed mode is active. */
   get isManaged(): boolean {
-    return this._config.managed;
+    return this._settings().managed;
   }
 
   /** Number of registered tokens. */

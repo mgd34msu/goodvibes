@@ -59,31 +59,41 @@ export function useAskActions(approvals: ApprovalActions) {
     onSettled: () => { void queryClient.invalidateQueries({ queryKey: queryKeys.ownerInbox }); },
   });
 
-  /** Carry out `choice` on `ask`, with what the person added (a reason, a tier, the hunks kept). */
-  function choose(ask: OpenAsk, choice: AskChoice, input: ChoiceInput = {}): void {
-    const record = ask.approval;
-    if (record) {
-      const revision = record.revision;
-      if (choice.id === 'no') {
-        approvals.deny.mutate({ id: record.id, expectedRevision: revision, ...(input.text?.trim() ? { reason: input.text.trim() } : {}) });
-        return;
+  /**
+   * Carry out `choice` on `ask`, with what the person added (a reason, a tier, the hunks kept).
+   * Resolves true only when the daemon answered that it applied the choice; a refusal or a
+   * failed send resolves false (the mutation's toast has already said which).
+   */
+  async function choose(ask: OpenAsk, choice: AskChoice, input: ChoiceInput = {}): Promise<boolean> {
+    try {
+      const record = ask.approval;
+      if (record) {
+        const revision = record.revision;
+        if (choice.id === 'no') {
+          const result = await approvals.deny.mutateAsync({ id: record.id, expectedRevision: revision, ...(input.text?.trim() ? { reason: input.text.trim() } : {}) });
+          return result.applied === true;
+        }
+        const result = await approvals.approve.mutateAsync({
+          id: record.id,
+          expectedRevision: revision,
+          ...(choice.id === 'remember' && input.rememberTier ? { rememberTier: input.rememberTier } : {}),
+          ...(input.selectedHunks ? { selectedHunks: input.selectedHunks } : {}),
+          ...(input.totalHunks !== undefined ? { totalHunks: input.totalHunks } : {}),
+          ...(input.answer !== undefined ? { answer: input.answer } : {}),
+        });
+        return result.applied === true;
       }
-      approvals.approve.mutate({
-        id: record.id,
-        expectedRevision: revision,
-        ...(choice.id === 'remember' && input.rememberTier ? { rememberTier: input.rememberTier } : {}),
-        ...(input.selectedHunks ? { selectedHunks: input.selectedHunks } : {}),
-        ...(input.totalHunks !== undefined ? { totalHunks: input.totalHunks } : {}),
-        ...(input.answer !== undefined ? { answer: input.answer } : {}),
-      });
-      return;
+      if (!ask.item) return false;
+      if (choice.id === 'own-words') {
+        if (!input.text?.trim()) return false;
+        return (await inbox.mutateAsync({ itemId: ask.item.id, text: input.text.trim() })).applied;
+      }
+      const outcome = await inbox.mutateAsync({ itemId: ask.item.id, ...(choice.value !== undefined ? { option: choice.value } : { option: choice.label }), ...(input.text?.trim() ? { text: input.text.trim() } : {}) });
+      return outcome.applied;
+    } catch {
+      // The mutation's onError has already told the person; nothing is recorded as decided here.
+      return false;
     }
-    if (!ask.item) return;
-    if (choice.id === 'own-words') {
-      if (input.text?.trim()) inbox.mutate({ itemId: ask.item.id, text: input.text.trim() });
-      return;
-    }
-    inbox.mutate({ itemId: ask.item.id, ...(choice.value !== undefined ? { option: choice.value } : { option: choice.label }), ...(input.text?.trim() ? { text: input.text.trim() } : {}) });
   }
 
   const busy = approvals.approve.isPending || approvals.deny.isPending || approvals.claim.isPending || approvals.cancel.isPending || inbox.isPending;

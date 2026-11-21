@@ -83,7 +83,14 @@ export function wireRuntimePower(input: RuntimePowerWiringInput): PowerManager {
     onSleep: input.sleepCheckpoint,
     onWake: input.wakeCatchUp
       ? async () => {
-        for (const hook of input.wakeCatchUp!) await hook();
+        // Each step runs on its own: one that fails does not skip the ones after it.
+        for (const [step, hook] of input.wakeCatchUp!.entries()) {
+          try {
+            await hook();
+          } catch (error: unknown) {
+            logger.warn('[power] wake catch-up step failed', { step, error: summarizeError(error) });
+          }
+        }
       }
       : undefined,
   };

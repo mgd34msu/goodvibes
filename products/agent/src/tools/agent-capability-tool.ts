@@ -221,7 +221,7 @@ export function createAgentCapabilityTool(options: AgentCapabilityToolOptions): 
         workingDirectory: requireShellPaths(options.commandContext).workingDirectory,
         configValuePresent: (key) => configValueIsPresent(options.configManager, key),
         secretPresent: (key) => secretValueIsPresent(options.secretsManager, key),
-        mcpServers: safeMcpServerPosture(options.commandContext),
+        mcpServers: () => safeMcpServerPosture(options.commandContext),
         servedOperatorMethodIds: servedOperatorMethodIds(),
       }),
       { homeDirectory: requireShellPaths(options.commandContext).homeDirectory },

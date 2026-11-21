@@ -275,6 +275,14 @@ export function countWorkPlanTasksInSpace(db: Db, spaceId: string): { readonly w
   return { workPlans: Number(row?.[0] ?? 0), tasks: Number(row?.[1] ?? 0) };
 }
 
+/** Live tasks per plan in one space, keyed by work plan id (plans with none are absent). */
+export function countWorkPlanTasksByPlanInSpace(db: Db, spaceId: string): ReadonlyMap<string, number> {
+  const rows = db.exec('SELECT work_plan_id, COUNT(*) FROM project_work_plan_tasks WHERE space_id = ? AND task_json IS NOT NULL GROUP BY work_plan_id', [spaceId])[0]?.values ?? [];
+  const counts = new Map<string, number>();
+  for (const row of rows) if (typeof row[0] === 'string') counts.set(row[0], Number(row[1] ?? 0));
+  return counts;
+}
+
 export function deleteWorkPlanTasksInSpace(db: Pick<SqlDatabase, 'run'>, spaceId: string): void {
   db.run('DELETE FROM project_work_plan_tasks WHERE space_id = ?', [spaceId]);
 }

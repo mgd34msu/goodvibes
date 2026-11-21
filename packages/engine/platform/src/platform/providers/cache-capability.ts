@@ -82,24 +82,6 @@ const PROVIDER_CACHE_CAPABILITIES = {
     type: 'automatic',
     readDiscount: 0.5,
   },
-  // Local runtimes
-  ollama: {
-    type: 'implicit',
-    keepAliveParam: 'keep_alive',
-    defaultKeepAliveSeconds: -1, // -1 = keep loaded indefinitely
-  },
-  lmstudio: {
-    type: 'implicit',
-  },
-  vllm: {
-    type: 'implicit', // Automatic prefix caching in GPU memory
-  },
-  'llama.cpp': {
-    type: 'implicit',
-  },
-  sglang: {
-    type: 'implicit', // RadixAttention, best automatic local caching
-  },
   // No caching
   mistral: {
     type: 'none',
@@ -107,10 +89,42 @@ const PROVIDER_CACHE_CAPABILITIES = {
 } as const satisfies Record<string, ProviderCacheCapability>;
 
 /**
+ * Local runtimes, keyed by the server type discovery found (`ServerType`), not
+ * by the name the server is registered under: a discovered server's name is a
+ * display name ('LM Studio', 'Ollama (192.168.1.5)') that no table row matches.
+ */
+const LOCAL_SERVER_CACHE_CAPABILITIES = {
+  ollama: {
+    type: 'implicit',
+    keepAliveParam: 'keep_alive',
+    defaultKeepAliveSeconds: -1, // -1 = keep loaded indefinitely
+  },
+  'lm-studio': {
+    type: 'implicit',
+  },
+  vllm: {
+    type: 'implicit', // Automatic prefix caching in GPU memory
+  },
+  llamacpp: {
+    type: 'implicit',
+  },
+  sglang: {
+    type: 'implicit', // RadixAttention, best automatic local caching
+  },
+} as const satisfies Record<string, ProviderCacheCapability>;
+
+/** The cache capability of a discovered local server of `serverType`; none for a server type without a row. */
+export function getLocalServerCacheCapability(serverType: string): ProviderCacheCapability {
+  const key = serverType as keyof typeof LOCAL_SERVER_CACHE_CAPABILITIES;
+  return Object.hasOwn(LOCAL_SERVER_CACHE_CAPABILITIES, key) ? LOCAL_SERVER_CACHE_CAPABILITIES[key] : { type: 'none' };
+}
+
+/**
  * Get the cache capability for a provider.
  *
  * The provider's own row when the table has one; every other provider has no
- * caching. A provider on the Anthropic-compatible or SDK adapters is
+ * caching. A discovered local server carries its own capability from
+ * `getLocalServerCacheCapability`. A provider on the Anthropic-compatible or SDK adapters is
  * deliberately not given the Anthropic row: those adapters send no
  * `cache_control` blocks, so claiming explicit caching for them would be false.
  */

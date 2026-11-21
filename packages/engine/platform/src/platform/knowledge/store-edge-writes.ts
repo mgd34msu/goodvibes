@@ -9,7 +9,10 @@ export function guardKnowledgeEdgeInput(input: KnowledgeEdgeUpsertInput, assertC
   guardedEdgeInputs.set(input, assertCurrent); return input;
 }
 
-export function findKnowledgeEdge(edges: ReadonlyMap<string, KnowledgeEdgeRecord>, input: KnowledgeEdgeUpsertInput): KnowledgeEdgeRecord | undefined {
+export function findKnowledgeEdge(
+  edges: ReadonlyMap<string, KnowledgeEdgeRecord>,
+  input: Pick<KnowledgeEdgeUpsertInput, 'fromKind' | 'fromId' | 'toKind' | 'toId' | 'relation'>,
+): KnowledgeEdgeRecord | undefined {
     return lookupRecord(edges, edgeEndpointKey(input), (edge) => (
       edge.fromKind === input.fromKind
       && edge.fromId === input.fromId

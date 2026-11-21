@@ -278,13 +278,17 @@ export function registerRoutingMethods(ctx: HandlerContext): RoutingRegistration
     const explicitChannelId = optionalString(body.channelId);
     const surfaceKind = optionalString(body.surfaceKind);
     const routeId = optionalString(body.routeId);
-    const channelId = explicitChannelId ?? (
+    const requestedChannelId = explicitChannelId ?? (
       surfaceKind !== undefined ? buildChannelId(surfaceKind, routeId) : undefined
     );
-    if (channelId === undefined) {
+    if (requestedChannelId === undefined) {
       throw new GatewayVerbError('surfaceKind (or channelId) is required', 'ROUTING_INVALID_CHANNEL_ID', 400);
     }
-    assertAssignableChannel(channelId, surfaceKind, routeId);
+    assertAssignableChannel(requestedChannelId, surfaceKind, routeId);
+    // The one spelling the store keeps (`slack: C123` and `slack:C123` are one
+    // channel), so the row read here is the row the write compares against.
+    const parsedChannel = parseChannelId(requestedChannelId);
+    const channelId = buildChannelId(parsedChannel.surfaceKind, parsedChannel.routeId);
     const label = optionalString(body.label);
     const input = {
       channelId,

@@ -113,23 +113,28 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
     const selectedHunks = choice.id === 'apply-selected' && hunks ? [...selected].sort((a, b) => a - b) : undefined;
     if (selectedHunks && selectedHunks.length === 0) return;
     const answer = p.kind === 'answer-command-prompt' && choice.id === 'once' ? execAnswer : undefined;
-    actions.choose(ask, choice, {
+    const reason = extra.text?.trim();
+    // The collapsed line is recorded only once the daemon says it applied the choice; on a
+    // refusal or a failed send the step and the typed text stay so the person can send again.
+    void actions.choose(ask, choice, {
       ...(extra.text !== undefined ? { text: extra.text } : {}),
       ...(extra.rememberTier ? { rememberTier: extra.rememberTier } : {}),
       ...(selectedHunks ? { selectedHunks, totalHunks: hunks?.length } : {}),
       ...(answer !== undefined ? { answer } : {}),
+    }).then((applied) => {
+      if (!applied) return;
+      decided(
+        choice.id === 'once' && p.kind === 'answer-command-prompt' ? 'You sent the answer'
+          : choice.id === 'once' && record ? 'You said yes once'
+            : choice.id === 'remember' ? 'You said yes and not to ask again'
+              : choice.id === 'apply-selected' ? `You applied ${selectedHunks?.length ?? 0} of ${hunks?.length ?? 0} changes`
+                : choice.id === 'no' && record ? `You said no${reason ? `: ${reason}` : ''}`
+                  : choice.id === 'own-words' ? `Answered: ${reason ?? ''}`
+                    : `Answered: ${choice.label}`,
+      );
+      setMode({ step: 'choose' });
+      setText('');
     });
-    const reason = extra.text?.trim();
-    decided(
-      choice.id === 'once' && p.kind === 'answer-command-prompt' ? 'You sent the answer'
-        : choice.id === 'once' && record ? 'You said yes once'
-          : choice.id === 'remember' ? 'You said yes and not to ask again'
-            : choice.id === 'apply-selected' ? `You applied ${selectedHunks?.length ?? 0} of ${hunks?.length ?? 0} changes`
-              : choice.id === 'no' && record ? `You said no${reason ? `: ${reason}` : ''}`
-                : choice.id === 'own-words' ? `Answered: ${reason ?? ''}`
-                  : `Answered: ${choice.label}`,
-    );
-    setMode({ step: 'choose' });
   };
 
   const primary = p.choices.find((choice) => choice.default) ?? p.choices[0];
@@ -197,7 +202,6 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
         event.preventDefault();
         if (mode.step === 'own-words' && !text.trim()) return;
         run(mode.choice, { text });
-        setText('');
       }}
     >
       <Input

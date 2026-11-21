@@ -5,6 +5,9 @@ import { buildHomeGraphMetadata } from './helpers.js';
 import { readHomeGraphState } from './state.js';
 import type { HomeGraphExport } from './types.js';
 import { assertKnowledgeImportRecordSizes } from '../store-import.js';
+import { GoodVibesError } from '@goodvibes/engine/errors';
+import { getKnowledgeSpaceId, type KnowledgeSpaceBackedRecord } from '../spaces.js';
+import { homeGraphIdentitySpace } from '../store-homegraph-node-selector.js';
 
 /** Records per import publication. */
 const IMPORT_BATCH_SIZE = 200;
@@ -45,6 +48,46 @@ export class HomeGraphImportIncompleteError extends Error {
   }
 }
 
+/**
+ * Refuses an import, before anything is written, when one of its records (by
+ * id; a source by canonical URI when it has no id, an extraction also by its
+ * source, an edge by its endpoints and relation) is already stored in another
+ * knowledge space. The refusal names the first such record, the space that
+ * owns it and the space the file was exported from.
+ */
+function assertHomeGraphImportOwnership(store: KnowledgeStore, spaceId: string, data: HomeGraphExport): void {
+  const target = homeGraphIdentitySpace(spaceId);
+  const check = (kind: string, id: string, existing: KnowledgeSpaceBackedRecord | null | undefined): void => {
+    if (!existing) return;
+    const owner = homeGraphIdentitySpace(getKnowledgeSpaceId(existing));
+    if (owner === target) return;
+    const from = typeof data.spaceId === 'string' && data.spaceId.trim() ? data.spaceId : 'an unnamed space';
+    throw new GoodVibesError(
+      `Home Graph import refused: ${kind} ${id} already belongs to knowledge space ${owner}, not ${target}. `
+        + `The file was exported from ${from}. Nothing was imported.`,
+      {
+        category: 'bad_request', source: 'runtime', operation: 'homegraph.import', recoverable: true,
+        next: ['Import the file into the space it came from, or reset that space first.'],
+      },
+    );
+  };
+  for (const source of data.sources ?? []) {
+    if (typeof source.id === 'string' && source.id) check('source', source.id, store.getSource(source.id));
+    else if (typeof source.canonicalUri === 'string' && source.canonicalUri) {
+      check('source', source.canonicalUri, store.getSourceByCanonicalUri(source.canonicalUri));
+    }
+  }
+  for (const extraction of data.extractions ?? []) {
+    check('extraction', extraction.id, store.getExtraction(extraction.id));
+    check('extraction for source', extraction.sourceId, store.getExtractionBySourceId(extraction.sourceId));
+  }
+  for (const node of data.nodes ?? []) check('node', node.id, store.getNode(node.id));
+  for (const edge of data.edges ?? []) {
+    check('edge', edge.id, store.findEdge(edge));
+  }
+  for (const issue of data.issues ?? []) check('issue', issue.id, store.getIssue(issue.id));
+}
+
 export function exportHomeGraphSpace(
   store: KnowledgeStore,
   input: { readonly spaceId: string; readonly installationId: string },
@@ -77,6 +120,8 @@ export async function importHomeGraphSpace(
   const extractionInputs = (input.data.extractions ?? []).map((extraction) => ({ ...extraction, metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, extraction.metadata) }));
   const nodeInputs = (input.data.nodes ?? []).map((node) => ({ ...node, metadata: buildHomeGraphMetadata(input.spaceId, input.installationId, node.metadata) }));
   await store.init();
+  // A record that already belongs to another space is never rewritten into this one.
+  assertHomeGraphImportOwnership(store, input.spaceId, input.data);
   const sourceById = new Map(sourceInputs.map((source) => [source.id, source]));
   const extractionBySourceId = new Map(extractionInputs.map((extraction) => [extraction.sourceId, extraction]));
   const nodesById = new Map(nodeInputs.map((node) => [node.id, node]));

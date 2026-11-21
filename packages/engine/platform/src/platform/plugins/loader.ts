@@ -295,10 +295,10 @@ export async function loadPlugin(
     return fail(`entry file not found: ${entryPath}`);
   }
 
-  // A plugin installed from a pinned bundle registers only what its receipt grants.
+  // A plugin installed from a pinned bundle registers only what its recorded grant allows.
   const bundle = readInstalledBundleGuard(pluginDir);
   if (bundle.kind === 'unreadable') {
-    return fail(`not loaded: ${bundle.reason}, so what it is allowed to register is unknown; reinstall it to write the receipt again`, 'error');
+    return fail(`not loaded: ${bundle.reason}, so what it is allowed to register is unknown; reinstall it to record its grant again`, 'error');
   }
 
   // The tier is read at every start, so a change of trust applies at the next one.

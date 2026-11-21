@@ -35,3 +35,13 @@ export const EMAIL_ITEM_ID = defineFormat<EmailItemAddress>({
 export function emailItemId(scope: string, generation: number, uid: number): string {
   return EMAIL_ITEM_ID.render({ scope, generation, uid }) as string;
 }
+
+/** The row id of one owner-mail message read through the Gmail API: `email:<scope>:gmail:<resource id>`. */
+export function gmailEmailItemId(scope: string, resourceId: string): string {
+  return `${EMAIL_OWNER_PROVIDER_ID}:${scope}:gmail:${resourceId}`;
+}
+
+/** True for a row id written by {@link gmailEmailItemId}. */
+export function isGmailEmailItemId(id: string): boolean {
+  return id.startsWith(`${EMAIL_OWNER_PROVIDER_ID}:`) && id.includes(':gmail:');
+}

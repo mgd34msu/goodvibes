@@ -70,6 +70,30 @@ function summarize(grants: DeviceGrantSweepReport, artifacts: DeviceArtifactSwee
 }
 
 /**
+ * A sweep whose capture half could not run: the grant half ran and both are
+ * disclosed under `summary`. Kept apart from a grant-sweep failure because
+ * the two weigh differently at start (see `isCaptureSweepFailure`).
+ */
+class CaptureSweepFailure extends Error {
+  readonly summary: string;
+
+  constructor(summary: string, cause: unknown) {
+    super(summary, { cause });
+    this.name = 'CaptureSweepFailure';
+    this.summary = summary;
+  }
+}
+
+/**
+ * The disclosure summary when `error` is a sweep whose capture half failed
+ * after its grant half ran, else null. A capture that could not be checked
+ * serves nothing stale; a grant that could not be checked might be honoured.
+ */
+export function captureSweepFailureSummary(error: unknown): string | null {
+  return error instanceof CaptureSweepFailure ? error.summary : null;
+}
+
+/**
  * Sweeps both device stores and records the disclosure. Construct once at
  * startup, call `runRecoverySweep()` before serving any capability request, and
  * `start()` to keep sweeping on a timer.
@@ -153,7 +177,7 @@ export class DeviceHousekeeper {
     this.lastReport = report;
     await this.appendDisclosure(report, () => this.observeRecoveryStage(trigger, 'disclosure-read'),
       () => this.observeRecoveryStage(trigger, 'disclosure-persist'));
-    if (captureFailure !== undefined) throw captureFailure;
+    if (captureFailure !== undefined) throw new CaptureSweepFailure(report.summary, captureFailure);
     return report;
   }
 

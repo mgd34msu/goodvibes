@@ -28,10 +28,10 @@ export type DomainVerbosity = 'minimal' | 'normal' | 'verbose';
  * These codes appear in RoutingDecision.reasonCode and provide a machine-
  * readable explanation of why a notification was suppressed or redirected.
  *
- * - `allowed`               , notification was not suppressed (delivered normally)
+ * - `allowed`               , shown as its level and domain verbosity allow
  * - `quiet_while_typing`    , suppressed because the user is actively typing
  * - `batch_window_collapsed`, one more of the same notification inside its collapse window, past the number shown
- * - `domain_verbosity_low`  , domain verbosity set below the notification level
+ * - `domain_verbosity_low`  , kept in the history only because the domain verbosity is below its level
  */
 export type RoutingReasonCode =
   | 'allowed'

@@ -191,12 +191,13 @@ export class ObservedAgentSource {
     return classified;
   }
 
-  private panesFor(processes: readonly ObservedRawProcess[], listPanes: () => readonly TmuxPaneRow[]): readonly ClassifiedObservedProcess[] {
+  // A pane read that failed answers undefined: the cache stands and the unseen terminals stay unseen, so the next scan reads again.
+  private panesFor(processes: readonly ObservedRawProcess[], listPanes: () => readonly TmuxPaneRow[] | undefined): readonly ClassifiedObservedProcess[] {
     const { classified, unseen } = this.unseenTtys(processes);
     return this.rememberPanes(classified, unseen ? listPanes() : undefined);
   }
 
-  private async panesForAsync(processes: readonly ObservedRawProcess[], listPanes: () => Promise<readonly TmuxPaneRow[]>): Promise<readonly ClassifiedObservedProcess[]> {
+  private async panesForAsync(processes: readonly ObservedRawProcess[], listPanes: () => Promise<readonly TmuxPaneRow[] | undefined>): Promise<readonly ClassifiedObservedProcess[]> {
     const { classified, unseen } = this.unseenTtys(processes);
     return this.rememberPanes(classified, unseen ? await listPanes() : undefined);
   }
@@ -210,14 +211,17 @@ export class ObservedAgentSource {
       const firstSighting = prior === undefined;
       const state: 'active' | 'quiet' = !firstSighting && proc.cpuSeconds > prior ? 'active' : 'quiet';
       this.cpuByPid.set(proc.pid, proc.cpuSeconds);
-      const pane = proc.tty ? this.paneByTty.get(proc.tty) ?? undefined : undefined;
+      const pane = proc.tty ? this.paneByTty.get(proc.tty) : undefined;
       const steer: ObservedSteerChannel = pane
         ? { kind: 'tmux', paneId: pane.paneId, tty: pane.tty }
         : {
             kind: 'none',
-            reason: proc.tty
-              ? `no tmux pane maps to this session's terminal (${proc.tty})`
-              : 'the session has no controlling terminal to steer through',
+            reason: !proc.tty
+              ? 'the session has no controlling terminal to steer through'
+              // No entry: the pane list has not been read for this terminal yet (the last read failed).
+              : pane === undefined
+                ? 'the tmux pane list could not be read; it is read again on the next scan'
+                : `no tmux pane maps to this session's terminal (${proc.tty})`,
           };
       rows.push({
         externalKind: proc.externalKind,
@@ -262,7 +266,11 @@ export class ObservedAgentSource {
     if (!current || current.externalKind !== row.externalKind || (row.startedAt !== undefined && current.startedAt !== row.startedAt)) {
       return { queued: false, reason: `nothing was sent: the observed session (pid ${row.pid}) is no longer running` };
     }
-    if (paneForTty(this.paneReader.listPanes(), current.tty)?.paneId !== pane) {
+    const panes = this.paneReader.listPanes();
+    if (panes === undefined) {
+      return { queued: false, reason: 'nothing was sent: the tmux pane list could not be read' };
+    }
+    if (paneForTty(panes, current.tty)?.paneId !== pane) {
       return { queued: false, reason: `nothing was sent: the session (pid ${row.pid}) is no longer on tmux pane ${pane}` };
     }
     const sends: readonly { readonly step: SteerStep; readonly args: readonly string[] }[] = [

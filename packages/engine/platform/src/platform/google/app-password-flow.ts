@@ -23,7 +23,7 @@ import { withGoogleDecisionWork } from './decision-work.js';
  */
 
 import { APP_PASSWORD_LABEL, APP_PASSWORD_URL, TWO_STEP_URL } from './setup-plan.js';
-import { captureGooglePage, describeElements, findElement, looksLikeGoogleSignIn, readGoogleAppPasswordState, readTextUntil, requireElement } from './browser-elements.js';
+import { captureGooglePage, describeElements, findElement, looksLikeGoogleSignIn, readGoogleAppPasswordState, readTextAfterSettle, requireElement } from './browser-elements.js';
 import { consumeGoogleElement } from './browser-elements.js';
 import { ownGoogleBrowser } from './browser-readings.js';
 import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
@@ -174,7 +174,7 @@ export async function createAppPassword(
     const textBeforeCreate = wordsOnPage(await browser.readText());
     await consumeGoogleElement(browser, createButtonLookup.element);
 
-    const passwordText = await readTextUntil(browser, (text) => extractPassword(text, textBeforeCreate), { signal: options.signal });
+    const passwordText = await readTextAfterSettle(browser, (text) => extractPassword(text, textBeforeCreate), { signal: options.signal });
 
     if (!passwordText) {
       elements = await browser.snapshot();
@@ -182,7 +182,7 @@ export async function createAppPassword(
         kind: 'failed',
         reason: 'result-dialog-not-found',
         problem: `Clicked "Create" but no 16-character app password could be read back afterward. The page showed ${describeElements(elements)}.`,
-        fix: `Open ${pageUrl} by hand, check whether an app password named "${label}" was created, and store it manually if so.`,
+        fix: `Open ${pageUrl} by hand. If an app password named "${label}" is listed, it was created but its value is shown only once and cannot be recovered: delete it there, then run this step again.`,
       };
     }
 

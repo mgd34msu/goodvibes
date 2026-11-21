@@ -278,6 +278,11 @@ export function createRemoteConversationRouter(
   const streamPositions = new Map<string, string>();
   const nativeTurnIds = new Map<string, string>();
   const nativeObservations = new Map<string, { readonly turn: WatchedTurn; readonly outcome: Extract<RemoteTurnOutcome, { routed: true }> }>();
+  const clearObservations = (): void => {
+    streamPositions.clear();
+    nativeTurnIds.clear();
+    nativeObservations.clear();
+  };
   const refuse = (reason: string, chosen = false): RemoteTurnOutcome => ({ routed: false, reason, chosen });
   const stopped = (): RemoteTurnOutcome => ({
     routed: false, chosen: true, cancelled: true,
@@ -293,6 +298,9 @@ export function createRemoteConversationRouter(
     if (turn.finished) return;
     turn.finished = true;
     if (active === turn) active = null;
+    // A turn the host settled is kept only for its identity and resolved
+    // outcome; its renderer and the transcript it wrote into are not needed again.
+    if (turn.settledByHost) turn.renderer = null;
     const close = turn.closeStream;
     turn.closeStream = null;
     try { close?.(); } catch (error) {
@@ -530,12 +538,16 @@ export function createRemoteConversationRouter(
       hostedId = null; hostedConnection = undefined; hostedMode = undefined;
       modeObservation++; modeRequest++;
       if (active) { abandon(active, 'The conversation was cleared before the hosted turn settled. Clearing did not cancel the remote turn.'); }
+      // The transcript these observations rendered into is gone; the native
+      // intake keeps each input's authoritative state.
+      clearObservations();
       if (id) detachQuietly(id);
     },
     dispose: () => {
       disposed = true;
       endRenewal();
       if (active) { abandon(active, 'This surface detached before the hosted turn settled. Detaching does not cancel the remote turn.'); }
+      clearObservations();
     },
   };
 }

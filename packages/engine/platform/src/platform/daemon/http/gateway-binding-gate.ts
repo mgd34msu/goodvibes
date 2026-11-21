@@ -4,7 +4,7 @@ import { missingScopeRefusal } from '@goodvibes/engine/daemon-api/error-response
 import { EngineErrorCodes } from '@goodvibes/engine/errors';
 import { actorHoldsScope, type Actor } from '../http-policy.js';
 import { EFFECTS, admitRules, declaredAccessRules, type EffectAdmission, type EffectRule } from '../../security/effect-authority.js';
-import { declaredRouteDescriptor } from './route-manifest.js';
+import { catalogPathname, declaredRouteDescriptor } from './route-manifest.js';
 import { pairingGrant } from '../../security/http-auth.js';
 
 type GatewayRefusal = { status: number; ok: false; body: Record<string, unknown> };
@@ -155,7 +155,8 @@ interface GatewayBindingGateDeps {
  * Request bodies are left unread; the route that owns the body validates it.
  */
 export function gateGatewayBinding(req: Request, deps: GatewayBindingGateDeps): Response | null {
-  const pathname = new URL(req.url).pathname;
+  // An alias path (the Agent's knowledge routes) is held to the method it serves.
+  const pathname = catalogPathname(new URL(req.url).pathname);
   const descriptor = deps.gatewayMethods.findByHttpBinding(req.method, pathname)
     ?? declaredRouteDescriptor(deps.gatewayMethods, req.method, pathname);
   if (!descriptor || descriptor.access === 'remote-peer') return null;

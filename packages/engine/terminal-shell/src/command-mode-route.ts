@@ -57,6 +57,16 @@ export interface CommandRouteState<Context extends CommandRouteContext> {
   readonly handleEscape: () => void;
 }
 const COMMAND_LINE_CURSOR_KEYS: readonly string[] = ['left', 'right', 'home', 'end'];
+
+/**
+ * What a person reads when a slash command fails: a refusal reads as its reason
+ * and next step, any other error as the command's failure, never as a crash.
+ */
+export function commandFailureMessage(name: string, error: unknown): string {
+  const refused = readRefusal(error);
+  return refused ? formatRefusal(refused) : `Command /${name} failed: ${summarizeError(error)}`;
+}
+
 export function createCommandModeTokenHandler<Context extends CommandRouteContext, State extends CommandRouteState<Context>>(presentation: {
   readonly prepare: (
     context: Context,
@@ -163,10 +173,7 @@ export function createCommandModeTokenHandler<Context extends CommandRouteContex
             }
           })
           .catch((error: unknown) => {
-            // A command that refused threw its refusal; it reads as the reason and the next step, not as a crash.
-            const refused = readRefusal(error);
-            const message = refused ? formatRefusal(refused) : `Command /${name} failed: ${summarizeError(error)}`;
-            state.conversationManager?.log(message, { fg: activeTokens().error });
+            state.conversationManager?.log(commandFailureMessage(name, error), { fg: activeTokens().error });
             state.requestRender();
           });
       } else {

@@ -235,6 +235,8 @@ export class Notifier implements NotificationDeadLetterSource {
   private _resolvedAt: number | undefined;
   /** Set by a failed resolution or send, or a secret change: the next delivery resolves again first. */
   private _stale = false;
+  /** Moves on every settings or secret change, so a resolution that read before a change does not count as current. */
+  private _changeGeneration = 0;
   private stopWatchingSecrets: (() => void) | undefined;
   private readonly _channelListeners = new Set<() => void>();
   private stopWatchingSettings: (() => void) | undefined;
@@ -304,9 +306,18 @@ export class Notifier implements NotificationDeadLetterSource {
       resolveChannels,
       featureFlags: options.featureFlags, metadataOnly: options.metadataOnly, configManager,
     });
-    notifier.stopWatchingSettings = configManager?.onDidChangeIncarnation?.(() => { void notifier.refresh(); });
+    // A settings change resolves the channels again; one landing during a
+    // resolution resolves again once that one is done.
+    notifier.stopWatchingSettings = configManager?.onDidChangeIncarnation?.(() => {
+      notifier._changeGeneration += 1;
+      const inFlight = notifier._resolving;
+      void (inFlight ? inFlight.then(() => notifier.refresh()) : notifier.refresh());
+    });
     // A stored token or webhook changed: the next delivery resolves the channels first.
-    notifier.stopWatchingSecrets = options.secretsManager?.onDidChange?.(() => { notifier._stale = true; });
+    notifier.stopWatchingSecrets = options.secretsManager?.onDidChange?.(() => {
+      notifier._changeGeneration += 1;
+      notifier._stale = true;
+    });
     return notifier;
   }
 
@@ -333,10 +344,13 @@ export class Notifier implements NotificationDeadLetterSource {
   refresh(): Promise<void> {
     const resolve = this.resolveChannels;
     if (!resolve || this._closed) return Promise.resolve();
-    return this._resolving ??= resolve().then((setup) => {
+    if (this._resolving) return this._resolving;
+    const generation = this._changeGeneration;
+    return this._resolving = resolve().then((setup) => {
       if (this._closed) return;
       this._resolvedAt = Date.now();
-      this._stale = false;
+      // A change that landed while this resolution read leaves the channels out of date.
+      this._stale = this._changeGeneration !== generation;
       const before = setupSignature(this.transports, this.gaps);
       this.transports = transportsFor(setup);
       this.gaps = setup.gaps ?? [];

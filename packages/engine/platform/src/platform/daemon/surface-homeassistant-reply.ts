@@ -178,8 +178,11 @@ export async function postHomeAssistantSurfaceChatMessage(
         return { ...session, messageId: input.messageId, ...(finished.response ? { response: finished.response } : {}),
           delivered: !failure, ...(failure ? { error: failure } : {}) };
       }
-      turn.late = (done) => { void publish(done, session); };
-      const publishError = await publish({ timedOut: true }, session);
+      // The late reply is sent only once the "Still working" event went out, so
+      // Home Assistant always sees the running status before the answer.
+      const stillWorking = publish({ timedOut: true }, session);
+      turn.late = (done) => { void stillWorking.then(() => publish(done, session)); };
+      const publishError = await stillWorking;
       // Still running, not failed: the final reply follows as its own event when the turn ends.
       return { ...session, messageId: input.messageId, delivered: !publishError, ...(publishError ? { error: publishError } : {}) };
     }

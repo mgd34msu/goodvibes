@@ -88,6 +88,8 @@ export class RelayCodeStore {
   private codes: Map<string, StoredRelayCode> | null = null;
   private readonly byHash = new Map<string, string>();
   private readonly seen = new Map<string, number>();
+  /** Codes revoked here whose removal from the file has not been saved yet: a revoke of one again retries it. */
+  private readonly removalUnsaved = new Set<string>();
 
   private readonly authority: AuthorityRecordFile | undefined;
 
@@ -164,6 +166,8 @@ export class RelayCodeStore {
         return { ...entry, ...(lastSeenAt !== undefined ? { lastSeenAt } : {}) };
       }),
     });
+    // The file just written lists none of the revoked codes, so every removal is saved.
+    this.removalUnsaved.clear();
   }
 
   private publicView(entry: StoredRelayCode): PublicRelayCode {
@@ -175,8 +179,15 @@ export class RelayCodeStore {
    * Issue a new code for one device. The code is returned here and never again.
    * `deviceTokenId` is the paired device asking for it, when one is: revoking
    * that device revokes this code with it.
+   *
+   * The code's entry on the authority record (its link to that device) is
+   * written and awaited first: when it cannot be written, this throws and
+   * nothing was issued (an unreadable record throws
+   * AuthorityRecordUnavailableError). Then the file is saved; when that
+   * fails, the entry just written is revoked and this throws. A code is
+   * returned only once both hold.
    */
-  mint(name: string | undefined, deviceTokenId?: string): MintedRelayCode {
+  async mint(name: string | undefined, deviceTokenId?: string): Promise<MintedRelayCode> {
     const codes = this.load();
     this.pruneRevokedOnRecord(codes);
     if (codes.size >= MAX_RELAY_CODES) {
@@ -193,23 +204,38 @@ export class RelayCodeStore {
       createdAt,
       hash: hashCode(code),
     };
+    // Held in the map while its record entry is written, so a concurrent mint counts it toward the cap.
     codes.set(stored.id, stored);
     this.byHash.set(stored.hash, stored.id);
-    try {
-      this.persist();
-    } catch (error) {
+    const withdraw = (): void => {
       codes.delete(stored.id);
       this.byHash.delete(stored.hash);
-      throw error;
-    }
+    };
     const authority = this.authority;
     if (authority) {
       const deviceKey: AuthorityKey | null = deviceTokenId ? `device-token:${deviceTokenId}` : null;
-      void authority.write((view) => ({ kind: 'issue', value: null, entries: [{
-        kind: 'relay-route', id: stored.id, audience: { nodeId: view.nodeId },
-        parent: deviceKey && view.entry('device-token', deviceTokenId!) ? deviceKey : null,
-        public: { routeHash: stored.hash, deviceKey, label: stored.name },
-      }] })).catch((error: unknown) => logger.warn('A relay code could not be written to the authority record; revoking its device does not revoke it until it is', { id: stored.id, error: summarizeError(error) }));
+      try {
+        await authority.write((view) => ({ kind: 'issue', value: null, entries: [{
+          kind: 'relay-route', id: stored.id, audience: { nodeId: view.nodeId },
+          parent: deviceKey && view.entry('device-token', deviceTokenId!) ? deviceKey : null,
+          public: { routeHash: stored.hash, deviceKey, label: stored.name },
+        }] }));
+      } catch (error) {
+        withdraw();
+        throw error;
+      }
+    }
+    try {
+      this.persist();
+    } catch (error) {
+      withdraw();
+      if (authority) {
+        await authority.write((view) => (view.entry('relay-route', stored.id)
+          ? { kind: 'revoke', key: routeKey(stored.id), by: 'owner', reason: 'its relay code could not be saved', value: null }
+          : { kind: 'none', value: null }))
+          .catch((revokeError: unknown) => logger.warn('A relay code that could not be saved could not be revoked on the authority record; it was never handed out', { id: stored.id, error: summarizeError(revokeError) }));
+      }
+      throw error;
     }
     return { ...this.publicView(stored), code };
   }
@@ -220,24 +246,44 @@ export class RelayCodeStore {
       .sort((a, b) => a.createdAt - b.createdAt).map((entry) => this.publicView(entry));
   }
 
-  /** Revoke one code: the device holding it is refused on its next relayed request. False for an unknown id. */
-  revoke(id: string): boolean {
+  /**
+   * Revoke one code: the device holding it is refused on its next relayed
+   * request. False for an unknown id. The durable refusal lands first: the
+   * code's entry on the authority record is revoked and awaited (verify
+   * honours it across restarts and machines); when that write fails, this
+   * throws and nothing was revoked. Then the code leaves this process and the
+   * file; when the file cannot be saved, this throws saying the code is
+   * refused, and revoking the same id again retries the save.
+   */
+  async revoke(id: string): Promise<boolean> {
     const codes = this.load();
     const entry = codes.get(id);
-    if (!entry) return false;
-    codes.delete(id);
-    this.byHash.delete(entry.hash);
-    this.seen.delete(id);
+    if (!entry && !this.removalUnsaved.has(id)) return false;
+    if (this.authority) {
+      try {
+        await this.authority.write((view) => (view.entry('relay-route', id) && !view.entry('relay-route', id)!.revoked
+          ? { kind: 'revoke', key: routeKey(id), by: 'owner', reason: 'revoked by the owner', value: null }
+          : { kind: 'none', value: null }));
+      } catch (error) {
+        throw Object.assign(new Error(`Relay code ${id} was not revoked: the authority record could not be written (${summarizeError(error)}). Its device keeps relay access; try again.`, { cause: error }),
+          { code: 'RELAY_CODE_REVOKE_FAILED', status: 503 });
+      }
+    }
+    if (entry) {
+      codes.delete(id);
+      this.byHash.delete(entry.hash);
+      this.seen.delete(id);
+    }
+    this.removalUnsaved.add(id);
     try {
       this.persist();
     } catch (error) {
-      // The code stays refused in this process; the file still names it until the next write succeeds.
-      logger.warn('A revoked relay code could not be removed from the file; it stays refused while the daemon runs', { id, error: summarizeError(error) });
-      throw error;
+      logger.warn('A revoked relay code could not be removed from the file; revoking it again retries', { id, error: summarizeError(error) });
+      throw Object.assign(new Error(this.authority
+        ? `Relay code ${id} is revoked on the authority record and refused from now on, but it could not be removed from the relay codes file (${summarizeError(error)}). Revoke it again to retry the removal.`
+        : `Relay code ${id} is refused while the daemon runs, but it could not be removed from the relay codes file (${summarizeError(error)}), so it would be accepted again after a restart. Revoke it again to retry.`, { cause: error }),
+      { code: 'RELAY_CODE_REVOKE_NOT_SAVED', status: 500 });
     }
-    void this.authority?.write((view) => (view.entry('relay-route', id) && !view.entry('relay-route', id)!.revoked
-      ? { kind: 'revoke', key: routeKey(id), by: 'owner', reason: 'revoked by the owner', value: null }
-      : { kind: 'none', value: null })).catch((error: unknown) => logger.warn('A relay code revocation could not be written to the authority record', { id, error: summarizeError(error) }));
     return true;
   }
 

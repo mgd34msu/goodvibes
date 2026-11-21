@@ -96,11 +96,21 @@ export interface AgentSkillBundleUpdateInput {
   readonly provenance?: string | undefined;
 }
 
+/** What deleting a skill changed: the skill, the bundles left empty and removed, and the bundles now pending review. */
+export interface AgentSkillDeleteResult {
+  readonly skill: AgentSkillRecord;
+  readonly removedBundles: readonly AgentSkillBundleRecord[];
+  readonly changedBundles: readonly AgentSkillBundleRecord[];
+}
+
 export interface AgentSkillSnapshot {
   readonly path: string;
   readonly skills: readonly AgentSkillRecord[];
   readonly enabledSkills: readonly AgentSkillRecord[];
   readonly bundles: readonly AgentSkillBundleRecord[];
   readonly enabledBundles: readonly AgentSkillBundleRecord[];
+  /** Enabled bundles a turn applies: reviewed, setup-ready, every member reviewed. */
+  readonly activeBundles: readonly AgentSkillBundleRecord[];
+  /** Skills a turn applies: enabled or in an active bundle, and reviewed and setup-ready. */
   readonly activeSkills: readonly AgentSkillRecord[];
 }

@@ -43,7 +43,8 @@ export interface ConformanceOptions {
 /**
  * Return the sorted ids of every registered descriptor that has no attached
  * handler (the 501 set), honoring `onlyIds` / `ignoreIds`. Empty means every
- * checked descriptor is invokable.
+ * checked descriptor is invokable. An `onlyIds` entry the catalog does not
+ * register is not part of this list; `assertEveryDescriptorHasHandler` reports it.
  */
 export function findMethodsMissingHandlers(
   catalog: GatewayCatalogConformanceView,
@@ -63,19 +64,33 @@ export function findMethodsMissingHandlers(
 /**
  * Assert every registered descriptor (honoring `onlyIds` / `ignoreIds`) has a
  * handler attached. Throws with the full list of offending ids when any is
- * handler-less. This is the consumer-facing gate: call it in your CI against
- * the same catalog your daemon serves.
+ * handler-less, and with the `onlyIds` entries the catalog does not register,
+ * so a scoped gate whose list went stale fails instead of checking nothing.
+ * This is the consumer-facing gate: call it in your CI against the same
+ * catalog your daemon serves.
  */
 export function assertEveryDescriptorHasHandler(
   catalog: GatewayCatalogConformanceView,
   options: ConformanceOptions = {},
 ): void {
+  const registered = new Set(catalog.list().map((descriptor) => descriptor.id));
+  const unknown = [...new Set(options.onlyIds ?? [])].filter((id) => !registered.has(id)).sort();
   const missing = findMethodsMissingHandlers(catalog, options);
-  if (missing.length === 0) return;
-  throw new Error(
-    `Gateway catalog has ${missing.length} descriptor(s) with no attached handler, `
-    + `each answers 501 "Gateway method is not invokable" over websocket and HTTP invoke. `
-    + `Attach handlers together with the descriptors at composition time. Offending ids:\n  `
-    + missing.join('\n  '),
-  );
+  if (missing.length === 0 && unknown.length === 0) return;
+  const problems: string[] = [];
+  if (unknown.length > 0) {
+    problems.push(
+      `onlyIds names ${unknown.length} id(s) the catalog does not register; fix or remove them:\n  `
+      + unknown.join('\n  '),
+    );
+  }
+  if (missing.length > 0) {
+    problems.push(
+      `Gateway catalog has ${missing.length} descriptor(s) with no attached handler, `
+      + `each answers 501 "Gateway method is not invokable" over websocket and HTTP invoke. `
+      + `Attach handlers together with the descriptors at composition time. Offending ids:\n  `
+      + missing.join('\n  '),
+    );
+  }
+  throw new Error(problems.join('\n'));
 }

@@ -281,7 +281,8 @@ export function researchSourceReportLine(source: AgentResearchSourceRecord): str
 /** The record `existing` becomes when a report uses it; throws when it cannot move to used. */
 function usedSource(existing: AgentResearchSourceRecord, input: AgentResearchSourceUseInput): AgentResearchSourceRecord {
   assertSourceMove(existing, 'used');
-  const reportArtifactId = input.reportArtifactId?.trim() || existing.usedInReportArtifactId;
+  // The earlier report is kept only when the source is already used by it; a new use takes only the report given.
+  const reportArtifactId = input.reportArtifactId?.trim() || (existing.status === 'used' ? existing.usedInReportArtifactId : undefined);
   const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
   assertSourceContentSafe([reportArtifactId ?? '', note ?? '']);
   const timestamp = nowIso();
@@ -410,7 +411,8 @@ export class AgentResearchSourceRegistry {
       if (!existing) throw new Error(`Unknown research source ${idOrTitle}.`);
       assertSourceMove(existing, 'reviewed');
       const tags = input.tags === undefined ? existing.tags : normalizeList(input.tags);
-      const note = input.note === undefined ? existing.note : input.note.trim() || undefined;
+      // A rejected source's note is its rejection reason, which does not carry into a review.
+      const note = input.note === undefined ? (existing.status === 'rejected' ? undefined : existing.note) : input.note.trim() || undefined;
       const summary = input.summary === undefined ? existing.summary : input.summary.trim();
       if (!summary) throw new Error('summary is required.');
       const evidence = input.evidence === undefined ? existing.evidence : input.evidence.trim() || undefined;

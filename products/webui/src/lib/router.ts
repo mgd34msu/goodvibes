@@ -45,29 +45,32 @@ export interface AppUrlState {
   tab?: string;
 }
 
+// Both tables are Maps, so a view id read from the address (`constructor`,
+// `toString`) matches only the ids listed here, never an Object.prototype member.
+
 /** Old view ids that now open the settings dialog, and the section each opens on. */
-export const LEGACY_SETTINGS_VIEWS: Readonly<Record<string, string>> = {
-  admin: 'account',
-  providers: 'models',
-  principals: 'people',
-  checkin: 'checkins',
-};
+export const LEGACY_SETTINGS_VIEWS: ReadonlyMap<string, string> = new Map([
+  ['admin', 'account'],
+  ['providers', 'models'],
+  ['principals', 'people'],
+  ['checkin', 'checkins'],
+]);
 
 /** Old data-view ids and the destination and tab each now lives on. */
-export const LEGACY_VIEW_REDIRECTS: Readonly<Record<string, { view: ViewId; tab: string }>> = {
-  sessions: { view: 'work', tab: 'sessions' },
-  'hosted-sessions': { view: 'work', tab: 'sessions' },
-  fleet: { view: 'work', tab: 'all' },
-  'approvals-tasks': { view: 'work', tab: 'all' },
-  workstream: { view: 'work', tab: 'processes' },
-  'ci-watches': { view: 'work', tab: 'processes' },
-  checkpoints: { view: 'work', tab: 'checkpoints' },
-  knowledge: { view: 'library', tab: 'knowledge' },
-  memory: { view: 'library', tab: 'memory' },
-  calendar: { view: 'personal', tab: 'calendar' },
-  mail: { view: 'personal', tab: 'mail' },
-  dates: { view: 'personal', tab: 'occasions' },
-};
+export const LEGACY_VIEW_REDIRECTS: ReadonlyMap<string, { view: ViewId; tab: string }> = new Map<string, { view: ViewId; tab: string }>([
+  ['sessions', { view: 'work', tab: 'sessions' }],
+  ['hosted-sessions', { view: 'work', tab: 'sessions' }],
+  ['fleet', { view: 'work', tab: 'all' }],
+  ['approvals-tasks', { view: 'work', tab: 'all' }],
+  ['workstream', { view: 'work', tab: 'processes' }],
+  ['ci-watches', { view: 'work', tab: 'processes' }],
+  ['checkpoints', { view: 'work', tab: 'checkpoints' }],
+  ['knowledge', { view: 'library', tab: 'knowledge' }],
+  ['memory', { view: 'library', tab: 'memory' }],
+  ['calendar', { view: 'personal', tab: 'calendar' }],
+  ['mail', { view: 'personal', tab: 'mail' }],
+  ['dates', { view: 'personal', tab: 'occasions' }],
+]);
 
 const VALID_VIEWS: ReadonlySet<string> = new Set<ViewId>([
   'chat',
@@ -83,7 +86,7 @@ const VALID_VIEWS: ReadonlySet<string> = new Set<ViewId>([
  */
 export function resolveViewId(raw: string): { view: ViewId; tab: string } | null {
   if (VALID_VIEWS.has(raw)) return { view: raw as ViewId, tab: '' };
-  return LEGACY_VIEW_REDIRECTS[raw] ?? null;
+  return LEGACY_VIEW_REDIRECTS.get(raw) ?? null;
 }
 
 const DEFAULT_STATE: AppUrlState = {
@@ -101,7 +104,7 @@ export function decodeUrlState(search: string = window.location.search): AppUrlS
   const rawView = params.get('view') ?? '';
   const resolved = resolveViewId(rawView);
   const view: ViewId = resolved?.view ?? DEFAULT_STATE.view;
-  const settings = nonEmpty(params.get('settings')) ?? nonEmpty(LEGACY_SETTINGS_VIEWS[rawView]) ?? '';
+  const settings = nonEmpty(params.get('settings')) ?? nonEmpty(LEGACY_SETTINGS_VIEWS.get(rawView)) ?? '';
   const tab = nonEmpty(params.get('tab')) ?? nonEmpty(resolved?.tab) ?? '';
 
   const session = params.get('session') ?? '';
@@ -125,13 +128,13 @@ export function decodeUrlState(search: string = window.location.search): AppUrlS
 /** True when the search string names an old view that now opens the settings dialog. */
 export function isLegacySettingsView(search: string = window.location.search): boolean {
   const rawView = new URLSearchParams(search).get('view') ?? '';
-  return rawView in LEGACY_SETTINGS_VIEWS;
+  return LEGACY_SETTINGS_VIEWS.has(rawView);
 }
 
 /** True when the search string names an old view id the URL should be rewritten from. */
 export function isLegacyView(search: string = window.location.search): boolean {
   const rawView = new URLSearchParams(search).get('view') ?? '';
-  return rawView in LEGACY_SETTINGS_VIEWS || rawView in LEGACY_VIEW_REDIRECTS;
+  return LEGACY_SETTINGS_VIEWS.has(rawView) || LEGACY_VIEW_REDIRECTS.has(rawView);
 }
 
 /** Encode AppUrlState into a URLSearchParams string (no leading '?'). */

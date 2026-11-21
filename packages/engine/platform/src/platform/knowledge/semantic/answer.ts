@@ -89,7 +89,8 @@ async function answerWithinBudget(context: KnowledgeAnswerContext, input: Knowle
     if (signal.aborted) throw new KnowledgeAnswerQualityHeldError('aborted');
     if (Date.now() >= deadlineAt) throw new KnowledgeAnswerQualityHeldError('budget');
   };
-  const remaining = () => Number.isFinite(deadlineAt) ? Math.max(1, deadlineAt - Date.now()) : 0;
+  // No deadline is an absent timeout, so each reader applies its own configured bound.
+  const remaining = () => Number.isFinite(deadlineAt) ? Math.max(1, deadlineAt - Date.now()) : undefined;
   const spaceId = normalizeKnowledgeSpaceId(input.knowledgeSpaceId);
   const mode = input.mode ?? 'standard';
   const limit = Math.max(1, input.limit ?? 8);

@@ -47,6 +47,7 @@ import { resolveEffortForRequest, resolveReasoningEffortSpec } from './reasoning
 import { reasoningEffortLevels } from './reasoning-effort.js';
 import { fetchOpenAISubscriptionModelIds, OpenAISubscriptionRoute, subscriptionAccountKey, type OpenAISubscriptionStore } from './openai-codex.js';
 import { logger } from '../utils/logger.js';
+import { httpStatusOf } from '@goodvibes/engine/errors';
 
 /** What a failed sign-in's category means, in a fixed sentence. */
 const SIGN_IN_FAILURE_WORDS: Readonly<Record<string, string>> = {
@@ -108,11 +109,19 @@ function routeFailure(error: unknown): boolean {
   return status === 400 && refusedModel(error);
 }
 
-/** The endpoint refused the model id itself (unknown to it, or not served to this sign-in). */
+/**
+ * The endpoint refused the model id itself (unknown to it, or not served to
+ * this sign-in): a 404, or the provider's own `model_not_found` code, as the
+ * API-key route reports it or as the subscription route puts it first in its
+ * message. A 400 about a parameter or a value (a reasoning level the model
+ * does not take) is a refusal of the request, never of the model.
+ */
 function refusedModel(error: unknown): boolean {
   if (!(error instanceof ProviderError)) return false;
-  if (error.statusCode !== 404 && error.statusCode !== 400) return false;
-  return /model/i.test(error.message) && /(does not exist|not found|model_not_found|not supported|unsupported|unknown|not available|no access)/i.test(error.message);
+  if (error.statusCode === 404) return true;
+  if (error.statusCode !== 400) return false;
+  if (normalizeError(error).providerCode === 'model_not_found') return true;
+  return /^OpenAI Codex API error(?: 400)?: model_not_found: /.test(error.message);
 }
 
 /**
@@ -149,8 +158,6 @@ export class OpenAIProvider implements LLMProvider {
   }
   /** What the subscription's own listing says it serves; null while it has not answered. */
   private subscriptionModels: ReadonlySet<string> | null = null;
-  /** Models the subscription refused this session (not on the plan): asked through the API key first from then on. */
-  private readonly subscriptionRefused = new Set<string>();
   /** The sign-in that answered last, for status surfaces, and the one that answered each model. */
   private lastAnswered: OpenAISignInRoute | null = null;
   private readonly answeredBy = new Map<string, OpenAISignInRoute>();
@@ -238,16 +245,18 @@ export class OpenAIProvider implements LLMProvider {
 
   /**
    * The sign-ins a request for `modelId` tries, in order: the subscription
-   * when it is set up, then the API key. A model the subscription is known
-   * not to serve (its own listing, or a refusal this session) goes to the API
-   * key first; with no API key it is still asked of the subscription, so the
-   * refusal is reported as it is.
+   * when it is set up, then the API key. A model the subscription's own
+   * current listing does not show goes to the API key first; with no API key
+   * it is still asked of the subscription, so the refusal is reported as it
+   * is. The listing is the one record of what the plan serves: it is read
+   * again when the subscription refuses a model, so the order follows the
+   * plan and account as they are now.
    */
   signInRoutes(modelId?: string): OpenAISignInRoute[] {
     const id = modelId ? normalizeOpenAIModelId(modelId) : undefined;
     const subscription = this.subscriptionConfigured();
     const apiKey = this.apiKeyConfigured();
-    const notOnPlan = id !== undefined && (this.subscriptionRefused.has(id) || (this.subscriptionModels !== null && !this.subscriptionModels.has(id)));
+    const notOnPlan = id !== undefined && this.subscriptionModels !== null && !this.subscriptionModels.has(id);
     const routes: OpenAISignInRoute[] = [];
     if (subscription && !(notOnPlan && apiKey)) routes.push('subscription');
     if (apiKey) routes.push('api-key');
@@ -292,11 +301,8 @@ export class OpenAIProvider implements LLMProvider {
         };
       } catch (error) {
         if (error instanceof ProviderAttemptDeniedError || params.signal?.aborted) throw error;
-        if (refusedModel(error)) {
-          if (route === 'subscription') this.subscriptionRefused.add(normalizeOpenAIModelId(params.model));
-          // The lists may be behind the provider: read them again, off this request's path.
-          this.onUnknownModel?.();
-        }
+        // The lists may be behind the provider: read them again, off this request's path.
+        if (refusedModel(error)) this.onUnknownModel?.();
         const next = routes[index + 1];
         if (next === undefined || delivered || !routeFailure(error)) {
           // Every sign-in failed: the error says so, not only the last one's words.
@@ -324,25 +330,9 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private async chatWithApiKey(params: ChatRequest): Promise<ChatResponse> {
-    const { messages, tools, model, maxTokens, signal, systemPrompt, onRetry } = params;
+    const { model, signal, onRetry } = params;
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
-    // `reasoning_effort` is a documented top-level parameter of
-    // POST /v1/chat/completions (openai@6.46.0 types it as
-    // 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'), so the
-    // endpoint this adapter already uses can carry the setting. It is resolved
-    // against the model's own options first, because OpenAI rejects a level the
-    // model does not support rather than coercing it.
-    // A `fallback`-sourced spec means neither the live catalog nor the curated
-    // family table recognises this model, so there is no evidence it reasons at
-    // all. OpenAI serves plenty of non-reasoning models on this same endpoint
-    // and rejects `reasoning_effort` on them, so silence beats a guess here.
-    const resolvedEffort = resolveEffortForRequest(params.reasoningEffort, {
-      provider: this.name, modelId: model,
-      ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}),
-    });
-    const reasoningEffort = resolvedEffort.spec.source === 'fallback'
-      ? undefined
-      : resolvedEffort.value;
+    const fields = this.chatCompletionFields(params);
 
     return (await instrumentedLlmCall(() => withRetry(async () => {
       let responseText = '';
@@ -355,9 +345,6 @@ export class OpenAIProvider implements LLMProvider {
       let rateLimit: ChatResponse['rateLimit'];
       let streamOpened = false;
 
-      const openaiMessages = toOpenAIMessages(messages, systemPrompt);
-      const openaiTools = tools && tools.length > 0 ? toOpenAITools(tools) : undefined;
-
       try {
         // Resolving the client inside the try means an absent `openai` package
         // arrives at the caller as this provider's ordinary chat error, naming
@@ -368,16 +355,10 @@ export class OpenAIProvider implements LLMProvider {
         // are readable on the SUCCESS path (not only 429s).
         const created = await client.chat.completions.create(
           {
-            model,
-            messages: openaiMessages as Parameters<OpenAIChatCreate>[0]['messages'],
-            ...(openaiTools ? { tools: openaiTools as Parameters<OpenAIChatCreate>[0]['tools'] } : {}),
-            ...(openaiTools && params.toolChoice === 'none' ? { tool_choice: 'none' as const } : {}),
-            // Chat completions takes max_completion_tokens from every current model; the GPT-5 and o-series models refuse max_tokens.
-            ...(maxTokens ? { max_completion_tokens: maxTokens } : {}),
-            ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+            ...fields,
             stream: true,
             stream_options: { include_usage: true },
-          } as Parameters<OpenAIChatCreate>[0],
+          } as unknown as Parameters<OpenAIChatCreate>[0],
           // withRetry is the one retry owner; the SDK's own retries would multiply the requests it reports.
           { ...(signal !== undefined ? { signal } : {}), maxRetries: 0 },
         ).withResponse() as unknown as {
@@ -645,12 +626,28 @@ export class OpenAIProvider implements LLMProvider {
       purpose: 'batch',
     });
     const metadata = input.metadata && Object.keys(input.metadata).length > 0 ? input.metadata : undefined;
-    const batch = await (await this.client()).batches.create({
-      input_file_id: file.id,
-      endpoint: '/v1/chat/completions',
-      completion_window: input.completionWindow ?? '24h',
-      ...(metadata ? { metadata } : {}),
-    });
+    let batch: Awaited<ReturnType<OpenAI['batches']['create']>>;
+    try {
+      batch = await (await this.client()).batches.create({
+        input_file_id: file.id,
+        endpoint: '/v1/chat/completions',
+        completion_window: input.completionWindow ?? '24h',
+        ...(metadata ? { metadata } : {}),
+      });
+    } catch (error) {
+      // The provider answered and made no batch: the uploaded file, which holds
+      // the jobs' prompts, is deleted. With no answer, or a 408/504/524 (the
+      // batch may have been made), it is kept: a batch found later reads it.
+      const status = httpStatusOf(error);
+      if (status !== undefined && status !== 408 && status !== 504 && status !== 524) {
+        try {
+          await (await this.client()).files.delete(file.id);
+        } catch (cleanup) {
+          logger.warn('[openai] could not delete the input file of a batch that was not created', { fileId: file.id, error: summarizeError(cleanup) });
+        }
+      }
+      throw error;
+    }
     return {
       providerBatchId: batch.id,
       status: this.mapOpenAIBatchStatus(batch.status),
@@ -708,14 +705,39 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private toOpenAIBatchChatBody(params: Omit<ChatRequest, 'signal' | 'onDelta'>): Record<string, unknown> {
+    return { ...this.chatCompletionFields(params), stream: false };
+  }
+
+  /**
+   * The Chat Completions request fields of a request, the one builder for the
+   * live call and the Batch body, so the two send the same thing.
+   *
+   * `reasoning_effort` is a documented top-level parameter of
+   * POST /v1/chat/completions (openai@6.46.0 types it as
+   * 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max'). It is
+   * resolved against the model's own options first, because OpenAI rejects a
+   * level the model does not support rather than coercing it. A
+   * `fallback`-sourced spec means neither the live catalog nor the curated
+   * family table recognises this model, so there is no evidence it reasons at
+   * all; OpenAI rejects `reasoning_effort` on non-reasoning models, so it is
+   * left out then.
+   */
+  private chatCompletionFields(params: Omit<ChatRequest, 'signal' | 'onDelta'>): Record<string, unknown> {
     const openaiMessages = toOpenAIMessages(params.messages, params.systemPrompt);
     const openaiTools = params.tools && params.tools.length > 0 ? toOpenAITools(params.tools) : undefined;
+    const resolvedEffort = resolveEffortForRequest(params.reasoningEffort, {
+      provider: this.name, modelId: params.model,
+      ...(params.reasoningEffortSpec ? { spec: params.reasoningEffortSpec } : {}),
+    });
+    const reasoningEffort = resolvedEffort.spec.source === 'fallback' ? undefined : resolvedEffort.value;
     return {
       model: params.model,
       messages: openaiMessages,
       ...(openaiTools ? { tools: openaiTools } : {}),
+      ...(openaiTools && params.toolChoice === 'none' ? { tool_choice: 'none' } : {}),
+      // Chat completions takes max_completion_tokens from every current model; the GPT-5 and o-series models refuse max_tokens.
       ...(params.maxTokens ? { max_completion_tokens: params.maxTokens } : {}),
-      stream: false,
+      ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
     };
   }
 

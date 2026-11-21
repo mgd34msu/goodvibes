@@ -10,7 +10,7 @@ import { AgentPersonaRegistry } from '@goodvibes/engine/terminal-shell/agent-tur
 import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { AgentRoutineRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
 import { formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
-import { assertActorMayEnable } from '@goodvibes/engine/terminal-shell/agent-turn/review-authority';
+import { assertActorMayEnable, assertActorMayMarkReviewed } from '@goodvibes/engine/terminal-shell/agent-turn/review-authority';
 import { describedCommandByName, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
 import { createNotesCommand, noteTitleFromText, type NotesActionId } from '@goodvibes/engine/terminal-shell/notes-command';
 import type { MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platform/state';
@@ -82,6 +82,24 @@ function refuseIfMade(note: AgentNoteRecord, domain: 'memory' | 'persona' | 'ski
   if (made) throw commandRefusal(`Note ${note.id} already made ${domain} ${made.id}; nothing new was made.`, `Change that one with ${command}.`);
 }
 
+/**
+ * Record on the note what was made from it. The record is already written and is
+ * what the person asked for, so it is kept when the note cannot record it; the
+ * failure says it exists and how to change it, so a retry does not make a second.
+ */
+function recordMade(ctx: CommandContext, note: AgentNoteRecord, domain: 'memory' | 'persona' | 'skill' | 'routine', id: string, command: string): void {
+  try {
+    notesOf(ctx).recordPromotion(note.id, { domain, id });
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw commandRefusal(
+      `Made ${domain} ${id} from note ${note.id}, but the note could not record it: ${reason}.`,
+      `It is kept; change it with ${command} ${id}. Do not run /notes to-${domain} again.`,
+      'COMMAND_FAILED',
+    );
+  }
+}
+
 type Run = (values: Readonly<Record<string, string>>, ctx: CommandContext) => Promise<string>;
 
 const run: Readonly<Record<NotesActionId, Run>> = {
@@ -99,7 +117,7 @@ const run: Readonly<Record<NotesActionId, Run>> = {
     }));
     return `Changed note ${note.id} (${note.title}).`;
   },
-  async review(values, ctx) { const note = step(() => notesOf(ctx).markReviewed(values.note!)); return `Marked note ${note.id} reviewed.`; },
+  async review(values, ctx) { assertActorMayMarkReviewed(ctx.invokedByModel === true ? 'model' : 'owner', 'note', values.note!); const note = step(() => notesOf(ctx).markReviewed(values.note!)); return `Marked note ${note.id} reviewed.`; },
   async stale(values, ctx) { const note = step(() => notesOf(ctx).markStale(values.note!, values.reason!)); return `Marked note ${note.id} out of date.`; },
   async delete(values, ctx) { const note = step(() => notesOf(ctx).deleteNote(values.note!)); return `Deleted note ${note.id} (${note.title}).`; },
   async 'to-memory'(values, ctx) {
@@ -112,7 +130,7 @@ const run: Readonly<Record<NotesActionId, Run>> = {
       detail: note.sourceUrl ? `${note.body}\n\nOrigin URL: ${note.sourceUrl}` : note.body, tags: noteTags(note),
       provenance: [...(ctx.session.runtime.sessionId ? [{ kind: 'session' as const, ref: ctx.session.runtime.sessionId }] : [])],
     });
-    step(() => notesOf(ctx).recordPromotion(note.id, { domain: 'memory', id: record.id }));
+    recordMade(ctx, note, 'memory', record.id, '/memory edit');
     return `Kept note ${note.id} as memory record ${record.id}.`;
   },
   async 'to-persona'(values, ctx) {
@@ -121,7 +139,7 @@ const run: Readonly<Record<NotesActionId, Run>> = {
     const persona = step(() => AgentPersonaRegistry.fromShellPaths(requireShellPaths(ctx)).create({
       name: note.title, description: noteSummary(note), body: note.body, tags: noteTags(note), triggers: [], source: 'user', provenance: `Note ${note.id}`,
     }));
-    step(() => notesOf(ctx).recordPromotion(note.id, { domain: 'persona', id: persona.id }));
+    recordMade(ctx, note, 'persona', persona.id, '/personas update');
     return `Made persona ${persona.id} from note ${note.id}. Use it with /personas use ${persona.id}.`;
   },
   async 'to-skill'(values, ctx) {
@@ -132,7 +150,7 @@ const run: Readonly<Record<NotesActionId, Run>> = {
       name: note.title, description: noteSummary(note), procedure: note.body, tags: noteTags(note), triggers: [],
       enabled: values.enabled === 'yes', source: 'user', provenance: `Note ${note.id}`,
     }));
-    step(() => notesOf(ctx).recordPromotion(note.id, { domain: 'skill', id: skill.id }));
+    recordMade(ctx, note, 'skill', skill.id, '/my-skills update');
     return `Made skill ${skill.id} from note ${note.id}${values.enabled === 'yes' ? ', switched on' : '; switch it on with /my-skills enable'}.`;
   },
   async 'to-routine'(values, ctx) {
@@ -143,7 +161,7 @@ const run: Readonly<Record<NotesActionId, Run>> = {
       name: note.title, description: noteSummary(note), steps: note.body, tags: noteTags(note), triggers: [],
       enabled: values.enabled === 'yes', source: 'user', provenance: `Note ${note.id}`,
     }));
-    step(() => notesOf(ctx).recordPromotion(note.id, { domain: 'routine', id: routine.id }));
+    recordMade(ctx, note, 'routine', routine.id, '/routines update');
     return `Made routine ${routine.id} from note ${note.id}${values.enabled === 'yes' ? ', switched on' : '; switch it on with /routines enable'}.`;
   },
   async 'to-knowledge'(values, ctx) {

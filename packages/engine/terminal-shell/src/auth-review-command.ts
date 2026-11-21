@@ -69,16 +69,16 @@ export interface AuthReviewBundleBase {
   readonly pendingSubscriptions: readonly string[];
 }
 
-/** How each app words its reports and what its summary file adds. */
-export interface AuthCommandPolicy<Bundle extends AuthReviewBundleBase> {
+/** How each app words its reports and what its summary file adds (read from the session the file is saved in). */
+export interface AuthCommandPolicy<Bundle extends AuthReviewBundleBase, Ctx extends AuthCommandContext = AuthCommandContext> {
   readonly review: (snapshot: Awaited<ReturnType<typeof buildAuthInspectionSnapshot>>, providers: string[]) => string[];
   readonly show: (provider: string, inspection: Awaited<ReturnType<typeof inspectProviderAuth>>) => string[];
   readonly repair: (provider: string, inspection: Awaited<ReturnType<typeof inspectProviderAuth>>) => string[];
-  readonly build: (base: AuthReviewBundleBase) => Bundle;
+  readonly build: (base: AuthReviewBundleBase, ctx: Ctx) => Bundle;
   readonly inspect: (value: unknown) => string;
 }
 
-function describeAuth<Ctx extends AuthCommandContext, Bundle extends AuthReviewBundleBase>(policy: AuthCommandPolicy<Bundle>): CommandDescription<Ctx> {
+function describeAuth<Ctx extends AuthCommandContext, Bundle extends AuthReviewBundleBase>(policy: AuthCommandPolicy<Bundle, Ctx>): CommandDescription<Ctx> {
   async function inspection(ctx: Ctx, provider: string) {
     try {
       return await inspectProviderAuth(provider, queryOf(ctx));
@@ -150,7 +150,7 @@ function describeAuth<Ctx extends AuthCommandContext, Bundle extends AuthReviewB
             secretKeys: await query.secretsManager.list(),
             activeSubscriptions: query.subscriptionManager.list().map((entry) => entry.provider),
             pendingSubscriptions: query.subscriptionManager.listPending().map((entry) => entry.provider),
-          });
+          }, ctx);
           mkdirSync(dirname(target), { recursive: true, mode: 0o700 });
           writeFileSync(target, JSON.stringify(bundle, null, 2) + '\n', { encoding: 'utf-8', mode: 0o600 });
           // The mode above applies only when the file is created; one written over must still end owner-only.
@@ -179,6 +179,6 @@ function describeAuth<Ctx extends AuthCommandContext, Bundle extends AuthReviewB
 }
 
 /** `/auth` for one app: the one description, with the app's report wording. */
-export function createAuthCommand<Ctx extends AuthCommandContext, Bundle extends AuthReviewBundleBase>(policy: AuthCommandPolicy<Bundle>): DescribedCommand<Ctx> {
+export function createAuthCommand<Ctx extends AuthCommandContext, Bundle extends AuthReviewBundleBase>(policy: AuthCommandPolicy<Bundle, Ctx>): DescribedCommand<Ctx> {
   return defineCommand(describeAuth<Ctx, Bundle>(policy));
 }

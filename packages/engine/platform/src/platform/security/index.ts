@@ -17,6 +17,7 @@ export type {
   TokenAuditResult,
   TokenAuditReport,
   TokenAuditorConfig,
+  TokenAuditorLiveSettings,
   ScopeAuditOutcome,
   RotationAuditOutcome,
 } from './token-audit.js';

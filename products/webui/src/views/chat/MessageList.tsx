@@ -34,8 +34,8 @@ interface MessageListProps {
   onCopyMessage: (message: ChatMessage) => void;
   onResendMessage: (message: ChatMessage) => void;
   onRegenerateFrom: (messageId: string) => void;
-  /** Called when the user submits an edited version of a user message. */
-  onEditMessage?: (messageId: string, newText: string) => void;
+  /** Called when the user submits an edited version of a user message; resolves true once it was accepted. */
+  onEditMessage?: (messageId: string, newText: string) => Promise<boolean>;
   /** Called when the user clicks the Stop button during an active stream. */
   onStop?: () => void;
   /** Tool calls currently running for the active turn (useChatStream's ActiveToolCall). */
@@ -106,7 +106,8 @@ export function MessageList({
   // One callback for every user message, so the memo on MessageItem holds across
   // keystrokes and tokens; replies get none (they are not edited).
   const editMessage = useCallback(
-    (message: ChatMessage, newText: string) => onEditMessage?.(message.id ?? message.messageId ?? '', newText),
+    (message: ChatMessage, newText: string): Promise<boolean> =>
+      onEditMessage ? onEditMessage(message.id ?? message.messageId ?? '', newText) : Promise.resolve(false),
     [onEditMessage],
   );
 

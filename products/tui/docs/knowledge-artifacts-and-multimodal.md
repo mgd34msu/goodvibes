@@ -135,7 +135,9 @@ is rebuilt from the records. `/memory snapshots` lists the copies with their
 date, size and record count. `/memory restore <name|latest|date>` replaces
 every record, link and pending consolidation proposal with those of one copy,
 after one confirmation. The records it replaces are copied first and the
-answer names that copy, so restoring it undoes the restore. The restore runs
+answer names that copy, so restoring it by that name undoes the restore.
+`latest` is the newest copy not taken by a restore, so it names the same copy
+before and after one. The restore runs
 where the store's writer is (the daemon when the terminal app is attached to
 one) in a single SQLite transaction: the terminal app, the Agent and the
 daemon that share the file see the restored records on their next read, and a

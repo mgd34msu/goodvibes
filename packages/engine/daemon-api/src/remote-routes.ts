@@ -188,7 +188,7 @@ export interface DistributedRuntimeRouteService {
   listPairRequests(): unknown;
   approvePairRequest(requestId: string, input: Record<string, unknown>): Promise<unknown | null>;
   rejectPairRequest(requestId: string, input: Record<string, unknown>): Promise<unknown | null>;
-  listPeers(): unknown;
+  listPeers(kind?: 'node' | 'device', limit?: number): unknown;
   getPeer(peerId: string): unknown | null;
   rotatePeerToken(peerId: string, input: Record<string, unknown>): Promise<unknown | null>;
   revokePeerToken(peerId: string, input: Record<string, unknown>): Promise<unknown | null>;
@@ -377,7 +377,7 @@ export function createDaemonRemoteRouteHandlers(
     getRemotePairRequests: () => Response.json({ requests: context.distributedRuntime.listPairRequests() }),
     approveRemotePairRequest: async (requestId, request) => handleApproveRemotePairRequest(context, requestId, request),
     rejectRemotePairRequest: async (requestId, request) => handleRejectRemotePairRequest(context, requestId, request),
-    getRemotePeers: () => Response.json({ peers: context.distributedRuntime.listPeers() }),
+    getRemotePeers: (request) => handleListRemotePeers(context, request),
     getRemotePeer: (peerId) => {
       const peer = context.distributedRuntime.getPeer(peerId);
       return peer ? Response.json({ peer }) : jsonErrorResponse({ error: 'Unknown distributed peer' }, { status: 404 });
@@ -393,6 +393,26 @@ export function createDaemonRemoteRouteHandlers(
     registerRemoteBackend: async (request) => handleRegisterRemoteBackend(context, request),
     removeRemoteBackend: async (peerId, request) => handleRemoveRemoteBackend(context, peerId, request),
   };
+}
+
+/**
+ * The peer list, narrowed by the query's `kind` (node or device) and cut to
+ * its `limit` (a positive whole number) when one is given; with no limit
+ * every peer is returned.
+ */
+function handleListRemotePeers(context: DaemonRemoteRouteContext, request: Request): Response {
+  const query = new URL(request.url).searchParams;
+  const kindText = query.get('kind');
+  const kind = kindText === 'node' || kindText === 'device' ? kindText : undefined;
+  if (kindText !== null && kind === undefined) {
+    return jsonErrorResponse({ error: 'kind must be node or device' }, { status: 400 });
+  }
+  const limitText = query.get('limit');
+  const limit = limitText === null ? Number.MAX_SAFE_INTEGER : Number(limitText);
+  if (!Number.isSafeInteger(limit) || limit < 1) {
+    return jsonErrorResponse({ error: 'limit must be a positive whole number' }, { status: 400 });
+  }
+  return Response.json({ peers: context.distributedRuntime.listPeers(kind, limit) });
 }
 
 function backendsUnavailable(): Response {

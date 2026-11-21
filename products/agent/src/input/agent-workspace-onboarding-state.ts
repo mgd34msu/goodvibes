@@ -16,8 +16,6 @@ import { readOnboardingDoneMarker } from '../runtime/onboarding/completion.ts';
  *   - 'provider-model' (wizard) → 'provider-access' (plan) so readyToChat
  *     and PLAN_ITEM_CATEGORY_MAP both resolve correctly.
  * The output ids are PLAN ids (SetupPlanItem.id), not wizard-step ids.
- * Do NOT compare the output ids against ONBOARDING_CRITICAL_STEP_IDS which
- * operates on wizard-step ids (see agent-workspace-onboarding-finish.ts).
  * blocksAutonomy is inferred from sourceStatus: blocked or check items block autonomy.
  * Intentional approximation: AgentSetupWizardStep does not carry the authoritative
  * SetupPlanItem.blocksAutonomy field; the wizard snapshot only exposes sourceStatus,

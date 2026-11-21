@@ -35,11 +35,10 @@ export interface TurnFailureConversation {
 /** The keys a failure row answers. */
 export type FailedTurnKeyAction = 'retry' | 'other-model' | 'details' | 'sign-in';
 
-/** The row's state for the process: details opened, the retry the program offers, a model change that should send the prompt again. */
+/** The row's state for the process: details opened, the retry the program offers. */
 const rows = {
   details: new Set<string>(),
   retry: null as (() => void) | null,
-  retryOnModelChange: false,
   conversation: null as TurnFailureConversation | null,
 };
 
@@ -108,9 +107,8 @@ export function offerFailedTurnRetry(retry: () => void): void {
   rows.retry = retry;
 }
 
-/** A prompt was sent: the older row's keys go (its rows are drawn again), and a pending model change no longer sends anything. */
+/** A prompt was sent: the older row's keys go (its rows are drawn again). */
 export function noteTurnFailurePromptSent(): void {
-  rows.retryOnModelChange = false;
   const conversation = rows.conversation;
   if (!conversation) return;
   // The prompt just added is last: a failure before it had live keys.
@@ -121,16 +119,9 @@ export function noteTurnFailurePromptSent(): void {
   }
 }
 
-/** The selected model changed: after alt+o, the failed prompt goes to it. */
-export function noteTurnFailureModelChanged(): void {
-  if (!rows.retryOnModelChange) return;
-  rows.retryOnModelChange = false;
-  const live = liveReading();
-  if (live && offers(live.reading, 'other-model', 'choose-model')) rows.retry?.();
-}
-
 export interface FailedTurnActionDeps {
-  readonly openModelPicker: () => void;
+  /** Open the model picker; `onClosed` hears once whether that picker session applied a main-model selection. */
+  readonly openModelPicker: (onClosed: (chosen: boolean) => void) => void;
   /** Where a provider is signed in again. */
   readonly openSignIn: () => void;
   /** The program's retry of the failed turn; absent: the one offered with offerFailedTurnRetry. */
@@ -143,6 +134,12 @@ export interface FailedTurnActionDeps {
  * live failure offers the action: the key then does nothing.
  */
 export function createFailedTurnAction(deps: FailedTurnActionDeps): (action: FailedTurnKeyAction) => boolean {
+  const sendAgain = (): boolean => {
+    if (deps.retry) return deps.retry();
+    if (!rows.retry) return false;
+    rows.retry();
+    return true;
+  };
   return (action) => {
     const live = liveReading();
     if (!live) return false;
@@ -158,8 +155,13 @@ export function createFailedTurnAction(deps: FailedTurnActionDeps): (action: Fai
       }
       case 'other-model': {
         if (!offers(reading, 'other-model', 'choose-model')) return false;
-        rows.retryOnModelChange = true;
-        deps.openModelPicker();
+        // Only the model chosen in the picker this key opened sends the failed
+        // prompt again, and only while that failure is still the live one.
+        deps.openModelPicker((chosen) => {
+          if (!chosen) return;
+          const still = liveReading();
+          if (still && still.index === index && offers(still.reading, 'other-model', 'choose-model')) sendAgain();
+        });
         deps.render();
         return true;
       }
@@ -171,10 +173,7 @@ export function createFailedTurnAction(deps: FailedTurnActionDeps): (action: Fai
       }
       case 'retry': {
         if (!offers(reading, 'retry')) return false;
-        if (deps.retry) return deps.retry();
-        if (!rows.retry) return false;
-        rows.retry();
-        return true;
+        return sendAgain();
       }
     }
   };
@@ -226,25 +225,22 @@ export function retryFailedTurn<F extends FailedTurnInputView>(
 export interface WireFailedTurnActionsOptions {
   readonly commandContext: {
     failedTurnAction?: ((action: FailedTurnKeyAction) => boolean) | undefined;
-    openModelPicker?: (() => void) | undefined;
+    openModelPicker?: ((onClosed?: (chosen: boolean) => void) => void) | undefined;
     executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
   };
-  /** Subscribes to MODEL_CHANGED; returns the unsubscribe. */
-  readonly onModelChanged: (listener: () => void) => () => void;
   /** The program's retry of the failed turn; absent: the one offered with offerFailedTurnRetry. */
   readonly retry?: (() => boolean) | undefined;
   readonly render: () => void;
 }
 
-/** Put the failure row's keys on the program's command context (alt+r, alt+o, alt+i, alt+s); returns the unsubscribe. */
-export function wireFailedTurnActions(options: WireFailedTurnActionsOptions): () => void {
+/** Put the failure row's keys on the program's command context (alt+r, alt+o, alt+i, alt+s). */
+export function wireFailedTurnActions(options: WireFailedTurnActionsOptions): void {
   const { commandContext } = options;
   commandContext.failedTurnAction = createFailedTurnAction({
-    openModelPicker: () => commandContext.openModelPicker?.(),
+    openModelPicker: (onClosed) => commandContext.openModelPicker?.(onClosed),
     // The provider sign-ins: each provider, whether it is signed in, and how to fix it.
     openSignIn: () => { void commandContext.executeCommand?.('auth', []).finally(options.render); },
     ...(options.retry ? { retry: options.retry } : {}),
     render: options.render,
   });
-  return options.onModelChanged(() => noteTurnFailureModelChanged());
 }

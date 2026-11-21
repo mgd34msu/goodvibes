@@ -16,6 +16,10 @@
  * the mail's order number when it has none, and that report says the order
  * went through. The move happens once, so the owner is told once.
  *
+ * A refund or settlement note is owed to the owner in the same write that
+ * records it, and settled once a channel took it; one that no channel took is
+ * sent at the next start, so the owner is never left untold.
+ *
  * Each purchase is reported once per kind of mail (confirmed, shipped,
  * delivered), worded by kind. The kind comes from the subject in code; a
  * purchase whose delivery was reported is no longer a candidate, so later shop
@@ -33,6 +37,7 @@ import { renderConfirmationReport, renderRefundReport, renderUnreadOrderMail, ty
 import { isClassicOperation, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 import type { PurchaseRecord } from './purchase-record.js';
 import { ownerSuppliedText, parseCurrencyCode } from './types.js';
+import { logger } from '../utils/logger.js';
 
 export type ConfirmationReportOutcome =
   | {
@@ -78,20 +83,41 @@ export function mailboxAddress(from: string): string {
 interface ReportInput {
   readonly mail: InboundMailFacts;
   readonly purchases: readonly PurchaseRecord[];
-  /** Sends the report to the owner; a rejection propagates so the caller can log it. */
-  readonly send: (message: string) => Promise<unknown>;
   /**
-   * Records the refund time on the purchase; false when one was already
-   * recorded, which sends nothing again. Absent: refunds are not recognised.
+   * Sends the report to the owner; true when a channel took it. A rejection
+   * propagates so the caller can log it, except for a notice already owed.
    */
-  readonly recordRefund?: ((purchaseId: string, refundedAt: string) => Promise<boolean>) | undefined;
+  readonly send: (message: string) => Promise<boolean>;
   /**
-   * Moves an unverified purchase to `purchased` with the mail's order number;
-   * true only on the call that moved it. Absent: records are never upgraded.
+   * Records the refund time on the purchase, and the refund note the owner is
+   * owed, in one write; false when one was already recorded, which sends
+   * nothing again. Absent: refunds are not recognised.
    */
-  readonly recordConfirmation?: ((purchaseId: string, orderNumber: string | null) => Promise<boolean>) | undefined;
+  readonly recordRefund?: ((purchaseId: string, refundedAt: string, ownerNotice: string) => Promise<boolean>) | undefined;
+  /**
+   * Moves an unverified purchase to `purchased` with the mail's order number,
+   * and owes the owner the report saying so, in one write; true only on the
+   * call that moved it. Absent: records are never upgraded.
+   */
+  readonly recordConfirmation?: ((purchaseId: string, orderNumber: string | null, ownerNotice: string) => Promise<boolean>) | undefined;
+  /** A recorded refund or settlement notice reached a channel: it is no longer owed. */
+  readonly settleNotice?: ((purchaseId: string, kind: 'refund' | 'settled') => Promise<void>) | undefined;
   /** Absent: every matching mail is reported (no memory across mails). */
   readonly reports?: OrderMailReports | undefined;
+}
+
+/**
+ * Sends a notice already owed in the purchases file and settles it once a
+ * channel took it. A send that fails or reaches no channel leaves it owed (it
+ * is sent at the next start) and still resolves, so the mail is not read again
+ * against a purchase that now reads as refunded or settled.
+ */
+async function tellOwed(input: ReportInput, purchaseId: string, kind: 'refund' | 'settled', message: string): Promise<void> {
+  try {
+    if (await input.send(message)) await input.settleNotice?.(purchaseId, kind);
+  } catch (error) {
+    logger.warn('A purchase notice from shop mail was not delivered; it stays owed and is sent at the next start', { kind, error: error instanceof Error ? error.name : 'unknown' });
+  }
 }
 
 /** One mail is one decision-model operation: a model that fails partway leaves the rest of it unread. */
@@ -142,8 +168,9 @@ async function reportOwned(input: ReportInput): Promise<ConfirmationReportOutcom
     // The set model failed on this mail (Hybrid): what it says is unread, so nothing is recorded from it.
     if (isClassicOperation()) return askAboutUnreadMail(input, [record], senderDomain, false);
     if (refunded) {
-      const recorded = await input.recordRefund(record.purchaseId, new Date(input.mail.receivedAtMs).toISOString());
-      if (recorded) await input.send(renderRefundReport({ facts, senderDomain }));
+      const notice = renderRefundReport({ facts, senderDomain });
+      const recorded = await input.recordRefund(record.purchaseId, new Date(input.mail.receivedAtMs).toISOString(), notice);
+      if (recorded) await tellOwed(input, record.purchaseId, 'refund', notice);
       return { kind: 'reported', purchaseId: record.purchaseId, refund: true };
     }
   }
@@ -160,15 +187,11 @@ async function reportOwned(input: ReportInput): Promise<ConfirmationReportOutcom
   const confirmation = await extractConfirmationFacts(input.mail);
   if (isClassicOperation()) return askAboutUnreadMail(input, [record], senderDomain, false);
   const kind = orderMailKind(input.mail.subject, confirmation.trackingReference);
-  const settled = recordConfirmation !== undefined && await recordConfirmation(record.purchaseId, confirmation.orderNumber);
-  if (!settled && reported.includes(kind)) return { kind: 'not-reported', reason: 'already-reported' };
-  await input.send(renderConfirmationReport({
-    facts,
-    confirmation,
-    senderDomain,
-    kind,
-    settled,
-  }));
+  const settledNotice = renderConfirmationReport({ facts, confirmation, senderDomain, kind, settled: true });
+  const settled = recordConfirmation !== undefined && await recordConfirmation(record.purchaseId, confirmation.orderNumber, settledNotice);
+  if (settled) await tellOwed(input, record.purchaseId, 'settled', settledNotice);
+  else if (reported.includes(kind)) return { kind: 'not-reported', reason: 'already-reported' };
+  else await input.send(renderConfirmationReport({ facts, confirmation, senderDomain, kind, settled: false }));
   if (reports !== undefined) await reports.record(record.purchaseId, kind);
   return { kind: 'reported', purchaseId: record.purchaseId, mailKind: kind, ...(settled ? { settled: true } : {}) };
 }

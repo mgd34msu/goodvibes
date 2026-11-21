@@ -359,7 +359,7 @@ export function createBlueBubblesDeliveryStrategy(
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           chatGuid,
-          tempGuid: stableSendId(request.runId, chatGuid, fitted.text),
+          tempGuid: stableSendId(request.announces ?? request.runId, chatGuid, fitted.text),
           message: fitted.text,
         }),
       }, 'opaque-url');

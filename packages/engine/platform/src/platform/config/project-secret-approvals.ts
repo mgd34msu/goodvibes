@@ -20,6 +20,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
+import { withSyncFileLock } from './sync-file-lock.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
@@ -50,20 +51,27 @@ export class ProjectSecretApprovals {
 
   /** Record the keys of the store at `storePath` as confirmed, each with its stored value. Throws when the record cannot be written. */
   approve(storePath: string, values: Readonly<Record<string, string>>): void {
-    this.#refresh();
-    const current = this.#stores.get(storePath) ?? new Map<string, string>();
     const digests = Object.entries(values).map(([key, value]) => [key, valueDigest(value)] as const);
-    if (digests.every(([key, digest]) => current.get(key) === digest)) return;
-    const next = new Map(this.#stores);
-    next.set(storePath, new Map([...current, ...digests]));
-    const document: ApprovalDocument = {
-      version: 2,
-      stores: Object.fromEntries([...next].map(([path, approved]) => [path, Object.fromEntries([...approved].sort(([a], [b]) => a.localeCompare(b)))])),
-    };
+    this.#refresh();
+    if (digests.every(([key, digest]) => this.#stores.get(storePath)?.get(key) === digest)) return;
     mkdirSync(dirname(this.#file), { recursive: true, mode: 0o700 });
-    writeJsonFileAtomic(this.#file, document, { mode: 0o600 });
-    this.#stores = next;
-    this.#identity = this.#stat();
+    // The daemon and a terminal may confirm at once: the record is read again
+    // and written under the file's lock, so neither drops the other's keys.
+    withSyncFileLock(this.#file, () => {
+      this.#identity = null;
+      this.#refresh();
+      const current = this.#stores.get(storePath) ?? new Map<string, string>();
+      if (digests.every(([key, digest]) => current.get(key) === digest)) return;
+      const next = new Map(this.#stores);
+      next.set(storePath, new Map([...current, ...digests]));
+      const document: ApprovalDocument = {
+        version: 2,
+        stores: Object.fromEntries([...next].map(([path, approved]) => [path, Object.fromEntries([...approved].sort(([a], [b]) => a.localeCompare(b)))])),
+      };
+      writeJsonFileAtomic(this.#file, document, { mode: 0o600 });
+      this.#stores = next;
+      this.#identity = this.#stat();
+    });
   }
 
   #stat(): string | null {

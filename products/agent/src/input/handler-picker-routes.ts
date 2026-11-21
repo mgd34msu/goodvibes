@@ -13,8 +13,11 @@ import { isLocalFitRecommendation, isProviderSignInRow } from './model-picker-lo
 export const handleModelPickerToken = createModelPickerTokenHandler<CommandContext, ModelPickerModal>({
   chromeLines: MODEL_PICKER_CHROME_LINES,
   commitBeforeClose: true,
-  commit(state, selection) {
-    state.commandContext?.completeModelSelection?.(selection);
+  commit(state, selection, applied) {
+    const context = state.commandContext;
+    if (!context?.completeModelSelection) return;
+    context.completeModelSelection(selection);
+    applied();
   },
   selectSpecial(state, selected) {
     if (isProviderSignInRow(selected)) {

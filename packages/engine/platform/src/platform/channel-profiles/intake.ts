@@ -41,14 +41,12 @@ export interface InboundSender {
  * never a guess.
  *
  * `channelPolicy`, when supplied, is the one exception to "never a guess": a
- * sender who is not in the named-principal registry but whom the channel's OWN
- * ingress policy already authorized as its owner (the per-surface allowlist
- * self-seeded from whoever pairs the channel first, see
- * `ChannelPolicyManager.evaluateIngress`) is attributed to the honest OWNER
- * principal, not the unknown one. Channel policy already decided this sender is
- * the owner in order to let the message through at all; attribution repeating
- * "unknown" for the person the platform just finished authorizing would be
- * dishonest, not cautious.
+ * sender who is not in the named-principal registry but who is the surface's
+ * recorded owner (`ownerId` on the channel policy, set when the channel is
+ * first paired) is attributed to the OWNER principal, not the unknown one.
+ * Any other sender the policy admits (a guest on the allowlist) is not the
+ * owner and resolves as the registry says, to the unknown principal when
+ * unnamed.
  */
 export async function attributeInboundSession(
   principals: Pick<PrincipalRegistry, 'resolveByIdentity'>,
@@ -65,7 +63,7 @@ export async function attributeInboundSession(
   const resolution = await principals.resolveByIdentity({ channel: sender.surfaceKind, value });
   if (!resolution.known && channelPolicy) {
     const policy = channelPolicy.getPolicy(sender.surfaceKind as ChannelSurface);
-    if (policy.allowlistUserIds.includes(value)) {
+    if (policy.ownerId !== undefined && policy.ownerId === value) {
       const owner = ownerPrincipal({ channel: sender.surfaceKind, value });
       const ownerResolution: PrincipalResolution = { principal: owner, known: true };
       return {

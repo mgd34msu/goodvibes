@@ -277,6 +277,24 @@ async function formatShow(loaded: LoadedArtifact, args: AgentArtifactsToolArgs, 
   return lines.join('\n');
 }
 
+/**
+ * Publishes a finished file at `target` without replacing anything there: the
+ * hard link fails when the name is taken. On a file system without hard links
+ * (FAT, exFAT, some mounts) the file is renamed into place once the name is
+ * seen free. The staged name is the caller's to remove.
+ */
+async function publishWithoutReplacing(staged: string, target: string, label: string): Promise<void> {
+  try {
+    await link(staged, target);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
+      throw new Error(`${label} target already exists: ${target}. Pass overwrite:true when replacement is part of the admitted action.`);
+    }
+    if (existsSync(target)) throw error;
+    await rename(staged, target);
+  }
+}
+
 async function exportArtifactToFile(
   store: AgentArtifactBrowserStore,
   args: AgentArtifactsToolArgs,
@@ -317,15 +335,15 @@ async function exportArtifactToFile(
         if (statSync(path).size !== buffer.byteLength) throw new Error(`The exported file at ${path} is not the artifact's ${buffer.byteLength} bytes`);
       });
     } else {
-      // Never replaces a file that appeared meanwhile: the link fails when the name is taken.
-      await link(replacement.staged, resolvedPath);
-      await unlink(replacement.staged);
+      await publishWithoutReplacing(replacement.staged, resolvedPath, 'Export');
     }
   } catch (error) {
     await rm(replacement.staged, { force: true }).catch(() => undefined);
     throw error;
   }
-  assertCurrent(); assertSource();
+  // The file is published, and that is the outcome: the staged name (a second
+  // link to it, or already gone after a rename) is only tidied away.
+  if (!overwrite) await rm(replacement.staged, { force: true }).catch(() => undefined);
   return [
     'Exported Agent artifact',
     `  artifact ${record.id}`,
@@ -638,15 +656,7 @@ async function exportArtifactArchive(
     await handle.close(); handleOpen = false;
     check();
     if (overwrite) await rename(partial, resolvedPath);
-    else {
-      try { await link(partial, resolvedPath); }
-      catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`Archive target already exists: ${resolvedPath}. Pass overwrite:true when replacement is part of the admitted action.`);
-        // A file system without hard links: the existence check above still holds the no-overwrite rule.
-        if (existsSync(resolvedPath)) throw error;
-        await rename(partial, resolvedPath);
-      }
-    }
+    else await publishWithoutReplacing(partial, resolvedPath, 'Archive');
   } finally {
     if (handleOpen) await handle.close().catch(() => undefined);
     await unlink(partial).catch(() => undefined);

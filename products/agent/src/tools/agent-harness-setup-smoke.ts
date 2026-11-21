@@ -397,12 +397,19 @@ export async function saveSetupSmokeArtifact(input: {
       redaction: 'token, secret, password, credential, authorization, and api-key-like values redacted before storage',
     },
   });
+  // The artifact create is the commit point: from here the answer always carries its id, so
+  // nothing after it turns a saved run into a failure that would be saved a second time.
   // The record, not the artifact's metadata, is what makes it setup smoke evidence.
-  recordSetupSmokeEvidence(shellPaths, descriptor.id);
-  input.ownership.assertCurrent();
+  let recordError: string | undefined;
+  try {
+    recordSetupSmokeEvidence(shellPaths, descriptor.id);
+  } catch (error) {
+    recordError = `The setup smoke run was saved as artifact ${descriptor.id}, but it was not listed as setup smoke evidence (${error instanceof Error ? error.message : String(error)}). Do not save it again; inspect it with the inspect route.`;
+  }
   return {
     status: 'saved',
     artifactId: descriptor.id,
+    ...(recordError ? { recordError } : {}),
     filename: descriptor.filename ?? null,
     mimeType: descriptor.mimeType,
     sizeBytes: descriptor.sizeBytes,

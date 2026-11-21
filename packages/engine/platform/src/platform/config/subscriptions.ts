@@ -3,6 +3,7 @@ import { assertSecurityReadSource, fileIdentity } from '../security/read-source.
 import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { logger } from '../utils/logger.js';
 import { withSyncFileLock } from './sync-file-lock.js';
+import { ProcessLockBusyError } from '../utils/process-lock.js';
 import { summarizeError } from '../utils/error-display.js';
 import { injectiveKeyPart } from '../utils/target-ref.js';
 import { captureStrictJudgmentJson } from '../gate/judgment-result.js';
@@ -598,13 +599,14 @@ export class SubscriptionManager {
   private async moveInlineTokens(inline: SubscriptionGrant): Promise<void> {
     try {
       const revision = await this.storeTokens(inline, inline.tokenRevision);
-      this.mutate((store) => {
+      const moved = this.mutate((store) => {
         const current = store.subscriptions[inline.provider];
         if (!current || current.tokenRevision !== inline.tokenRevision
           || current.accessToken !== inline.accessToken || current.refreshToken !== inline.refreshToken) return false;
         store.subscriptions[inline.provider] = storedForm({ ...(current as SubscriptionGrant) }, revision);
         return true;
-      }, (moved) => moved);
+      }, (result) => result);
+      if (!moved) await this.reconcileDiscardedTokens(inline.provider, revision);
     } catch (error) {
       // Not moved: the tokens stay usable from the file, and a later process moves them.
       this.movedInline.delete(inline.provider);
@@ -672,14 +674,16 @@ export class SubscriptionManager {
    * the TUI and the agent share this file, and without the lock the later
    * rename drops whatever another process saved in between. `change` sees the
    * store as it is on disk now; return false from `wrote` to skip the write.
+   * `onBusy` is the lock's policy when another process holds it past the wait
+   * (sync-file-lock.ts): a plain save still writes, a refresh claim refuses.
    */
-  private mutate<T>(change: (store: SubscriptionStore) => T, wrote: (result: T) => boolean = () => true): T {
+  private mutate<T>(change: (store: SubscriptionStore) => T, wrote: (result: T) => boolean = () => true, onBusy: 'refuse' | 'write-unlocked' = 'write-unlocked'): T {
     return withSyncFileLock(this.path, () => {
       const store = this.readStrict();
       const result = change(store);
       if (wrote(result)) this.write(store);
       return result;
-    });
+    }, { onBusy });
   }
 
   public list(): ProviderSubscription[] {
@@ -818,7 +822,7 @@ export class SubscriptionManager {
       return null;
     }, (result) => result === null);
     if (superseded) {
-      await this.dropUnnamedTokens(provider, stored.tokenRevision);
+      await this.reconcileDiscardedTokens(provider, stored.tokenRevision);
       this.assertLoginCurrent(provider, pending.state, superseded);
     }
     this.notifyChanged(provider);
@@ -835,19 +839,29 @@ export class SubscriptionManager {
   }
 
   /**
-   * After a refused sign-in write: the tokens it stored are removed again when no
-   * record names them, so a signed-out provider keeps no tokens. A record that
-   * still names the previous revision keeps resolving through `previous`.
+   * After a token write whose record write was discarded (a sign-in, renewal or
+   * inline move that lost its race): while the secret's current revision is
+   * still the one that write stored, no record names it. With no record left
+   * the secret is removed, so a signed-out provider keeps no tokens; with a
+   * record naming the previous revision, that entry becomes current again, so
+   * the next stored revision keeps it as previous and the record still resolves.
    */
-  private async dropUnnamedTokens(provider: string, revision: number | undefined): Promise<void> {
+  private async reconcileDiscardedTokens(provider: string, revision: number | undefined): Promise<void> {
     if (!this.secrets || revision === undefined) return;
-    if (this.read().subscriptions[provider] !== undefined) return;
-    if (this.readTokenSecret(provider)?.revision !== revision) return;
+    const secret = this.readTokenSecret(provider);
+    if (secret?.revision !== revision) return;
+    const record = this.read().subscriptions[provider];
+    const previous = secret.previous;
     try {
-      await this.secrets.delete(subscriptionTokensKey(provider));
-      this.tokenSecrets.delete(provider);
+      if (record === undefined) {
+        await this.secrets.delete(subscriptionTokensKey(provider));
+        this.tokenSecrets.delete(provider);
+      } else if (previous !== undefined && record.tokenRevision === previous.revision) {
+        await this.secrets.set(subscriptionTokensKey(provider), JSON.stringify(previous), { scope: 'daemon' });
+        this.tokenSecrets.set(provider, previous);
+      }
     } catch (error) {
-      logger.warn('SubscriptionManager: tokens of a sign-in that was ended meanwhile could not be removed from the secret store', { provider, error: summarizeError(error) });
+      logger.warn('SubscriptionManager: tokens no sign-in record names could not be put back in step with the record in the secret store', { provider, error: summarizeError(error) });
     }
   }
 
@@ -911,18 +925,30 @@ export class SubscriptionManager {
   /** One locked read of the record: return it as it is, take the claim on it, or report another process's live claim. */
   private claimRefresh(provider: string, held: string | undefined): RefreshClaim {
     const now = Date.now();
-    return this.mutate((store): RefreshClaim => {
-      const stored = store.subscriptions[provider];
-      const current = this.withTokens(stored);
-      if (!stored || !current) throw new Error(`No stored OAuth subscription for ${provider}.`);
-      if (current.revokedAt !== undefined) throw new SubscriptionSessionEndedError(provider);
-      if (!current.refreshToken || (held !== undefined && current.accessToken !== held)) return { kind: 'settled', record: current };
-      if (current.refreshingUntil !== undefined && current.refreshingUntil > now) {
-        return { kind: 'leased', record: current, until: current.refreshingUntil };
-      }
-      store.subscriptions[provider] = { ...stored, refreshingUntil: now + REFRESH_LEASE_MS };
-      return { kind: 'claimed', record: current };
-    }, (claim) => claim.kind === 'claimed');
+    try {
+      return this.mutate((store): RefreshClaim => this.claimIn(store, provider, held, now), (claim) => claim.kind === 'claimed', 'refuse');
+    } catch (error) {
+      if (!(error instanceof ProcessLockBusyError)) throw error;
+      // Another process holds the store past the wait and may be taking this
+      // claim: never take it unlocked. Wait as for a live claim and read again.
+      const record = this.getGrant(provider);
+      if (!record) throw new Error(`No stored OAuth subscription for ${provider}.`);
+      return { kind: 'leased', record, until: Date.now() + LEASE_POLL_MAX_MS };
+    }
+  }
+
+  /** The claim decision on the store as read under the lock; takes the claim by writing the lease into `store`. */
+  private claimIn(store: SubscriptionStore, provider: string, held: string | undefined, now: number): RefreshClaim {
+    const stored = store.subscriptions[provider];
+    const current = this.withTokens(stored);
+    if (!stored || !current) throw new Error(`No stored OAuth subscription for ${provider}.`);
+    if (current.revokedAt !== undefined) throw new SubscriptionSessionEndedError(provider);
+    if (!current.refreshToken || (held !== undefined && current.accessToken !== held)) return { kind: 'settled', record: current };
+    if (current.refreshingUntil !== undefined && current.refreshingUntil > now) {
+      return { kind: 'leased', record: current, until: current.refreshingUntil };
+    }
+    store.subscriptions[provider] = { ...stored, refreshingUntil: now + REFRESH_LEASE_MS };
+    return { kind: 'claimed', record: current };
   }
 
   /** Spend the claimed refresh token outside the lock, then write the answer (or the refusal) in one locked compare-and-write. */
@@ -952,10 +978,11 @@ export class SubscriptionManager {
       throw error;
     }
     let outcome: RefreshWrite;
+    let revision: number | undefined;
     try {
       const answered = this.refreshedRecord(claimed, claimed, tokenResponse);
       // The new tokens are stored first; the record that names them follows.
-      const revision = this.secrets ? await this.storeTokens(answered, claimed.tokenRevision) : undefined;
+      revision = this.secrets ? await this.storeTokens(answered, claimed.tokenRevision) : undefined;
       outcome = this.mutate((store): RefreshWrite => {
         const stored = store.subscriptions[provider];
         const current = this.withTokens(stored);
@@ -976,6 +1003,8 @@ export class SubscriptionManager {
       });
       return this.refreshedRecord(claimed, claimed, tokenResponse);
     }
+    // The answer was not saved: the tokens it stored must not run ahead of the record.
+    if (outcome.kind !== 'saved') await this.reconcileDiscardedTokens(provider, revision);
     if (outcome.kind === 'gone') throw signedOutDuringRefresh(provider);
     return outcome.record;
   }

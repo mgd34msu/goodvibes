@@ -1,6 +1,6 @@
 import type { AgentResearchReportSource as ResearchSource } from './research-report-input.js';
 import { prepareProtectedResearchReport, hasPreparedResearchReport, createAgentResearchReportProjector, bindAgentResearchSourceOwner, bindAgentResearchReportSourceOwner, type PreparedResearchReport } from './protected-research-report.js';
-import { AgentResearchRunRegistry } from './research-run-registry.js';
+import { AgentResearchRunRegistry, type AgentResearchRunRecord } from './research-run-registry.js';
 import { AgentResearchSourceRegistry, resolveResearchSource, type AgentResearchSourceRecord } from './research-source-registry.js';
 import { bindResearchArtifacts, researchLedgers } from './research-ledgers.js';
 import { formatJsonStoreWriteReport } from './store-file.js';
@@ -546,8 +546,46 @@ function settleResearchRun(paths: ResearchLedgerPaths, runId: string, sourceIds:
     if (runNote) lines.push(`  ${runNote}`);
     return { lines, runOpen: false };
   } catch (error) {
-    lines.push(`  run ${runId} not completed: ${error instanceof Error ? error.message : String(error)}`);
+    // The outcome follows the run's state, read only on this failure path.
+    const reason = error instanceof Error ? error.message : String(error);
+    const run = readRun(runs, runId);
+    if (run === 'unreadable') {
+      lines.push(`  run ${runId} not completed: ${reason}`);
+      return { lines, runOpen: true };
+    }
+    if (!run) {
+      lines.push(`  run ${runId} not completed: it is not in the research run ledger; this report was saved on its own`);
+      return { lines, runOpen: false };
+    }
+    if (run.status === 'completed' && !run.reportArtifactId) {
+      try {
+        runs.attachReport(run.id, artifactId);
+        lines.push(`  report attached to completed run ${run.id}`);
+        const runNote = formatJsonStoreWriteReport(runs.lastWriteReport(), 'research run');
+        if (runNote) lines.push(`  ${runNote}`);
+      } catch (attachError) {
+        lines.push(`  report not attached to completed run ${run.id}: ${attachError instanceof Error ? attachError.message : String(attachError)}`);
+      }
+      return { lines, runOpen: false };
+    }
+    if (run.status === 'completed') {
+      lines.push(`  run ${run.id} is completed with report ${run.reportArtifactId}; this report was saved on its own`);
+      return { lines, runOpen: false };
+    }
+    if (run.status === 'cancelled' || run.status === 'failed') {
+      lines.push(`  run ${run.id} is ${run.status}; this report was saved on its own`);
+      return { lines, runOpen: false };
+    }
+    lines.push(`  run ${run.id} not completed: ${reason}`);
     return { lines, runOpen: true };
+  }
+}
+
+function readRun(runs: AgentResearchRunRegistry, runId: string): AgentResearchRunRecord | null | 'unreadable' {
+  try {
+    return runs.get(runId);
+  } catch {
+    return 'unreadable';
   }
 }
 

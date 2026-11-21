@@ -156,7 +156,11 @@ export function scheduleAutomationJob(context: AutomationSchedulingContext, job:
 
   const delayMs = Math.max(0, nextRunAt - Date.now());
   if (delayMs > MAX_TIMEOUT_MS) {
-    const timer = setTimeout(() => scheduleAutomationJob(context, refreshed), MAX_TIMEOUT_MS);
+    // The hop re-reads the live record, so a job changed, disabled or removed meanwhile is never written back from this snapshot.
+    const timer = setTimeout(() => {
+      const live = context.jobs.get(job.id);
+      if (live) scheduleAutomationJob(context, live);
+    }, MAX_TIMEOUT_MS);
     timer.unref?.();
     context.timers.set(job.id, timer);
     return;

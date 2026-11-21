@@ -128,12 +128,16 @@ export function createTtsSettingsActions<Context extends TtsPickerContext>(prese
         ctx.print(providerId ? `No voices returned for ${providerId}.` : 'No TTS voices returned.');
         return true;
       }
-      const current = String(ctx.platform.configManager.get('tts.voice') ?? '').trim();
+      // Voices are provider-specific: choosing one of another provider's voices
+      // sets that provider too, so tts.provider and tts.voice stay a pair.
+      const configuredProvider = String(ctx.platform.configManager.get('tts.provider') ?? '').trim();
+      const foreign = providerId !== undefined && providerId !== configuredProvider;
+      const current = foreign ? '' : String(ctx.platform.configManager.get('tts.voice') ?? '').trim();
       const items: SelectionItem[] = [
         {
           id: '__default__',
           label: 'Use provider default voice',
-          detail: current ? 'clears tts.voice' : '(current)',
+          detail: foreign ? `sets tts.provider to ${providerId} and clears tts.voice` : current ? 'clears tts.voice' : '(current)',
           category: 'voice',
           primaryAction: 'select',
         },
@@ -148,14 +152,22 @@ export function createTtsSettingsActions<Context extends TtsPickerContext>(prese
       ];
       ownership?.assertCurrent?.();
       ctx.openSelection(
-        `Choose TTS Voice${providerId ? ` (${providerId})` : ''}`,
+        `Choose TTS Voice${providerId ? ` (${providerId})` : ''}${foreign ? ` (not your current provider: ${configuredProvider || 'none'})` : ''}`,
         items,
         { preSelectId: current || '__default__', allowSearch: true },
         (result) => {
           if (!result) return;
           const nextVoice = result.item.id === '__default__' ? '' : result.item.id;
-          setTtsConfigValue(ctx, 'tts.voice', nextVoice);
-          ctx.print(nextVoice ? `TTS voice set to ${nextVoice}.` : 'TTS voice cleared. The provider default voice will be used.');
+          if (foreign && providerId !== undefined) {
+            setTtsConfigValue(ctx, 'tts.provider', providerId);
+            setTtsConfigValue(ctx, 'tts.voice', nextVoice);
+            ctx.print(nextVoice
+              ? `TTS provider set to ${providerId} and voice to ${nextVoice}.`
+              : `TTS provider set to ${providerId}. TTS voice cleared. The provider default voice will be used.`);
+          } else {
+            setTtsConfigValue(ctx, 'tts.voice', nextVoice);
+            ctx.print(nextVoice ? `TTS voice set to ${nextVoice}.` : 'TTS voice cleared. The provider default voice will be used.');
+          }
           ctx.renderRequest();
         },
       );

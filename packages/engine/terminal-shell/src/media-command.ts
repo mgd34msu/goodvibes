@@ -21,6 +21,7 @@ import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, InputDescription } from './command-actions/types.js';
 import { choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
 import { collectMedia, generateMedia, type MediaGenerationRun } from './media-generation.js';
+import { resolveConfinedBundlePath } from './recall-shared.js';
 
 type MediaStore = Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'readContent'>>;
 
@@ -34,7 +35,7 @@ export interface MediaCommandPolicy<Ctx> {
   readonly product: string;
   readonly registry: (ctx: Ctx) => MediaProviderRegistry | undefined;
   readonly artifactStore: (ctx: Ctx) => MediaStore | undefined;
-  readonly paths: (ctx: Ctx) => Pick<ShellPathService, 'workingDirectory' | 'resolveWorkspacePath'>;
+  readonly paths: (ctx: Ctx) => Pick<ShellPathService, 'workingDirectory' | 'resolveWorkspacePath' | 'isWithinWorkingDirectory'>;
   /** Opens a saved file in the system viewer; false where there is none. Absent: the path is printed only. */
   readonly openFile?: ((path: string) => Promise<boolean>) | undefined;
 }
@@ -91,8 +92,21 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
     return { registry, store };
   };
 
+  /**
+   * The resolved --out path, checked before anything is asked for: a model-run
+   * line may only save inside the workspace, so a refused path costs nothing.
+   */
+  const outPath = (ctx: Ctx, out: string): string | undefined => {
+    if (!out) return undefined;
+    const resolved = resolveConfinedBundlePath(out, policy.paths(ctx), ctx.invokedByModel);
+    if (resolved === undefined) {
+      throw commandRefusal('A model-run /media may only save inside the workspace; nothing was asked for.', 'Ask the owner to type the line for a place outside it.');
+    }
+    return resolved;
+  };
+
   /** Each artifact saved as a file next to its stored copy; the first one opened where there is a viewer. */
-  const save = async (ctx: Ctx, store: MediaStore, result: MediaGenerationRun, prompt: string, out: string): Promise<string> => {
+  const save = async (ctx: Ctx, store: MediaStore, result: MediaGenerationRun, prompt: string, out: string, target: string | undefined): Promise<string> => {
     if (result.pending) {
       return [
         `${result.pending.providerId} accepted the job (task ${result.pending.taskId}) and is still making it; it is paid for and keeps running.`,
@@ -114,13 +128,13 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
         lines.push(`  artifact ${artifact.artifactId} (${artifact.mimeType}) is kept, but could not be read back to save a file: ${summarizeError(error)}`);
         continue;
       }
-      const target = mediaFilePath(paths.workingDirectory, prompt, artifact.mimeType, index, result.artifacts.length, out ? paths.resolveWorkspacePath(out) : undefined);
-      const shown = relative(paths.workingDirectory, target).startsWith('..') ? target : relative(paths.workingDirectory, target);
+      const file = mediaFilePath(paths.workingDirectory, prompt, artifact.mimeType, index, result.artifacts.length, target);
+      const shown = relative(paths.workingDirectory, file).startsWith('..') ? file : relative(paths.workingDirectory, file);
       try {
-        await mkdir(dirname(target), { recursive: true });
+        await mkdir(dirname(file), { recursive: true });
         // `wx`: an existing file is never replaced.
-        await writeFile(target, bytes, { flag: 'wx' });
-        written.push(target);
+        await writeFile(file, bytes, { flag: 'wx' });
+        written.push(file);
         lines.push(`  saved: ${shown} (${artifact.mimeType}, ${bytes.byteLength} bytes; artifact ${artifact.artifactId})`);
       } catch (error) {
         const exists = (error as NodeJS.ErrnoException).code === 'EEXIST';
@@ -182,6 +196,7 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
         example: { prompt: 'a lighthouse at dusk', kind: 'image' },
         async run(values, ctx) {
           const { registry, store } = needs(ctx);
+          const target = outPath(ctx, values.out ?? '');
           const prompt = values.prompt!.trim();
           let result: MediaGenerationRun;
           try {
@@ -194,7 +209,7 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
           } catch (error) {
             return failed('Making it', error);
           }
-          return save(ctx, store, result, prompt, values.out ?? '');
+          return save(ctx, store, result, prompt, values.out ?? '', target);
         },
       }),
       doAction<Ctx>({
@@ -209,6 +224,7 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
         example: { provider: 'fal', task: 'req-123' },
         async run(values, ctx) {
           const { registry, store } = needs(ctx);
+          const target = outPath(ctx, values.out ?? '');
           const resume: Record<string, string> = {};
           for (const pair of (values.resume ?? '').split(/\s+/).filter(Boolean)) {
             const at = pair.indexOf('=');
@@ -221,7 +237,7 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
           } catch (error) {
             return failed(`Collecting ${values.provider} job ${values.task}`, error);
           }
-          return save(ctx, store, result, values.task!, values.out ?? '');
+          return save(ctx, store, result, values.task!, values.out ?? '', target);
         },
       }),
     ],

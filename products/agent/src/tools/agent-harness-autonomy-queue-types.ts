@@ -46,6 +46,8 @@ export interface AutonomyQueueItem {
   readonly methodIds?: readonly string[];
   readonly unavailableMethodIds?: readonly string[] | undefined;
   readonly liveRecords?: readonly AutonomyQueueLiveRecord[];
+  /** Sources this lane reads that could not be read this time: the lane is unknown, not empty. */
+  readonly unreadSources?: readonly string[];
 }
 
 export interface AutonomyQueueLiveRecord {

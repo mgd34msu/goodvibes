@@ -112,6 +112,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
    * press, if any, cleared before every subsequent press decides its own
    * outcome (see handleCtrlC in handler-content-actions.ts). */
   public lastCtrlCTimeoutId: ReturnType<typeof setTimeout> | null = null;
+  /** Unbracketed-paste-flood guard state (shared guard in terminal-shell), mutated in place. */
+  public burstGuard: import('@goodvibes/engine/terminal-shell/paste-flood-guard').PasteBurstGuardState = { timestamps: [], suspended: false, hintShown: false };
   /** Long-lived feed context, reused across every feed() call to avoid per-keystroke allocation. */
   public feedContext!: import('./handler-feed.ts').InputFeedContext;
   public commandRegistry: CommandRegistry | null = null;
@@ -140,7 +142,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public onboardingHydrationSerial = 0;
   /** The onboarding operation running now, by name, so another key press can say what it waits for; null when none. */
   public onboardingOperation: string | null = null;
-  public onboardingOpenAiListenerSerial = 0;
+  /** The OpenAI sign-in's callback listener while it waits on the fixed port; null when none is held. */
+  public onboardingOpenAiListener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
 
   public sessionPickerModal: SessionPickerModal;
   public profilePickerModal: ProfilePickerModal;
@@ -258,6 +261,7 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
       this,
       {
         ...projectFeedContextStable(this),
+        burstGuard: this.burstGuard,
         configModal: this.configModal,
         onboardingWizard: this.onboardingWizard,
         killRing: this.killRing,
@@ -421,9 +425,8 @@ export class InputHandler extends TerminalInputHandlerState implements InputHand
   public async completeOpenAiSubscriptionFromListener(
     listener: Awaited<ReturnType<typeof createOAuthLocalListener>>,
     verifier: string,
-    serial: number,
   ): Promise<void> {
-    await completeOpenAiSubscriptionFromListenerForHandler(this, listener, verifier, serial);
+    await completeOpenAiSubscriptionFromListenerForHandler(this, listener, verifier);
   }
   public async handleOpenAiSubscriptionFinish(): Promise<void> {
     await handleOpenAiSubscriptionFinishForHandler(this);

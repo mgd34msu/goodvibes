@@ -86,7 +86,7 @@ const OPEN_TASKS = defineList<CommandActionContext>({
 const ENDED_TASKS = defineList<CommandActionContext>({
   name: 'tasks.ended',
   read: (ctx) => listRows(ctx, (entry) => entry.task.status === 'failed' || entry.task.status === 'cancelled'),
-  operator: { method: 'tasks.list', input: {}, rows: { from: 'tasks', where: { field: 'status', equals: 'failed' }, value: 'id', label: 'title', state: 'status' } },
+  operator: { terminalOnly: 'A task this terminal runs is retried from it.' },
 });
 
 const STATUSES: readonly FixedChoice[] = [
@@ -125,14 +125,16 @@ function mutationsOf(ctx: CommandActionContext): Pick<OpsApi, 'tasks'> {
  * contract has no verb for is refused by name rather than applied to a local
  * record that does not exist (which would report success and change nothing).
  */
-async function changeTask(ctx: CommandActionContext, taskId: string, act: 'start' | 'update' | 'complete' | 'fail' | 'cancel' | 'pause' | 'resume' | 'retry', apply: (tasks: Pick<OpsApi, 'tasks'>['tasks']) => Promise<string> | string): Promise<string> {
+async function changeTask(ctx: CommandActionContext, taskId: string, act: 'start' | 'update' | 'complete' | 'fail' | 'cancel' | 'pause' | 'resume' | 'retry', apply: (tasks: Pick<OpsApi, 'tasks'>['tasks']) => Promise<string> | string, note?: string): Promise<string> {
   const mutations = mutationsOf(ctx);
   const found = await findTask(ctx, taskId);
   try {
     if (found.origin === 'daemon') {
       const client = clientOf(ctx);
-      if (act === 'cancel') { await client.cancel(taskId); return `Cancelled task ${taskId} on the daemon.`; }
-      if (act === 'retry') { await client.retry(taskId); return `Re-queued task ${taskId} on the daemon.`; }
+      // The daemon's cancel and retry take only the task id.
+      const noteDropped = note ? ' The daemon keeps no note with its tasks, so your note was not saved.' : '';
+      if (act === 'cancel') { await client.cancel(taskId); return `Cancelled task ${taskId} on the daemon.${noteDropped}`; }
+      if (act === 'retry') { await client.retry(taskId); return `Re-queued task ${taskId} on the daemon.${noteDropped}`; }
       throw commandRefusal(`${taskId} runs on the daemon, and the daemon takes no ${act} for a task. Cancel and retry reach it; the rest act on this terminal's own tasks.`);
     }
     return await apply(mutations.tasks);
@@ -288,13 +290,13 @@ export const TASKS_COMMAND: CommandDescription<CommandActionContext> = {
     change({
       id: 'cancel', label: 'Cancel a task', word: 'cancel', inputs: [OPEN_TASK, NOTE],
       sentence: 'Task {task} is stopped and marked cancelled.', example: { task: 'task-1a2b' }, risk: 'cannot-be-undone',
-      run: (values, ctx) => changeTask(ctx, values.task!, 'cancel', async (tasks) => { await tasks.cancel(values.task!, values.note || undefined); return `Cancelled task ${values.task}.`; }),
+      run: (values, ctx) => changeTask(ctx, values.task!, 'cancel', async (tasks) => { await tasks.cancel(values.task!, values.note || undefined); return `Cancelled task ${values.task}.`; }, values.note || undefined),
     }),
     change({
       id: 'retry', label: 'Run a failed task again', word: 'retry',
       inputs: [listInput({ id: 'task', label: 'Task', help: 'Tasks that failed or were cancelled', list: ENDED_TASKS, other: 'a task id' }), NOTE],
       sentence: 'Task {task} is queued to run again, until you change it.', example: { task: 'task-1a2b' },
-      run: (values, ctx) => changeTask(ctx, values.task!, 'retry', async (tasks) => { await tasks.retry(values.task!, values.note || undefined); return `Re-queued task ${values.task}.`; }),
+      run: (values, ctx) => changeTask(ctx, values.task!, 'retry', async (tasks) => { await tasks.retry(values.task!, values.note || undefined); return `Re-queued task ${values.task}.`; }, values.note || undefined),
     }),
   ],
 };

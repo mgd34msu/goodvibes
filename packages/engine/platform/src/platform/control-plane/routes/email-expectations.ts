@@ -182,8 +182,10 @@ export function createEmailExpectationCancelHandler(
  * Where one expectation stands, waiting up to `timeoutMs` (at most a minute)
  * for it to change: `arrived` carries the verification link or code the daemon
  * took from the matching message; `waiting` lists matching messages that held
- * none; `expired`, `capability-lost` and `cancelled` say how it ended; `unknown`
- * says no such expectation is open or remembered. `watching` says whether a
+ * none; `expired`, `capability-lost` and `cancelled` say how it ended;
+ * `replaced` says a later open for the same address replaced it, with
+ * `replacedBy` the id to wait on instead; `unknown` says no such expectation
+ * is open or remembered. `watching` says whether a
  * mailbox is being read right now, so "nothing yet" is never confused with
  * "nobody is looking".
  */

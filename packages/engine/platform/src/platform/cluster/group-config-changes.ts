@@ -24,6 +24,8 @@ export class GroupConfigChangeRetiredError extends Error {
 export class GroupConfigChanges {
   private readonly origin = new AsyncLocalStorage<{ readonly kind: ChangeKind; readonly key: string; active: boolean }>();
   private readonly pending = new Map<string, Change>();
+  /** `kind:path` of local changes made while suspended (finite policy paths, never values). */
+  private readonly changedWhileSuspended = new Set<string>();
   private unsubscribers: Array<() => void> = [];
   private active = false;
   private suspended = false;
@@ -65,12 +67,24 @@ export class GroupConfigChanges {
     } catch (error) { this.stop(); throw error; }
   }
   stop(): void {
-    this.active = false; this.suspended = true; this.pending.clear(); this.seeded = null;
+    this.active = false; this.suspended = true; this.pending.clear(); this.changedWhileSuspended.clear(); this.seeded = null;
     const unsubscribe = this.unsubscribers; this.unsubscribers = [];
     for (const release of unsubscribe) { try { release(); } catch { this.host.logger.warn('cluster: a change subscription could not be released'); } }
   }
-  suspend(): void { this.suspended = true; this.pending.clear(); this.seeded = null; }
-  resume(): void { if (!this.active) return; this.suspended = false; this.refresh(); }
+  /** Explicit local changes not yet sent are remembered (as `kind:path`), and sent again on resume. */
+  suspend(): void {
+    for (const [key, change] of this.pending) if (!change.seed) this.changedWhileSuspended.add(key);
+    this.suspended = true; this.pending.clear(); this.seeded = null;
+  }
+  resume(): void {
+    if (!this.active) return; this.suspended = false;
+    const remembered = [...this.changedWhileSuspended]; this.changedWhileSuspended.clear();
+    for (const key of remembered) {
+      const split = key.indexOf(':');
+      this.enqueue(key.slice(0, split) as ChangeKind, key.slice(split + 1), false);
+    }
+    this.refresh();
+  }
   async join(): Promise<void> { while (this.task) await this.task; }
   /** Housekeeping retries failed metadata under its original owner and detects
    * a real master transition. It never polls credential values each tick.
@@ -87,9 +101,15 @@ export class GroupConfigChanges {
   }
   private changed(kind: ChangeKind, path: string, key: string): void {
     const source = this.origin.getStore();
-    if (isSecretBearingConfigKey(path)) this.pending.delete(`${kind === 'config' ? 'secret' : 'config'}:${path}`);
-    if (source?.active && source.kind === kind && source.key === key) { this.pending.delete(`${kind}:${path}`); return; }
+    if (isSecretBearingConfigKey(path)) {
+      const other = `${kind === 'config' ? 'secret' : 'config'}:${path}`;
+      this.pending.delete(other); this.changedWhileSuspended.delete(other);
+    }
+    if (source?.active && source.kind === kind && source.key === key) {
+      this.pending.delete(`${kind}:${path}`); this.changedWhileSuspended.delete(`${kind}:${path}`); return;
+    }
     this.host.retireLocal?.(path);
+    if (this.active && this.suspended) { this.changedWhileSuspended.add(`${kind}:${path}`); return; }
     this.enqueue(kind, path, false); this.kick();
   }
   private enqueue(kind: ChangeKind, path: string, seed: boolean): void {

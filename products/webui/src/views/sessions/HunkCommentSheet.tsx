@@ -10,13 +10,14 @@
  * sessions.followUp path after authoritative legacy classification) and passes
  * back `pending` / `error` / a `mode` label so this sheet stays free of any wire concern.
  */
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
+import { useId, useRef, useState, type KeyboardEvent, type SyntheticEvent } from 'react';
 import { SendHorizontal } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import { Textarea } from '../../components/ui/Field';
 import { shouldSubmitComposerKey } from '../../lib/composer-keys';
 import { formatRange, hunkExcerpt, hunkNewRange, hunkOldRange, type DiffHunk } from '../../lib/unified-diff';
+import { useContinuationDraft } from './SessionContinuation';
 import '../../styles/components/session-changes.css';
 
 export interface HunkCommentSheetProps {
@@ -46,11 +47,8 @@ export function HunkCommentSheet({
 }: HunkCommentSheetProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const formId = useId();
-  const [text, setText] = useState('');
-
-  useEffect(() => {
-    if (open) setText('');
-  }, [open]);
+  const draft = useContinuationDraft();
+  const [text, setText] = useState(draft);
 
   if (!open) return null;
 

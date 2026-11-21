@@ -10,9 +10,11 @@
  * and the arguments with which it destroys. The programs are found by the
  * gate's one command walk (command-walk.ts): through `sudo`, `env`, `xargs`,
  * `setsid`, `flock` and the other wrappers, into `sh -c` / `eval` strings,
- * `$(...)`, `find -exec`, and the shell scripts a command runs. A command
- * nested too deeply to read, or a script too large to read, counts as a
- * deletion, so what code cannot see fails closed. What these rules do not
+ * `$(...)`, `find -exec`, the shell's grouping and keywords, and the shell
+ * scripts a command runs. A command nested too deeply to read, a script too
+ * large to read, and a script that cannot be read (missing when the call is
+ * judged, read from a shell's standard input, relative to a directory code
+ * cannot follow) count as a deletion, so what code cannot see fails closed. What these rules do not
  * name stays a judgment, where a confident reading still puts it on the
  * owner's list.
  *
@@ -25,7 +27,7 @@ import { walkCommands } from './command-walk.js';
 /** What a call destroys, in words. */
 export interface Destruction {
   readonly reason: string;
-  /** Code could not read what the command runs (nested too deeply, a script too large); held as a deletion so it fails closed. */
+  /** Code could not read what the command runs (nested too deeply, a script too large or unreadable); held as a deletion so it fails closed. */
   readonly unread: boolean;
 }
 
@@ -37,11 +39,16 @@ const DATABASE_CLIENTS: ReadonlySet<string> = new Set([
 ]);
 const DATABASE_DESTRUCTION = /\b(?:drop\s+(?:table|database|schema|collection|index|view)|truncate\s+(?:table\s+)?[`"\w]|flushall|flushdb|dropdatabase\s*\(|\.drop\s*\()/i;
 
+/** git's global options that take the next word as their value when written without `=`. */
+const GIT_VALUE_OPTIONS: ReadonlySet<string> = new Set([
+  '-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--attr-source', '--super-prefix',
+]);
+
 /** What `git <subcommand> ...` destroys, or undefined. */
 function gitDestroys(args: readonly string[]): string | undefined {
-  // Global options before the subcommand; -C and -c take a value.
+  // Global options before the subcommand, each with its value when it takes one.
   let index = 0;
-  while (index < args.length && args[index]!.startsWith('-')) index += args[index] === '-C' || args[index] === '-c' ? 2 : 1;
+  while (index < args.length && args[index]!.startsWith('-')) index += GIT_VALUE_OPTIONS.has(args[index]!) ? 2 : 1;
   const sub = args[index];
   const rest = args.slice(index + 1);
   const has = (...flags: string[]) => rest.some((word) => flags.includes(word));
@@ -100,6 +107,7 @@ export function unrecoverableDeletionIn(commands: readonly string[], directory: 
     directory,
     tooDeep: (name) => ({ reason: `${name} runs a command nested too deeply to read`, unread: true }),
     onScriptTooLarge: (path) => ({ reason: `it runs the script ${path}, which is too large to read`, unread: true }),
+    onUnread: (what) => ({ reason: `it runs ${what}`, unread: true }),
     fromScript: (path, found) => found.unread ? found : { reason: `the script ${path} it runs: ${found.reason}`, unread: false },
   });
 }

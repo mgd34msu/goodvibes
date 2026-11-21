@@ -492,10 +492,9 @@ async function buildBenchmarkRecords(
   query?: ProviderApiBenchmarkQuery,
 ): Promise<readonly ProviderApiBenchmarkRecord[]> {
   const models = deps.providerRegistry.listModels();
+  // A named key of either form that names no model fails the call naming it.
   const selectedModels = query?.registryKeys
-    ? query.registryKeys
-        .map((ref) => findModelDefinition(models, resolveModelReference(ref, models)))
-        .filter((model): model is ModelDefinition => model != null)
+    ? query.registryKeys.map((ref) => resolveModelOrThrow(deps, ref))
     : models;
 
   // Models named in the query have their leaderboard identity read before

@@ -46,10 +46,34 @@ function route(
   return reading === 'uncertain' ? { method, path, file, line, reading } : { method, path, file, line };
 }
 
-async function findNextjsAppRoutes(root: string, unavailable: string[], notes: string[], current?: () => void): Promise<ApiRoute[]> {
+/**
+ * Where Next.js reads a route folder (`app` or `pages`): at the project root, or under
+ * `src/` when the root has none (Next.js ignores `src/` when the root folder exists).
+ */
+function nextjsDirectory(root: string, name: 'app' | 'pages'): string | undefined {
+  const atRoot = join(root, name);
+  if (existsSync(atRoot)) return atRoot;
+  const underSrc = join(root, 'src', name);
+  return existsSync(underSrc) ? underSrc : undefined;
+}
+
+/**
+ * The URL a pages/ file serves: its path under `pagesDir` without the extension, an
+ * `index` file serving its folder (`pages/api/users/index.ts` is `/api/users`), and
+ * `[id]` a parameter.
+ */
+function nextjsPagesRoutePath(pagesDir: string, file: string): string {
+  const path = relative(pagesDir, file)
+    .split(sep)
+    .join('/')
+    .replace(/\.[tj]sx?$/, '')
+    .replace(/(^|\/)index$/, '')
+    .replace(/\[(.+?)\]/g, ':$1');
+  return `/${path}`;
+}
+
+async function findNextjsAppRoutes(root: string, appDir: string, unavailable: string[], notes: string[], current?: () => void): Promise<ApiRoute[]> {
   const routes: ApiRoute[] = [];
-  const appDir = join(root, 'app');
-  if (!existsSync(appDir)) return routes;
 
   // The file must be named route.ts / route.js itself; `reroute.ts` is not a route handler.
   const files = await walk(appDir, (p) => /^route\.[tj]s$/.test(basename(p)), ROUTE_TREE_SKIPS, 0, notes, current);
@@ -81,23 +105,19 @@ async function findNextjsAppRoutes(root: string, unavailable: string[], notes: s
 }
 
 /** Each pages/api handler is read once for all seven methods (one request); each method it serves is a route. */
-async function findNextjsPagesRoutes(root: string, unavailable: string[], notes: string[], current?: () => void, signal?: AbortSignal): Promise<ApiRoute[]> {
-  const apiDir = join(root, 'pages', 'api');
+async function findNextjsPagesRoutes(root: string, pagesDir: string, unavailable: string[], notes: string[], current?: () => void, signal?: AbortSignal): Promise<ApiRoute[]> {
+  const apiDir = join(pagesDir, 'api');
   if (!existsSync(apiDir)) return [];
 
   const files = await walk(apiDir, (p) => /\.[tj]sx?$/.test(p), ROUTE_TREE_SKIPS, 0, notes, current);
   if (isClassicOperation()) {
     // The file convention says each handler is a route; which methods it serves needs a reading.
     if (files.length > 0) notes.push(`Decision models are off, so the methods of ${files.length} pages/api handlers are unassessed and each is listed as ANY.`);
-    return files.map((file) => route('ANY', '/' + relative(join(root, 'pages'), file).replace(/\.[tj]sx?$/, '').replace(/\[(.+?)\]/g, ':$1'), relative(root, file), 1, 'uncertain'));
+    return files.map((file) => route('ANY', nextjsPagesRoutePath(pagesDir, file), relative(root, file), 1, 'uncertain'));
   }
   const perFile = await mapWithConcurrency(files, READ_CONCURRENCY, async (file) => {
     const relFile = relative(root, file);
-    const routePath =
-      '/' +
-      relative(join(root, 'pages'), file)
-        .replace(/\.[tj]sx?$/, '')
-        .replace(/\[(.+?)\]/g, ':$1');
+    const routePath = nextjsPagesRoutePath(pagesDir, file);
     current?.();
     const content = await scanRead(file, unavailable);
     if (!content) return [];
@@ -234,10 +254,15 @@ export function walkSourceFiles(root: string, notes: string[], current?: () => v
 
 async function inspectDecisionApi(root: string, framework: ApiFramework, unavailable: string[], notes: string[], current?: () => void, sourceFiles?: readonly string[], signal?: AbortSignal): Promise<ApiRoute[]> {
   let frameworks: ConcreteFramework[];
-  if (framework !== 'auto') frameworks = [framework];
-  else {
+  // Whether Next.js was asked for or declared, not only scanned for want of a declaration.
+  let nextjsNamed: boolean;
+  if (framework !== 'auto') {
+    frameworks = [framework];
+    nextjsNamed = framework === 'nextjs';
+  } else {
     const declared = await declaredApiFrameworks(root, unavailable);
     frameworks = declared.length > 0 ? declared : FRAMEWORK_PACKAGES.map(([, fw]) => fw);
+    nextjsNamed = declared.includes('nextjs');
   }
   const found = new Map<string, ApiRoute>();
   const add = (routes: readonly ApiRoute[]): void => {
@@ -249,7 +274,15 @@ async function inspectDecisionApi(root: string, framework: ApiFramework, unavail
     }
   };
   if (frameworks.includes('nextjs')) {
-    add([...(await findNextjsAppRoutes(root, unavailable, notes, current)), ...(await findNextjsPagesRoutes(root, unavailable, notes, current, signal))]);
+    const appDir = nextjsDirectory(root, 'app');
+    const pagesDir = nextjsDirectory(root, 'pages');
+    if (nextjsNamed && appDir === undefined && (pagesDir === undefined || !existsSync(join(pagesDir, 'api')))) {
+      notes.push('No app/ or pages/api directory was found at the project root or under src/, so no Next.js routes are listed; this does not mean the project has none.');
+    }
+    add([
+      ...(appDir === undefined ? [] : await findNextjsAppRoutes(root, appDir, unavailable, notes, current)),
+      ...(pagesDir === undefined ? [] : await findNextjsPagesRoutes(root, pagesDir, unavailable, notes, current, signal)),
+    ]);
   }
   // Every other framework shares one reading per candidate, so asking about three costs no more than asking about one.
   const calling = frameworks.filter((fw) => fw !== 'nextjs');

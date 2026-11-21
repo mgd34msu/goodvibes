@@ -44,6 +44,38 @@ interface BuiltinActorAuthorizationContext extends BuiltinAccountActionContext {
   readonly channelPolicy: Pick<ChannelPolicyManager, 'start' | 'getPolicy'>;
 }
 
+/**
+ * Start (or restart) Telegram receiving and answer from the receiver's own
+ * status. `switchedOn` is the setting this start just switched on, named in
+ * the message; undefined when Telegram was already on.
+ */
+async function startTelegramIngress(
+  context: BuiltinAccountActionContext,
+  restart: NonNullable<BuiltinAccountActionContext['restartTelegramIngress']>,
+  switchedOn: string | undefined,
+): Promise<Pick<ChannelAccountLifecycleResult, 'ok' | 'account' | 'state' | 'authState' | 'message' | 'metadata'>> {
+  const status = await restart();
+  const refreshed = await context.buildAccount('telegram');
+  // Restarted means receiving, or failing on a backoff that recovers by itself. A blocked
+  // receiver (cursor review, another receiver, undeliverable webhook) needs the owner first.
+  const restarted = status !== null && (status.kind === 'receiving' || status.kind === 'retrying');
+  const verb = switchedOn === undefined ? 'restarted' : 'started';
+  const message = status === null
+    ? 'Telegram receiving is not available on this node: the host keeps no cursor storage for it.'
+    : status.kind === 'receiving' ? `Telegram receiving ${verb}: ${status.reason}`
+      : status.kind === 'retrying' ? `Telegram receiving ${verb} but is not receiving yet; it retries by itself: ${status.reason}`
+        : status.kind === 'blocked' ? `Telegram is not receiving: ${status.reason.trim().replace(/\.+$/, '')}. Clear that, then start Telegram again.`
+          : `Telegram receiving did not start: ${status.reason}`;
+  return {
+    ok: restarted,
+    account: refreshed,
+    state: refreshed.state,
+    authState: refreshed.authState,
+    message: switchedOn === undefined ? message : `Telegram is switched on (${switchedOn}). ${message}`,
+    metadata: { ingress: status, ...(switchedOn === undefined ? {} : { enabled: refreshed.enabled, switchedOn: true }) },
+  };
+}
+
 export async function runBuiltinAccountAction(
   context: BuiltinAccountActionContext,
   surface: ChannelSurface,
@@ -142,13 +174,18 @@ export async function runBuiltinAccountAction(
         // write setup performs; the surface's own settings watcher then starts
         // its receiving path.
         setSurfaceEnabled(context.deps, surface, true);
+        const section = `surfaces.${configSectionForSurface(surface)}.enabled`;
+        // Telegram's receiver is started here and its own status is the answer,
+        // as a start of an already switched-on Telegram answers.
+        if (surface === 'telegram' && context.restartTelegramIngress && (await context.buildAccount(surface)).enabled) {
+          return { ...base, ...(await startTelegramIngress(context, context.restartTelegramIngress, section)) };
+        }
         // The provider's own start is awaited and its answer is the receipt:
         // switched on is not receiving until the connection says so.
         const started = providerSurface && context.deps.providerRuntime
           ? await context.deps.providerRuntime.start(providerSurface)
           : undefined;
         const refreshed = await context.buildAccount(surface);
-        const section = `surfaces.${configSectionForSurface(surface)}.enabled`;
         const ok = refreshed.enabled && (started === undefined || started.ok);
         return {
           ...base,
@@ -175,25 +212,7 @@ export async function runBuiltinAccountAction(
         };
       }
       if (surface === 'telegram' && account.enabled && context.restartTelegramIngress) {
-        const status = await context.restartTelegramIngress();
-        const refreshed = await context.buildAccount(surface);
-        // Restarted means receiving, or failing on a backoff that recovers by itself. A blocked
-        // receiver (cursor review, another receiver, undeliverable webhook) needs the owner first.
-        const restarted = status !== null && (status.kind === 'receiving' || status.kind === 'retrying');
-        return {
-          ...base,
-          ok: restarted,
-          account: refreshed,
-          state: refreshed.state,
-          authState: refreshed.authState,
-          message: status === null
-            ? 'Telegram receiving is not available on this node: the host keeps no cursor storage for it.'
-            : status.kind === 'receiving' ? `Telegram receiving restarted: ${status.reason}`
-              : status.kind === 'retrying' ? `Telegram receiving restarted but is not receiving yet; it retries by itself: ${status.reason}`
-                : status.kind === 'blocked' ? `Telegram is not receiving: ${status.reason.trim().replace(/\.+$/, '')}. Clear that, then start Telegram again.`
-                  : `Telegram receiving did not start: ${status.reason}`,
-          metadata: { ingress: status },
-        };
+        return { ...base, ...(await startTelegramIngress(context, context.restartTelegramIngress, undefined)) };
       }
       if (providerSurface && context.deps.providerRuntime) {
         const runtimeResult = await context.deps.providerRuntime.start(providerSurface);

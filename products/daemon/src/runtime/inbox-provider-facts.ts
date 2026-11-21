@@ -13,7 +13,7 @@
  * Writes of anything else (a theme, a model choice, another provider's token)
  * leave the source, its store, its poller and its screening alone.
  */
-import { CONFIG_KEYS, daemonSecretKeyFor, normalizeSecretRef, type ConfigKey, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { CONFIG_KEYS, SERVICE_SECRET_KEY_FIELDS, SERVICE_SECRET_REFERENCE_FIELDS, daemonSecretKeyFor, normalizeSecretRef, type ConfigKey, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { getBuiltinSetupSchema } from '@goodvibes/engine/platform/platform/channels';
 
 export type InboxProvider = 'slack' | 'email' | 'discord';
@@ -47,17 +47,14 @@ export interface InboxCredentialReaders {
   readonly serviceSecretKeys?: ((serviceName: string) => readonly string[]) | undefined;
 }
 
-const SERVICE_KEY_FIELDS = ['tokenKey', 'passwordKey', 'authTokenKey', 'webhookUrlKey', 'signingSecretKey', 'publicKeyKey', 'appTokenKey'] as const;
-const SERVICE_REF_FIELDS = ['tokenRef', 'passwordRef', 'authTokenRef', 'webhookUrlRef', 'signingSecretRef', 'publicKeyRef', 'appTokenRef'] as const;
-
 /** The secret-store keys a service-registry entry names: its key fields and its `goodvibes://secrets/...` references. */
 export function serviceRegistrySecretKeys(registry: { get(serviceName: string): object | null }): (serviceName: string) => readonly string[] {
   return (serviceName) => {
     const entry = registry.get(serviceName) as Record<string, unknown> | null;
     if (!entry) return [];
     const names: string[] = [];
-    for (const field of SERVICE_KEY_FIELDS) if (typeof entry[field] === 'string' && entry[field]) names.push(entry[field]);
-    for (const field of SERVICE_REF_FIELDS) {
+    for (const field of SERVICE_SECRET_KEY_FIELDS) if (typeof entry[field] === 'string' && entry[field]) names.push(entry[field]);
+    for (const field of SERVICE_SECRET_REFERENCE_FIELDS) {
       const stored = referencedStoreKey(entry[field]);
       if (stored) names.push(stored);
     }

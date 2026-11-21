@@ -80,8 +80,8 @@ export function askingQuestions(inbox: AskingInbox, asker: () => QuestionAsker |
           ...(who.host !== undefined ? { [OWNER_ASKER_HOST_METADATA]: who.host } : {}),
         },
       });
-      // A post under an open key returns the question someone already asked; only its own asker watches it.
-      if (outcome.item.status === 'open' && (outcome.created || belongsTo(outcome.item, who))) {
+      // A post under an open key returns only this asker's own open question (question-store.ts post), so it is watched either way.
+      if (outcome.item.status === 'open') {
         if (who.agent !== undefined) watchAgentQuestion(who.agent, outcome.item.id);
         if (who.sessionWatch && who.session !== undefined && who.sessionWatch.sessionId === who.session) who.sessionWatch.add(outcome.item.id);
       }

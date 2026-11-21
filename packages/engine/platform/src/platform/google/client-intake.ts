@@ -32,7 +32,6 @@
 export interface GoogleClientCredentials {
   readonly clientId: string;
   readonly clientSecret: string;
-  readonly authUri: string;
   readonly tokenUri: string;
 }
 
@@ -43,7 +42,6 @@ export type GoogleClientIntakeResult =
   | { readonly ok: true; readonly credentials: GoogleClientCredentials; readonly route: GoogleClientIntakeRoute }
   | { readonly ok: false; readonly problem: string; readonly fix: string };
 
-const DEFAULT_AUTH_URI = 'https://accounts.google.com/o/oauth2/auth';
 const DEFAULT_TOKEN_URI = 'https://oauth2.googleapis.com/token';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -128,9 +126,8 @@ export function readClientCredentialsFromJson(rawText: string): GoogleClientInta
     credentials: {
       clientId,
       clientSecret,
-      authUri: readString(inner.auth_uri) ?? DEFAULT_AUTH_URI,
-      // Never taken from the file: a pasted JSON must not choose where the
-      // client secret is sent.
+      // Never taken from the file, nor is its `auth_uri` read: a pasted JSON
+      // must not choose where the client secret is sent or where consent is asked.
       tokenUri: DEFAULT_TOKEN_URI,
     },
   };
@@ -163,6 +160,6 @@ export function clientCredentialsFromInput(input: {
   return {
     ok: true,
     route: 'manual-entry',
-    credentials: { clientId, clientSecret, authUri: DEFAULT_AUTH_URI, tokenUri: DEFAULT_TOKEN_URI },
+    credentials: { clientId, clientSecret, tokenUri: DEFAULT_TOKEN_URI },
   };
 }

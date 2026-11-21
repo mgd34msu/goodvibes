@@ -142,7 +142,10 @@ export function composePlainTextMessage(
   if (references.length > 0) headers.push(`References: ${references}`);
   if (input.messageId !== undefined) headers.push(`Message-ID: ${input.messageId}`);
 
-  const lines = input.body.replace(/\r\n/g, '\n').split('\n');
+  // Every line-ending form (CRLF, a lone CR, a lone LF) is one line break, so
+  // the message carries only CRLF line ends and a lone CR can never form an
+  // end-of-data marker on the SMTP wire.
+  const lines = input.body.replace(/\r\n?/g, '\n').split('\n');
   if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
   const ascii = !/[^\x00-\x7f]/.test(input.body);
   const longLine = lines.some((line) => Buffer.byteLength(line, 'utf8') > MAX_LINE_OCTETS);

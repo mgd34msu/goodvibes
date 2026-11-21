@@ -426,8 +426,80 @@ async function extractDocx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
   };
 }
 
+/**
+ * The text of one string item (a shared-string `<si>` or an inline `<is>`):
+ * every `<t>` run joined in order, phonetic `<rPh>` runs left out, and a
+ * self-closing `<t/>` read as empty.
+ */
+function stringItemText(itemXml: string): string {
+  const withoutPhonetic = itemXml.replace(/<rPh\b[\s\S]*?<\/rPh>/g, '');
+  return Array.from(
+    withoutPhonetic.matchAll(/<t\b[^>]*?(?:\/>|>([\s\S]*?)<\/t>)/g),
+    (match) => decodeHtmlEntities(match[1] ?? ''),
+  ).join('');
+}
+
+/** The shared-string table: exactly one entry per `<si>` item, so a cell's index finds its own text. */
 function readSharedStrings(xml: string): string[] {
-  return Array.from(xml.matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g), (match) => decodeHtmlEntities(match[1] ?? ''));
+  return Array.from(xml.matchAll(/<si\b[^>]*?(?:\/>|>([\s\S]*?)<\/si>)/g), (match) => stringItemText(match[1] ?? ''));
+}
+
+/** The attributes of one XML start tag, by their name as written (prefix included). */
+function xmlAttributes(tag: string): Map<string, string> {
+  const attributes = new Map<string, string>();
+  for (const match of tag.matchAll(/([\w:.-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g)) {
+    attributes.set(match[1]!, decodeHtmlEntities(match[2] ?? match[3] ?? ''));
+  }
+  return attributes;
+}
+
+/** A relationship target resolved to its path in the archive (relative targets are relative to xl/). */
+function workbookPartPath(target: string): string {
+  const segments = target.startsWith('/') ? [] : ['xl'];
+  for (const segment of target.split('/')) {
+    if (segment === '' || segment === '.') continue;
+    if (segment === '..') segments.pop();
+    else segments.push(segment);
+  }
+  return segments.join('/');
+}
+
+/**
+ * The workbook's worksheets in tab order, each with its own name and the
+ * archive path of its part, resolved through xl/_rels/workbook.xml.rels.
+ * Chart and dialog sheets are left out. Without the rels part, the
+ * xl/worksheets/sheetN.xml files are paired with the tab names in number order.
+ */
+async function xlsxWorksheets(
+  zip: Awaited<ReturnType<JsZipModule['loadAsync']>>,
+  workbookXml: string,
+): Promise<Array<{ name: string; path: string }>> {
+  const tabs = Array.from(workbookXml.matchAll(/<sheet\b[^>]*>/g), (match) => {
+    const attributes = xmlAttributes(match[0]);
+    const relationshipId = [...attributes].find(([key]) => /^[A-Za-z_][\w.-]*:id$/.test(key))?.[1];
+    return { name: attributes.get('name') ?? '', relationshipId };
+  });
+  const relsXml = await zip.file('xl/_rels/workbook.xml.rels')?.async('string');
+  if (relsXml === undefined) {
+    const sheetNumber = (name: string) => Number(name.match(/sheet(\d+)\.xml$/i)?.[1] ?? 0);
+    return Object.keys(zip.files)
+      .filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name))
+      .sort((a, b) => sheetNumber(a) - sheetNumber(b))
+      .map((path, index) => ({ name: tabs[index]?.name || path, path }));
+  }
+  const worksheetTargets = new Map<string, string>();
+  for (const match of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
+    const attributes = xmlAttributes(match[0]);
+    const id = attributes.get('Id');
+    const target = attributes.get('Target');
+    if (id && target && /\/worksheet$/.test(attributes.get('Type') ?? '')) {
+      worksheetTargets.set(id, workbookPartPath(target));
+    }
+  }
+  return tabs.flatMap((tab) => {
+    const path = tab.relationshipId === undefined ? undefined : worksheetTargets.get(tab.relationshipId);
+    return path === undefined ? [] : [{ name: tab.name || path, path }];
+  });
 }
 
 async function extractXlsx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
@@ -436,17 +508,15 @@ async function extractXlsx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
   const workbookXml = await zip.file('xl/workbook.xml')?.async('string') ?? '';
   const sharedStringsXml = await zip.file('xl/sharedStrings.xml')?.async('string') ?? '';
   const sharedStrings = readSharedStrings(sharedStringsXml);
+  // The capped, deduplicated tab list is for display only; each sheet's rows
+  // are named by its own tab below.
   const sheetNames = uniqueStrings(
-    Array.from(workbookXml.matchAll(/<sheet[^>]+name="([^"]+)"/g), (match) => decodeHtmlEntities(match[1] ?? '')),
+    Array.from(workbookXml.matchAll(/<sheet\b[^>]*>/g), (match) => xmlAttributes(match[0]).get('name') ?? ''),
     20,
   );
   const sheets: Array<{ name: string; rows: string[][] }> = [];
-  const sheetNumber = (name: string) => Number(name.match(/sheet(\d+)\.xml$/i)?.[1] ?? 0);
-  const sheetEntries = Object.keys(zip.files)
-    .filter((name) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(name))
-    .sort((a, b) => sheetNumber(a) - sheetNumber(b));
-  for (const [index, sheetPath] of sheetEntries.entries()) {
-    const xml = await zip.file(sheetPath)?.async('string');
+  for (const worksheet of await xlsxWorksheets(zip, workbookXml)) {
+    const xml = await zip.file(worksheet.path)?.async('string');
     if (!xml) continue;
     const rows = Array.from(xml.matchAll(/<row[^>]*>([\s\S]*?)<\/row>/g), (rowMatch) => {
       // Attributes are read from the tag itself: `t` is rarely the first one
@@ -455,17 +525,20 @@ async function extractXlsx(buffer: Buffer): Promise<KnowledgeExtractionResult> {
       return Array.from((rowMatch[1] ?? '').matchAll(/<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g), (cellMatch) => {
         const type = (cellMatch[1] ?? '').match(/\bt="([^"]*)"/)?.[1] ?? '';
         const body = cellMatch[2] ?? '';
-        const raw = body.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1]
-          ?? body.match(/<t[^>]*>([\s\S]*?)<\/t>/)?.[1]
-          ?? '';
-        const value = type === 's'
-          ? (sharedStrings[Number(raw)] ?? raw)
-          : decodeHtmlEntities(raw);
+        const stored = body.match(/<v[^>]*>([\s\S]*?)<\/v>/)?.[1];
+        const inline = body.match(/<is\b[^>]*>([\s\S]*?)<\/is>/)?.[1];
+        const value = type === 'inlineStr' && inline !== undefined
+          ? stringItemText(inline)
+          : stored === undefined
+            ? stringItemText(inline ?? '')
+            : type === 's'
+              ? (sharedStrings[Number(stored)] ?? stored)
+              : decodeHtmlEntities(stored);
         return cleanText(value);
       }).filter(Boolean);
     }).filter((row) => row.length > 0);
     sheets.push({
-      name: sheetNames[index] ?? sheetPath,
+      name: worksheet.name,
       rows,
     });
   }

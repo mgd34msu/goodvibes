@@ -38,6 +38,16 @@ export function containsIssuerCredential(text: string): boolean {
   return ISSUER_CREDENTIAL_PATTERNS.some(({ pattern }) => text.search(pattern) !== -1);
 }
 
+/** Where the first issuer-reserved credential format in `text` starts, or -1 when there is none. */
+export function firstIssuerCredentialIndex(text: string): number {
+  let first = -1;
+  for (const { pattern } of ISSUER_CREDENTIAL_PATTERNS) {
+    const at = text.search(pattern);
+    if (at !== -1 && (first === -1 || at < first)) first = at;
+  }
+  return first;
+}
+
 /**
  * Shapes that a credential often has but that ordinary text also has: an
  * `sk-` token of 20 or more characters, a `key-` token of 16 or more, and the

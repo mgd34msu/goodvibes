@@ -7,7 +7,7 @@ import { describeMemoryPromptEligibility, isPromptActiveMemory, MIN_PROMPT_MEMOR
 import { AgentPersonaRegistry, buildActivePersonaPrompt } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
 import { buildProjectContextPrompt, discoverProjectContextFiles } from '@goodvibes/engine/terminal-shell/agent-turn/project-context-files';
 import { AgentRoutineRegistry, buildEnabledRoutinesPrompt, evaluateAgentRoutineReadiness } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
-import { AgentSkillRegistry, buildEnabledSkillsPrompt, evaluateAgentSkillBundleReadiness, evaluateAgentSkillReadiness } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { AgentSkillRegistry, buildEnabledSkillsPrompt, evaluateAgentSkillReadiness } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { buildVibePrompt, discoverVibeFiles } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
 import { buildCapabilitySummaryPrompt } from '@goodvibes/engine/terminal-shell/agent-turn/capability-summary-prompt';
 import type { PromptContextReceipt } from '@goodvibes/engine/terminal-shell/agent-turn/prompt-context-receipts';
@@ -445,23 +445,15 @@ async function promptContextSegments(context: CommandContext, includeParameters:
   const suppressedRoutines = routineSnapshot.enabledRoutines.filter((routine) => !activeRoutines.some((active) => active.id === routine.id));
   const routinePrompt = buildEnabledRoutinesPrompt(shellPaths) ?? '';
   const skillSnapshot = AgentSkillRegistry.fromShellPaths(shellPaths).snapshot();
-  const activeBundles = skillSnapshot.enabledBundles.filter((bundle) => {
-    if (bundle.reviewState !== 'reviewed') return false;
-    const readiness = evaluateAgentSkillBundleReadiness(bundle, skillSnapshot.skills);
-    return readiness.ready && readiness.includedSkills.every((skill) => skill.reviewState === 'reviewed');
-  });
-  const activeSkillIds = new Set([
-    ...skillSnapshot.enabledSkills.map((skill) => skill.id),
-    ...activeBundles.flatMap((bundle) => bundle.skillIds),
-  ]);
-  const activeSkills = skillSnapshot.skills.filter((skill) => activeSkillIds.has(skill.id) && skill.reviewState === 'reviewed' && evaluateAgentSkillReadiness(skill).ready);
+  const activeBundles = skillSnapshot.activeBundles;
+  const activeSkills = skillSnapshot.activeSkills;
   const candidateSkillIds = new Set([
     ...skillSnapshot.enabledSkills.map((skill) => skill.id),
     ...skillSnapshot.enabledBundles.flatMap((bundle) => bundle.skillIds),
   ]);
   const suppressedSkills = skillSnapshot.skills.filter((skill) => candidateSkillIds.has(skill.id) && !activeSkills.some((active) => active.id === skill.id));
   const suppressedBundles = skillSnapshot.enabledBundles.filter((bundle) => !activeBundles.some((active) => active.id === bundle.id));
-  const skillPrompt = buildEnabledSkillsPrompt(shellPaths) ?? '';
+  const skillPrompt = buildEnabledSkillsPrompt(shellPaths, skillSnapshot) ?? '';
   const { memory, fromSpine: memoryFromSpine } = promptMemorySource(context);
 
   const capabilityIndex = capabilitySnapshot();

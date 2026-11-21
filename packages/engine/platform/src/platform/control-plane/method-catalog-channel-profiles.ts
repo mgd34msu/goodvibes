@@ -26,6 +26,7 @@ import {
   objectSchema,
 } from './method-catalog-shared.js';
 import { METADATA_SCHEMA } from './operator-contract-schemas-shared.js';
+import { OWNER_APPROVAL_PENDING_SCHEMA } from './operator-contract-schemas-admin.js';
 import { CHANNEL_PERMISSION_MODES } from '../channel-profiles/types.js';
 
 const CHANNEL_PERMISSION_MODE_SCHEMA = { type: 'string', enum: CHANNEL_PERMISSION_MODES } as const;
@@ -83,17 +84,17 @@ export const CHANNEL_PROFILES_SET_INPUT_SCHEMA = objectSchema({
   permissionMode: CHANNEL_PERMISSION_MODE_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['surfaceKind']);
-export const CHANNEL_PROFILES_SET_OUTPUT_SCHEMA = entityOutputSchema('binding', CHANNEL_PROFILE_BINDING_SCHEMA);
+export const CHANNEL_PROFILES_SET_OUTPUT_SCHEMA = { anyOf: [entityOutputSchema('binding', CHANNEL_PROFILE_BINDING_SCHEMA), OWNER_APPROVAL_PENDING_SCHEMA] };
 
 export const CHANNEL_PROFILES_DELETE_INPUT_SCHEMA = objectSchema({
   surfaceKind: STRING_SCHEMA,
   channelId: STRING_SCHEMA,
 }, ['surfaceKind']);
-export const CHANNEL_PROFILES_DELETE_OUTPUT_SCHEMA = objectSchema({
+export const CHANNEL_PROFILES_DELETE_OUTPUT_SCHEMA = { anyOf: [objectSchema({
   surfaceKind: STRING_SCHEMA,
   channelId: STRING_SCHEMA,
   deleted: BOOLEAN_SCHEMA,
-}, ['surfaceKind', 'deleted']);
+}, ['surfaceKind', 'deleted']), OWNER_APPROVAL_PENDING_SCHEMA] };
 
 export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMethodDescriptor[] = [
   methodDescriptor({
@@ -120,7 +121,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
     id: 'channels.profiles.set',
     repeat: 'safe',
     title: 'Bind Channel Profile',
-    description: 'Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names.',
+    description: 'Bind (upsert) the model/provider and permission-mode defaults for a channel. Keyed on (surfaceKind, channelId?): field by field, a channelId-scoped binding wins over the surface-wide default; setting the same key again replaces it. A session the daemon originates from the channel uses these values whatever a channels.routing assignment names. A set that loosens the permission mode the channel\'s sessions run under (against the mode they get now, the host\'s when no binding sets one; leaving permissionMode out of a set removes the key\'s own mode) is the owner\'s own act, as sessions.permissionMode.set is: from a caller who is not the owner it is put to the owner and answers 202 OWNER_APPROVAL_PENDING with approvalId, followable, the current binding, mode, requestedMode, state and next, and applies when he approves it; with no approval path it is 403 OWNER_ONLY and nothing is changed.',
     category: 'channels',
     effects: ['channels.administer'],
     http: { method: 'POST', path: '/api/channels/profiles' },
@@ -132,7 +133,7 @@ export const builtinGatewayChannelProfilesMethodDescriptors: readonly GatewayMet
     repeat: 'safe',
     effects: ['channels.administer', 'record.destroy'],
     title: 'Unbind Channel Profile',
-    description: 'Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal.',
+    description: 'Remove a channel profile binding. Returns { deleted: false } when no binding for that key existed, an honest boolean, never a phantom removal. Removing a binding whose permission mode is tighter than the one its channel\'s sessions would fall back to (the surface-wide binding\'s, else the host\'s) loosens it, which is the owner\'s own act: from a caller who is not the owner it answers 202 OWNER_APPROVAL_PENDING and is removed when he approves it; with no approval path it is 403 OWNER_ONLY.',
     category: 'channels',
     http: { method: 'DELETE', path: '/api/channels/profiles/{surfaceKind}' },
     inputSchema: CHANNEL_PROFILES_DELETE_INPUT_SCHEMA,

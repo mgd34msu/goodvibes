@@ -27,9 +27,10 @@ import { emitModelChanged } from '../runtime/emitters/index.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { resolveConfiguredModelKey } from './model-id-resolution.js';
 import { splitModelRegistryKey } from './registry-helpers.js';
+import { DEFAULT_CONFIG } from '../config/schema.js';
 
-/** Where model resolution lands when `provider.model` is empty. */
-export const UNCONFIGURED_MODEL_REGISTRY_KEY = 'openrouter:openrouter/free';
+/** Where model resolution lands when `provider.model` is empty: the setting's own default. */
+export const UNCONFIGURED_MODEL_REGISTRY_KEY: string = DEFAULT_CONFIG.provider.model;
 
 /** The registry rows a bare (provider-less) configured model id resolves against. */
 export interface ConfiguredModelCandidate {

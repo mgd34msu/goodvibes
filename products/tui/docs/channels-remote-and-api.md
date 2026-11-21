@@ -122,7 +122,7 @@ Key remote API paths:
 | `POST /api/remote/heartbeat` | Peer liveness heartbeat |
 | `POST /api/remote/work/pull` | Pull available work |
 | `POST /api/remote/work/{workId}/complete` | Report a work item complete |
-| `GET /api/remote/peers` | List paired peers |
+| `GET /api/remote/peers` | List paired peers, most recently seen first; `?kind=node` or `?kind=device` keeps one kind and `?limit=N` the first N (every peer when no limit is given) |
 | `GET /api/remote/peers/{peerId}` | One paired peer (404 when no peer has that id) |
 | `GET /api/remote/work` | List work items |
 | `GET /api/remote/node-host/contract` | Inspect a node host's contract |

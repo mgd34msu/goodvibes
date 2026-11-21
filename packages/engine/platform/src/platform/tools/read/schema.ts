@@ -43,7 +43,8 @@ export const READ_TOOL_SCHEMA = {
           },
           force_text: {
             type: 'boolean',
-            description: 'Read a file as UTF-8 text even though it contains a NUL byte (otherwise it is skipped as binary).',
+            description: 'Read a file as UTF-8 text even though it contains a NUL byte (otherwise it is skipped as binary)'
+              + ' or is not valid UTF-8 (otherwise it is refused); invalid bytes then show as U+FFFD and the file\'s result carries a warning.',
           },
           pages: {
             type: 'string',
@@ -93,9 +94,10 @@ export const READ_TOOL_SCHEMA = {
         max_tokens: {
           type: 'integer',
           minimum: 1,
-          description: 'Token cap across the entire response; use this to bound a read. Files clipped by it are'
-            + ' listed in summary.truncated with next_start_line to continue from (extract=lines with range).'
-            + ' Default: 25000 unless token_budget is set.',
+          description: 'Token cap across the entire response; use this to bound a read. Every file clipped by it is'
+            + ' listed in summary.truncated; for content and lines extracts the entry gives next_start_line to continue from'
+            + ' (extract=lines with range), and for other extracts (outline, symbols, ast, PDF, notebook, archive) it gives'
+            + ' returned_characters, so read that file alone or with a larger max_tokens. Default: 25000 unless token_budget is set.',
         },
       },
     },

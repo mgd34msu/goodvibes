@@ -22,7 +22,7 @@ import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
-import { SessionContinuation } from '../sessions/SessionContinuation';
+import { SessionContinuation, useContinuationDraft } from '../sessions/SessionContinuation';
 
 export interface FleetSessionActionsProps {
   sessionId: string;
@@ -77,7 +77,8 @@ export function FleetSessionActions({ sessionId, steerable, detachable }: FleetS
 function LegacyFleetSteer({ sessionId }: { sessionId: string }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const [text, setText] = useState('');
+  const draft = useContinuationDraft();
+  const [text, setText] = useState(draft);
   // The steer's messageId, kept until it is answered or refused: a press repeated after a
   // lost answer is recorded once by the daemon (sessions.steer replays by messageId).
   const [intent] = useState(() => new IntentKey());

@@ -265,7 +265,8 @@ export interface DaemonRemoteManagementRouteHandlers {
   getRemotePairRequests(): MaybeResponse;
   approveRemotePairRequest(requestId: string, req: Request): MaybeResponse;
   rejectRemotePairRequest(requestId: string, req: Request): MaybeResponse;
-  getRemotePeers(): MaybeResponse;
+  /** Reads `kind` and `limit` from the query; with no limit every peer is returned. */
+  getRemotePeers(req: Request): MaybeResponse;
   getRemotePeer(peerId: string): MaybeResponse;
   rotateRemotePeerToken(peerId: string, req: Request): MaybeResponse;
   revokeRemotePeerToken(peerId: string, req: Request): MaybeResponse;

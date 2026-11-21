@@ -8,6 +8,8 @@ export interface EditPublishEnv {
   fileUndoManager?: FileUndoManager | undefined;
   /** This call's undo token: every file it changes is one undo entry. */
   undoCall?: number | undefined;
+  /** The id of the tool call being run, stored on its undo entry. */
+  toolCallId?: string | undefined;
   changeTracker?: Pick<SessionChangeTracker, 'recordChange'> | undefined;
 }
 
@@ -39,7 +41,7 @@ export function verboseContent(content: string): string {
 export function recordPublishedEdit(env: EditPublishEnv, path: string, beforeContent: string | null, afterContent: string): void {
   if (env.fileUndoManager) {
     try {
-      env.fileUndoManager.snapshot({ path, beforeContent, afterContent, tool: 'edit', call: env.undoCall });
+      env.fileUndoManager.snapshot({ path, beforeContent, afterContent, tool: 'edit', call: env.undoCall, toolCallId: env.toolCallId });
     } catch {
       // Undo snapshot failure should not fail the edit.
     }

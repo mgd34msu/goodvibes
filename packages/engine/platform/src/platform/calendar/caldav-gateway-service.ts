@@ -55,7 +55,7 @@ import type {
 } from '../control-plane/routes/calendar.js';
 import { CalDavClient, withinCredentialPin, type CalDavHttpPort } from '../google/caldav-client.js';
 import { isCalendarResourceType, parseMultistatus } from '../google/caldav-parse.js';
-import { parseICSDetailed, splitICalDocument, type ICalComponentBlock, type ParsedICalEvent } from './caldav-ics.js';
+import { attendeeDisplayName, parseContentLine, parseICSDetailed, splitICalDocument, type ICalComponentBlock, type ParsedICalEvent } from './caldav-ics.js';
 import { buildCalendarObject, eventToVEvent, foldLine, generateICS, ICalValueError, type GenerateICalInput } from './caldav-ics-generate.js';
 import { parseIcs } from './ics-parser.js';
 import { expandEvents } from './rrule.js';
@@ -335,37 +335,67 @@ function eventAndZoneComponents(parts: readonly ICalComponentBlock[]): {
   };
 }
 
-/** The properties an update writes afresh; every other line of the stored event is kept as it was. */
-const UPDATED_PROPERTIES = new Set([
+/**
+ * The properties every update writes afresh; every other line of the stored
+ * event is kept as it was. ORGANIZER is never rewritten, and ATTENDEE only when
+ * the update names attendees, so a stored participant keeps its CN, PARTSTAT,
+ * ROLE and RSVP.
+ */
+const UPDATED_PROPERTIES: ReadonlySet<string> = new Set([
   'UID', 'DTSTAMP', 'DTSTART', 'DTEND', 'DURATION', 'SUMMARY', 'DESCRIPTION', 'LOCATION',
-  'STATUS', 'RRULE', 'ORGANIZER', 'ATTENDEE', 'SEQUENCE', 'LAST-MODIFIED',
+  'STATUS', 'RRULE', 'SEQUENCE', 'LAST-MODIFIED',
 ]);
 
 /**
- * The stored VEVENT with the changed properties written afresh and everything
- * else (alarms, categories, a server's own properties) kept line for line, so
- * a change made here loses nothing another calendar application put there.
+ * Whether an attendee named in an update (an address, or the display name a
+ * read returned) is the stored attendee with this display name and value.
  */
-function updatedEventBlock(stored: ICalComponentBlock, fresh: readonly string[]): ICalComponentBlock {
+function namesAttendee(entry: string, displayName: string, value: string): boolean {
+  const wanted = entry.trim().replace(/^mailto:/i, '').toLowerCase();
+  if (wanted.length === 0) return false;
+  return wanted.includes('@')
+    ? value.trim().replace(/^mailto:/i, '').toLowerCase() === wanted
+    : displayName.toLowerCase() === wanted;
+}
+
+/**
+ * The stored VEVENT with the properties in `rewritten` written afresh and
+ * everything else (alarms, categories, a server's own properties, the
+ * organizer) kept line for line, so a change made here loses nothing another
+ * calendar application put there. When ATTENDEE is rewritten, a stored
+ * attendee line `keepAttendee` accepts is kept verbatim, with its parameters.
+ */
+function updatedEventBlock(
+  stored: ICalComponentBlock,
+  fresh: readonly string[],
+  rewritten: ReadonlySet<string>,
+  keepAttendee?: (displayName: string, value: string) => boolean,
+): ICalComponentBlock {
+  // One property per group: its line and the continuation lines folded under it.
+  const groups: string[][] = [];
+  for (const line of stored.lines.slice(1, -1)) {
+    const last = groups.at(-1);
+    if ((line.startsWith(' ') || line.startsWith('\t')) && last !== undefined) last.push(line);
+    else groups.push([line]);
+  }
   const kept: string[] = [];
   let sequence = 0;
   let depth = 0;
-  let keepingProperty = true;
-  for (const line of stored.lines.slice(1, -1)) {
-    const continuation = line.startsWith(' ') || line.startsWith('\t');
-    if (continuation) {
-      if (keepingProperty) kept.push(line);
-      continue;
-    }
-    const upper = line.toUpperCase();
+  for (const group of groups) {
+    const head = group[0] ?? '';
+    const upper = head.toUpperCase();
     if (upper.startsWith('BEGIN:')) depth += 1;
     const name = upper.slice(0, upper.search(/[;:]|$/));
     if (depth === 0 && name === 'SEQUENCE') {
-      const value = Number(line.slice(line.indexOf(':') + 1));
+      const value = Number(head.slice(head.indexOf(':') + 1));
       if (Number.isFinite(value)) sequence = value;
     }
-    keepingProperty = depth > 0 || !UPDATED_PROPERTIES.has(name);
-    if (keepingProperty) kept.push(line);
+    let keep = depth > 0 || !rewritten.has(name);
+    if (!keep && name === 'ATTENDEE' && keepAttendee !== undefined) {
+      const property = parseContentLine(group.map((line, index) => (index === 0 ? line : line.slice(1))).join(''));
+      keep = keepAttendee(attendeeDisplayName(property.params, property.value), property.value);
+    }
+    if (keep) kept.push(...group);
     if (upper.startsWith('END:')) depth -= 1;
   }
   const body = fresh.slice(1, -1).map(foldLine);
@@ -460,7 +490,7 @@ export function createCalDavCalendarGatewayService(
    * guess (a child collection of the base URL).
    */
   async function collectionUrlOf(config: CalDavGatewayConfig, request: CalDavRequest, calendarId: string): Promise<string> {
-    if (calendarId === config.defaultCalendarId || config.collectionMap[calendarId]) return collectionUrlFor(config, calendarId);
+    if (calendarId === config.defaultCalendarId || Object.hasOwn(config.collectionMap, calendarId)) return collectionUrlFor(config, calendarId);
     let known = discoveredCollections.get(discoveryKey(config));
     if (known === undefined || (!known.urls.has(calendarId) && now() - known.at > REDISCOVER_AFTER_MS)) {
       try {
@@ -680,6 +710,14 @@ export function createCalDavCalendarGatewayService(
       const updatedAt = stampNow();
       const description = changes.description ?? current.description;
       const location = changes.location ?? current.location;
+      // Attendees are rewritten only when the update names them: a stored one
+      // still named keeps its line verbatim, and only the new ones are written.
+      const requested = changes.attendees?.filter((entry) => entry.trim().length > 0);
+      const keepAttendee = requested === undefined
+        ? undefined
+        : (displayName: string, value: string): boolean => requested.some((entry) => namesAttendee(entry, displayName, value));
+      const added = requested?.filter((entry) => !current.attendees.some((attendee) => namesAttendee(entry, attendee.displayName, attendee.rawValue)));
+      const rewritten = requested === undefined ? UPDATED_PROPERTIES : new Set([...UPDATED_PROPERTIES, 'ATTENDEE']);
       let fresh: string[];
       try {
         fresh = eventToVEvent({
@@ -693,15 +731,14 @@ export function createCalDavCalendarGatewayService(
           ...(description === undefined ? {} : { description }),
           ...(location === undefined ? {} : { location }),
           ...(current.status === undefined ? {} : { status: current.status }),
-          ...(current.organizerRaw === undefined ? {} : { organizer: current.organizerRaw }),
-          attendees: changes.attendees ?? current.attendees.map((attendee) => attendee.rawValue),
+          ...(added === undefined ? {} : { attendees: added }),
         });
       } catch (error) {
         if (error instanceof ICalValueError) throw new GatewayVerbError(error.message, 'INVALID_ARGUMENT', 400);
         throw error;
       }
       const components = document.components.map((component) => (
-        component === blocks[0] ? updatedEventBlock(component, fresh) : component
+        component === blocks[0] ? updatedEventBlock(component, fresh, rewritten, keepAttendee) : component
       ));
       try {
         await stored.request(

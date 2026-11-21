@@ -13,7 +13,10 @@ import { applyRemoteSettingsPrecondition, assertRemoteSettingsPrecondition, capt
 import type { ToolExecuteOptions } from '../../types/tools.js';
 import { assertProjectionExecution, ToolInputProjectionError, type ToolInputProjector, type ToolPreparedSettingsMutation } from '../input-projection.js';
 import { assertCurrentToolExecution, claimCurrentToolSettingsDispatch, commitCurrentToolSettings, currentToolSettingsPresentation } from '../registry.js';
-import { applyRoutedConfigWrite, readClientOwnedValue, resolveRouterDeps, settingsWriteRefusal, usesClientOwnedStore, type ClientOwnedStore, type ConfigRoutingOptions } from './config-routing.js';
+import { refusal, type Refusal } from '@goodvibes/engine/errors';
+import { logger } from '../../utils/logger.js';
+import { summarizeError } from '../../utils/error-display.js';
+import { applyRoutedConfigWrite, readClientOwnedValue, resolveRouterDeps, routedLoosenRefusal, settingsWriteRefusal, usesClientOwnedStore, type ClientOwnedStore, type ConfigRoutingOptions } from './config-routing.js';
 
 /**
  * A client-owned key of the surface a hosted session was created for: that
@@ -65,14 +68,24 @@ function clientStoreStamp(path: string): string {
 }
 /**
  * Writes the prepared value to the originating surface's file and reads it
- * back there. One attempt: a write whose read-back fails may or may not have
- * landed, so it is reported as unknown, never retried.
+ * back there. The owner's loosening rule is checked first: its refusal writes
+ * nothing and is reported as refused with its reason and next step. One
+ * attempt: a write whose read-back fails may or may not have landed, so it is
+ * reported as unknown, never retried.
  */
-async function applyClientStoreCapture(key: ConfigKey, client: ClientStoreCapture): Promise<PreparedConfigMutationReceipt & { readonly verifiedInOwningStore: boolean }> {
+async function applyClientStoreCapture(key: ConfigKey, client: ClientStoreCapture): Promise<PreparedConfigMutationReceipt & {
+  readonly verifiedInOwningStore: boolean; readonly refused?: true; readonly failure?: Refusal;
+}> {
+  const loosening = routedLoosenRefusal(client.configManager, key, client.value);
+  if (loosening) {
+    return Object.freeze({ status: 'unknown' as const, completedPaths: Object.freeze([] as string[]), refused: true as const, verifiedInOwningStore: false,
+      failure: refusal({ code: loosening.code, state: 'settings change not applied', reason: loosening.reason, next: loosening.next, status: loosening.status, retryable: false }) });
+  }
   try {
     const applied = await applyRoutedConfigWrite(client.configManager, key, client.value, client.routing);
     return Object.freeze({ status: 'committed' as const, completedPaths: Object.freeze([applied.persistedTo]), verifiedInOwningStore: true });
-  } catch {
+  } catch (error) {
+    logger.warn('[settings] A client-owned settings write has an unknown outcome', { key, path: client.store.settingsPath, error: summarizeError(error) });
     return Object.freeze({ status: 'unknown' as const, completedPaths: Object.freeze([] as string[]), uncertainPath: client.store.settingsPath, verifiedInOwningStore: false });
   }
 }

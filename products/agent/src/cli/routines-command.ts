@@ -25,6 +25,7 @@ import {
 } from '../agent/routine-schedule-format.ts';
 import { fetchLiveSchedules, formatReceiptsOnOtherHosts, reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { operatorFlagValue, operatorHasFlag, parseOperatorCommandArgs, type ParsedOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
 
@@ -40,11 +41,6 @@ interface RoutinesCommandFailure {
   readonly error: string;
 }
 
-interface ParsedRoutineOptions {
-  readonly positionals: readonly string[];
-  readonly flags: ReadonlyMap<string, string>;
-  readonly yes: boolean;
-}
 
 const ROUTINE_CREATE_USAGE =
   'Usage: goodvibes-agent routines create --name <name> --description <summary> --steps <steps> [--tags a,b] [--triggers a,b] [--requires-env A,B] [--requires-command gh,jq] [--enabled]';
@@ -58,6 +54,7 @@ const ROUTINE_VALUE_OPTIONS = [
   'requires-command',
   'requires-commands',
 ] as const;
+const ROUTINE_BOOLEAN_OPTIONS = ['enabled'] as const;
 
 function commandFailure(runtime: CliCommandRuntime, kind: string, error: string, exitCode: number): CliCommandOutput {
   const failure: RoutinesCommandFailure = { ok: false, kind, error };
@@ -100,54 +97,13 @@ function splitList(value: string | undefined): readonly string[] {
     .filter(Boolean);
 }
 
-function parseRoutineOptions(args: readonly string[]): ParsedRoutineOptions {
-  const valued: ReadonlySet<string> = new Set(ROUTINE_VALUE_OPTIONS);
-  const flags = new Map<string, string>();
-  const positionals: string[] = [];
-  let yes = false;
-  for (let index = 0; index < args.length; index += 1) {
-    const token = args[index] ?? '';
-    if (token === '--') {
-      positionals.push(...args.slice(index + 1));
-      break;
-    }
-    if (token === '--yes') {
-      yes = true;
-      continue;
-    }
-    if (token.startsWith('--') && token.length > 2) {
-      const raw = token.slice(2);
-      const equalIndex = raw.indexOf('=');
-      if (equalIndex >= 0) {
-        flags.set(raw.slice(0, equalIndex), raw.slice(equalIndex + 1));
-        continue;
-      }
-      const key = raw;
-      const next = args[index + 1];
-      if (next !== undefined && (valued.has(key) || !next.startsWith('--'))) {
-        flags.set(key, next);
-        index += 1;
-      } else {
-        flags.set(key, 'true');
-      }
-      continue;
-    }
-    positionals.push(token);
-  }
-  return { positionals, flags, yes };
+/** `--enabled` never takes a value, so the word after it stays a positional (part of the steps). */
+function parseRoutineOptions(args: readonly string[]): ParsedOperatorCommandArgs {
+  return parseOperatorCommandArgs(args, ROUTINE_VALUE_OPTIONS, ROUTINE_BOOLEAN_OPTIONS);
 }
 
-function optionValue(options: ParsedRoutineOptions, key: string): string | undefined {
-  const value = options.flags.get(key)?.trim();
-  return value ? value : undefined;
-}
-
-function hasFlag(options: ParsedRoutineOptions, key: string): boolean {
-  return options.flags.get(key) === 'true';
-}
-
-function requiredOption(options: ParsedRoutineOptions, key: string): string {
-  const value = optionValue(options, key);
+function requiredOption(options: ParsedOperatorCommandArgs, key: string): string {
+  const value = operatorFlagValue(options, key);
   if (!value) throw new Error(`${ROUTINE_CREATE_USAGE}\nMissing --${key}.`);
   return value;
 }
@@ -412,14 +368,14 @@ function handleRoutineChange(
       routine = registry.markStale(id, reason);
       headline = 'Agent routine marked stale';
     } else {
-      const requiresEnv = optionValue(options, 'requires-env');
-      const requiresCommand = optionValue(options, 'requires-command') ?? optionValue(options, 'requires-commands');
+      const requiresEnv = operatorFlagValue(options,'requires-env');
+      const requiresCommand = operatorFlagValue(options,'requires-command') ?? operatorFlagValue(options,'requires-commands');
       routine = registry.update(id, {
-        name: optionValue(options, 'name'),
-        description: optionValue(options, 'description'),
-        steps: optionValue(options, 'steps'),
-        tags: optionValue(options, 'tags') === undefined ? undefined : splitList(optionValue(options, 'tags')),
-        triggers: optionValue(options, 'triggers') === undefined ? undefined : splitList(optionValue(options, 'triggers')),
+        name: operatorFlagValue(options,'name'),
+        description: operatorFlagValue(options,'description'),
+        steps: operatorFlagValue(options,'steps'),
+        tags: operatorFlagValue(options,'tags') === undefined ? undefined : splitList(operatorFlagValue(options,'tags')),
+        triggers: operatorFlagValue(options,'triggers') === undefined ? undefined : splitList(operatorFlagValue(options,'triggers')),
         requirements: requiresEnv === undefined && requiresCommand === undefined
           ? undefined
           : buildAgentSkillRequirements({ env: splitList(requiresEnv), commands: splitList(requiresCommand) }),
@@ -607,14 +563,14 @@ export async function handleRoutinesCommand(runtime: CliCommandRuntime): Promise
       const routine = registry.create({
         name: requiredOption(options, 'name'),
         description: requiredOption(options, 'description'),
-        steps: optionValue(options, 'steps') ?? options.positionals.join(' ').trim(),
-        tags: splitList(optionValue(options, 'tags')),
-        triggers: splitList(optionValue(options, 'triggers')),
+        steps: operatorFlagValue(options,'steps') ?? options.positionals.join(' ').trim(),
+        tags: splitList(operatorFlagValue(options,'tags')),
+        triggers: splitList(operatorFlagValue(options,'triggers')),
         requirements: buildAgentSkillRequirements({
-          env: splitList(optionValue(options, 'requires-env')),
-          commands: splitList(optionValue(options, 'requires-command') ?? optionValue(options, 'requires-commands')),
+          env: splitList(operatorFlagValue(options,'requires-env')),
+          commands: splitList(operatorFlagValue(options,'requires-command') ?? operatorFlagValue(options,'requires-commands')),
         }),
-        enabled: hasFlag(options, 'enabled'),
+        enabled: operatorHasFlag(options, 'enabled'),
         source: 'user',
         provenance: 'cli',
       });

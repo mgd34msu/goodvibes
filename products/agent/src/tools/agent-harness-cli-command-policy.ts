@@ -1,18 +1,7 @@
 import { CONNECTED_HOST_LIFECYCLE_STATEMENT } from './agent-harness-connected-host-capabilities.ts';
 import { EFFECT_ADMISSION_SENTENCE } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
 import type { CommandExecutionPolicy } from './agent-harness-metadata.ts';
-
-function agentHarnessModes(...modes: readonly string[]): string {
-  return `agent_harness ${modes.map((mode) => `mode:"${mode}"`).join(', ')}`;
-}
-
-function settingsActions(...actions: readonly string[]): string {
-  return `settings ${actions.map((action) => `action:"${action}"`).join('|')}`;
-}
-
-function hostActions(...actions: readonly string[]): string {
-  return `host ${actions.map((action) => `action:"${action}"`).join('|')}`;
-}
+import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
 
 export function describeCliCommandPolicy(commandName: string): CommandExecutionPolicy {
   const root = commandName.trim().toLowerCase();

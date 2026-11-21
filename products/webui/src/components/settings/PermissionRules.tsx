@@ -2,7 +2,9 @@
  * Approval rules, in Settings > Permissions: every decision remembered at a
  * generalizing tier (permissions.rules.list), with revocation
  * (permissions.rules.delete). Rules are only minted by decisions (an approval
- * with a Remember scope); deleting one makes matching asks prompt again. A
+ * with a Remember scope); deleting one hands matching calls back to the
+ * permission mode: an allow rule's calls may prompt again, a deny rule's calls
+ * are no longer refused by it (so deleting a deny rule is confirmed first). A
  * `deleted:false` answer is the daemon's honest "no such rule" (already gone),
  * reported as information, not an error.
  */
@@ -15,6 +17,7 @@ import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Button } from '../ui/Button';
 import { IconButton } from '../ui/IconButton';
+import { useConfirm } from '../ui/ConfirmDialog';
 import { Row, RowList } from '../ui/Row';
 import { StatusDot } from '../ui/StatusDot';
 import { SettingsBlock } from './dialog/parts';
@@ -29,6 +32,7 @@ export function ruleSummary(rule: PermissionRuleRecord): string {
 export function PermissionRules() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
+  const confirm = useConfirm();
   const rules = useQuery({
     queryKey: queryKeys.permissionRules,
     queryFn: () => platformClient.operator.permissions.rules.list(),
@@ -38,20 +42,34 @@ export function PermissionRules() {
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.permissionRules });
       toast(result.deleted
-        ? { title: 'Rule deleted', description: 'Matching asks will prompt again.', tone: 'info' }
+        ? { title: 'Rule deleted', description: 'Matching calls are decided by your permission mode now.', tone: 'info' }
         : { title: 'Rule already gone', description: 'The daemon reported no such rule.', tone: 'info' });
     },
     onError: (error: unknown) => toast({ title: 'Delete failed', description: formatError(error), tone: 'danger' }),
   });
   const rows = rules.data?.rules ?? [];
 
+  async function deleteRule(rule: PermissionRuleRecord): Promise<void> {
+    if (rule.effect === 'deny') {
+      const ok = await confirm.ask({
+        title: 'Delete this deny rule?',
+        description: 'Calls this rule refuses will no longer be refused by it; your permission mode decides them, which may allow them without asking.',
+        tone: 'danger',
+        confirmLabel: 'Delete rule',
+      });
+      if (!ok) return;
+    }
+    remove.mutate(rule.id);
+  }
+
   return (
     <SettingsBlock
       title="Approval rules"
-      description="Approving with a Remember scope (exact command, command class, path or tool) records a rule here. Delete one and matching asks prompt again."
+      description="Approving with a Remember scope (exact command, command class, path or tool) records a rule here. Delete one and your permission mode decides matching calls again: an allow rule's calls may prompt again, a deny rule's calls are no longer refused by it."
       actions={<IconButton label="Refresh rules" icon={<RefreshCw />} onClick={() => void rules.refetch()} />}
       testId="permission-rules"
     >
+      {confirm.element}
       {rules.isPending && <p className="settings-empty">Loading rules…</p>}
       {rules.isError && (
         <p className="settings-empty" role="alert">
@@ -76,8 +94,8 @@ export function PermissionRules() {
                   icon={<Trash2 aria-hidden="true" />}
                   disabled={remove.isPending && remove.variables === rule.id}
                   aria-label={`Delete rule: ${ruleSummary(rule)}`}
-                  title="Delete this rule: matching asks will prompt again"
-                  onClick={() => remove.mutate(rule.id)}
+                  title="Delete this rule: your permission mode decides matching calls again"
+                  onClick={() => void deleteRule(rule)}
                 >
                   {remove.isPending && remove.variables === rule.id ? 'Deleting…' : 'Delete'}
                 </Button>

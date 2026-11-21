@@ -365,7 +365,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const contractRecovery = resumeContracts(services.contractRunner, services.workingDirectory);
   // A contract whose checkpoint was refused at start is shown to the owner with what to do, not only logged.
   void contractRecovery.then((report) => {
-    for (const { refusal } of report?.refused ?? []) {
+    if ('failed' in report) {
+      systemMessageRouter.high(`[Contracts] Saved contracts could not be resumed at start-up: ${report.failed}. They are still on disk; restart to try again, or /agents contracts-view to see them.`, 'error');
+      return;
+    }
+    for (const { refusal } of report.refused) {
       systemMessageRouter.high(`[Contracts] ${refusal.reason} Now: ${refusal.state}. Next: ${refusal.next.join(' ')}`, 'warning');
     }
   });
@@ -379,11 +383,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const commandContext = shell.commandContext;
   // A failed or refused turn is a row in the transcript with its next steps on keys: alt+o picks
   // another model for the prompt, alt+i opens its details, alt+s the sign-ins (alt+r is the shell's retry chord).
-  bootstrapUnsubs.push(wireFailedTurnActions({
+  wireFailedTurnActions({
     commandContext,
-    onModelChanged: (listener) => runtimeBus.on('MODEL_CHANGED', listener),
     render: requestRender,
-  }));
+  });
   // Recovery loads persisted history before continuing its work. Announce
   // that history without waiting for the resumed work to finish.
   void announceResumeState({

@@ -10,6 +10,7 @@ import { rankClassicCatalog } from '../classic-catalog.js';
 import { fanOut, toJson, type EntryType } from '@goodvibes/judgment';
 import { catalogSearch, catalogSearchAt, catalogSearchEntryView } from './batteries/catalog-search.js';
 import { trustNoteCaution } from './batteries/trust-note-caution.js';
+import { BUNDLE_GRANT_FILE, type InstalledBundleGrantFile } from './installed-bundle-guard.js';
 
 export type EcosystemEntryKind = 'plugin' | 'skill' | 'hook-pack' | 'policy-pack';
 export interface EcosystemCatalogPathOptions {
@@ -81,7 +82,12 @@ export interface EcosystemInstallReceipt {
   readonly bundle?: EcosystemBundleGrant | undefined;
 }
 
-/** The pin and the capability grant an installed bundle carries in its receipt; the loader reads the grant from here. */
+/**
+ * The pin and the capability grant an installed bundle carries in its receipt.
+ * A bundle plugin also carries the grant in its own directory
+ * (installed-bundle-guard.ts `BUNDLE_GRANT_FILE`), which the loader enforces;
+ * the receipt's copy is what listings, history and rollback show.
+ */
 export interface EcosystemBundleGrant {
   readonly source: { readonly kind: 'file' | 'url' | 'git'; readonly location: string; readonly sha256: string; readonly ref?: string | undefined };
   readonly trustTier: string;
@@ -697,7 +703,7 @@ export async function reviewEcosystemCatalogEntry(
 export function installEcosystemCatalogEntry(
   kind: EcosystemEntryKind,
   entryId: string,
-  options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user'; skipBackup?: boolean },
+  options: EcosystemCatalogPathOptions & { scope?: 'project' | 'user'; backupReason?: 'replace' | 'update' },
 ): { ok: true; receipt: EcosystemInstallReceipt } | { ok: false; error: string } {
   const scope = options.scope ?? 'project';
   if (!isSafeEcosystemEntryId(entryId)) return { ok: false, error: unsafeIdMessage(kind, String(entryId)) };
@@ -715,10 +721,9 @@ export function installEcosystemCatalogEntry(
   const targetPath = join(root, entry.id);
   if (!isInside(root, targetPath)) return { ok: false, error: unsafeIdMessage(kind, entryId) };
   try {
+    // Taken only after the entry and its source were found, so a refused install leaves the kept rollback points alone.
     const previousReceipt = loadReceipt(receiptPath(kind, entry.id, options, scope));
-    if (previousReceipt && !options.skipBackup) {
-      createBackupFromReceipt(previousReceipt, 'replace', options);
-    }
+    if (previousReceipt) createBackupFromReceipt(previousReceipt, options.backupReason ?? 'replace', options);
   } catch (error) {
     return { ok: false, error: `Backing up ${kind} ${entryId} before installing failed: ${errorText(error)}. Nothing was changed.` };
   }
@@ -767,9 +772,10 @@ export interface VerifiedBundleInstall {
 
 /**
  * Install a pinned bundle whose bytes were verified and unpacked: the payload
- * is written to a staging directory and swapped into the entry's install
- * directory exactly as a catalog install is (backup of the previous install,
- * staged copy, rename, receipt), and the receipt carries the pin and the grant.
+ * is written to a staging directory (with the grant file, for a plugin) and,
+ * once it is complete, swapped into the entry's install directory exactly as a
+ * catalog install is (backup of the previous install, staged copy, rename,
+ * receipt), and the receipt carries the pin and the grant.
  * Updates, rollback, history and uninstall work on it like any installed entry.
  */
 export function installVerifiedBundle(
@@ -783,26 +789,44 @@ export function installVerifiedBundle(
   const targetPath = join(root, id);
   if (!isInside(root, targetPath)) return { ok: false, error: unsafeIdMessage(kind, id) };
   const unpacked = join(installedReceiptsRoot(options, scope), `.bundle-${kind}-${id}-${process.pid}`);
-  try {
-    const previousReceipt = loadReceipt(receiptPath(kind, id, options, scope));
-    if (previousReceipt) createBackupFromReceipt(previousReceipt, 'replace', options);
-    rmSync(unpacked, { recursive: true, force: true });
-    mkdirSync(unpacked, { recursive: true });
-    for (const [path, bytes] of bundle.files) {
-      const target = join(unpacked, path);
-      if (!isInside(unpacked, target)) throw new Error(`bundle member '${path}' would be written outside the install directory`);
-      mkdirSync(dirname(target), { recursive: true });
-      writeFileSync(target, bytes, { mode: 0o644 });
-    }
-  } catch (error) {
-    rmSync(unpacked, { recursive: true, force: true });
-    return { ok: false, error: `Unpacking ${kind} bundle ${id} failed: ${errorText(error)}. Nothing was installed.` };
-  }
   const entry: EcosystemCatalogEntry = {
     id, kind, name: bundle.name, summary: bundle.description, version: bundle.version,
     ...(bundle.author ? { author: bundle.author } : {}),
     source: bundle.grant.source.location, tags: [], provenance: `sha256:${bundle.grant.source.sha256}`,
   };
+  // The plugin loader enforces the grant, so a plugin carries it in its own directory.
+  const grantFile = kind === 'plugin' ? join(unpacked, BUNDLE_GRANT_FILE) : null;
+  try {
+    rmSync(unpacked, { recursive: true, force: true });
+    mkdirSync(unpacked, { recursive: true });
+    for (const [path, bytes] of bundle.files) {
+      const target = join(unpacked, path);
+      if (!isInside(unpacked, target)) throw new Error(`bundle member '${path}' would be written outside the install directory`);
+      if (target === grantFile) throw new Error(`bundle member '${path}' uses the name ${BUNDLE_GRANT_FILE}, which the install keeps for the bundle's grant`);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, bytes, { mode: 0o644 });
+    }
+    if (grantFile !== null) {
+      // The grant travels inside the plugin's directory, so moving the project or quarantining the receipt never loses it.
+      const grantRecord: InstalledBundleGrantFile = {
+        version: 1,
+        entry: { id, name: bundle.name, version: bundle.version, summary: bundle.description },
+        bundle: bundle.grant,
+      };
+      writeFileSync(grantFile, `${JSON.stringify(grantRecord, null, 2)}\n`, { mode: 0o644 });
+    }
+  } catch (error) {
+    rmSync(unpacked, { recursive: true, force: true });
+    return { ok: false, error: `Unpacking ${kind} bundle ${id} failed: ${errorText(error)}. Nothing was installed.` };
+  }
+  try {
+    // The backup is taken only once the new copy is ready, so a failed unpack leaves the kept rollback points alone.
+    const previousReceipt = loadReceipt(receiptPath(kind, id, options, scope));
+    if (previousReceipt) createBackupFromReceipt(previousReceipt, 'replace', options);
+  } catch (error) {
+    rmSync(unpacked, { recursive: true, force: true });
+    return { ok: false, error: `Backing up ${kind} ${id} before installing failed: ${errorText(error)}. Nothing was changed.` };
+  }
   const receipt: EcosystemInstallReceipt = {
     version: 1,
     id: `${kind}:${id}`,
@@ -873,13 +897,8 @@ export function updateInstalledEcosystemEntry(
   if (!previousReceipt) {
     return { ok: false, error: `No installed ${kind} receipt found for ${entryId} in ${scope} scope.` };
   }
-  try {
-    createBackupFromReceipt(previousReceipt, 'update', options);
-  } catch (error) {
-    return { ok: false, error: `Backing up ${kind} ${entryId} before the update failed: ${errorText(error)}` };
-  }
-
-  const installed = installEcosystemCatalogEntry(kind, entryId, { ...options, scope, skipBackup: true });
+  // The install takes the backup once the entry and its source check out.
+  const installed = installEcosystemCatalogEntry(kind, entryId, { ...options, scope, backupReason: 'update' });
   if (!installed.ok) return installed;
   return { ok: true, receipt: installed.receipt, previousReceipt };
 }

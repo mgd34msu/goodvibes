@@ -388,7 +388,8 @@ export function ModelWorkspaceModal({ open, onClose }: ModelWorkspaceModalProps)
               {groups.length > 1 && <h3 className="model-workspace-group__title">{group.label}</h3>}
               <RowList aria-label={`Models in ${group.label}`}>
                 {group.models.map((model) => {
-                  const isCurrent = model.registryKey === routing.model || (target === 'main' && `${model.provider}:${model.id}` === `${routing.provider}:${routing.model}`);
+                  // Every model target stores provider and bare id; a value stored as a full registry key is matched too.
+                  const isCurrent = (model.provider === routing.provider && model.id === routing.model) || model.registryKey === routing.model;
                   return (
                     <Row
                       key={model.registryKey}

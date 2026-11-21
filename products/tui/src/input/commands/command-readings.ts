@@ -1,5 +1,5 @@
 /** The command readings that may be pending at once, one of each kind. */
-export type CommandReadingKind = 'schedule' | 'share' | 'teamwork';
+export type CommandReadingKind = 'schedule' | 'share';
 
 /** A submission that now owns its kind's reading until `finish`, a newer submission, Escape, a session change or shutdown. */
 export interface CommandReading {
@@ -23,7 +23,7 @@ export interface CommandReadingRefused {
 
 /**
  * The one owner of pending command readings (a natural-language schedule, a
- * gist upload's credential reading, a teamwork brief). The terminal creates,
+ * gist upload's credential reading). The terminal creates,
  * cancels and disposes this one object; a command begins a reading of its kind.
  */
 export class CommandReadings {

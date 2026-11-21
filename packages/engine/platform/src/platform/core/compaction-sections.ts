@@ -68,6 +68,28 @@ export const COMPACTION_HANDOFF_HEADER =
  * buildHandoffHeader, always returns the mandatory handoff header.
  * This is the first line of every compacted output.
  */
+/** Whether `text` is a compaction handoff (a message a compaction wrote, not one a person sent). */
+export function isCompactionHandoff(text: string): boolean {
+  return text.trimStart().startsWith(COMPACTION_HANDOFF_HEADER);
+}
+
+const CURRENT_TASK_HEADER = '## Current Task';
+
+/**
+ * The task a compaction handoff carried forward: the body of its
+ * "## Current Task" section, up to the next "## " header. Null when `text` is
+ * not a handoff or has no such section.
+ */
+export function handoffCurrentTask(text: string): string | null {
+  if (!isCompactionHandoff(text)) return null;
+  const start = text.indexOf(`\n${CURRENT_TASK_HEADER}\n`);
+  if (start < 0) return null;
+  const body = text.slice(start + CURRENT_TASK_HEADER.length + 2);
+  const end = body.indexOf('\n## ');
+  const task = (end < 0 ? body : body.slice(0, end)).trim();
+  return task || null;
+}
+
 export function buildHandoffHeader(): CompactionSection {
   const content = COMPACTION_HANDOFF_HEADER;
   return {
@@ -182,7 +204,7 @@ export function buildCurrentTask(
     planTitle ??
     (lastUserMessage ? lastUserMessage.trim() : null);
   if (!task) return null;
-  return makeSection('current-task', '## Current Task', task);
+  return makeSection('current-task', CURRENT_TASK_HEADER, task);
 }
 
 // ---------------------------------------------------------------------------
@@ -387,8 +409,9 @@ export function gatherRecentConversation(
   messages: ProviderMessage[],
   maxTokens = 3000,
 ): ProviderMessage[] {
+  // A previous compaction's handoff is carried by the new sections, not summarised again as conversation.
   const eligible = messages.filter(
-    (m) => m.role === 'user' || m.role === 'assistant',
+    (m) => m.role === 'assistant' || (m.role === 'user' && !isCompactionHandoff(extractText(m.content))),
   );
 
   const gathered: ProviderMessage[] = [];

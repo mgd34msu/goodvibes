@@ -322,9 +322,11 @@ export class McpPermissionManager {
       this._recordDecision({
         serverName,
         toolName,
+        // An ask is recorded as one: the owner's answer is recorded once, by the gate's admission record.
         verdict: permission.verdict ?? (permission.allowed ? 'allow' : 'deny'),
         riskLevel: severityForPosture(profile.mode, 'unknown', profile.allowedPaths, profile.allowedHosts),
-        incoherent: (permission.causes?.length ?? 0) > 0,
+        // A call the owner decides is not an incoherent decision; only a refused out-of-scope call is.
+        incoherent: permission.verdict === 'deny' && (permission.causes?.length ?? 0) > 0,
         reason: permission.reason,
         profileMode: profile.mode,
         evaluatedAt: Date.now(),
@@ -375,7 +377,7 @@ export class McpPermissionManager {
     // ask-on-risk: a call outside the scope is the owner's to allow, never refused unasked.
     const asks = !allowed && profile.mode === 'ask-on-risk';
     return {
-      allowed, verdict: allowed ? 'allow' : 'deny', profileMode: profile.mode, causes,
+      allowed, verdict: allowed ? 'allow' : asks ? 'ask' : 'deny', profileMode: profile.mode, causes,
       ...(asks ? { askOwner: `The MCP server '${serverName}' is trusted ask-on-risk and this call to '${toolName}' is outside its configured scope: ${details.join('; ')}.` } : {}),
       reason: allowed
         ? `server '${serverName}' permits this tool`

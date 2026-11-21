@@ -136,9 +136,7 @@ export class QuotaWindowTracker {
     const activeCooldownMs = latest.retryAfterMs !== undefined
       ? Math.max(0, latest.at + latest.retryAfterMs - now)
       : undefined;
-    const remaining = lastDefined(recent, (s) => s.remaining);
-    const limit = lastDefined(recent, (s) => s.limit);
-    const resetAt = lastDefined(recent, (s) => s.resetAt);
+    const { remaining, limit, resetAt } = liveWindow(recent, now);
     return {
       provider,
       hasSignal: true,
@@ -175,8 +173,9 @@ export class QuotaWindowTracker {
     const activeCooldownMs = latest.retryAfterMs !== undefined
       ? Math.max(0, latest.at + latest.retryAfterMs - now)
       : undefined;
-    const observedRemaining = lastDefined(recent, (s) => s.remaining);
-    const observedLimit = lastDefined(recent, (s) => s.limit);
+    const live = liveWindow(recent, now);
+    const observedRemaining = live.remaining;
+    const observedLimit = live.limit;
     const evidence: FanoutEvidence = {
       recentRateLimitCount: recent.filter((s) => s.retryAfterMs !== undefined).length,
       ...(activeCooldownMs !== undefined && activeCooldownMs > 0 ? { activeCooldownMs } : {}),
@@ -215,6 +214,30 @@ export class QuotaWindowTracker {
       evidence,
     };
   }
+}
+
+/**
+ * The live window view from the recent signals: the latest reported remaining
+ * and the reset its own signal carried. Once that reset time has passed the
+ * provider's window has started over, so the observation has expired and
+ * neither is reported; the limit does not expire with the window.
+ */
+function liveWindow(recent: readonly QuotaSignal[], now: number): { readonly remaining?: number; readonly resetAt?: number; readonly limit?: number } {
+  const limit = lastDefined(recent, (s) => s.limit);
+  let withRemaining: QuotaSignal | undefined;
+  for (let i = recent.length - 1; i >= 0 && withRemaining === undefined; i -= 1) {
+    if (recent[i]!.remaining !== undefined) withRemaining = recent[i];
+  }
+  const expired = withRemaining?.resetAt !== undefined && withRemaining.resetAt <= now;
+  const remaining = expired ? undefined : withRemaining?.remaining;
+  const latestReset = lastDefined(recent, (s) => s.resetAt);
+  // A reset time already passed is no window still running.
+  const resetAt = expired || (latestReset !== undefined && latestReset <= now) ? undefined : latestReset;
+  return {
+    ...(remaining !== undefined ? { remaining } : {}),
+    ...(resetAt !== undefined ? { resetAt } : {}),
+    ...(limit !== undefined ? { limit } : {}),
+  };
 }
 
 function lastDefined<T>(list: readonly QuotaSignal[], pick: (s: QuotaSignal) => T | undefined): T | undefined {

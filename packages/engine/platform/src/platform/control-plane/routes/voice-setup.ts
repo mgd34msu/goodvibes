@@ -18,6 +18,7 @@ import type { VoiceKeySupersede } from '../../voice/provisioning/config-preconfi
 import type { VoiceRoundTripProof } from '../../voice/provisioning/round-trip-proof.js';
 import { attachHandler } from './attach-handler.js';
 import type { VoiceSetupOutcome, VoiceSetupRequest } from '../../runtime/voice-setup.js';
+import { WAKE_MODEL_COMPONENTS, isWakeModelComponent, type WakeModelComponent } from '../../runtime/wake-setup.js';
 
 /** One-act install outcome served by voice.local.install. */
 export interface VoiceLocalInstallResult {
@@ -82,7 +83,7 @@ export interface VoiceSetupGatewayService {
   /** Download + verify the pinned wake artifacts. Explicit act, single-flight. */
   wakeProvision(): Promise<unknown>;
   /** Read one wake artifact in bounded chunks, for a surface that cannot fetch it. */
-  wakeModelChunk(request: { component: string; offset?: number | undefined; maxBytes?: number | undefined }): WakeModelChunkPayload;
+  wakeModelChunk(request: { component: WakeModelComponent; offset?: number | undefined; maxBytes?: number | undefined }): WakeModelChunkPayload;
   /** Plan voice setup from the host's facts, do what needs no answer, and return the plan. */
   setup(request: VoiceSetupRequest): Promise<VoiceSetupOutcome>;
 }
@@ -139,9 +140,8 @@ export function createWakeModelHandler(service: VoiceSetupGatewayService): Gatew
   return (invocation) => {
     const params = readInvocationParams(invocation);
     const component = typeof params['component'] === 'string' ? params['component'] : '';
-    const known = ['classifier', 'tflite', 'embedding', 'notice', 'embedding-notice', 'vad', 'vad-notice'];
-    if (!known.includes(component)) {
-      throw new GatewayVerbError(`voice.wake.model.get: component must be one of ${known.join(', ')} (got "${component}")`, 'INVALID_ARGUMENT', 400, 'component');
+    if (!isWakeModelComponent(component)) {
+      throw new GatewayVerbError(`voice.wake.model.get: component must be one of ${WAKE_MODEL_COMPONENTS.join(', ')} (got "${component}")`, 'INVALID_ARGUMENT', 400, 'component');
     }
     return service.wakeModelChunk({
       component,

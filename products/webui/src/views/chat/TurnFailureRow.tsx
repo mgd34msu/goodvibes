@@ -21,6 +21,7 @@ import {
   type TurnFailureReading,
 } from '@goodvibes/engine/platform/platform/core/turn-failure';
 import { Button } from '../../components/ui/Button';
+import { openSettingsSection } from '../personal/openSettings';
 import type { ChatMessage } from './types';
 
 /** The failure reading a failed reply carries, or one read from its reason text. */
@@ -29,14 +30,6 @@ export function failureReadingOf(message: ChatMessage, id: string): TurnFailureR
   if (stored) return stored;
   const reason = typeof message.failureReason === 'string' ? message.failureReason.trim() : '';
   return readTurnFailure({ turnId: id, ...(reason ? { error: reason } : {}), stopReason: 'failed' });
-}
-
-/** Open a settings page through the address, as every settings link does (`?settings=<section>`). */
-export function openSettingsPage(section: string): void {
-  const url = new URL(window.location.href);
-  url.searchParams.set('settings', section);
-  window.history.pushState(window.history.state, '', url);
-  window.dispatchEvent(new PopStateEvent('popstate', { state: window.history.state }));
 }
 
 /** The web's button words for a next step ("try again" → "Try again"). */
@@ -63,7 +56,7 @@ export function TurnFailureRow({ reading, latest, onRetry, onOtherModel }: TurnF
       case 'other-model':
       case 'choose-model': onOtherModel(); return;
       case 'details': setShowDetails((open) => !open); return;
-      case 'sign-in': openSettingsPage('models'); return;
+      case 'sign-in': openSettingsSection('models'); return;
       case 'start-daemon': return;
     }
   };
@@ -106,7 +99,7 @@ export function TurnFailureRow({ reading, latest, onRetry, onOtherModel }: TurnF
       {reading.tip && (
         <p className="turn-failure__tip">
           {reading.tip.text}{' '}
-          <button type="button" className="turn-failure__link" onClick={() => openSettingsPage('models')}>Choose a backup model</button>
+          <button type="button" className="turn-failure__link" onClick={() => openSettingsSection('models')}>Choose a backup model</button>
         </p>
       )}
     </div>

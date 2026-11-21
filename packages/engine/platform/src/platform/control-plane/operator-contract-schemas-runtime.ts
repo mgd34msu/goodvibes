@@ -375,14 +375,6 @@ export const SHARED_SESSION_MESSAGE_ROUTE_OUTPUT_SCHEMA = {
   ],
 } as const;
 
-const TASK_RETRY_POLICY_SCHEMA = objectSchema({
-  maxAttempts: NUMBER_SCHEMA,
-  currentAttempt: NUMBER_SCHEMA,
-  delayMs: NUMBER_SCHEMA,
-  backoff: enumSchema(['fixed', 'exponential']),
-  retryOn: arraySchema(enumSchema(['network', 'timeout', 'transient', 'tool_error'])),
-}, ['maxAttempts', 'currentAttempt', 'delayMs', 'backoff', 'retryOn']);
-
 export const RUNTIME_TASK_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   kind: TASK_KIND_SCHEMA,
@@ -396,9 +388,6 @@ export const RUNTIME_TASK_SCHEMA = objectSchema({
   queuedAt: NUMBER_SCHEMA,
   startedAt: NUMBER_SCHEMA,
   endedAt: NUMBER_SCHEMA,
-  retryPolicy: TASK_RETRY_POLICY_SCHEMA,
-  retryDelayMs: NUMBER_SCHEMA,
-  retryAt: NUMBER_SCHEMA,
   exitCode: NUMBER_SCHEMA,
   error: STRING_SCHEMA,
   result: JSON_VALUE_SCHEMA,

@@ -30,11 +30,14 @@ export interface TelemetryResume {
 }
 
 /**
- * Records that happened after `cursor`, oldest first, for an SSE reconnect:
- * the newest `limit` of them, so the stream continues without a hole before
- * live records (`truncated` says older ones were skipped). The cursor record
- * itself is not repeated, and it need not match the filter. A cursor the
- * history no longer holds resumes from the records held, and says so (`gap`).
+ * Records that arrived after `cursor`, in arrival order, for an SSE reconnect.
+ * `records` is the service's history in arrival order, which is the order the
+ * stream sent them, so an ingested record stamped with an older time is still
+ * after the cursor it arrived after. The newest `limit` of them are sent, so
+ * the stream continues without a hole before live records (`truncated` says
+ * older ones were skipped). The cursor record itself is not repeated, and it
+ * need not match the filter. A cursor the history no longer holds resumes from
+ * the records held, and says so (`gap`).
  */
 export function listTelemetryRecordsAfterCursor(
   records: readonly TelemetryRecord[],
@@ -42,11 +45,10 @@ export function listTelemetryRecordsAfterCursor(
   cursor: string,
   limit: number,
 ): TelemetryResume {
-  const newestFirst = [...records].sort(compareTelemetryRecordsNewestFirst);
-  const found = newestFirst.findIndex((record) => record.id === cursor);
-  const missed = newestFirst.slice(0, found >= 0 ? found : newestFirst.length).filter(matches);
+  const found = records.findIndex((record) => record.id === cursor);
+  const missed = records.slice(found + 1).filter(matches);
   return {
-    records: missed.slice(0, limit).reverse(),
+    records: missed.slice(Math.max(0, missed.length - limit)),
     gap: found < 0,
     truncated: missed.length > limit,
   };

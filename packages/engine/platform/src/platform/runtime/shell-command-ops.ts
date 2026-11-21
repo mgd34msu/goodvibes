@@ -117,7 +117,8 @@ export interface RemoteCommandService {
   buildReviewSummary(artifactId: string): string | null;
   exportArtifact(artifactId: string, path?: string): Promise<{ artifact: RemoteExecutionArtifact; path: string } | null>;
   exportArtifactForAgent(agentId: string, path?: string): Promise<{ artifact: RemoteExecutionArtifact; path: string } | null>;
-  importArtifact(path: string): Promise<RemoteExecutionArtifact>;
+  /** Refused when it would replace a different artifact held under its id, unless `replace` is set. */
+  importArtifact(path: string, options?: { readonly replace?: boolean | undefined }): Promise<RemoteExecutionArtifact>;
   exportSessionBundle(path: string): Promise<{ bundle: RemoteSessionBundle; path: string }>;
   importSessionBundle(path: string): Promise<RemoteSessionBundle>;
 }
@@ -169,7 +170,7 @@ export function createShellRemoteCommandService(options: {
         return remoteRunnerRegistry.exportArtifact(artifact.id, path);
       })()
     ),
-    importArtifact: (path) => remoteRunnerRegistry.importArtifact(path),
+    importArtifact: (path, importOptions) => remoteRunnerRegistry.importArtifact(path, importOptions),
     exportSessionBundle: (path) => remoteRunnerRegistry.exportSessionBundle(runtimeStore, path),
     importSessionBundle: (path) => remoteRunnerRegistry.importSessionBundle(path),
   };

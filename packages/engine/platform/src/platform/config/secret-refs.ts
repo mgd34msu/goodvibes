@@ -419,8 +419,15 @@ function parseProviderUri(value: string): SecretRef | null {
     return parseGoodVibesSecretsUri(url);
   }
 
-  const host = decodeURIComponent(url.hostname);
-  const segments = url.pathname.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+  // A stray `%` survives in the host or path of these schemes; such a reference is malformed, not an error.
+  let host: string;
+  let segments: string[];
+  try {
+    host = decodeURIComponent(url.hostname);
+    segments = url.pathname.split('/').filter(Boolean).map((segment) => decodeURIComponent(segment));
+  } catch {
+    return null;
+  }
 
   if (url.protocol === 'bw:') {
     if (!host) return null;
@@ -446,51 +453,14 @@ function parseProviderUri(value: string): SecretRef | null {
     };
   }
 
-  if (url.protocol === 'bws:') {
-    if (!host) return null;
-    return {
-      source: 'bws',
-      id: host,
-      field: segments[0]! ?? url.searchParams.get('field') ?? 'value',
-      profile: url.searchParams.get('profile') ?? undefined,
-    };
-  }
-
-  const source = normalizeSource(host);
-  if (!source) return null;
-  const first = segments[0]!;
-
-  if (source === 'env') {
-    return first ? { source: 'env', id: first } : null;
-  }
-  if (source === 'goodvibes') {
-    return first ? { source: 'goodvibes', id: first } : null;
-  }
-  if (source === 'file') {
-    const path = decodeURIComponent(url.pathname).replace(/^\/+/, '/');
-    return path ? { source: 'file', path, selector: url.searchParams.get('selector') ?? undefined } : null;
-  }
-  if (source === 'bitwarden' || source === 'vaultwarden') {
-    if (!first) return null;
-    return {
-      source,
-      item: first,
-      field: segments[1]! ?? url.searchParams.get('field') ?? 'password',
-      customField: url.searchParams.get('customField') ?? undefined,
-      server: url.searchParams.get('server') ?? undefined,
-      serverEnv: url.searchParams.get('serverEnv') ?? undefined,
-    };
-  }
-  if (source === 'bws' || source === 'bitwarden-secrets-manager') {
-    if (!first) return null;
-    return {
-      source,
-      id: first,
-      field: segments[1]! ?? url.searchParams.get('field') ?? 'value',
-      profile: url.searchParams.get('profile') ?? undefined,
-    };
-  }
-  return null;
+  // The prefix check above leaves no other scheme here.
+  if (!host) return null;
+  return {
+    source: 'bws',
+    id: host,
+    field: segments[0]! ?? url.searchParams.get('field') ?? 'value',
+    profile: url.searchParams.get('profile') ?? undefined,
+  };
 }
 
 export function normalizeSecretRef(input: unknown): SecretRef | null {

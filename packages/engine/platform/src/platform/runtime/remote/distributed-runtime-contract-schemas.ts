@@ -36,6 +36,7 @@ export const DISTRIBUTED_AUDIT_ACTION_SCHEMA = enumSchema([
   'work-failed',
   'work-cancelled',
   'work-expired',
+  'work-requeued',
 ]);
 
 export const DISTRIBUTED_PAIR_REQUEST_SCHEMA = objectSchema({

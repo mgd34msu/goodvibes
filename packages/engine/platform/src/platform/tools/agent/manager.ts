@@ -869,17 +869,18 @@ export class AgentManager {
       if (this.cancellationSignals.get(agentId)?.aborted) this.cancellationSignals.delete(agentId);
       this.cancellationControllers.set(agentId, controller);
       const priorSummary = this.summarizeTranscriptTailForWake(agentId);
-      record.resumeSteer = { steer, ...(priorSummary ? { priorSummary } : {}), ...(referenceOnly ? { referenceOnly: true as const } : {}) };
-      record.error = undefined;
-      record.failureStatus = undefined;
-      record.failureCode = undefined;
-      record.failureRetryAfterMs = undefined;
-      record.failureReason = undefined;
-      record.turnBudget = undefined;
-      record.completedAt = undefined;
       const execute = () => {
         if (controller.signal.aborted || record.status === 'cancelled') return Promise.resolve();
-        // From here the previous run's outcome no longer describes the record.
+        // From here the previous run's outcome no longer describes the record. A
+        // boundary that refuses the run never calls this, so the outcome stays.
+        record.resumeSteer = { steer, ...(priorSummary ? { priorSummary } : {}), ...(referenceOnly ? { referenceOnly: true as const } : {}) };
+        record.error = undefined;
+        record.failureStatus = undefined;
+        record.failureCode = undefined;
+        record.failureRetryAfterMs = undefined;
+        record.failureReason = undefined;
+        record.turnBudget = undefined;
+        record.completedAt = undefined;
         moveAgentRun(record, 'pending');
         // Surfaces dropped every event for a finished run; this marked event is
         // the one that tells them the run lives again.

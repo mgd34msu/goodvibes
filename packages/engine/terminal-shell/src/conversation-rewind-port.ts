@@ -82,6 +82,15 @@ export interface ConversationRewindPort extends RewindConversationPort {
 /** How many rewinds stay reversible per port; older ones are forgotten so a long-lived process does not keep every closed conversation alive. */
 const MAX_UNDOABLE_REWINDS = 32;
 
+/** Why a rewind confirmed against an earlier revision of the conversation cut nothing, and what to do. */
+const CONVERSATION_CHANGED_SINCE_PLAN = 'the conversation changed after the plan (a message arrived), so nothing was cut; run rewind.plan again with scope conversation to rewind it to this point';
+
+/** A conversation's revision: its message count and the key of its last message, as preview reports it and a rewind compares it. */
+function revisionOf(total: number, messages: readonly BoundaryMessage[] | null): string {
+  const last = messages?.at(-1);
+  return `${total} messages, last ${last ? turnBoundaryKey(last) : 'none'}`;
+}
+
 /** One truncation's captured state, the target conversation and its snapshots. */
 interface SnapshotPair {
   /** The session the rewind was of; an undo for another session is refused. */
@@ -244,21 +253,26 @@ export function createConversationRewindPort(
       const messages = (): readonly BoundaryMessage[] | null => (read === undefined ? (read = messagesOf(conv.toJSON())) : read);
       const cut = keepFor(anchor, conv, messages);
       if ('reason' in cut) return { available: false, unavailableReason: cut.reason, messagesToDrop: 0, messagesRemaining: cut.total };
-      const last = messages()?.at(-1);
       return {
         messagesToDrop: Math.max(0, cut.total - cut.keep), messagesRemaining: cut.keep,
-        revision: `${cut.total} messages, last ${last ? turnBoundaryKey(last) : 'none'}`,
+        revision: revisionOf(cut.total, messages()),
       };
     },
 
-    async rewind(anchor: RewindAnchor): Promise<RewindConversationOutcome> {
+    async rewind(anchor: RewindAnchor, expectedRevision?: string): Promise<RewindConversationOutcome> {
       const conv = resolveConversation(anchor.sessionId);
       const undoSnapshotId = `rwc_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
       if (!conv) return { droppedMessages: 0, undoSnapshotId };
       const before = conv.toJSON() as ConversationJson;
-      const cut = keepFor(anchor, conv, () => messagesOf(before));
+      let read: readonly BoundaryMessage[] | null | undefined;
+      const messages = (): readonly BoundaryMessage[] | null => (read === undefined ? (read = messagesOf(before)) : read);
+      const cut = keepFor(anchor, conv, messages);
       // Reporting success for a rewind that dropped nothing would leave files and conversation at different points.
       if ('reason' in cut) return { available: false, unavailableReason: cut.reason, droppedMessages: 0, undoSnapshotId };
+      // A message that arrived after the apply was confirmed is not cut with the planned ones.
+      if (expectedRevision !== undefined && revisionOf(cut.total, messages()) !== expectedRevision) {
+        return { available: false, unavailableReason: CONVERSATION_CHANGED_SINCE_PLAN, droppedMessages: 0, undoSnapshotId };
+      }
       conv.removeMessagesAfter(cut.keep);
       conv.rebuildHistory();
       const after = conv.toJSON() as ConversationJson;

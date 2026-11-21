@@ -109,7 +109,7 @@ export async function handleGitHubAutomationWebhook(
       reason: 'duplicate-delivery',
       message: 'This delivery was already handled.',
     }),
-    async () => {
+    async (committed) => {
       const spawnResult = await context.trySpawnAgent({ mode: 'spawn', task: decision.prompt }, 'handleGitHubAutomationWebhook');
       // The daemon is restarting into an update: the event is saved as owed work and started after the restart.
       if (spawnResult instanceof Response && isAdmissionRefusal(spawnResult) && context.operations) {
@@ -118,13 +118,25 @@ export async function handleGitHubAutomationWebhook(
         return Response.json({ acknowledged: true, queued: true, outcome: 'waiting-for-restart', eventType: event.type, action: event.action }, { status: 202 });
       }
       if (spawnResult instanceof Response) return spawnResult;
+      // An agent is running: a redelivery of this event must not start a second one.
+      committed();
       if (decision.reply && context.awaitAgent) {
         // Save, then acknowledge: the owed answer is on disk before GitHub is told it will come.
         const op = newOperationId('github-reply');
-        if (context.operations) {
-          await context.operations.accept({ op, kind: REPLY_KIND, payload: { target: decision.reply, agentId: spawnResult.id } });
+        let operations = context.operations;
+        if (operations) {
+          try {
+            await operations.accept({ op, kind: REPLY_KIND, payload: { target: decision.reply, agentId: spawnResult.id } });
+          } catch (error) {
+            // The agent runs either way, so its answer is still posted by this
+            // daemon; only a restart before it finishes would lose it.
+            logger.warn('handleGitHubAutomationWebhook: the owed answer could not be saved; it is posted if the daemon keeps running until the agent finishes', {
+              agentId: spawnResult.id, error: summarizeError(error),
+            });
+            operations = undefined;
+          }
         }
-        void postAgentAnswer({ operations: context.operations, awaitAgent: context.awaitAgent, resolveToken }, op, spawnResult.id, decision.reply);
+        void postAgentAnswer({ operations, awaitAgent: context.awaitAgent, resolveToken }, op, spawnResult.id, decision.reply);
       }
       logger.info('handleGitHubAutomationWebhook: spawned agent', {
         type: event.type,
@@ -157,9 +169,10 @@ function replyMarker(op: OperationId): string {
 
 /**
  * Posts a finished agent's answer to the issue or pull request its event came
- * from. Runs after GitHub was answered; a failure is logged and settled on the
- * operation, never thrown. The answer is recorded (its own operation, with the
- * body) before the post, so a restart in the middle posts it once.
+ * from, or a short notice that it gave none. Runs after GitHub was answered; a
+ * failure is logged and settled on the operation, never thrown. The text is
+ * recorded (its own operation, with the body) before the post, so a restart in
+ * the middle posts it once.
  */
 async function postAgentAnswer(deps: ReplyDeps, op: OperationId, agentId: string, target: GitHubReplyTarget): Promise<void> {
   const where = `${target.owner}/${target.repo}#${target.number}`;
@@ -171,19 +184,35 @@ async function postAgentAnswer(deps: ReplyDeps, op: OperationId, agentId: string
   try {
     const record = await deps.awaitAgent(agentId);
     const answer = record?.fullOutput?.trim();
-    if (record?.status !== 'completed' || !answer) {
-      fail(record ? (answer ? `the agent ended ${record.status}` : 'the agent left no answer') : 'the agent is not known to this daemon (it stopped with an earlier daemon)');
-      return;
+    const answered = record?.status === 'completed' && answer !== undefined && answer.length > 0;
+    // The person who mentioned the bot was told an answer would come: when the
+    // agent gave none, a short notice is posted in its place, naming only the
+    // agent's status (never its internal error), through the same recorded path.
+    const body = answered ? answer : noAnswerNotice(record);
+    if (!answered) {
+      logger.warn('handleGitHubAutomationWebhook: the agent gave no answer; a notice is posted instead', {
+        agentId, where,
+        reason: record ? (answer ? `the agent ended ${record.status}` : 'the agent left no answer') : 'the agent is not known to this daemon (it stopped with an earlier daemon)',
+      });
     }
     const post = effectKey(op, 'post') as string as OperationId;
     if (ops) {
-      await ops.accept({ op: post, kind: POST_KIND, payload: { target, body: answer } });
-      ops.settle(op, done((await observe('the answer was produced and recorded for posting', () => post))!));
+      await ops.accept({ op: post, kind: POST_KIND, payload: { target, body } });
+      ops.settle(op, done((await observe(answered
+        ? 'the answer was produced and recorded for posting'
+        : 'the agent gave no answer; a notice was recorded for posting', () => post))!));
     }
-    await postRecordedAnswer(deps, post, target, answer, Date.now(), false);
+    await postRecordedAnswer(deps, post, target, body, Date.now(), false);
   } catch (error) {
     fail(summarizeError(error));
   }
+}
+
+/** What is posted on the issue or pull request when the agent produced no answer: its status only. */
+function noAnswerNotice(record: AgentRecord | null): string {
+  if (record === null) return 'The agent stopped when the daemon restarted, without an answer; mention me again to retry.';
+  if (record.status === 'completed') return 'The agent finished without an answer; mention me again to retry.';
+  return `The agent ended ${record.status} without an answer; mention me again to retry.`;
 }
 
 /**
@@ -222,21 +251,25 @@ async function postRecordedAnswer(deps: ReplyDeps, post: OperationId, target: Gi
  * At start-up: every GitHub answer owed before a restart is finished or
  * reported. A recorded answer is posted (after one read for its marker, so a
  * post that landed is not repeated); an owed answer whose agent stopped with
- * the previous daemon cannot be produced, and is settled failed with that
- * reason and logged. Reads the open lines of the log once.
+ * the previous daemon cannot be produced, so a notice saying so is posted in
+ * its place. Reads the open lines of the log once, before anything is started:
+ * the replies started here, and the answers they record while this runs, are
+ * posted by the code that started them, never a second time from a later read.
  */
 export async function recoverGitHubReplies(deps: ReplyDeps & {
   readonly operations: OperationLog<GitHubReplyOperation>;
   /** Starts the events taken while the daemon took no new work; absent, they wait for a start that has it. */
   readonly trySpawnAgent?: TrySpawnAgentFn | undefined;
 }): Promise<void> {
+  const posts = [...deps.operations.open(POST_KIND)];
+  const replies = [...deps.operations.open(REPLY_KIND)];
   if (deps.trySpawnAgent) await startOwedGitHubEvents({ ...deps, trySpawnAgent: deps.trySpawnAgent });
-  for (const line of deps.operations.open(POST_KIND)) {
+  for (const line of posts) {
     const payload = line.payload as GitHubReplyPost | undefined;
     if (!payload?.target || typeof payload.body !== 'string') continue;
     await postRecordedAnswer(deps, line.op, payload.target, payload.body, line.at, true);
   }
-  for (const line of deps.operations.open(REPLY_KIND)) {
+  for (const line of replies) {
     const payload = line.payload as GitHubReplyOwed | undefined;
     if (!payload?.target || typeof payload.agentId !== 'string') continue;
     void postAgentAnswer(deps, line.op, payload.agentId, payload.target);

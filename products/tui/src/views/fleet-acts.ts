@@ -15,6 +15,7 @@
 //     Confirmation rechecks that record and preserves the gateway receipt.
 // ---------------------------------------------------------------------------
 
+import { isAbsolute } from 'node:path';
 import type { ProcessNode } from '@goodvibes/engine/platform/platform/runtime/fleet';
 import { isTerminalContractStatus } from '@goodvibes/engine/platform/platform/contract/types';
 import type { ContractView, ContractUnitView } from '@goodvibes/engine/platform/platform/contract';
@@ -561,7 +562,19 @@ export class FleetActs {
             this.deps.notify(`[Fleet] Worktree discard refused for ${receipt.path}: ${receipt.detail}`);
           }
         } catch (err) {
-          this.deps.notify(`Worktree discard failed: ${summarizeError(err)}`);
+          // The daemon may have discarded it before the reply was lost: ask it whether the worktree is still recorded.
+          // Recorded paths are absolute; a relative one cannot be matched here, so it reports the failure as it came.
+          let stillListed = true;
+          if (isAbsolute(path)) {
+            try {
+              stillListed = (await gateway.listWorktreePaths()).includes(path);
+            } catch {
+              stillListed = true;
+            }
+          }
+          this.deps.notify(stillListed
+            ? `Worktree discard failed: ${summarizeError(err)}`
+            : 'Discard outcome unknown: the worktree is no longer listed, so it was most likely discarded; its branch is kept and holds the preservation commit.');
         }
         this.deps.diffSurface.close();
         this.deps.markDirty();

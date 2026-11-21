@@ -653,7 +653,8 @@ export function createWriteTool(options?: {
       const warnings: string[] = [];
       // Every file this call writes is one undo entry.
       const undoCall = options.fileUndoManager?.beginCall();
-      const pendingUndo: Array<{ path: string; beforeContent: string | Buffer | null; afterContent: string | Buffer; tool: 'write'; call: number | undefined }> = [];
+      const toolCallId = executeOptions?.callId;
+      const pendingUndo: Array<{ path: string; beforeContent: string | Buffer | null; afterContent: string | Buffer; tool: 'write'; call: number | undefined; toolCallId: string | undefined }> = [];
       const transactionMode = input.transaction?.mode ?? 'none';
       const atomic = transactionMode === 'atomic';
       // Snapshots for atomic rollback: map from resolvedPath -> original content (null = new file)
@@ -900,7 +901,7 @@ export function createWriteTool(options?: {
               const revision = revisions.get(retainedPath);
               if (!revision) throw new Error('Captured failed repair has no owned revision');
               assertCapturedToolWriteRevision(retainedPath, revision);
-              options.fileUndoManager.snapshot({ path: retainedPath, beforeContent, afterContent: content, tool: 'write', call: undoCall });
+              options.fileUndoManager.snapshot({ path: retainedPath, beforeContent, afterContent: content, tool: 'write', call: undoCall, toolCallId });
             } catch (historyError) {
               logger.warn('write tool: failed repair undo snapshot withheld', { path: retainedPath, error: summarizeError(historyError) });
             }
@@ -959,7 +960,7 @@ export function createWriteTool(options?: {
               );
             } else if (options?.fileUndoManager) {
               try {
-                const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: outcome.result._bytes ?? content, tool: 'write' as const, call: undoCall };
+                const snapshot = { path: outcome.result.resolved_path, beforeContent, afterContent: outcome.result._bytes ?? content, tool: 'write' as const, call: undoCall, toolCallId };
                 if (atomic) pendingUndo.push(snapshot);
                 else options.fileUndoManager.snapshot(snapshot);
               } catch (err) {

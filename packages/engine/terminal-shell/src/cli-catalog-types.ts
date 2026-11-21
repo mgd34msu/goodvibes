@@ -44,7 +44,7 @@ export interface CommandFlagSpec<TField extends string> {
   readonly bareValue?: string | true | undefined;
   /** `const` only: the fixed value this flag's mere presence assigns to `field`. */
   readonly constValue?: CliFlagValue | undefined;
-  /** `const` only: a line that also names another exclusive `const` flag of the same field is refused. */
+  /** `const` only: a line that also names an exclusive `const` flag setting another value of the same field is refused; two spellings of one value are not. */
   readonly exclusive?: boolean | undefined;
   /** `enum` only: the values a string value is checked against. */
   readonly enumValues?: readonly string[] | undefined;

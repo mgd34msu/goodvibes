@@ -376,6 +376,42 @@ export function findDisclosedDate(
 
 export class UntrustedContentLedger {
   #publicationRevision = 0;
+  /**
+   * How often each scope's evidence changed ('' for unscoped): a read recorded
+   * in it, private dates shown to it, a turn started in it. A scoped window is
+   * current while the counters of the scopes it can see stand still, so one
+   * session's reads do not fail another session's comparison. A scope
+   * forgotten past the bound folds into the floor every window includes.
+   */
+  readonly #scopeRevisions = new Map<string, number>();
+  #scopeRevisionFloor = 0;
+
+  #bumpScope(scope: string | undefined): void {
+    const key = scope ?? '';
+    const next = (this.#scopeRevisions.get(key) ?? 0) + 1;
+    this.#scopeRevisions.delete(key);
+    this.#scopeRevisions.set(key, next);
+    if (this.#scopeRevisions.size > MAX_SCOPE_WATERMARKS) {
+      const oldest = this.#scopeRevisions.entries().next();
+      if (!oldest.done) {
+        this.#scopeRevisions.delete(oldest.value[0]);
+        this.#scopeRevisionFloor += oldest.value[1];
+      }
+    }
+  }
+
+  /**
+   * The revision of what a window in `scope` can see: the floor, the unscoped
+   * counter, the scope's own and its principal scope's (the scopes
+   * `ingestedSince` lets it read). An unscoped window sees every scope, so it
+   * is the ledger-wide revision.
+   */
+  #windowRevision(scope: string | undefined): number {
+    if (scope === undefined) return this.#publicationRevision;
+    const principalScope = scope.includes(':connection:') ? scope.slice(0, scope.indexOf(':connection:')) : undefined;
+    return this.#scopeRevisionFloor + (this.#scopeRevisions.get('') ?? 0) + (this.#scopeRevisions.get(scope) ?? 0)
+      + (principalScope === undefined ? 0 : this.#scopeRevisions.get(principalScope) ?? 0);
+  }
   /** Private dates shown this turn, per untrusted-content scope ('' when unscoped). */
   private readonly disclosedDates = new Map<string, DisclosedDate[]>();
   private readonly ingests: UntrustedIngest[] = [];
@@ -416,6 +452,7 @@ export class UntrustedContentLedger {
     this.ingestSequence++;
     const content = ingest.content;
     const scope = ingest.scope ?? currentUntrustedContentScope();
+    this.#bumpScope(scope);
     const retained: UntrustedIngest = Object.freeze({ surface: ingest.surface, origin: ingest.origin, at: ingest.at,
       ...(scope === undefined ? {} : { scope }),
       ...(content === undefined ? {} : { content: content.length > RETAINED_CONTENT_BUDGET ? content.slice(0, RETAINED_CONTENT_BUDGET) : content }) });
@@ -462,6 +499,7 @@ export class UntrustedContentLedger {
   recordDisclosedDates(dates: readonly DisclosedDate[], scope: string | undefined = currentUntrustedContentScope()): void {
     if (dates.length === 0) return;
     this.#publicationRevision++;
+    this.#bumpScope(scope);
     const key = scope ?? '';
     const kept = this.disclosedDates.get(key) ?? [];
     kept.push(...dates);
@@ -481,6 +519,7 @@ export class UntrustedContentLedger {
   /** Called when a new owner turn begins: the previous turn's exposure ends. */
   startTurn(scope: string | undefined = currentUntrustedContentScope()): void {
     this.#publicationRevision++;
+    this.#bumpScope(scope);
     this.disclosedDates.delete(scope ?? '');
     if (scope === undefined) {
       this.previousTurnStartSequence = this.turnStartSequence;
@@ -618,8 +657,9 @@ export class UntrustedContentLedger {
 
   /** One immutable coverage model for semantic turn windows and retained exact comparisons. */
   captureTaintEvidence(window: TaintEvidenceWindow = 'turn'): TaintEvidence {
-    const revision = this.#publicationRevision;
     const scope = window === 'retained' ? undefined : currentUntrustedContentScope();
+    // A change in what this window can see fails the comparison; another scope's read or turn does not.
+    const revision = this.#windowRevision(scope);
     const start = window === 'turn' ? this.turnStartOf(scope) : window === 'since-last-boundary' ? this.previousTurnStartOf(scope) : 0;
     const ingests = this.ingestedSince(start, scope);
     const missing = ingests.some(ingest => this.incompleteIngests.get(ingest) === 'missing');
@@ -631,7 +671,7 @@ export class UntrustedContentLedger {
     return Object.freeze({ sources: toTaintSources(ingests), complete: !missing && !truncated && !evicted,
       missing, truncated, evicted, revision,
       assertCurrent: () => {
-        if (revision !== this.#publicationRevision) throw new JudgmentError('rejected', 'untrusted content evidence changed during comparison');
+        if (revision !== this.#windowRevision(scope)) throw new JudgmentError('rejected', 'untrusted content evidence changed during comparison');
       },
     });
   }

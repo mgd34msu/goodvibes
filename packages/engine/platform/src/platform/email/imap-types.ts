@@ -219,6 +219,11 @@ export interface ImapAppendDraftResult {
 export interface ImapReplaceDraftInput extends ImapAppendDraftInput {
   readonly uid: number;
   readonly uidValidity: number;
+  /**
+   * An earlier save of this same replacement got no answer: look for the
+   * edited draft under `messageId` before appending it, so it is not saved twice.
+   */
+  readonly lookFirst?: boolean | undefined;
 }
 
 export interface ImapClientOptions {

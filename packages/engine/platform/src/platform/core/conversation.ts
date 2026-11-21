@@ -46,6 +46,8 @@ type AssistantMessage = {
   provider?: string | undefined;
   /** A completed acknowledgement request; billed independently, without the main turn's tool definitions. */
   followUp?: true | undefined;
+  /** The correlation id of the submitted request whose turn wrote this reply; absent when the turn carried none. */
+  correlationId?: string | undefined;
 };
 
 export type NoticeLevel = 'info' | 'success' | 'warning' | 'error';
@@ -95,7 +97,9 @@ function storedPresentation(value: unknown): SystemMessagePresentation | undefin
 }
 
 export type ConversationMessageSnapshot =
-  | { role: 'user'; content: string | ContentPart[]; cancelled?: boolean }
+  | { role: 'user'; content: string | ContentPart[]; cancelled?: boolean;
+    /** The correlation id the request was submitted with; absent when the turn carried none. */
+    correlationId?: string | undefined }
   | AssistantMessage
   | { role: 'system'; content: string; runtimeEvent?: RuntimeEventProvenance | undefined; presentation?: SystemMessagePresentation | undefined;
     /** Present when the writer declared the notice (addNotice); absent on older lines. */
@@ -226,8 +230,19 @@ export class ConversationManager {
   readonly #requestHooks = new Set<() => void>();
   /** Run after the provider accepted a request (see `onRequestAccepted`). */
   readonly #acceptedHooks = new Set<() => void>();
+  /** The correlation id of the turn now writing, stamped on the user and assistant messages it appends. */
+  #turnCorrelationId: string | undefined;
 
   constructor() {}
+
+  /**
+   * Name the submitted request whose turn now writes to this conversation, or
+   * `undefined` when it ends. Each user and assistant message appended until
+   * then carries it, so a reader can tell which reply answers which request.
+   */
+  setTurnCorrelation(correlationId: string | undefined): void {
+    this.#turnCorrelationId = correlationId;
+  }
 
   /**
    * Run `hook` as each provider request is assembled, before the host channel
@@ -336,7 +351,8 @@ export class ConversationManager {
     if (this._title === '' && typeof content === 'string' && deriveConversationTitle(content).length > 0) {
       this.setSystemTitle(deriveConversationTitle(content));
     }
-    this.messages.push({ role: 'user', content });
+    const correlationId = this.#turnCorrelationId;
+    this.messages.push({ role: 'user', content, ...(correlationId === undefined ? {} : { correlationId }) });
     // Clear undo stack when new user input is added (can't redo past new input)
     this.undoStack = [];
     this._messagesRevision++;
@@ -369,6 +385,7 @@ export class ConversationManager {
       model: opts?.model,
       provider: opts?.provider,
       ...(opts?.followUp ? { followUp: true as const } : {}),
+      ...(this.#turnCorrelationId === undefined ? {} : { correlationId: this.#turnCorrelationId }),
     };
     if (isRedeliveredAssistantMessage(this.messages[this.messages.length - 1], candidate)) {
       // Dropped on purpose, see isRedeliveredAssistantMessage. Recorded rather

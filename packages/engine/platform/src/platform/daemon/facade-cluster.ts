@@ -60,19 +60,28 @@ export { ClusterCoordinator } from '../cluster/index.js';
  * would drop everything published between the previous holder's last heartbeat
  * and this start. Telegram needs no equivalent, its backlog lives on
  * Telegram's servers and the persisted offset already covers the gap.
+ *
+ * A start the runtime refuses (its access token cannot be read) rejects, so
+ * the election knows this node is not reading the topic and stands it down;
+ * a refusal caused by this gate's own stop is not a failure.
  */
 function ntfyTopicGate(
   providerRuntime: ChannelProviderRuntimeManager,
   baseUrl: string,
   topic: string,
 ): ClusterConsumerGate {
+  let generation = 0;
   return {
     id: `ntfy-topic:${topic}`,
     surface: ntfySurface(baseUrl, topic),
     start: async (context) => {
-      await providerRuntime.startNtfyTopic(topic, { replayFromMs: context.replayFromMs });
+      const attempt = ++generation;
+      const result = await providerRuntime.startNtfyTopic(topic, { replayFromMs: context.replayFromMs });
+      if (result.ok || attempt !== generation) return;
+      throw new Error(`ntfy did not start reading the topic: ${result.message}`);
     },
     stop: async () => {
+      generation += 1;
       providerRuntime.stopNtfyTopic(topic);
     },
   };
@@ -340,6 +349,10 @@ class DaemonSurfaceRegistrar {
     this.collaborators.builtinChannels.setSurfaceResponsibility(
       (surface) => this.contested.isResponsible(this.coordinator, surface),
     );
+    // A topic whose stream the server refused for good is not being read here,
+    // so this node stops contesting it; the next reconcile (a settings or
+    // secret change) contests it again.
+    this.collaborators.providerRuntime.setNtfyTopicLostHandler((topic, reason) => { this.onNtfyTopicLost(topic, reason); });
     await this.reconcile(false);
     if (!this.inboundMailRegistered) {
       this.inboundMailRegistered = true;
@@ -431,6 +444,22 @@ class DaemonSurfaceRegistrar {
     }
   }
 
+  /** Withdraw the gate of a topic whose stream ended for good, and say why it is not read. */
+  private onNtfyTopicLost(topic: string, reason: string): void {
+    let withdrew = false;
+    for (const [id, withdraw] of [...this.ntfy]) {
+      if (id.slice(id.indexOf('\n') + 1) !== topic) continue;
+      this.ntfy.delete(id);
+      this.contested.remove('ntfy', id);
+      withdraw();
+      withdrew = true;
+    }
+    if (withdrew) {
+      reportInert('ntfy', `the ntfy server refused the topic's stream (${reason}); this node stopped contesting it. `
+        + 'Fix the topic or its access token; it is contested again when an ntfy setting or a stored secret changes');
+    }
+  }
+
   /**
    * Slack and Discord are contested under the identity the provider reports,
    * never under a placeholder, a placeholder would put two different
@@ -461,10 +490,17 @@ class DaemonSurfaceRegistrar {
         // A start that never connects is handled like a socket that dropped: the
         // gate is withdrawn, a RESIGN lets another node try, and this one tries
         // again later.
+        // The contested record lives and dies with the registration: whatever
+        // withdraws the gate (a lost socket, a refresh, dispose) clears it, so
+        // channel health never reports a peer serving a surface nobody contests.
         register: (surface) => {
           this.contested.add(kind, kind, surface);
-          return this.coordinator.register(socketProviderGate(providerRuntime, kind, surface,
+          const withdraw = this.coordinator.register(socketProviderGate(providerRuntime, kind, surface,
             (message) => { this.sockets.get(kind)?.onSocketLost(message); }));
+          return () => {
+            this.contested.remove(kind, kind);
+            withdraw();
+          };
         },
         isRunning: () => this.coordinator.running,
         reportInert,

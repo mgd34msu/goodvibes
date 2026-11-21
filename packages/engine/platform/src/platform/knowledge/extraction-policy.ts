@@ -16,7 +16,7 @@ export { KnowledgeIngestStoppedError, type KnowledgeIngestStopReason } from './i
  * retained lake into a compounding asset. Extractions written before versioning
  * carry no stamp and resolve to version 0, so they re-extract once.
  */
-export const KNOWLEDGE_EXTRACTOR_VERSION = 5;
+export const KNOWLEDGE_EXTRACTOR_VERSION = 6;
 
 export function readKnowledgeExtractorVersion(metadata: Record<string, unknown>): number {
   const value = readDocumentFields(metadata, ['extractorVersion']).extractorVersion;

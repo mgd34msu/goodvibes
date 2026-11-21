@@ -626,19 +626,13 @@ export function applyFeatureUnitOperations(
       const enablementKey = getFeatureSetting(unit.flagId)?.enablement.key;
       for (const sub of unit.subOptions ?? []) {
         const raw = controller.getStringFieldValue(featureSubOptionFieldId(unit.flagId, sub.key), subOptionStartValue(controller, sub));
-        let wrote = true;
-        if (sub.valueType === 'boolean') {
-          setConfig(sub.configKey, raw === 'yes');
-        } else if (sub.valueType === 'text') {
-          wrote = raw.length > 0;
-          if (wrote) setConfig(sub.configKey, raw);
-        } else {
-          setConfig(sub.configKey, raw);
-        }
+        // A text field starts from the saved value, so a cleared one is written
+        // as '' (the setting's default) and an untouched one is dropped as unchanged.
+        setConfig(sub.configKey, sub.valueType === 'boolean' ? raw === 'yes' : raw);
         // A sub-option that writes the unit's OWN enablement key (e.g. the
         // provider-optimizer routing mode) is the authoritative enablement
         // value, drop the pending override so the flush cannot clobber it.
-        if (wrote && enablementKey !== undefined && sub.configKey === enablementKey) {
+        if (enablementKey !== undefined && sub.configKey === enablementKey) {
           overrides.delete(unit.flagId);
         }
       }

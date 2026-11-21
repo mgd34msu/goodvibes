@@ -81,10 +81,18 @@ export function openProvisionedStore(directory: string | undefined): CloudflareP
     replace,
     merge(patch) {
       const previous = read();
-      const base = previous && previous.accountId === patch.accountId ? previous : { version: 1 as const, accountId: patch.accountId, updatedAt: 0 };
+      const sameAccount = previous && previous.accountId === patch.accountId ? previous : null;
+      const base = sameAccount ?? { version: 1 as const, accountId: patch.accountId, updatedAt: 0 };
+      // Secrets placed in the same store by earlier runs stay listed: a run that
+      // placed none (or fewer) must not erase where an earlier run put one.
+      const earlierStore = sameAccount?.secretsStore;
+      const secretsStore = patch.secretsStore && earlierStore && earlierStore.storeId === patch.secretsStore.storeId
+        ? { ...patch.secretsStore, secrets: mergeSecretsByName(earlierStore.secrets, patch.secretsStore.secrets) }
+        : patch.secretsStore;
       const next: CloudflareProvisionedResources = {
         ...base,
         ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== undefined)),
+        ...(secretsStore ? { secretsStore } : {}),
         version: 1,
         updatedAt: Date.now(),
       };
@@ -92,6 +100,16 @@ export function openProvisionedStore(directory: string | undefined): CloudflareP
       return next;
     },
   };
+}
+
+type PlacedSecret = { readonly name: string; readonly id: string };
+
+/** The earlier list with each name the later list carries replaced by the later entry, then the later list's new names. */
+function mergeSecretsByName(earlier: readonly PlacedSecret[], later: readonly PlacedSecret[]): readonly PlacedSecret[] {
+  const byName = new Map<string, PlacedSecret>();
+  for (const secret of earlier) byName.set(secret.name, secret);
+  for (const secret of later) byName.set(secret.name, secret);
+  return [...byName.values()];
 }
 
 function parseRecord(parsed: unknown): CloudflareProvisionedResources {

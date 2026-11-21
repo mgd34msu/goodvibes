@@ -2,7 +2,7 @@ import { promises as fsPromises } from 'node:fs';
 import { join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
+import { markdownRecordName, parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
 
 export type RoutineOrigin = 'project-local' | 'global' | 'custom';
 
@@ -15,9 +15,11 @@ export interface DiscoveredRoutineRecord {
   readonly frontmatter: Record<string, string>;
 }
 
-const DIRECTORY_MARKERS: readonly string[] = ['ROUTINE.md', 'routine.md'];
+/** The file a routine folder holds its steps in; the startup summary reads the same list. */
+export const ROUTINE_DIRECTORY_MARKERS: readonly string[] = ['ROUTINE.md', 'routine.md'];
 
-function getRoutineDirectories(cwd: string, homeDir: string): Array<{ root: string; origin: RoutineOrigin }> {
+/** Where routines are discovered, project first; the startup summary reads the same roots. */
+export function getRoutineDirectories(cwd: string, homeDir: string): Array<{ root: string; origin: 'project-local' | 'global' }> {
   return [
     { root: join(cwd, '.goodvibes', 'routines'), origin: 'project-local' },
     { root: join(cwd, '.goodvibes', GOODVIBES_AGENT_SURFACE_ROOT, 'routines'), origin: 'project-local' },
@@ -38,7 +40,8 @@ async function readRoutineFile(path: string, origin: RoutineOrigin): Promise<Dis
   const markdownBody = stripMarkdownFrontmatter(content);
   const steps = (frontmatter.steps ?? markdownBody).trim();
   if (!steps) return null;
-  const name = frontmatter.name ?? path.split(/[\\/]/).pop()?.replace(/\.md$/i, '') ?? 'routine';
+  const name = markdownRecordName(frontmatter, path);
+  if (!name) return null;
   const description = frontmatter.description ?? frontmatter.summary ?? frontmatter.title ?? '';
 
   return {
@@ -67,7 +70,7 @@ async function scanRoutineDirectory(root: string, origin: RoutineOrigin): Promis
       continue;
     }
 
-    for (const marker of DIRECTORY_MARKERS) {
+    for (const marker of ROUTINE_DIRECTORY_MARKERS) {
       const record = await readRoutineFile(join(root, entry, marker), origin);
       if (record) {
         records.push(record);

@@ -1,15 +1,18 @@
 import type { GenericWebhookAdapterContext } from '../types.js';
 import { validatePublicWebhookUrl } from '../../utils/url-safety.js';
-import { constantTimeEquals, readTextBodyWithinLimit, ingressAnswerResponse } from '../helpers.js';
+import { constantTimeEquals, readTextBodyWithinLimit, ingressAnswerResponse, readRecord } from '../helpers.js';
 import { resolveSurfaceCredential, surfaceCredentialUnavailable } from '../surface-credential.js';
 import { submitSurfaceMessage, surfaceOutcomeResponse } from '../surface-message.js';
 
-function parseJsonRecord(rawBody: string): Record<string, unknown> | Response {
+/** The JSON body as an object, or the 400 answer for a body that is not valid JSON or not a JSON object. */
+function parseJsonObjectBody(rawBody: string): Record<string, unknown> | Response {
+  let parsed: unknown;
   try {
-    return JSON.parse(rawBody) as Record<string, unknown>;
+    parsed = JSON.parse(rawBody);
   } catch {
     return Response.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
+  return readRecord(parsed) ?? Response.json({ error: 'Invalid JSON body: expected a JSON object' }, { status: 400 });
 }
 
 /** Binding fields a caller may describe itself with; anything else it sends is not copied onto the shared binding. */
@@ -46,7 +49,7 @@ export async function handleGenericWebhookSurface(req: Request, context: Generic
 
   let body: Record<string, unknown> = {};
   if ((req.headers.get('content-type') ?? '').includes('application/json')) {
-    const parsed = parseJsonRecord(rawBody);
+    const parsed = parseJsonObjectBody(rawBody);
     if (parsed instanceof Response) return parsed;
     body = parsed;
   } else if (rawBody.trim().length > 0) {

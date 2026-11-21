@@ -16,20 +16,35 @@ import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirm
 const QUEUED = defineList<CommandContext>({
   name: 'queue.messages',
   async read(ctx) {
-    return (ctx.listQueuedMessages?.() ?? []).map((message, index): ListRow => ({ value: String(index + 1), label: message.text }));
+    // The row's value is the message's id, so a pick stays on that message when an earlier one is sent meanwhile.
+    return (ctx.listQueuedMessages?.() ?? []).map((message, index): ListRow => ({ value: message.id, label: `${index + 1}. ${message.text}` }));
   },
   operator: { terminalOnly: 'The queue is the terminal app\'s composer.' },
 });
 
 const LOCAL = { terminalOnly: 'The queue is the terminal app\'s composer.' } as const;
 
-/** The queued message at a 1-based position; refused with the valid range otherwise. */
-function queuedAt(ctx: CommandContext, position: string): { readonly id: string; readonly n: number } {
+/** A queued message's text, shortened for a reply line. */
+function quoted(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return `"${flat.length <= 60 ? flat : `${flat.slice(0, 59)}…`}"`;
+}
+
+/**
+ * The queued message a picked id or a typed 1-based position names. A picked
+ * id that is no longer queued was sent meanwhile and is refused as such; it is
+ * never swapped for the message now at its old position.
+ */
+function queuedAt(ctx: CommandContext, choice: string): { readonly id: string; readonly text: string } {
   const list = ctx.listQueuedMessages?.() ?? [];
-  const n = Number.parseInt(position, 10);
+  const byId = list.find((message) => message.id === choice);
+  if (byId) return { id: byId.id, text: byId.text };
+  if (!/^\d+$/.test(choice)) throw commandRefusal('That message is no longer queued: it was sent when the turn before it ended, so nothing was changed.', '/queue list shows what is still waiting.');
   if (list.length === 0) throw commandRefusal('No message is queued.', 'Messages typed while a turn runs wait here until it finishes.');
-  if (!Number.isInteger(n) || n < 1 || n > list.length) throw commandRefusal(`No queued message #${position}; they are numbered 1 to ${list.length}.`, '/queue list shows them.');
-  return { id: list[n - 1]!.id, n };
+  const n = Number.parseInt(choice, 10);
+  if (n < 1 || n > list.length) throw commandRefusal(`No queued message #${choice}; they are numbered 1 to ${list.length}.`, '/queue list shows them.');
+  const message = list[n - 1]!;
+  return { id: message.id, text: message.text };
 }
 
 export function registerQueueRuntimeCommands(registry: CommandRegistry): void {
@@ -54,25 +69,25 @@ export function registerQueueRuntimeCommands(registry: CommandRegistry): void {
       doAction<CommandContext>({
         id: 'edit', label: 'Change a queued message', word: 'edit', operator: LOCAL,
         inputs: [
-          listInput({ id: 'message', label: 'Message', help: 'The messages waiting, in order', list: QUEUED }),
+          listInput({ id: 'message', label: 'Message', help: 'The messages waiting, in order', list: QUEUED, other: 'its number in /queue list' }),
           textInput({ id: 'text', label: 'New text', help: 'What it says instead', why: 'your own words', kind: 'long-text', typed: { tail: true } }),
         ],
         sentence: 'Queued message {message} is sent as {text} instead, when the running turn ends.', example: { message: '1', text: 'also check the tests' },
         async run(values, ctx) {
           const target = queuedAt(ctx, values.message!);
-          if (!(ctx.editQueuedMessage?.(target.id, values.text!) ?? false)) throw commandRefusal(`Message #${target.n} was already sent, so it was not changed.`);
-          return `Changed queued message #${target.n}.`;
+          if (!(ctx.editQueuedMessage?.(target.id, values.text!) ?? false)) throw commandRefusal(`The queued message ${quoted(target.text)} was already sent, so it was not changed.`);
+          return `Changed the queued message ${quoted(target.text)}.`;
         },
       }),
       {
         id: 'delete', label: 'Take back a queued message', word: 'delete', operator: LOCAL,
-        inputs: [listInput({ id: 'message', label: 'Message', help: 'The messages waiting, in order', list: QUEUED })],
+        inputs: [listInput({ id: 'message', label: 'Message', help: 'The messages waiting, in order', list: QUEUED, other: 'its number in /queue list' })],
         sentence: 'Queued message {message} is taken back and never sent.', done: '',
         touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { message: '1' },
         async run(values, ctx) {
           const target = queuedAt(ctx, values.message!);
-          if (!(ctx.deleteQueuedMessage?.(target.id) ?? false)) throw commandRefusal(`Message #${target.n} was already sent, so it was not taken back.`);
-          return `Took back queued message #${target.n}.`;
+          if (!(ctx.deleteQueuedMessage?.(target.id) ?? false)) throw commandRefusal(`The queued message ${quoted(target.text)} was already sent, so it was not taken back.`);
+          return `Took back the queued message ${quoted(target.text)}.`;
         },
       },
     ],

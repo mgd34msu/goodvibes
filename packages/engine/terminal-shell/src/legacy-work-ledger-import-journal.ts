@@ -138,12 +138,16 @@ export class LegacyImportJournal {
     if (this.writable && this.db) return this.db;
     invoke(this.beforeWrite);
     let created = false;
-    if (!lstatSync(this.path, { throwIfNoEntry: false })) {
+    const entry = lstatSync(this.path, { throwIfNoEntry: false });
+    if (!entry) {
       mkdirSync(dirname(this.path), { recursive: true, mode: 0o700 });
       const fd = openSync(this.path, constants.O_RDWR | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
       closeSync(fd);
       // The new name must survive a crash before a request id is saved under it.
       invoke(() => this.directorySync(dirname(this.path)));
+      created = true;
+    } else if (entry.isFile() && entry.size === 0) {
+      // A creation cut short before its schema was written leaves an empty file, which SQLite reads as an empty database: build it now.
       created = true;
     }
     this.db?.close(); this.db = undefined;
@@ -161,7 +165,9 @@ export class LegacyImportJournal {
   private readable(): DatabasePort | undefined {
     if (this.closed) throw new Error('Import journal is closed');
     if (!this.db) {
-      if (!lstatSync(this.path, { throwIfNoEntry: false })) return undefined;
+      const entry = lstatSync(this.path, { throwIfNoEntry: false });
+      // An empty file is a journal whose creation was cut short: nothing is saved in it yet.
+      if (!entry || (entry.isFile() && entry.size === 0)) return undefined;
       this.open(false, false);
     }
     return this.db;

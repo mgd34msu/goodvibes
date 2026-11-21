@@ -18,8 +18,9 @@
 
 import { open, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import {
-  frontmatterIsComplete,
+  followFrontmatter,
   isValidSkillName,
   parseSkill,
   parseSkillIndex,
@@ -125,17 +126,19 @@ async function readDocument(path: string, whole: boolean): Promise<ReadDocument 
     const info = await handle.stat();
     if (!info.isFile()) return null;
     if (whole) return { text: await handle.readFile('utf8'), updatedAt: info.mtimeMs };
-    const chunks: Buffer[] = [];
+    // Each chunk is decoded once and each line tested once, so the read stays linear in
+    // the length of a frontmatter that never closes.
+    const decoder = new StringDecoder('utf8');
+    const frontmatter = followFrontmatter();
+    const chunk = Buffer.allocUnsafe(HEAD_CHUNK_BYTES);
     let total = 0;
     for (;;) {
-      const chunk = Buffer.allocUnsafe(HEAD_CHUNK_BYTES);
       const { bytesRead } = await handle.read(chunk, 0, HEAD_CHUNK_BYTES, total);
       if (bytesRead === 0) break;
-      chunks.push(chunk.subarray(0, bytesRead));
       total += bytesRead;
-      if (frontmatterIsComplete(Buffer.concat(chunks, total).toString('utf8'))) break;
+      if (frontmatter.add(decoder.write(chunk.subarray(0, bytesRead)))) break;
     }
-    return { text: Buffer.concat(chunks, total).toString('utf8'), updatedAt: info.mtimeMs };
+    return { text: frontmatter.text() + decoder.end(), updatedAt: info.mtimeMs };
   } catch {
     return null;
   } finally {

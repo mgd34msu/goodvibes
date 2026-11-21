@@ -343,6 +343,13 @@ export async function buildProviderAccountSnapshot(
             : routes.includes('subscription')
               ? 'Ambient API-key access is the active route; the stored subscription does not override ambient API keys.'
               : 'Ambient API-key access is the current usable route.';
+      } else if (preferredRoute === 'subscription') {
+        authFreshness = subscriptionFreshness;
+        activeRouteReason = subscriptionEnded
+          ? `The provider ended the stored subscription session; sign in again with /subscription login ${providerId} start.`
+          : `The stored subscription session ended or expired; sign in again with /subscription login ${providerId} start.`;
+      } else if (preferredRoute === 'service-oauth') {
+        activeRouteReason = 'Service OAuth is configured, but its credential is missing; no usable auth route remains.';
       }
       const fallbackRoute = preferredRoute !== activeRoute && activeRoute !== 'unconfigured'
         ? activeRoute
@@ -350,9 +357,6 @@ export async function buildProviderAccountSnapshot(
       const fallbackRisk = fallbackRoute
         ? `Provider is using ${fallbackRoute} because the preferred ${preferredRoute} path is not currently usable.`
         : undefined;
-      if (!pending && routes.includes('subscription') && !subscription && builtinSubscriptionProviders.has(providerId)) {
-        authFreshness = 'unconfigured';
-      }
       return Object.freeze({
         providerId,
         active: currentModel?.provider === providerId,

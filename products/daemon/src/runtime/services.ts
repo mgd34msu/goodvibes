@@ -11,7 +11,6 @@ import { createDaemonBootController, type DaemonBootController } from './boot-ta
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
-export { startDeviceHousekeeping } from './device-posture-composition.js';
 
 /** Await before passing this owned graph to DaemonServer. */
 export async function createRuntimeServices(options: RuntimeServicesOptions): Promise<RuntimeServices> {
@@ -64,7 +63,12 @@ export async function createRuntimeServices(options: RuntimeServicesOptions): Pr
     // A contract whose checkpoint was refused at start is the owner's to decide: a receipt the next
     // attached terminal or web UI shows, with what happened and what to do, not only a log line.
     void contractRecovery.then((report) => {
-      if (!report || report.refused.length === 0) return;
+      if ('failed' in report) {
+        daemonReceiptStoreAt(daemonReceiptsPath(services.configManager))
+          .record(`Saved contracts could not be resumed at start-up: ${report.failed}. They are still on disk; restart to try again, or /agents contracts-view to see them.`);
+        return;
+      }
+      if (report.refused.length === 0) return;
       const receipts = daemonReceiptStoreAt(daemonReceiptsPath(services.configManager));
       for (const { refusal } of report.refused) receipts.record(`${refusal.reason} Now: ${refusal.state}. Next: ${refusal.next.join(' ')}`);
     });

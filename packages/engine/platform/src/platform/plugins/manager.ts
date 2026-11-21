@@ -263,6 +263,8 @@ export class PluginManager {
   private readonly trustFilePath: string | undefined;
   /** Identity of the shared trust file when it was last read; a different one means another app changed it. */
   private trustFileIdentity: string | undefined;
+  /** Why the last read of the shared trust file failed; set until a read succeeds, and no trust change is saved meanwhile. */
+  private trustReadError: string | undefined;
   private readonly subscribers = new Set<() => void>();
   private readonly pathOptions: PluginPathOptions;
   private readonly stateFilePath: string;
@@ -1133,6 +1135,7 @@ export class PluginManager {
         // save in between is kept, not overwritten.
         withProcessLockSync(trustLockPath(path), () => {
           this.refreshSharedTrust();
+          if (this.trustReadError !== undefined) throw new Error(`the shared trust file could not be read: ${this.trustReadError}`);
           carried = newer(this.trustStore);
           writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), ...carried }, { trailingNewline: false });
         }, { waitMs: TRUST_LOCK_WAIT_MS });
@@ -1164,7 +1167,6 @@ export class PluginManager {
     if (!path) return;
     const identity = fileIdentity(path);
     if (identity === this.trustFileIdentity) return;
-    this.trustFileIdentity = identity;
     const store = new PluginTrustStore();
     try {
       const records = readJsonFileOrQuarantine<Record<string, PluginTrustRecord>>(path, {
@@ -1176,8 +1178,15 @@ export class PluginManager {
         store.importRecords(records);
         noteUnboundTrust(records);
       }
+      // Only a completed read is remembered; after a failed one the next lookup reads again.
+      this.trustFileIdentity = identity;
+      this.trustReadError = undefined;
     } catch (err) {
-      logger.warn(`[plugins] Could not read trust tiers from ${path}: ${summarizeError(err)}; every plugin is treated as untrusted`);
+      if (this.trustReadError === undefined) {
+        logger.warn(`[plugins] Could not read trust tiers from ${path}: ${summarizeError(err)}; every plugin is treated as untrusted`);
+      }
+      this.trustFileIdentity = undefined;
+      this.trustReadError = summarizeError(err);
     }
     this.trustStore = store;
   }
@@ -1191,6 +1200,10 @@ export class PluginManager {
       // so two apps saving different plugins at once both keep their record.
       withProcessLockSync(trustLockPath(path), () => {
         this.refreshSharedTrust();
+        // Writing over a file that could not be read would drop every other app's records.
+        if (this.trustReadError !== undefined) {
+          throw new Error(`the shared trust file could not be read, so this change was not saved: ${this.trustReadError}`);
+        }
         writeJsonFileAtomic(path, { ...this.trustStore.exportRecords(), [name]: record }, { trailingNewline: false });
         this.trustFileIdentity = undefined;
         this.refreshSharedTrust();

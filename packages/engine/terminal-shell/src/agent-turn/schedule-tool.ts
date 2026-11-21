@@ -91,7 +91,23 @@ function hasEditFields(args: AgentScheduleToolArgs): boolean {
   );
 }
 
-const SCHEDULE_ACTION_WORDS = ['list', 'show', 'create', 'autonomous', 'remind', 'reminder', 'edit', 'run', 'pause', 'resume', 'enable', 'disable', 'delete'] as const;
+/** The create-only fields that were sent; an edit cannot apply them. */
+function sentCreateOnlyFields(args: AgentScheduleToolArgs): readonly string[] {
+  const fields: readonly (keyof AgentScheduleToolArgs)[] = ['provider', 'model', 'deliveryChannel', 'deliveryRoute', 'deliveryWebhook', 'deliveryLink', 'disabled', 'message'];
+  return fields.filter((field) => field === 'disabled' ? args.disabled !== undefined : Boolean(readString(args[field])));
+}
+
+/** The refusal for an edit that names fields the edit cannot change, naming the route that does. */
+function createOnlyEditRefusal(scheduleId: string, fields: readonly string[]): string {
+  const routes: string[] = [];
+  if (fields.includes('disabled')) routes.push(`to turn ${scheduleId || 'the schedule'} off or on use action:pause or action:resume`);
+  if (fields.includes('message')) routes.push('to change what it says use prompt');
+  const recreated = fields.filter((field) => field !== 'disabled' && field !== 'message');
+  if (recreated.length > 0) routes.push(`${recreated.join(', ')} are set only when a schedule is created: use action:delete and then create it again`);
+  return `schedule action:edit cannot change ${fields.join(', ')}; nothing was changed. ${routes.join('; ')}.`;
+}
+
+const SCHEDULE_ACTION_WORDS =['list', 'show', 'create', 'autonomous', 'remind', 'reminder', 'edit', 'run', 'pause', 'resume', 'enable', 'disable', 'delete'] as const;
 
 /** The action to take, or a refusal naming why none can be chosen. */
 function readAction(args: AgentScheduleToolArgs): { readonly action: ScheduleAction } | { readonly refusal: string } {
@@ -113,7 +129,7 @@ function readAction(args: AgentScheduleToolArgs): { readonly action: ScheduleAct
     return { action: 'reminder' };
   }
   if (readString(args.task)) return { action: scheduleId && hasEditFields(args) ? 'edit' : 'create' };
-  if (scheduleId && hasEditFields(args)) return { action: 'edit' };
+  if (scheduleId && (hasEditFields(args) || sentCreateOnlyFields(args).length > 0)) return { action: 'edit' };
   return { action: 'list' };
 }
 
@@ -274,12 +290,12 @@ export function createAgentScheduleTool(
           staggerMs: { type: 'number', description: 'Optional cron stagger in milliseconds for edits.' },
           name: { type: 'string', description: 'Connected schedule display name.' },
           prompt: { type: 'string', description: 'Exact replacement prompt for action:edit.' },
-          provider: { type: 'string', description: 'Optional provider row id for scheduled execution.' },
-          model: { type: 'string', description: 'Optional model id for scheduled execution.' },
-          deliveryChannel: { type: 'string', description: 'Optional delivery channel target.' },
-          deliveryRoute: { type: 'string', description: 'Optional connected route target.' },
-          deliveryWebhook: { type: 'string', description: 'Optional webhook target.' },
-          deliveryLink: { type: 'string', description: 'Optional link target: the result is published as a document under this name and its link shown on the web surface.' },
+          provider: { type: 'string', description: 'Optional provider row id for scheduled execution; create and reminder only.' },
+          model: { type: 'string', description: 'Optional model id for scheduled execution; create and reminder only.' },
+          deliveryChannel: { type: 'string', description: 'Optional delivery channel target; create and reminder only.' },
+          deliveryRoute: { type: 'string', description: 'Optional connected route target; create and reminder only.' },
+          deliveryWebhook: { type: 'string', description: 'Optional webhook target; create and reminder only.' },
+          deliveryLink: { type: 'string', description: 'Optional link target: the result is published as a document under this name and its link shown on the web surface; create and reminder only.' },
           disabled: { type: 'boolean', description: 'Create schedule disabled.' },
           query: { type: 'string', description: 'For action:list, show only schedules whose id or name contains this text.' },
           limit: { type: 'number', description: `For action:list, the most schedules to show (default ${DEFAULT_LIST_LIMIT}, max ${MAX_LIST_LIMIT}).` },
@@ -311,7 +327,11 @@ export function createAgentScheduleTool(
       }
       if (action === 'create') return run('agent_autonomy_schedule', autonomyArgs(args));
       if (action === 'reminder') return run('agent_reminder_schedule', reminderArgs(args));
-      if (action === 'edit') return run('agent_schedule_edit', editArgs(args));
+      if (action === 'edit') {
+        const createOnly = sentCreateOnlyFields(args);
+        if (createOnly.length > 0) return { success: false, error: createOnlyEditRefusal(readScheduleId(args), createOnly) };
+        return run('agent_schedule_edit', editArgs(args));
+      }
 
       const scheduleId = readScheduleId(args);
       if (!scheduleId) {

@@ -1,3 +1,4 @@
+import { maskCredentialCandidates } from '@goodvibes/engine/platform/platform/utils';
 import { activeTokens } from './theme.js';
 import type { KitRow } from './surface-kit-list.js';
 import { formatArgs, parseArgs, type McpWorkspaceFormField } from '../mcp-workspace-model.js';
@@ -21,7 +22,36 @@ export function maskEnvText(text: string): string {
     .join(',');
 }
 
-/** Display copy of launch arguments with the value of a secret-looking flag (--token x, --api-key=x) hidden. */
+/**
+ * Display copy of one launch argument that is not the value of a secret flag:
+ * a secret-named header (`Authorization: x`) keeps its name, a URL keeps
+ * everything but its userinfo password and its secret-named query values, and
+ * what remains goes through the shared credential shapes (Bearer, sk-, key-, JWT).
+ */
+function maskArgValue(value: string): string {
+  if (isReferenceValue(value)) return value;
+  let shown = value;
+  const header = /^([A-Za-z0-9_-]+)(\s*:\s*)(.*)$/.exec(shown);
+  if (header && SECRET_FLAG.test(header[1]!) && header[3]!.trim() !== '' && !isReferenceValue(header[3]!)) {
+    shown = `${header[1]}${header[2]}${MASK}`;
+  }
+  const url = /^([A-Za-z][A-Za-z0-9+.-]*:\/\/)([^/?#]*)(.*)$/.exec(shown);
+  if (url) {
+    const authority = url[2]!.replace(/^([^@:]*):([^@]*)@/, (whole, user: string, password: string) =>
+      password === '' || isReferenceValue(password) ? whole : `${user}:${MASK}@`);
+    const rest = url[3]!.replace(/([?&])([^=&#]+)=([^&#]*)/g, (whole, sep: string, name: string, param: string) =>
+      param === '' || !SECRET_FLAG.test(name) || isReferenceValue(param) ? whole : `${sep}${name}=${MASK}`);
+    shown = `${url[1]}${authority}${rest}`;
+  }
+  return maskCredentialCandidates(shown);
+}
+
+/**
+ * Display copy of launch arguments with credentials hidden: the value of a
+ * secret-looking flag (--token x, --api-key=x), a secret-named header value,
+ * a URL password or secret query value, and any credential-shaped token.
+ * References (stored-secret URIs, ${VAR}) stay readable.
+ */
 export function maskLaunchArgs(args: readonly string[]): string[] {
   const out: string[] = [];
   let hideNext = false;
@@ -37,7 +67,11 @@ export function maskLaunchArgs(args: readonly string[]): string[] {
       else out.push(isReferenceValue(flag[3] ?? '') ? arg : `${flag[1]}=${MASK}`);
       continue;
     }
-    out.push(arg);
+    if (flag && flag[2] !== undefined) {
+      out.push(`${flag[1]}=${maskArgValue(flag[3] ?? '')}`);
+      continue;
+    }
+    out.push(maskArgValue(arg));
   }
   return out;
 }

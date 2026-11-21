@@ -1,11 +1,16 @@
 /** Sticky command-key burst guard. Ordinary composer typing and modal input stay outside it. */
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 export const PASTE_FLOOD_WINDOW_MS = 120;
-export const PASTE_FLOOD_THRESHOLD = 8;
+/**
+ * Enters allowed inside one window before the rest are held: the first runs, and
+ * every further Enter that follows within the window (pasted lines, or a held
+ * Enter key repeating) is held back. Nobody presses Enter twice within 120 ms on purpose.
+ */
+export const PASTE_FLOOD_THRESHOLD = 1;
 
 /**
  * Guard state, a single persistent instance lives on the caller's
- * long-lived context (this agent's handler-feed.ts InputFeedContext, mirroring
+ * long-lived context (each terminal app's handler-feed.ts InputFeedContext, mirroring
  * how that object already owns `nextPasteId`/`mouseDownRow`/etc.) and is
  * MUTATED IN PLACE by trackPasteFloodGuard below, never replaced, so
  * callers never need to thread a return value back into their own state.

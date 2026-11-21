@@ -121,25 +121,7 @@ export interface ControlPlaneWebSocketData {
   readonly admin: boolean;
   readonly scopes: readonly string[];
   readonly domains: readonly RuntimeEventDomain[];
-  readonly clientKind:
-    | 'tui'
-    | 'web'
-    | 'slack'
-    | 'discord'
-    | 'ntfy'
-    | 'webhook'
-    | 'homeassistant'
-    | 'telegram'
-    | 'google-chat'
-    | 'signal'
-    | 'whatsapp'
-    | 'telephony'
-    | 'imessage'
-    | 'msteams'
-    | 'bluebubbles'
-    | 'mattermost'
-    | 'matrix'
-    | 'daemon';
+  readonly clientKind: ChannelSurface | 'daemon';
   readonly remoteAddress?: string | undefined;
   clientId?: string | undefined;
 }

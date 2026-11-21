@@ -15,6 +15,9 @@ import { defineFormat, renderChecked } from '../../utils/format-codec.js';
 
 export const SELF_IMPROVEMENT_RETRY_DELAY_MS = 6 * 60 * 60 * 1000;
 
+/** The `resolution.resolvedBy` a gap repair writes on the issues it resolves. */
+export const GAP_REPAIR_RESOLVER = 'semantic-self-improvement';
+
 /**
  * A gap's `nextRepairAttemptAt`: milliseconds since the epoch, as a safe
  * integer. The gap writer renders it and every scheduler reads it with this
@@ -170,7 +173,7 @@ function resolvedIssueInput(issue: KnowledgeIssueRecord, spaceId: string, reason
       ...issue.metadata,
       resolution: {
         reason,
-        resolvedBy: 'semantic-self-improvement',
+        resolvedBy: GAP_REPAIR_RESOLVER,
         resolvedAt: Date.now(),
       },
     }),

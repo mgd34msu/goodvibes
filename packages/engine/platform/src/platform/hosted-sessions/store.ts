@@ -15,10 +15,13 @@ import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
  *    conversation's recent turns are what a reattach needs). A session's file
  *    cannot grow without limit, and the directory cannot either.
  *  - CONTENT VALIDATION. Every file is validated on load against the shape the
- *    engine can actually rebuild from. A file that fails is not silently
- *    dropped and not half-restored: it is counted, named in the restore report,
- *    and moved aside with a `.rejected` suffix so it can be inspected rather
- *    than lost.
+ *    engine can actually rebuild from. A file whose content fails (not JSON, or
+ *    not a shape the engine can rebuild) is not silently dropped and not
+ *    half-restored: it is counted, named in the restore report, and moved aside
+ *    with a `.rejected` suffix so it can be inspected rather than lost. A file
+ *    that could not be read at all (an I/O error) says nothing about its
+ *    content: it is named in the report as unread, left in place, and read
+ *    again on the next start.
  *  - SWEEP. Terminated sessions are retired once they are older than
  *    `terminatedRetentionMs`; the sweep runs at init and on a timer.
  *  - DISCLOSURE. `load()` returns exactly what happened, restored, rejected,
@@ -75,6 +78,8 @@ export interface HostedSessionLoadReport {
   readonly restored: readonly PersistedHostedSession[];
   /** Files that failed validation, by filename, with the reason. */
   readonly rejected: readonly { readonly file: string; readonly reason: string }[];
+  /** Files that could not be read this time (an I/O error), left in place and read again on the next start. */
+  readonly unread: readonly { readonly file: string; readonly reason: string }[];
   /** Sessions retired by the retention sweep, by id. */
   readonly swept: readonly string[];
   /** Sessions dropped because the directory was over `maxSessions`, by id. */
@@ -182,6 +187,7 @@ export class HostedSessionStore {
   async load(now: number = Date.now()): Promise<HostedSessionLoadReport> {
     const restored: PersistedHostedSession[] = [];
     const rejected: { file: string; reason: string }[] = [];
+    const unread: { file: string; reason: string }[] = [];
     const swept: string[] = [];
     const evicted: string[] = [];
     let entries: string[];
@@ -193,16 +199,29 @@ export class HostedSessionStore {
         directory: this.directory,
         error: summarizeError(error),
       });
-      return { restored, rejected, swept, evicted };
+      return { restored, rejected, unread, swept, evicted };
     }
 
     for (const file of entries) {
       const full = join(this.directory, file);
+      let text: string;
+      try {
+        text = await fs.readFile(full, 'utf-8');
+      } catch (error) {
+        // An I/O failure says nothing about the file's content: it stays where it is.
+        const reason = `could not be read now; left in place and tried again on the next start: ${summarizeError(error)}`;
+        unread.push({ file, reason });
+        logger.warn('[hosted-sessions] a session file could not be read now; left in place and tried again on the next start', {
+          file: full,
+          error: summarizeError(error),
+        });
+        continue;
+      }
       let parsed: unknown;
       try {
-        parsed = JSON.parse(await fs.readFile(full, 'utf-8')) as unknown;
+        parsed = JSON.parse(text) as unknown;
       } catch (error) {
-        rejected.push({ file, reason: `unreadable: ${summarizeError(error)}` });
+        rejected.push({ file, reason: `not valid JSON: ${summarizeError(error)}` });
         await this.setAside(full);
         continue;
       }
@@ -241,12 +260,13 @@ export class HostedSessionStore {
       return {
         restored: restored.filter((session) => !dropped.has(session.record.id)),
         rejected,
+        unread,
         swept,
         evicted,
         ...(evictedLive.length > 0 ? { evictedLive } : {}),
       };
     }
-    return { restored, rejected, swept, evicted };
+    return { restored, rejected, unread, swept, evicted };
   }
 
   /** Whether a terminated record has outlived its retention. */

@@ -99,9 +99,9 @@ export function prepareAnswerGapUniverse(store: KnowledgeStore, requestedSpace: 
         const key = answerGapKey(query, currentSubjects);
         // A gap retired after its repair is history: the same question unanswered
         // again is a new gap, with a task of its own.
-        const gaps = store.listNodesInSpace(exactSpace).filter((node) => answerGap(node) && getKnowledgeSpaceId(node) === exactSpace
-          && !(node.status !== 'active' && readString(node.metadata.repairStatus) === 'repaired'))
-          .map((gap) => ({ gap, subjectIds: subjectIdsOf(gap) }));
+        const openGap = (node: KnowledgeNodeRecord) => answerGap(node) && getKnowledgeSpaceId(node) === exactSpace
+          && !(node.status !== 'active' && readString(node.metadata.repairStatus) === 'repaired');
+        const gaps = store.listNodesInSpace(exactSpace).filter(openGap).map((gap) => ({ gap, subjectIds: subjectIdsOf(gap) }));
         let selected = gaps.find((entry) => answerGapKey(gapQuestion(entry.gap), entry.subjectIds) === key)?.gap;
         const decisionIds: string[] = [];
         const question = meaning(query, undefined, linkedObjects, selectedSources);
@@ -149,17 +149,33 @@ export function prepareAnswerGapUniverse(store: KnowledgeStore, requestedSpace: 
           for (const node of linkedObjects) guard.node(node.id, node);
           for (const source of selectedSources) guard.source(source.id, source);
         };
+        // A new gap: another answer to the same question may have written its own
+        // gap while this one read. Checked again at the write, right before commit;
+        // when one has appeared, this insert stops and that gap is the answer's gap.
+        let appeared: KnowledgeNodeRecord | undefined;
         const writeCurrent = () => {
           check();
           try { guard.assertCurrent(); } catch { throw new Held(signal?.aborted ? 'aborted' : 'stale'); }
+          if (!selected) {
+            // Only gaps asking the same words are read for their subjects.
+            const sameText = answerGapKey(query, []);
+            appeared = store.listNodesInSpace(exactSpace).find((node) => node.id !== target.nodeId && openGap(node)
+              && answerGapKey(gapQuestion(node), []) === sameText && answerGapKey(gapQuestion(node), subjectIdsOf(node)) === key);
+            if (appeared) throw new Held('stale');
+          }
         };
         return Object.freeze({ assertCurrent: check,
           async persist(reason: string): Promise<KnowledgeNodeRecord | null> {
             check(); assertJudgmentInput({ reason });
             try { capture(); } catch { throw new Held(signal?.aborted ? 'aborted' : 'stale'); }
-            return persistPreparedAnswerGap(store, { spaceId: exactSpace, query, reason, target, existing: selected,
-              issue: selectedIssue, issues, tasks, sources: selectedSources, linkedObjects,
-              reading: { version: 2, decisionIds } }, writeCurrent, signal);
+            try {
+              return await persistPreparedAnswerGap(store, { spaceId: exactSpace, query, reason, target, existing: selected,
+                issue: selectedIssue, issues, tasks, sources: selectedSources, linkedObjects,
+                reading: { version: 2, decisionIds } }, writeCurrent, signal);
+            } catch (error) {
+              if (appeared === undefined) throw error;
+              return store.getNode(appeared.id) ?? appeared;
+            }
           },
         });
       }

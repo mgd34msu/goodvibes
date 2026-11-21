@@ -190,13 +190,25 @@ export async function readMessageDetail(
     // to BODY.PEEK[TEXT] is safe ONLY when the headers say the message is a
     // single text part, on a multipart message that section is every part
     // concatenated, including the encoded attachments this function exists not
-    // to download, so it stays unfetched and the body reads empty.
+    // to download, so it stays unfetched and the read names the body as missing.
     const contentType = extractHeader(rawHeaders, 'Content-Type').toLowerCase();
     if (contentType.length === 0 || contentType.startsWith('text/')) {
       const lines = await session.commandFrames(`UID FETCH ${uid} BODY.PEEK[TEXT]`);
-      const raw = (extractFetchSection(lines) ?? '').replace(/\r\n/g, '\n');
-      if (contentType.startsWith('text/html')) bodyHtml = raw;
-      else bodyText = raw;
+      const section = extractFetchSection(lines);
+      if (section === null) {
+        bodyUnavailable.push({ section: 'TEXT', reason: 'the server\'s answer carried no text for the message body' });
+      } else {
+        const raw = section.replace(/\r\n/g, '\n');
+        if (contentType.startsWith('text/html')) bodyHtml = raw;
+        else bodyText = raw;
+      }
+    } else {
+      bodyUnavailable.push({
+        section: 'TEXT',
+        reason: contentType.startsWith('multipart/')
+          ? 'the server\'s description of this message could not be read and it has several parts, so its text and attachments were not fetched'
+          : 'the server\'s description of this message could not be read and it is not a text message, so its content was not fetched',
+      });
     }
   }
 

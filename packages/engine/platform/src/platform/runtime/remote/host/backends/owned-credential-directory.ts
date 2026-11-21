@@ -222,7 +222,28 @@ export class OwnedCredentialDirectory {
     return pending;
   }
 
-  /** Remove only a file this instance created, never an arbitrary caller path. */
+  /**
+   * A fresh private directory inside this instance's scratch, for a tool that
+   * keeps its own state in a directory (a cloud CLI's config); removed with
+   * {@link remove} like a file.
+   */
+  makeDirectory(): Promise<string> {
+    const pending = Promise.resolve().then(async () => {
+      this.assertOpen();
+      const directory = await this.directory();
+      this.assertOpen();
+      await assertRealPath(directory);
+      const path = join(directory, `${randomUUID()}.dir`);
+      await mkdir(path, { mode: 0o700 });
+      this.files.add(path);
+      return path;
+    });
+    this.writes.add(pending);
+    void pending.then(() => { this.writes.delete(pending); }, () => { this.writes.delete(pending); });
+    return pending;
+  }
+
+  /** Remove only a file or directory this instance created, never an arbitrary caller path. */
   async remove(path: string): Promise<void> {
     if (!this.files.has(path)) throw new Error('Credential scratch file is not owned by this instance.');
     if (this.owned) {
@@ -232,7 +253,7 @@ export class OwnedCredentialDirectory {
           || !sameDirectory(await lstat(this.owned.path), this.owned.stat)) {
           throw new Error('Credential scratch directory identity changed.');
         }
-        await rm(path, { force: true });
+        await rm(path, { recursive: true, force: true });
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }

@@ -115,6 +115,8 @@ function noticeFields(result: ExecCommandResult): Record<string, unknown> {
     ...(result.expectation_error && { expectation_error: result.expectation_error }),
     ...(result.timed_out && { timed_out: true }),
     ...(result.cancelled && { cancelled: true }),
+    // A stopped run in a writable view may already have written to the project.
+    ...(result.captured_changes_published && { captured_changes_published: true }),
     ...(result.retries !== undefined && { retries: result.retries }),
     ...(result.progress_file && { progress_file: result.progress_file }),
     ...(result.warnings && { warnings: result.warnings }),

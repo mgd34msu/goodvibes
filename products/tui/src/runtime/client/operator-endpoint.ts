@@ -328,6 +328,14 @@ function withGatewayRouteForWsOnlyVerbs(
   return { ...client, operator: { ...client.operator, invoke } };
 }
 
+/** A verb call refused before any request left this process: no daemon is reachable, so nothing it could do happened. */
+export class DaemonVerbNotSentError extends Error {
+  constructor(methodId: string, reason: string) {
+    super(`cannot invoke '${methodId}': ${reason}`);
+    this.name = 'DaemonVerbNotSentError';
+  }
+}
+
 /**
  * The verb caller every client seam shares. The endpoint and its client are
  * resolved on first use and kept while nothing they depend on moved: the
@@ -374,7 +382,7 @@ export function createDaemonVerbCaller(deps: {
     },
     invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
       const rpc = resolve();
-      if (!rpc.available) throw new Error(`cannot invoke '${methodId}': ${rpc.reason}`);
+      if (!rpc.available) throw new DaemonVerbNotSentError(methodId, rpc.reason);
       return await rpc.platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T;
     },
   };

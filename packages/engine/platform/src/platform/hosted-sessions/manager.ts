@@ -351,13 +351,15 @@ export class HostedSessionManager {
     this.observeTurnEvents();
     this.spine.start();
     this.startAttachmentSweep();
-    if (report.rejected.length > 0 || report.swept.length > 0 || report.evicted.length > 0) {
+    if (report.rejected.length > 0 || report.unread.length > 0 || report.swept.length > 0 || report.evicted.length > 0) {
       logger.info('[hosted-sessions] restored persisted sessions', {
         restored: report.restored.length,
         rejected: report.rejected.length,
+        unread: report.unread.length,
         swept: report.swept.length,
         evicted: report.evicted.length,
         rejectedFiles: report.rejected.map((entry) => `${entry.file}: ${entry.reason}`),
+        unreadFiles: report.unread.map((entry) => `${entry.file}: ${entry.reason}`),
       });
     }
     return report;
@@ -1702,10 +1704,13 @@ function historyFromMessages(messages: readonly unknown[]): HostedSessionHistory
   const history: HostedSessionHistoryMessage[] = [];
   for (const entry of messages) {
     if (typeof entry !== 'object' || entry === null) continue;
-    const message = entry as { readonly role?: unknown; readonly content?: unknown; readonly toolCalls?: unknown; readonly callId?: unknown };
+    const message = entry as { readonly role?: unknown; readonly content?: unknown; readonly toolCalls?: unknown; readonly callId?: unknown; readonly correlationId?: unknown };
     const role = message.role;
     if (role !== 'user' && role !== 'assistant' && role !== 'system' && role !== 'tool') continue;
     const content = typeof message.content === 'string' ? message.content : JSON.stringify(message.content ?? '');
+    // The request a user or assistant row belongs to, when its turn was submitted with one.
+    const correlation = (role === 'user' || role === 'assistant') && typeof message.correlationId === 'string' && message.correlationId
+      ? { correlationId: message.correlationId } : {};
     // A mirror or resumed copy keeps the model's tool history: which calls an
     // assistant turn made and which call each tool result answers.
     if (role === 'assistant' && Array.isArray(message.toolCalls) && message.toolCalls.length > 0) {
@@ -1715,14 +1720,14 @@ function historyFromMessages(messages: readonly unknown[]): HostedSessionHistory
         if (typeof id !== 'string' || typeof name !== 'string') return [];
         return [{ id, name, arguments: typeof args === 'object' && args !== null ? args as Readonly<Record<string, unknown>> : {} }];
       });
-      history.push({ role, content, toolCalls });
+      history.push({ role, content, toolCalls, ...correlation });
       continue;
     }
     if (role === 'tool' && typeof message.callId === 'string') {
       history.push({ role, content, callId: message.callId });
       continue;
     }
-    history.push({ role, content });
+    history.push({ role, content, ...correlation });
   }
   return history;
 }

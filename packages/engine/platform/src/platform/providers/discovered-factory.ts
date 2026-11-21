@@ -15,6 +15,7 @@ export function createDiscoveredProvider(server: DiscoveredServer): LLMProvider 
     defaultModel: server.models[0]!,
     models: server.models,
     capabilities: traits.providerCapabilities,
+    cacheCapability: traits.cacheCapability,
     allowAnonymous: true,
     anonymousConfigured: true,
     setupDescription: `Discovered ${server.serverType} serving endpoint on the operator's network; hosting and upstream payment are not established by discovery alone.`,

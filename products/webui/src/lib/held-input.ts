@@ -106,13 +106,22 @@ export function newClientMessageId(): string {
   return Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
+/**
+ * Each store's sign-out step, kept off the public HeldInputs: it empties the
+ * store, tells the mounted panes, and stops every later storage write.
+ */
+const retirements = new WeakMap<HeldInputs, () => void>();
+
 /** A held-input store over `storage` (null keeps it in memory only). */
 export function createHeldInputs(scope: HeldInputScope, storage: Storage | null = sessionStore(), mintId: () => string = newClientMessageId): HeldInputs {
   const key = storageKey(scope);
   const entries = readStored(storage, key);
   const listeners = new Set<() => void>();
+  // Set on sign-out: a late answer to a send that began under the old sign-in
+  // still updates this store in memory, but never writes it back to storage.
+  let retired = false;
   const changed = (): void => {
-    if (storage) {
+    if (storage && !retired) {
       try {
         if (entries.size === 0) storage.removeItem(key);
         else storage.setItem(key, JSON.stringify([...entries.values()]));
@@ -128,7 +137,7 @@ export function createHeldInputs(scope: HeldInputScope, storage: Storage | null 
     changed();
     return next;
   };
-  return {
+  const store: HeldInputs = {
     hold(input) {
       const held: HeldInput = { ...input, clientMessageId: mintId(), state: 'sending' };
       entries.set(held.clientMessageId, held);
@@ -155,6 +164,12 @@ export function createHeldInputs(scope: HeldInputScope, storage: Storage | null 
       return () => { listeners.delete(listener); };
     },
   };
+  retirements.set(store, () => {
+    retired = true;
+    entries.clear();
+    for (const listener of [...listeners]) listener();
+  });
+  return store;
 }
 
 /** One store per daemon and account, above every mounted pane. */
@@ -176,7 +191,9 @@ export function clearHeldInputs(scope?: HeldInputScope): void {
   const storage = sessionStore();
   for (const key of [...stores.keys()]) {
     if (scope && key !== storageKey(scope)) continue;
+    const store = stores.get(key);
     stores.delete(key);
+    if (store) retirements.get(store)?.();
     try { storage?.removeItem(key); } catch { /* nothing to clear */ }
   }
   if (!scope && storage) {

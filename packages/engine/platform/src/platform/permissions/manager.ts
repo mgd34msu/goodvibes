@@ -609,6 +609,13 @@ export interface AutonomousPermissionOptions extends PermissionExecutionOptions 
    * rule, plan mode, a refused decision) still decides; nobody is asked again.
    */
   readonly ownerConfirmed?: boolean | undefined;
+  /**
+   * The session the call belongs to. Every remembered answer, owner-only key
+   * and allowed recipient the admission reads or writes is kept under it, so
+   * "allow for this session" holds in that session and nowhere else. Absent
+   * for a call that belongs to no session.
+   */
+  readonly sessionId?: string | undefined;
 }
 
 interface AuthenticAutonomousAdmission {
@@ -644,6 +651,8 @@ export interface AutonomousNestedOwner {
   readonly manager: PermissionManager;
   readonly source: AutonomousToolSource;
   readonly decoratePort: AutonomousPermissionOptions['decoratePort'];
+  /** The session of the admitted call; a call it runs inside is admitted under the same session. */
+  readonly sessionId: string | undefined;
 }
 const nestedOwners = new WeakMap<() => void, AutonomousNestedOwner>();
 
@@ -1029,7 +1038,9 @@ export class PermissionManager {
     this.autonomousPending.add(sourceId);
     try {
       await this.prepareAutonomousOwner(options.signal);
-      return await this.decideAutonomous(sourceId, toolName, preparedArgs, options, epoch);
+      // One key space for the whole decision: rule facts, remembered answers,
+      // queued asks, owner-only keys and recipients all read the call's session.
+      return await sessionOfCheck.run(options.sessionId, () => this.decideAutonomous(sourceId, toolName, preparedArgs, options, epoch));
     }
     finally { this.autonomousPending.delete(sourceId); }
   }
@@ -1125,7 +1136,7 @@ export class PermissionManager {
     const ownerOnly = recognizeOwnerOnly(toolName, args, definition, ownerFacts, capturedAuthority.directory ?? undefined);
     const rule = await this.ruleFactOf({
       toolName, args, category, mode, tools: permissions.tools, ownerOnly, subjects: callSubjects(args, definition),
-      policyEnabled: capturedAuthority.policyEnabled, options: { signal, assertCurrent }, owner, sessionId: options.hookOwner?.sessionId,
+      policyEnabled: capturedAuthority.policyEnabled, options: { signal, assertCurrent }, owner,
     });
     const exposure = (rawAuthority as Readonly<Record<string, unknown>>)['exposure'];
     const decided = askedByOwnerRule(classifyCall(mode, this.callFacts({
@@ -1207,7 +1218,7 @@ export class PermissionManager {
       const record: AuthenticAutonomousAdmission = {
         issuer: this, registry: preparedCall?.registry, call: preparedCall?.call, claim: admission.claim, consumed: false, assertWorkspace,
         settingsBinding: settingsMutation, nestedSettingsBindings, parents,
-        nestedOwner: Object.freeze({ manager: this, source, decoratePort: options.decoratePort }),
+        nestedOwner: Object.freeze({ manager: this, source, decoratePort: options.decoratePort, sessionId: options.sessionId }),
         assertEffect: effect => {
           if ((effect !== 'write' && effect !== 'send') || effectReadOnly || effectWriteDenied
             || (effectSurface !== undefined && !ownerDirected && !effectPermittedForProvenance(effect, { surfaceId: effectSurface }).allowed)) {

@@ -15,7 +15,18 @@ import {
 
 const GEMINI_API_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta';
 const DEFAULT_GOOGLE_STT_MODEL = 'gemini-2.5-flash';
-const GOOGLE_INLINE_AUDIO_LIMIT_BYTES = 20 * 1024 * 1024;
+/** Gemini's limit on a whole generateContent request that carries its audio inline. */
+const GOOGLE_INLINE_REQUEST_LIMIT_BYTES = 20 * 1024 * 1024;
+/** Room for the request's JSON around the prompt and the audio (keys, model fields, MIME type). */
+const GOOGLE_INLINE_REQUEST_ENVELOPE_BYTES = 1024;
+
+/** The bytes of the inline request body: the audio as base64, the prompt as a JSON string, and the JSON around them. */
+function inlineRequestBytes(audioBytes: number, prompt: string, mimeType: string): number {
+  return Math.ceil(audioBytes / 3) * 4
+    + Buffer.byteLength(JSON.stringify(prompt))
+    + Buffer.byteLength(JSON.stringify(mimeType))
+    + GOOGLE_INLINE_REQUEST_ENVELOPE_BYTES;
+}
 
 type GoogleGenerateContentResponse = {
   readonly candidates?: ReadonlyArray<{
@@ -162,7 +173,7 @@ export function createGoogleProvider(): VoiceProvider {
       const metadata = asRecord(request.metadata);
       const effectiveMimeType = mimeType || 'audio/wav';
       const useFilesApi = metadata?.['preferFilesApi'] === true
-        || buffer.byteLength > GOOGLE_INLINE_AUDIO_LIMIT_BYTES;
+        || inlineRequestBytes(buffer.byteLength, prompt, effectiveMimeType) > GOOGLE_INLINE_REQUEST_LIMIT_BYTES;
       let uploadedFile: { name: string; uri: string; mimeType: string } | null = null;
       try {
         if (useFilesApi) {

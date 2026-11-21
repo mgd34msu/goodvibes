@@ -467,8 +467,13 @@ export class VerificationExpectationBook {
    */
   public constructor(private readonly authority?: SurfaceAuthorityProbe) {}
 
-  /** Registered explicitly when the agent initiates a signup. Nothing else opens one. */
-  public openExpectation(input: OpenExpectationInput, assertCurrent?: () => void): VerificationExpectation {
+  /**
+   * Registered explicitly when the agent initiates a signup. Nothing else opens one.
+   * Answers the new expectation and the one it displaced for the same address
+   * (null when none), so a caller that cannot keep the new one can put the
+   * displaced one back with `hydrateExpectation`, and can tell its waiters.
+   */
+  public openExpectation(input: OpenExpectationInput, assertCurrent?: () => void): { readonly expectation: VerificationExpectation; readonly replaced: VerificationExpectation | null } {
     if (this.authority?.surfaceHasCommandAuthority(EMAIL_SURFACE) === true) {
       throw new ExpectationAuthorityError(
         'Email has been granted command authority; scoped verification expectations assume email is input-only. Refusing to open one.',
@@ -540,7 +545,7 @@ export class VerificationExpectationBook {
     };
     assertCurrent?.();
     this.open.set(expectation.id, expectation);
-    return expectation;
+    return { expectation, replaced: existing ?? null };
   }
 
   /**

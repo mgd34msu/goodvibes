@@ -148,7 +148,7 @@ export function createAgentAccountsTool(options: AgentAccountsToolOptions): Tool
               throw error;
             }
           }
-          const expectation = getSessionExpectationBook().openExpectation({
+          const { expectation } = getSessionExpectationBook().openExpectation({
             serviceDomain: alias.serviceDomain,
             recipientAddress: alias.address,
             purpose,

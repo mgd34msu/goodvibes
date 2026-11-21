@@ -175,7 +175,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     id: 'browser.sessions.launch',
     repeat: 'safe',
     title: 'Launch Browser Session',
-    description: 'Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists.',
+    description: 'Start a browser the daemon owns. Pass a profileName to keep sign-ins across runs; headless defaults to true where no display exists. One launched browser is open at a time: a launch with no different profile or headless value returns the open one, and a different profile or headless value needs the open one closed first.',
     category: 'browser',
     effects: ['browser.write'],
     dangerous: true,
@@ -344,7 +344,7 @@ export const builtinGatewayBrowserMethodDescriptors: readonly GatewayMethodDescr
     title: 'Press Key',
     description: 'Send one key to an element resolved from the latest snapshot. Enter is treated as a form submission and is an outward effect.',
     category: 'browser',
-    effects: ['browser.write'],
+    effects: ['browser.write', 'outward.send'],
     dangerous: true,
     http: { method: 'POST', path: '/api/browser/press' },
     inputSchema: pageInputSchema({

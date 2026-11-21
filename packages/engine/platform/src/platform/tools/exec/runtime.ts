@@ -603,10 +603,12 @@ async function runCommandWithProgress(
 ): Promise<ExecCommandResult> {
   const stdoutSink: CaptureSink = { text: '', dropped: false };
   const stderrSink: CaptureSink = { text: '', dropped: false };
-  const progressFile = openProgressFile(cmdStr, workingDirectory, progressRequested, () => stdoutSink.text);
   const withProgressFile = (path: string | undefined): { progress_file?: string } => (path ? { progress_file: path } : {});
   beforeSpawn?.();
   const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
+  // Opened only once the command has started: a command that never starts
+  // arms no timer and leaves no file. Nothing is read before the readers below.
+  const progressFile = openProgressFile(cmdStr, workingDirectory, progressRequested, () => stdoutSink.text);
   let timedOut = false;
   let cancelled = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -740,8 +742,15 @@ async function runCommandWithProgress(
   return applyExpectations(result, cmdInput.expect, actualExitCode);
 }
 
+/**
+ * Runs a command until its output matches `until.pattern`. With `kill_after`
+ * the command is stopped at the match; without it the running command is
+ * handed to the process manager at the match, as a background job, and the
+ * call returns at once with its `process_id`, `pid` and the output up to the
+ * match: the same promotion the captured path makes.
+ */
 async function runUntil(
-  _processManager: ProcessManager,
+  processManager: ProcessManager,
   overflowHandler: OverflowHandler,
   cmdStr: string,
   cmdInput: ExecCommandInput,
@@ -774,6 +783,26 @@ async function runUntil(
   const stdoutSink: CaptureSink = { text: '', dropped: false };
   const stderrSink: CaptureSink = { text: '', dropped: false };
   let matched = false;
+  // Set at a match without kill_after: from then on each reader forwards the
+  // child's bytes, unread, to the stream the process manager drains.
+  const relay: {
+    handoff?: {
+      readonly stdout: WritableStreamDefaultWriter<Uint8Array>;
+      readonly stderr: WritableStreamDefaultWriter<Uint8Array>;
+      readonly readable: { readonly stdout: ReadableStream<Uint8Array>; readonly stderr: ReadableStream<Uint8Array> };
+    } | undefined;
+  } = {};
+  let handedOff!: () => void;
+  const handoffReady = new Promise<void>((resolve) => { handedOff = resolve; });
+  // Once the manager owns the child, this call neither stops nor waits for it.
+  let adopted = false;
+  const startHandoff = (): void => {
+    if (relay.handoff) return;
+    const out = new TransformStream<Uint8Array, Uint8Array>();
+    const err = new TransformStream<Uint8Array, Uint8Array>();
+    relay.handoff = { stdout: out.writable.getWriter(), stderr: err.writable.getWriter(), readable: { stdout: out.readable, stderr: err.readable } };
+    handedOff();
+  };
   try {
     current();
     await using pattern = await createSafeRegex(until.pattern, '', { operation: 'exec until pattern', signal: active, assertCurrent: current });
@@ -786,8 +815,15 @@ async function runUntil(
       const reader = stream.getReader(); readers.add(reader);
       try {
         while (true) {
-          current();
+          if (!relay.handoff) current();
           const { done, value } = await reader.read();
+          const forward = relay.handoff?.[isStderr ? 'stderr' : 'stdout'];
+          if (forward) {
+            // Backpressure reaches the child through the manager's reads, as for any background job.
+            if (done) { await forward.close(); break; }
+            await forward.write(value);
+            continue;
+          }
           current();
           if (done) break;
           const chunk = decoder.decode(value, { stream: true });
@@ -795,16 +831,51 @@ async function runUntil(
           if (!matched && await pattern.test((stdoutSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderrSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))) {
             current(); matched = true; clearTimeout(untilTimer);
             if (until.kill_after) stop();
+            else startHandoff();
           }
         }
-      } catch (error) { stop(); throw error; }
+      } catch (error) {
+        const handoff = relay.handoff;
+        if (!handoff) { stop(); throw error; }
+        // After the handoff the manager owns the child: a forwarding failure
+        // (its reader was released at the child's exit) ends this reader only.
+        void handoff[isStderr ? 'stderr' : 'stdout'].abort(error).catch(() => {});
+        void reader.cancel().catch(() => {});
+      }
       finally { readers.delete(reader); reader.releaseLock(); }
     };
     streams = Promise.all([
       readStream(proc.stdout as ReadableStream<Uint8Array>, false),
       readStream(proc.stderr as ReadableStream<Uint8Array>, true),
     ]);
-    const [, exitCode] = await Promise.all([streams, proc.exited]);
+    const finished = Promise.all([streams, proc.exited]);
+    const first = await Promise.race([handoffReady.then(() => undefined), finished.then(([, code]) => ({ code }))]);
+    const handoff = relay.handoff;
+    if (first === undefined && handoff) {
+      // The pattern matched and the command keeps running: it becomes a background job.
+      void finished.catch(() => {});
+      clearTimeout(commandTimer); clearTimeout(untilTimer);
+      active.removeEventListener('abort', onStop);
+      let adoptedJob: ReturnType<ProcessManager['adoptRunning']>;
+      try {
+        adoptedJob = processManager.adoptRunning({
+          proc, cmd: cmdStr, stdout: handoff.readable.stdout, stderr: handoff.readable.stderr,
+          stdoutSoFar: stdoutSink.text, stderrSoFar: stderrSink.text,
+        });
+      } catch (error) {
+        // Not adopted: release the forwarding readers, so the stop below ends them.
+        void handoff.readable.stdout.cancel(error).catch(() => {});
+        void handoff.readable.stderr.cancel(error).catch(() => {});
+        throw error;
+      }
+      adopted = true;
+      const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout');
+      const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr');
+      return { cmd: cmdStr, exit_code: null, stdout: stdoutResult.text, stderr: stderrResult.text,
+        success: true, duration_ms: Date.now() - startTime, cwd, process_id: adoptedJob.process_id, pid: adoptedJob.pid,
+        ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }), ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }) };
+    }
+    const [, exitCode] = await finished;
     current(); pattern.assertCurrent();
     const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout');
     const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr');
@@ -825,9 +896,12 @@ async function runUntil(
       ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }), ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }) };
   } finally {
     clearTimeout(commandTimer); clearTimeout(untilTimer);
-    active.removeEventListener('abort', onStop); stop(true);
-    await streams?.catch(() => {});
-    await proc?.exited.catch(() => {});
+    active.removeEventListener('abort', onStop);
+    if (!adopted) {
+      stop(true);
+      await streams?.catch(() => {});
+      await proc?.exited.catch(() => {});
+    }
   }
 }
 

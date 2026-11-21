@@ -600,28 +600,29 @@ export async function decomposeGoal(
     // Not clean, fall through to a single repair with the assembler's issues.
     const repairErrors = issues.map((i) => i.message);
     const repaired = await tryRepair(repairErrors);
-    if (repaired) return repaired;
-    return heuristicResult({ kind: 'fallback', reason: `invalid agent decomposition after repair: ${issues.map((i) => i.kind).join(', ')}`, usage: lastUsage, elapsedMs: totalElapsedMs });
+    if (repaired.accepted) return repaired.accepted;
+    return heuristicResult({ kind: 'fallback', reason: repaired.reason, usage: lastUsage, elapsedMs: totalElapsedMs });
   }
 
   // Malformed structure, one repair attempt with the parser's errors.
   const repaired = await tryRepair(first.errors);
-  if (repaired) return repaired;
-  return heuristicResult({ kind: 'fallback', reason: `malformed agent output after repair: ${first.errors.slice(0, 3).join('; ')}`, usage: lastUsage, elapsedMs: totalElapsedMs });
+  if (repaired.accepted) return repaired.accepted;
+  return heuristicResult({ kind: 'fallback', reason: repaired.reason, usage: lastUsage, elapsedMs: totalElapsedMs });
 
-  // --- one repair attempt: returns an accepted result, or null to fall back ---
-  async function tryRepair(repairErrors: string[]): Promise<DecomposeGoalResult | null> {
+  // --- one repair attempt: the accepted result, or why the repair run gave none (its own cause and errors) ---
+  async function tryRepair(repairErrors: string[]): Promise<{ readonly accepted: DecomposeGoalResult; readonly reason?: undefined } | { readonly accepted?: undefined; readonly reason: string }> {
     let repairRun: DecompositionRunResult;
     try {
       repairRun = await runOnce('repair', repairErrors);
-    } catch {
-      return null;
+    } catch (err) {
+      return { reason: `repair spawn error: ${(err as Error).message}` };
     }
-    if (repairRun.status !== 'completed') return null;
+    if (repairRun.status === 'cancelled') return { reason: `repair cancelled${repairRun.detail ? ` (${repairRun.detail})` : ''}` };
+    if (repairRun.status === 'failed') return { reason: `repair agent error: ${repairRun.detail ?? 'unknown'}` };
     const parsed = parseDecomposition(repairRun.output);
-    if (!parsed.ok || !parsed.raw) return null;
+    if (!parsed.ok || !parsed.raw) return { reason: `malformed agent output after repair: ${parsed.errors.slice(0, 3).join('; ')}` };
     const { proposal, issues } = assemblePlanProposal(request.goal, gate.strategy, parsed.raw);
-    if (issues.length !== 0) return null;
-    return accept(proposal, issues, true);
+    if (issues.length !== 0) return { reason: `invalid agent decomposition after repair: ${issues.map((i) => i.kind).join(', ')}` };
+    return { accepted: accept(proposal, issues, true) };
   }
 }

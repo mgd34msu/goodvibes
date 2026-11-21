@@ -32,7 +32,7 @@ const CONTENT_FIELDS: ReadonlySet<string> = new Set([
   'reasoning', 'reasoningcontent', 'reasoningsummary', 'result', 'results', 'stdout', 'stderr', 'messages',
   'instructions', 'transcript', 'preview', 'snippet', 'diff', 'patch', 'excerpt', 'task', 'question', 'answer',
   'context', 'document', 'query', 'toolinput', 'tooloutput', 'completion', 'delta',
-  'goal', 'taskdescription', 'notes', 'progress', 'quote', 'successcriteria', 'requiredevidence', 'title',
+  'goal', 'taskdescription', 'description', 'notes', 'progress', 'quote', 'successcriteria', 'requiredevidence', 'title',
   'reasons', 'dispositionreason',
 ]);
 

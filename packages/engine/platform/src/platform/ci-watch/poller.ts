@@ -64,17 +64,22 @@ export async function runCiWatchPollPass(service: CiWatchPollTarget): Promise<st
   let checked = 0;
   let retired = 0;
   let failedChecks = 0;
+  let repairsNotStarted = 0;
   for (const watch of watches) {
     try {
       const result = await service.checkWatch(watch.id);
       checked += 1;
       if (result.retired) retired += 1;
+      if (result.fixSessionError) {
+        repairsNotStarted += 1;
+        logger.warn('[ci-watch] repair not started', { watchId: watch.id, repo: watch.repo, error: result.fixSessionError });
+      }
     } catch (error) {
       failedChecks += 1;
       logger.warn('[ci-watch] poll check failed', { watchId: watch.id, repo: watch.repo, error: summarizeError(error) });
     }
   }
-  return `checked ${checked}/${watches.length} watch(es)${retired > 0 ? `, ${retired} retired` : ''}${failedChecks > 0 ? `, ${failedChecks} check(s) failed` : ''}`;
+  return `checked ${checked}/${watches.length} watch(es)${retired > 0 ? `, ${retired} retired` : ''}${repairsNotStarted > 0 ? `, ${repairsNotStarted} repair(s) not started` : ''}${failedChecks > 0 ? `, ${failedChecks} check(s) failed` : ''}`;
 }
 
 /**

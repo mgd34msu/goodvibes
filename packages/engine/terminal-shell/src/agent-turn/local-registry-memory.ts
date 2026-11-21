@@ -36,6 +36,7 @@ import {
 } from '@goodvibes/engine/platform/platform/state';
 import type { MemoryAccess, MemoryOperationOptions } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import { assertNoSecretLikeMemoryText } from './memory-safety.js';
+import { assertActorMayMarkReviewed } from './review-authority.js';
 import { formatAgentRecordReference, formatAgentRecordReviewState } from './record-labels.js';
 import {
   AGENT_TOOL_PROVENANCE,
@@ -239,7 +240,7 @@ export async function handleMemory(
     assertNoSecretLikeMemoryText([summary, detail, ...(tags ?? [])]);
     requireUpdateFields('memory record', { summary, detail, tags, scope: args.scope }, [
       ['cls', args.cls, 'a memory class cannot be changed; create a new record with the class and delete the old one.'],
-      ['confidence', args.confidence, 'use action:"review" with confidence to change it.'],
+      ['confidence', args.confidence, 'confidence is set by the owner\'s review: ask the owner to run /memory review <id> reviewed --confidence <0-100>.'],
     ]);
     const record = await run(() => memorySpine.update(requireId(args), {
       summary: summary || undefined,
@@ -255,16 +256,7 @@ export async function handleMemory(
     ].join('\n');
   }
   if (action === 'review') {
-    const record = await run(() => memorySpine.updateReview(requireId(args), {
-      state: 'reviewed',
-      confidence: readOptionalConfidence(args.confidence),
-      reviewedBy: 'agent',
-    }, options));
-    if (!record) throw unknownMemory(readString(args.id));
-    return [
-      'Reviewed Agent-local memory',
-      `  id ${record.id}`,
-    ].join('\n');
+    assertActorMayMarkReviewed('model', 'memory', requireId(args));
   }
   if (action === 'stale') {
     const record = await run(() => memorySpine.updateReview(requireId(args), {

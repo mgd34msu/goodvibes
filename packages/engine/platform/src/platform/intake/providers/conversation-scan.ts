@@ -175,7 +175,9 @@ export async function scanConversations(options: ConversationScanOptions): Promi
       window.kept = window.kept.filter(candidate => candidate.receivedAt < keptBelow);
     }
     const candidates = window.kept;
-    // Held until drained, so a pass that stops below keeps what this one read; replaced or dropped once messages are taken.
+    // Kept as read until the stored cursor passes it: the drain above lets a
+    // message go only once its cursor is committed, so a poll whose result is
+    // discarded takes the same messages again on the next tick.
     if (forward) state.resume.delete(conversation);
     else state.resume.set(conversation, { floor, upper: window.upper, kept: candidates, complete: true, ...(keptBelow === undefined ? {} : { keptBelow }) });
     let selected = candidates.slice(0, left);
@@ -199,11 +201,6 @@ export async function scanConversations(options: ConversationScanOptions): Promi
       left -= 1;
     }
     if (through > floor) advance[conversation] = through;
-    if (!forward) {
-      const rest = candidates.filter(candidate => candidate.receivedAt > through);
-      if (rest.length > 0) state.resume.set(conversation, { floor, upper: window.upper, kept: rest, complete: true, ...(keptBelow === undefined ? {} : { keptBelow }) });
-      else state.resume.delete(conversation);
-    }
     if (screeningStopped) {
       state.next = conversation;
       return { items, advance, failure: new ScanFailure('Privacy screening is unavailable right now, so new messages wait; the next poll screens them', 'tick', false) };

@@ -1018,7 +1018,7 @@ export class ToolRegistry {
       const signal = combineProjectionSignals(record.projection.signal, record.projection.preparationSignal, opts === undefined ? undefined : projectionSignal(projectionProperty(opts, 'signal')));
       executionSignal = signal;
       const onProgress = opts === undefined ? undefined : projectionFunction<(note?: string) => void>(projectionProperty(opts, 'onProgress'));
-      const executionOptions = Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.projection.executionContext ? { inputProjectionContext: record.projection.executionContext } : {}) });
+      const executionOptions = Object.freeze({ signal, callId: call.callId, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.projection.executionContext ? { inputProjectionContext: record.projection.executionContext } : {}) });
       // All callbacks and option capture precede claim. The tail below is synchronous
       // and invokes only metadata/intrinsic checks before the exact executor.
       const guardRevision = record.projection.preparationGuards.revision;
@@ -1351,7 +1351,7 @@ export class ToolRegistry {
       while (true) {
         const current = call;
         const admission = await manager.admitAutonomous(sourceId, current.name, current.args, {
-          sourceOf, decoratePort, signal, choiceProjection, ...(ownerAsk !== undefined ? { ownerAsk } : {}),
+          sourceOf, decoratePort, signal, choiceProjection, sessionId: parent.nestedOwner.sessionId, ...(ownerAsk !== undefined ? { ownerAsk } : {}),
           consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}),
           schemaRevision: current.schemaRevision, preparationDecisionIds: current.judgmentDecisionIds,
           preparedCall: { registry: this, call: current }, assertPrepared: () => { assertParent(); this.assertPrepared(current); },
@@ -1403,7 +1403,13 @@ export class ToolRegistry {
    * calls this; a model reaches tools through a turn or `executeNested`.
    */
   async executeOwnerConfirmed(callId: string, name: string, args: Record<string, unknown>,
-    request: { readonly goal: string; readonly criteria: readonly string[]; readonly signal?: AbortSignal | undefined }): Promise<ToolResult> {
+    request: {
+      readonly goal: string;
+      readonly criteria: readonly string[];
+      readonly signal?: AbortSignal | undefined;
+      /** The session the owner confirmed the call in; his remembered answers are read under it. */
+      readonly sessionId?: string | undefined;
+    }): Promise<ToolResult> {
     const manager = registryPermissionOwners.get(this);
     if (!manager) {
       return { callId, success: false, error: `${name} was not run: this tool registry has no permission owner to admit an owner-confirmed call.` };
@@ -1436,7 +1442,7 @@ export class ToolRegistry {
       while (true) {
         const current = call;
         const admission = await manager.admitAutonomous(sourceId, current.name, current.args, {
-          sourceOf, signal, choiceProjection, ownerConfirmed: true,
+          sourceOf, signal, choiceProjection, ownerConfirmed: true, sessionId: request.sessionId,
           consumedRevisions, ...(permittedRevisionIds ? { permittedRevisionIds } : {}),
           schemaRevision: current.schemaRevision, preparationDecisionIds: current.judgmentDecisionIds,
           preparedCall: { registry: this, call: current }, assertPrepared: () => this.assertPrepared(current),
@@ -1517,8 +1523,8 @@ export class ToolRegistry {
       this.repairProjection(record, effectiveArgs);
       const onProgress = opts === undefined ? undefined : projectionFunction<(note?: string) => void>(projectionProperty(opts, 'onProgress'));
       const executionOptions = record.registration.projector
-        ? Object.freeze({ signal, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.executionContext ? { inputProjectionContext: record.executionContext } : {}) })
-        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, ...(onProgress ? { onProgress } : {}) });
+        ? Object.freeze({ signal, callId, ...(callerCurrent ? { assertCurrent: callerCurrent } : {}), ...(onProgress ? { onProgress } : {}), ...(record.executionContext ? { inputProjectionContext: record.executionContext } : {}) })
+        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, callId, ...(onProgress ? { onProgress } : {}) });
       // The claim: the one complete verification immediately before the body.
       this.assertPreparationCurrent(record);
       record.claimed = true;
@@ -1595,8 +1601,8 @@ export class ToolRegistry {
       const effectiveArgs = repair.repaired ? repair.fixed : args;
       // The new projection-context field is owner-only, even on a legacy call.
       const onProgress = opts === undefined ? undefined : projectionFunction<(note?: string) => void>(projectionProperty(opts, 'onProgress'));
-      const executionOptions = assertCurrent ? Object.freeze({ signal, assertCurrent, ...(onProgress ? { onProgress } : {}) })
-        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, ...(onProgress ? { onProgress } : {}) });
+      const executionOptions = assertCurrent ? Object.freeze({ signal, callId, assertCurrent, ...(onProgress ? { onProgress } : {}) })
+        : opts === undefined || projectionProperty(opts, 'inputProjectionContext') === undefined ? opts : Object.freeze({ signal, callId, ...(onProgress ? { onProgress } : {}) });
       assertProjectionCurrent(assertCurrent, effectiveArgs);
       if (executionOptions) ordinaryCallRegistries.set(executionOptions, this);
       const result = await executingContext.run(undefined, () => tool.execute(effectiveArgs, executionOptions));

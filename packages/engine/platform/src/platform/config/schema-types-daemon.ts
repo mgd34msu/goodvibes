@@ -80,9 +80,9 @@ export interface RuntimeConfig {
   maxParallelToolCalls: number;
   /** Unified RuntimeTask tracking across subsystems (restart to apply). Default true. */
   unifiedTasks: boolean;
-  /** Structured plugin init/teardown lifecycle with health integration (restart to apply). Default false. */
+  /** Structured plugin init/teardown lifecycle with health integration (restart to apply). Default true. */
   pluginLifecycle: boolean;
-  /** Structured MCP server connect/disconnect lifecycle with health integration (restart to apply). Default false. */
+  /** Structured MCP server connect/disconnect lifecycle with health integration (restart to apply). Default true. */
   mcpLifecycle: boolean;
   /**
    * Default per-phase tool-execution budget limits. `enforced` turns hard
@@ -110,13 +110,10 @@ export interface DaemonProcessConfig {
   enabled: boolean;         // default: true. ADOPT a session daemon of this surface's own (loopback only)
   timezone: string;         // default: ''. IANA name; empty means UTC
   /**
-   * Whether this surface may DIAL the daemon it is connected to, a different
-   * decision from adopting one of its own, and its own setting since the two
-   * shared `enabled` and turning adoption off silently stopped inbound-message
-   * delivery, rewind registration, the approvals stream and daemon-routed turns
-   * on machines whose connected host was live.
-   */
-  /**
+   * The daemon this surface is connected to. `enabled`: whether this surface
+   * may DIAL it, a decision apart from adopting a daemon of its own (`enabled`
+   * above), so turning adoption off does not stop inbound-message delivery,
+   * rewind registration, the approvals stream or daemon-routed turns.
    * `url`: where this terminal dials its daemon when it was pointed at one
    * (setup's "connect to an existing daemon"). Empty means the daemon on this
    * machine, derived from the control-plane bind settings, which describe only

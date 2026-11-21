@@ -247,11 +247,11 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
   methodDescriptor({
     id: 'remote.peers.list',
     title: 'List Remote Peers',
-    description: 'Return known remote peers.',
+    description: 'Return known remote peers: kind (node or device) keeps only that kind, and limit keeps the most recently seen that many; with no limit every peer is returned.',
     category: 'remote',
     effects: ['remote.read'],
     http: { method: 'GET', path: '/api/remote/peers' },
-    inputSchema: EMPTY_OBJECT_SCHEMA,
+    inputSchema: objectSchema({ kind: enumSchema(['node', 'device']), limit: NUMBER_SCHEMA }),
     outputSchema: REMOTE_PEERS_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
@@ -324,7 +324,7 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
     repeat: 'safe',
     effects: ['remote.administer'],
     title: 'Register Remote Backend',
-    description: 'Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; a value docker or a cloud CLI would read as an option (starting with "-") and an id a paired peer holds are refused.',
+    description: 'Register or replace an execution backend under peerId so remote.peers.invoke runs commands on it. Credentials are goodvibes://secrets/ references only; an azure cloud-terminal credential is a JSON object {"clientId", "tenantId", "certificate"} (service principal application id, tenant id, and a PEM holding its certificate and private key), and a stored one of another shape is refused. A value docker or a cloud CLI would read as an option (starting with "-") and an id a paired peer holds are refused.',
     category: 'remote',
     http: { method: 'POST', path: '/api/remote/backends' },
     inputSchema: REMOTE_BACKEND_REGISTER_INPUT_SCHEMA,

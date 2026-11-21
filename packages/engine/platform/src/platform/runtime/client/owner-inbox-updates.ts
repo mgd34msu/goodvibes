@@ -147,6 +147,8 @@ export interface AnswerDeliveryOptions {
   readonly askerFacts?: ((sessionId: string) => Readonly<Record<string, string>>) | undefined;
   /** True while a daemon is reachable; its inbox may be another machine's (read over the wire only then). */
   readonly daemonReachable: () => boolean;
+  /** The address of the daemon this process talks to now (it can change while the process runs); undefined when none is set. */
+  readonly daemonAddress: () => string | undefined;
   /** The reachable daemon's own list, for the questions a session asked there. */
   readonly daemon: { list(filter?: OwnerInboxListFilter): Promise<readonly OwnerItem[]> };
   /** Opens the reachable daemon's update stream, for questions posted to a daemon that keeps another store. */
@@ -163,10 +165,6 @@ export interface AnswerDeliveryOptions {
 /** How many of one session's questions a session open or delete reads over the wire; a session asks far fewer. */
 const SESSION_QUESTION_LIMIT = 500;
 
-// Whether the reachable daemon keeps this home's store, learned from the first item it returned (it is, or is
-// not, also in the home store). Unknown until then; a daemon on this machine always does.
-let daemonSharesStore: boolean | undefined;
-
 /**
  * The inbox the `query` tool posts to, plus delivery of each answer to the
  * asking agent or conversation.
@@ -174,11 +172,15 @@ let daemonSharesStore: boolean | undefined;
 export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDeliveryOptions): AnswerDeliveringInbox {
   const { home } = options;
   const held = (id: string): boolean => home.get(id) !== undefined;
+  // Whether a daemon keeps this home's store, learned from an item it returned (it is, or is not, also in the
+  // home store) and kept with the address it was learned from: it says nothing about another daemon.
+  let learned: { readonly address: string | undefined; readonly shares: boolean } | undefined;
   const learn = (id: string): boolean => {
     const local = held(id);
-    if (options.daemonReachable()) daemonSharesStore = local;
+    if (options.daemonReachable()) learned = { address: options.daemonAddress(), shares: local };
     return local;
   };
+  const daemonSharesStore = (): boolean => learned?.shares === true && learned.address === options.daemonAddress();
 
   // Questions a daemon on another machine holds: one stream while one is open.
   const remotePending = new Set<string>();
@@ -246,7 +248,7 @@ export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDel
 
   /** One session's questions on a daemon that may keep another store; empty when it keeps this one. */
   const remoteSessionQuestions = async (id: string): Promise<readonly OwnerItem[]> => {
-    if (!options.daemonReachable() || daemonSharesStore === true) return [];
+    if (!options.daemonReachable() || daemonSharesStore()) return [];
     const items = await options.daemon.list({ sessionId: id, kinds: ['question'], status: 'all', limit: SESSION_QUESTION_LIMIT });
     const file = fileOf(id);
     return items.filter((item) => !learn(item.id) && isAskedBySession(item, id, file));

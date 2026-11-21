@@ -19,11 +19,9 @@ import { createDaemonRuntimeRouteHandlers } from './runtime-routes.js';
 import { createDaemonSystemRouteHandlers } from './system-routes.js';
 import { createDaemonTelemetryRouteHandlers } from './telemetry-routes.js';
 import type { DaemonRouteDispatcher, DaemonRouteTable } from './request-router.js';
+import { catalogPathname } from './route-manifest.js';
 
 type RouteExtension = NonNullable<DaemonRouteTable['extensions']>[number];
-
-/** Where the Agent's own knowledge is served; the same routes as `/api/knowledge` over another store. */
-const AGENT_KNOWLEDGE_PREFIX = '/api/goodvibes-agent/knowledge';
 
 /** What each route family reads. A family's context is the one its own handler factory declares. */
 export interface DaemonRouteFamilies {
@@ -62,7 +60,7 @@ export function buildDaemonRouteTable(families: DaemonRouteFamilies): DaemonRout
   const extensions: RouteExtension[] = [];
   if (families.agentKnowledge) {
     const agentKnowledgeHandlers = { ...handlers, ...createDaemonKnowledgeRouteHandlers(families.agentKnowledge) };
-    extensions.push((req) => dispatchAliasedKnowledgeRoutes(req, AGENT_KNOWLEDGE_PREFIX, agentKnowledgeHandlers));
+    extensions.push((req) => dispatchAliasedKnowledgeRoutes(req, agentKnowledgeHandlers));
   }
   if (families.extensions) extensions.push(...families.extensions);
   return {
@@ -74,15 +72,15 @@ export function buildDaemonRouteTable(families: DaemonRouteFamilies): DaemonRout
   };
 }
 
+/** Serves a path under the Agent knowledge prefix at the cataloged path the gate already held it to. */
 function dispatchAliasedKnowledgeRoutes(
   req: Request,
-  aliasPrefix: string,
   handlers: DaemonRouteTable['handlers'],
 ): Promise<Response | null> | Response | null {
   const url = new URL(req.url);
-  if (!url.pathname.startsWith(aliasPrefix)) return null;
-  const suffix = url.pathname.slice(aliasPrefix.length);
-  url.pathname = `/api/knowledge${suffix}`;
+  const served = catalogPathname(url.pathname);
+  if (served === url.pathname) return null;
+  url.pathname = served;
   const aliased = new Request(url.toString(), req);
   // The same caller: the derived request carries the principal already authenticated.
   const context = requestContextOf(req);

@@ -667,7 +667,8 @@ export async function scanHosts(
  * Whether this process has looked for model servers on this computer:
  * 'off' before any scan started, 'running' while one runs, 'done' once one
  * finished (first run's "looking for models on this computer…" / "none
- * found"). A scan that was cancelled or failed leaves it as it was before.
+ * found"). When the last scan running was cancelled or failed and none has
+ * finished, the state returns to 'off'.
  */
 export type LocalScanState = 'off' | 'running' | 'done';
 let localScan: LocalScanState = 'off';
@@ -678,7 +679,6 @@ export function localScanState(): LocalScanState {
 }
 
 async function trackLocalScan<T>(run: () => Promise<T>): Promise<T> {
-  const before = localScan;
   localScansRunning += 1;
   if (localScan !== 'done') localScan = 'running';
   try {
@@ -686,7 +686,8 @@ async function trackLocalScan<T>(run: () => Promise<T>): Promise<T> {
     localScan = 'done';
     return result;
   } catch (error) {
-    if (localScan !== 'done' && localScansRunning === 1) localScan = before;
+    // 'off' is the only state an unfinished scan can follow; another scan still running keeps 'running'.
+    if (localScan !== 'done' && localScansRunning === 1) localScan = 'off';
     throw error;
   } finally {
     localScansRunning -= 1;

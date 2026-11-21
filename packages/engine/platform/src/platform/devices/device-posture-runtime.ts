@@ -43,7 +43,7 @@ import {
 } from './device-capability-service.js';
 import { DeviceGrantStore } from './device-grants.js';
 import { DeviceCaptureArtifactStore } from './device-capture-artifacts.js';
-import { DeviceHousekeeper, type DeviceHousekeepingOptions } from './device-housekeeping.js';
+import { DeviceHousekeeper, captureSweepFailureSummary, type DeviceHousekeepingOptions } from './device-housekeeping.js';
 import {
   DEVICE_CAPABILITY_WORK_TYPE,
   buildDeviceCapabilityWorkRequest,
@@ -109,14 +109,19 @@ export interface DevicePeerTransport {
   cancelWork?(workId: string, input?: { readonly actor?: string | undefined; readonly reason?: string | undefined }): Promise<unknown>;
 }
 
-/** The slice of the shared approval path the confirmation prompt rides. */
+/**
+ * The slice of the shared approval path the confirmation prompt rides. Its
+ * answer names who decided (`decidedBy`, the principal that answered the
+ * ask) when the path knows it, so a durable grant and its audit entry record
+ * that principal; absent, they record `operator`.
+ */
 export interface DeviceApprovalBridge {
   requestApproval(input: {
     readonly request: PermissionPromptRequest;
     readonly sessionId?: string | undefined;
     readonly metadata?: Record<string, unknown> | undefined;
     readonly timeoutMs?: number | undefined;
-  }): Promise<PermissionPromptDecision>;
+  }): Promise<PermissionPromptDecision & { readonly decidedBy?: string | undefined }>;
 }
 
 /**
@@ -337,11 +342,12 @@ function createConfirmationHandler(options: DevicePostureRuntimeOptions): Device
       // The question must not outlive the request it belongs to.
       timeoutMs: readDeviceRequestTimeoutMs(options.config),
     });
+    const actor = decision.decidedBy ?? 'operator';
     if (!decision.approved) {
-      return { decision: 'deny', actor: 'operator', ...(decision.reason ? { note: decision.reason } : {}) };
+      return { decision: 'deny', actor, ...(decision.reason ? { note: decision.reason } : {}) };
     }
     const durable = decision.rememberTier !== undefined && decision.rememberTier !== 'session';
-    return { decision: durable ? 'always' : 'once', actor: 'operator' };
+    return { decision: durable ? 'always' : 'once', actor };
   };
 }
 
@@ -417,9 +423,19 @@ export function createDevicePostureRuntime(options: DevicePostureRuntimeOptions)
     readPolicy: () => readDeviceCapabilityPolicy(config),
     async startHousekeeping(): Promise<void> {
       // Recovery first: a grant whose node is gone, or a capture torn by a
-      // crash, is removed BEFORE the first request of this run is served.
-      await housekeeper.runRecoverySweep();
-      housekeeper.start(() => readDeviceSweepIntervalMs(config));
+      // crash, is removed BEFORE the first request of this run is served. A
+      // grant sweep that fails refuses the start (a departed phone's grant must
+      // not be honoured); a capture sweep that fails is logged and the start
+      // goes on. The periodic sweep is armed either way.
+      try {
+        await housekeeper.runRecoverySweep();
+      } catch (error) {
+        const summary = captureSweepFailureSummary(error);
+        if (summary === null) throw error;
+        logger.warn('Device captures could not be checked at start; the periodic sweep tries again', { summary });
+      } finally {
+        housekeeper.start(() => readDeviceSweepIntervalMs(config));
+      }
     },
     stopHousekeeping(): void {
       housekeeper.stop();

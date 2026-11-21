@@ -1,7 +1,8 @@
 import { assertCapturedToolReadAccess } from '../shared/captured-input-tools.js';
 import { ContractInputReadDeniedError } from '../../contract/input-authority.js';
-import { existsSync, lstatSync, readFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
+import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import { readdir } from 'node:fs/promises';
 import type {
   InspectMode,
@@ -35,17 +36,16 @@ const SUMMARY_SAMPLE_LIMIT = 5;
 
 export type InspectToolResult = { success: boolean; output?: string; error?: string };
 
-export function resolvePath(projectRoot: string, inputPath: string): string {
-  const resolved = resolve(inputPath.startsWith('/') ? inputPath : join(projectRoot, inputPath));
-  const rel = relative(projectRoot, resolved);
-  if (rel.startsWith('..')) {
-    throw new Error(`Path '${inputPath}' resolves outside the project root`);
-  }
-  return resolved;
+/**
+ * A file argument resolved under the project root by the rule read uses: the real path (through
+ * any symbolic link) must stay inside the root unless access outside the project is allowed.
+ */
+export function resolvePath(projectRoot: string, inputPath: string, allowOutsideProject = false): string {
+  return resolveAndValidatePath(inputPath, projectRoot, allowOutsideProject);
 }
 
-export function requireExistingFilePath(projectRoot: string, inputPath: string, notFoundPrefix: string): string {
-  const filePath = resolvePath(projectRoot, inputPath);
+export function requireExistingFilePath(projectRoot: string, inputPath: string, notFoundPrefix: string, allowOutsideProject = false): string {
+  const filePath = resolvePath(projectRoot, inputPath, allowOutsideProject);
   if (!existsSync(filePath)) {
     throw new Error(`${notFoundPrefix}: ${filePath}`);
   }
@@ -56,10 +56,13 @@ function takeSample<T>(items: readonly T[] | undefined, limit = SUMMARY_SAMPLE_L
   return Array.isArray(items) ? items.slice(0, limit) : [];
 }
 
-/** What a scan could not cover is part of the answer in every format: files left out and limits reached. */
+/**
+ * What a scan could not cover is part of the answer in every format: files left out, limits reached,
+ * and the note that its candidates were never assessed.
+ */
 function carriedCoverage(record: Record<string, unknown>): Record<string, unknown> {
   const carried: Record<string, unknown> = {};
-  for (const key of ['unavailable_files', 'warning', 'warnings']) if (record[key] !== undefined) carried[key] = record[key];
+  for (const key of ['unavailable_files', 'warning', 'warnings', 'assessment_note']) if (record[key] !== undefined) carried[key] = record[key];
   return carried;
 }
 
@@ -88,6 +91,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
           method: route.method ?? null,
           path: route.path ?? null,
           file: route.file ?? null,
+          ...(route.reading !== undefined ? { reading: route.reading } : {}),
         })),
       };
     case 'database': {
@@ -128,11 +132,13 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'accessibility':
       return {
+        ...carriedCoverage(record),
         count: record.count ?? 0,
         issues: takeSample(record.issues as Array<Record<string, unknown>> | undefined).map((issue) => ({
           code: issue.code ?? null,
           line: issue.line ?? null,
           wcag: issue.wcag ?? null,
+          ...(issue.reading !== undefined ? { reading: issue.reading } : {}),
         })),
       };
     case 'api_spec':
@@ -191,6 +197,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'hooks':
       return {
+        ...carriedCoverage(record),
         count: Array.isArray(record.hooks) ? record.hooks.length : 0,
         hooks: takeSample(record.hooks as Array<Record<string, unknown>> | undefined).map((hook) => ({
           hookKind: hook.hookKind ?? null,
@@ -200,14 +207,17 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'overflow':
       return {
+        ...carriedCoverage(record),
         count: record.count ?? 0,
         issues: takeSample(record.issues as Array<Record<string, unknown>> | undefined).map((issue) => ({
           kind: issue.kind ?? null,
           line: issue.line ?? null,
+          ...(issue.reading !== undefined ? { reading: issue.reading } : {}),
         })),
       };
     case 'sizing':
       return {
+        ...carriedCoverage(record),
         count: Array.isArray(record.items) ? record.items.length : 0,
         items: takeSample(record.items as Array<Record<string, unknown>> | undefined).map((item) => ({
           kind: item.kind ?? null,
@@ -217,6 +227,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'stacking':
       return {
+        ...carriedCoverage(record),
         count: Array.isArray(record.zIndexItems) ? record.zIndexItems.length : 0,
         zIndexItems: takeSample(record.zIndexItems as Array<Record<string, unknown>> | undefined).map((item) => ({
           value: item.value ?? null,
@@ -250,6 +261,7 @@ export function summarizeInspectValue(mode: InspectMode, value: unknown): unknow
       };
     case 'client_boundary':
       return {
+        ...carriedCoverage(record),
         directive: record.directive ?? null,
         importsServerOnly: record.importsServerOnly ?? false,
         serverOnlyImports: takeSample(record.serverOnlyImports as string[] | undefined),
@@ -290,7 +302,10 @@ const WALK_MAX_DEPTH = 10;
 
 /**
  * Every file under `dir` the filter accepts. What the scan could not cover (a directory it could
- * not read, the depth limit) is added to `notes` so a short result is not mistaken for a complete one.
+ * not read, the depth limit, a symbolic link that leads outside the walk's root) is added to
+ * `notes` so a short result is not mistaken for a complete one. A symbolic link is included only
+ * when it leads to a regular file whose real path stays under `root` (the directory the walk
+ * started from); links to directories are not followed.
  */
 export async function walk(
   dir: string,
@@ -299,6 +314,7 @@ export async function walk(
   depth = 0,
   notes?: string[],
   current?: () => void,
+  root: string = dir,
 ): Promise<string[]> {
   current?.();
   if (depth > WALK_MAX_DEPTH) {
@@ -318,14 +334,35 @@ export async function walk(
     const full = join(dir, entry.name);
     if (entry.isDirectory()) {
       if (!skipDirs.has(entry.name)) {
-        const sub = await walk(full, filter, skipDirs, depth + 1, notes, current);
+        const sub = await walk(full, filter, skipDirs, depth + 1, notes, current, root);
         results.push(...sub);
       }
+    } else if (entry.isSymbolicLink()) {
+      if (filter(full) && linkStaysUnder(full, root, notes)) results.push(full);
     } else if (filter(full)) {
       results.push(full);
     }
   }
   return results;
+}
+
+/** True when the link at `path` leads to a regular file under `root`; a link that leads outside is noted. */
+function linkStaysUnder(path: string, root: string, notes?: string[]): boolean {
+  let target: string;
+  let realRoot: string;
+  try {
+    target = realpathSync(path, 'utf8');
+    realRoot = realpathSync(root, 'utf8');
+  } catch {
+    // A dangling link: scanRead records it as unreadable.
+    return true;
+  }
+  const rel = relative(realRoot, target);
+  if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
+    notes?.push(`Skipped ${path}: it is a symbolic link to a file outside ${root}.`);
+    return false;
+  }
+  return statSync(target, { throwIfNoEntry: false })?.isFile() === true;
 }
 
 /** Reads a file the caller already knows exists; any failure (a directory, permissions) is an error, never an empty file. */
@@ -372,6 +409,7 @@ export function createInspectSuccess(output: unknown, format: string, mode: Insp
 
 export async function readRequiredFile(
   projectRoot: string,
+  allowOutsideProject: boolean,
   inputFile: string | undefined,
   mode: string,
   errorMessage: string,
@@ -379,6 +417,6 @@ export async function readRequiredFile(
   if (!inputFile) {
     return createInspectFailure(`file is required for ${mode} mode`);
   }
-  const filePath = requireExistingFilePath(projectRoot, inputFile, errorMessage);
+  const filePath = requireExistingFilePath(projectRoot, inputFile, errorMessage, allowOutsideProject);
   return { filePath, content: await safeRead(filePath) };
 }

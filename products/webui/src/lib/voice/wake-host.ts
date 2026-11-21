@@ -106,6 +106,11 @@ export interface WakeHostState {
   readonly lastWakeAt: number | null;
   /** The last transcript this host handed onward, for a receipt in the UI. */
   readonly lastTranscript: string | null;
+  /**
+   * Words heard while no view could take them (no chat open): kept until a chat
+   * registers its sink, which receives them once as a draft, never sent by itself.
+   */
+  readonly undelivered: string | null;
   readonly modelIds: readonly string[];
   /** Configured rows this tab cannot honour while it listens, written for a user to read. */
   readonly limitations: readonly string[];
@@ -123,6 +128,7 @@ const IDLE_STATE: WakeHostState = {
   restarts: 0,
   lastWakeAt: null,
   lastTranscript: null,
+  undelivered: null,
   modelIds: [],
   limitations: [],
 };
@@ -218,6 +224,8 @@ export class WakeHost {
   #modelSet: WakeModelSet | null = null;
   #signature: string | null = null;
   #sink: WakeTranscriptSink | null = null;
+  /** The words no sink took, with the sign-in they were spoken under; mirrored as `undelivered`. */
+  #undelivered: { readonly text: string; readonly identity: number | undefined } | null = null;
   #unregisterWake: (() => void) | null = null;
   /** Serialises apply/suspend/resume so two config updates cannot overlap. */
   #chain: Promise<void> = Promise.resolve();
@@ -276,11 +284,19 @@ export class WakeHost {
   /**
    * Register where transcripts go. Returns the unregister function. The host keeps
    * working with no sink registered, it still listens, chimes and transcribes,
-   * and reports the transcript in its own state, so a wake is never silently lost
-   * because no view happened to be mounted.
+   * and keeps the words as `undelivered`, so a wake is never silently lost
+   * because no view happened to be mounted: the next sink registered receives
+   * them once, as a draft (never auto-submitted, since the send would come
+   * later than the person spoke it), unless the sign-in changed in between.
    */
   setTranscriptSink(sink: WakeTranscriptSink): () => void {
     this.#sink = sink;
+    const pending = this.#undelivered;
+    if (pending) {
+      this.#undelivered = null;
+      this.#patch({});
+      if (pending.identity === this.#deps.identityRevision?.()) sink(pending.text, { autoSubmit: false });
+    }
     return () => {
       if (this.#sink === sink) this.#sink = null;
     };
@@ -682,6 +698,7 @@ export class WakeHost {
         return;
       }
       const autoSubmit = this.#settings?.autoSubmit === true;
+      if (text.length > 0 && !this.#sink) this.#undelivered = { text, identity: spokenUnder };
       this.#finishUtterance({ lastTranscript: text, error: null });
       if (text.length > 0) this.#sink?.(text, { autoSubmit });
       else this.#patch({ error: 'Speech-to-text returned no words for that utterance.' });
@@ -706,7 +723,8 @@ export class WakeHost {
   }
 
   #patch(next: Partial<WakeHostState>): void {
-    this.#state = { ...this.#state, ...next };
+    // `undelivered` has one owner, #undelivered: a reset to the idle state keeps it.
+    this.#state = { ...this.#state, ...next, undelivered: this.#undelivered?.text ?? null };
     for (const listener of this.#listeners) listener();
   }
 }

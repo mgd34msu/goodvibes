@@ -28,10 +28,15 @@ export interface CapabilityBootCheckInput {
   readonly configValuePresent: ProbeContext['configValuePresent'];
   /** Answers whether a secret-store entry holds a value. Never returns the value. */
   readonly secretPresent?: ProbeContext['secretPresent'];
-  /** Live MCP posture (and why it could not be read), when this session has an MCP client. */
-  readonly mcpServers?: McpServerPosture;
-  readonly mcpToolNames?: Iterable<string>;
-  /** Operator method ids the daemon actually serves. */
+  /** Reads the MCP posture (and why it could not be read) now; called on every resolution, so a server that connects or drops mid-session is seen. */
+  readonly mcpServers?: () => McpServerPosture;
+  /**
+   * Reads the qualified names (`mcp:<server>:<tool>`) of the MCP tools offered now; called on every resolution.
+   * The MCP API lists tools only asynchronously, so the Agent's wiring supplies none and an
+   * `mcp-tool-available` probe reports unsatisfied; no built-in capability declares one.
+   */
+  readonly mcpToolNames?: () => Iterable<string>;
+  /** Operator method ids the daemon serves, from the static operator contract. */
   readonly servedOperatorMethodIds?: Iterable<string>;
 }
 
@@ -42,11 +47,12 @@ export function buildProbeContext(input: CapabilityBootCheckInput): ProbeContext
   } catch {
     registeredToolNames = new Set();
   }
+  const mcp = input.mcpServers?.();
   return {
     registeredToolNames,
-    mcpServers: input.mcpServers?.servers ?? [],
-    ...(input.mcpServers?.unreadable ? { mcpServersUnreadable: input.mcpServers.unreadable } : {}),
-    mcpToolNames: new Set(input.mcpToolNames ?? []),
+    mcpServers: mcp?.servers ?? [],
+    ...(mcp?.unreadable ? { mcpServersUnreadable: mcp.unreadable } : {}),
+    mcpToolNames: new Set(input.mcpToolNames?.() ?? []),
     servedOperatorMethodIds: new Set(input.servedOperatorMethodIds ?? []),
     configValuePresent: input.configValuePresent,
     ...(input.secretPresent ? { secretPresent: input.secretPresent } : {}),
@@ -58,8 +64,8 @@ export function runCapabilityBootCheck(input: CapabilityBootCheckInput): Capabil
     homeDirectory: input.homeDirectory,
     workingDirectory: input.workingDirectory,
   });
-  // Sources are read live on each resolution: registered tools, MCP posture and
-  // served methods through the input's own getters, config and secrets by key.
+  // Registered tools, MCP posture, config and secrets are read live on each
+  // resolution; served methods come from the static operator contract.
   installCapabilityResolver(() => resolveCapabilityIndex(buildProbeContext(input), { homeDirectory: input.homeDirectory }));
   const report = refreshCapabilityIndex()!;
 

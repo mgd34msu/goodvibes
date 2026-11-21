@@ -457,6 +457,8 @@ async function fetchWithValidatedRedirects(input: {
 
     const location = response.headers.get('location');
     if (!location) return settled;
+    // A redirect that is followed or refused is never read: release its body and connection now.
+    await response.body?.cancel().catch(() => undefined);
     if (redirectCount === MAX_REDIRECTS) {
       throw new Error(`Too many redirects after ${MAX_REDIRECTS} hops`);
     }

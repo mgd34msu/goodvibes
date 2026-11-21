@@ -21,15 +21,15 @@ export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[
 export type FirstOpenTrustLevel = 'trusted' | 'restricted';
 
 /**
- * decodeFirstOpenChoice, pure mapping from a chosen selection-item id (or
- * null on Escape/enter-through) to the trust decision. Kept pure so the
- * consequence-time trust prompt's semantics (raised by trustGatedAsk, wired
- * in main.ts's trustPromptRef.requestTrustDecision) are unit-testable
- * without a live modal. Escape/enter-through (id === null) is the safe
- * default: 'restricted'.
+ * The trust decision a chosen row of the trust prompt records: 'trusted' or
+ * 'restricted' for the row of that name, null when no row was chosen (the
+ * prompt was dismissed), which records nothing and leaves the workspace
+ * undecided so the next request asks again.
  */
-export function decodeFirstOpenChoice(id: string | null): FirstOpenTrustLevel {
-  return id === 'trusted' ? 'trusted' : 'restricted';
+export function decodeFirstOpenChoice(id: string | null): FirstOpenTrustLevel | null {
+  if (id === 'trusted') return 'trusted';
+  if (id === 'restricted') return 'restricted';
+  return null;
 }
 
 /**
@@ -183,18 +183,24 @@ export function applyInitialTuiCliState(options: {
     }
     // A fork runs only after its session resumed, so bare --fork forks the last
     // session and never the new empty one.
-    return resumeSessionAndRender(commandRegistry, target, commandContext, render)
-      .then(async () => {
+    return resumeSessionAndRender(commandRegistry, target, commandContext, render).then(
+      async () => {
         if (!fork) return;
-        await commandRegistry.execute('session', ['fork'], commandContext);
+        // The session is open by now: a failed fork leaves it open as it is, so first run does not start over it.
+        try {
+          await commandRegistry.execute('session', ['fork'], commandContext);
+        } catch (error) {
+          commandContext.print(`[Fork] Resumed session ${target}, but it was not forked: ${summarizeError(error)}. Later turns are saved to ${target}; run /session fork to make a copy.`);
+        }
         render();
-      })
-      .catch((error: unknown) => {
+      },
+      (error: unknown) => {
         // A refusal (no such session, one open elsewhere) is said with its own next step, then the launch goes on as a plain one would.
-        commandContext.print(`[Resume] Could not ${fork ? 'resume and fork' : 'resume'} session ${target}: ${summarizeError(error)}`);
+        commandContext.print(`[Resume] Could not resume session ${target}: ${summarizeError(error)}`);
         render();
         runFirstRunSteps();
-      });
+      },
+    );
   } else {
     runFirstRunSteps();
   }

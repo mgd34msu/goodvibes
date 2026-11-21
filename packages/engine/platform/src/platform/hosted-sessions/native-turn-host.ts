@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { canonicalNativeConversationContinuation, captureNativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
 import { captureNativeSelectedDiffContext, selectNativeDiffHunk, NativeSelectedDiffError } from '../workflow/work-ledger/native-diff-context.js';
 import type { WorkspaceCheckpointManager } from '../workspace/checkpoint/manager.js';
-import { readlinkSync, realpathSync } from 'node:fs';
+import { readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { hostname } from 'node:os';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -15,7 +15,7 @@ import type { NativeConversationIntakeHost, NativeConversationContinuationOwner 
 import { holdsNativeOwnership, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from '../workflow/work-ledger/native-execution.js';
 import type { SharedSessionBroker } from '../control-plane/session-broker.js';
 import type { HostedSessionManager } from './manager.js';
-import { NativeHostedTurnJournal, NativeHostedTurnJournalError, isTerminalNativeHostedTurnState, type NativeHostedTurnFailure, type NativeHostedTurnIdentity, type NativeHostedTurnDispatch, type NativeHostedTurnOriginSurface } from './native-turn-journal.js';
+import { NATIVE_HOSTED_TURN_JOURNAL_LIMIT_NEXT_STEP, NativeHostedTurnJournal, NativeHostedTurnJournalError, isTerminalNativeHostedTurnState, type NativeHostedTurnClaimOwner, type NativeHostedTurnFailure, type NativeHostedTurnIdentity, type NativeHostedTurnDispatch, type NativeHostedTurnOriginSurface } from './native-turn-journal.js';
 import { nativeHostedTurnRequestSchema, nativeHostedTurnStartRequestSchema, type NativeHostedTurnRequest, type NativeHostedTurnStartRequest, type NativeHostedTurnLookup, type NativeHostedTurnSnapshot, type NativeHostedSessionLookup } from './native-turn-wire.js';
 import type { GatePresetName } from '../gate/presets.js';
 
@@ -40,8 +40,9 @@ const NEXT_STEP: Record<NativeHostedTurnErrorCode, string> = {
   'recovery-required': 'A turn on this session has no live owner on this host; cancel that turn, then continue the session.',
 };
 export class NativeHostedTurnError extends Error {
-  constructor(readonly code: NativeHostedTurnErrorCode, detail?: string) {
-    super(`Native hosted turn: ${code}. ${NEXT_STEP[code]}${detail ? ` ${detail}` : ''}`); this.name = 'NativeHostedTurnError';
+  /** `nextStep` replaces the code's usual next step when the cause names a different one. */
+  constructor(readonly code: NativeHostedTurnErrorCode, detail?: string, nextStep?: string) {
+    super(`Native hosted turn: ${code}. ${nextStep ?? NEXT_STEP[code]}${detail ? ` ${detail}` : ''}`); this.name = 'NativeHostedTurnError';
   }
 }
 
@@ -51,12 +52,43 @@ const processAlive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true; }
   catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
 };
-/** Machine and pid namespace of this process: a pid in another container or host means nothing here. */
-export const NATIVE_HOST_IDENTITY = (() => {
-  let namespace = '';
-  try { namespace = readlinkSync('/proc/self/ns/pid'); } catch { /* not Linux, or not readable: the hostname alone */ }
-  return `${hostname()}|${namespace}`;
+function readFact(read: () => string): string {
+  try { return read().trim(); } catch { return ''; }
+}
+/**
+ * Where this process runs, read once: the machine (`/etc/machine-id` on
+ * Linux, which survives a hostname change; the hostname elsewhere), the boot
+ * (`/proc/sys/kernel/random/boot_id` on Linux; empty elsewhere, where the
+ * clock-derived boot time can move with a clock step and so proves nothing),
+ * and the pid namespace (empty where there is none). These answer whether a
+ * recorded pid can still be a claim's owner: a pid on another machine or in
+ * another namespace means nothing here, and no process outlives a reboot.
+ */
+const NATIVE_HOST_FACTS = (() => {
+  const machine = readFact(() => readFileSync('/etc/machine-id', 'utf8')) || hostname();
+  return {
+    machine,
+    boot: readFact(() => readFileSync('/proc/sys/kernel/random/boot_id', 'utf8')),
+    namespace: readFact(() => readlinkSync('/proc/self/ns/pid')),
+  };
 })();
+/** The owner identity 3.4.0 recorded (`<hostname>|<pid namespace>`), to read the owner entries it wrote. */
+const LEGACY_HOST_IDENTITY = `${hostname()}|${NATIVE_HOST_FACTS.namespace}`;
+
+/**
+ * Whether the recorded owner of a claim is provably no longer running. Same
+ * machine and a different boot: ended. Same machine, boot and namespace: ended
+ * when its pid is this process's (a restarted daemon reused it) or is not
+ * alive. Another machine, or anything not recorded: not proven.
+ */
+function claimOwnerEnded(owner: NativeHostedTurnClaimOwner): boolean {
+  if (owner.instance === PROCESS_INSTANCE) return false;
+  const pidEnded = owner.pid === process.pid || !processAlive(owner.pid);
+  if (owner.machine === undefined) return owner.host === LEGACY_HOST_IDENTITY && pidEnded;
+  if (owner.machine !== NATIVE_HOST_FACTS.machine) return false;
+  if (owner.boot !== '' && NATIVE_HOST_FACTS.boot !== '' && owner.boot !== NATIVE_HOST_FACTS.boot) return true;
+  return owner.boot === NATIVE_HOST_FACTS.boot && owner.namespace === NATIVE_HOST_FACTS.namespace && pidEnded;
+}
 const BROKER_TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 export interface NativeHostedTurnOptions {
   readonly signal?: AbortSignal;
@@ -69,6 +101,13 @@ export interface NativeHostedTurnDependencies {
   readonly journalPath: string;
   readonly checkpoints?: Pick<WorkspaceCheckpointManager, 'init' | 'workspaceRoot' | 'sessionChanges' | 'diff'>;
   readonly installContinuationOwner?: (owner: NativeConversationContinuationOwner) => void;
+  /**
+   * Whether a principal can still act here (its pairing is current). A
+   * principal that cannot can never admit or replay its intake captures, so
+   * its finished turns are dropped from the shared journal without a settle.
+   * Absent: only the caller's own finished turns are dropped.
+   */
+  readonly principalCanAct?: (principalId: string) => boolean;
 }
 interface NativeTurnOwnership {
   cancelled: boolean;
@@ -220,15 +259,26 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
    * Before a claim, when the journal is near a cap, drop records that are terminal here and
    * durably settled on intake. Settling is attempted first, so a crash between a terminal
    * journal write and its intake write heals here instead of pinning the record forever.
-   * Only the caller's own principal can be read; others are kept. Never drops a live turn.
+   * Only the caller's own principal can be settled; another principal's finished turns are dropped
+   * only when that principal can no longer act (its pairing was revoked or replaced), since nobody
+   * can then admit or replay its captures. Others are kept. Never drops a live turn.
    */
   async function compactJournal(principalId: string, authority: NativePairedExecutionAuthority, options: NativeHostedTurnOptions): Promise<void> {
     if (!deps.intake.settle) return;
     const { nearCap, terminal } = await journal.census();
     if (!nearCap) return;
     const finished: NativeHostedTurnIdentity[] = [];
+    const gone = new Map<string, boolean>();
     for (const record of terminal) {
-      if (record.identity.projectId !== deps.projectId || record.identity.principalId !== principalId || active.has(keyOf(record.identity))) continue;
+      if (active.has(keyOf(record.identity))) continue;
+      const owner = record.identity.principalId;
+      if (owner !== principalId) {
+        if (!deps.principalCanAct) continue;
+        if (!gone.has(owner)) gone.set(owner, !deps.principalCanAct(owner));
+        if (gone.get(owner)) finished.push(record.identity);
+        continue;
+      }
+      if (record.identity.projectId !== deps.projectId) continue;
       if (await settleIntake(record.identity, authority, options)) finished.push(record.identity);
     }
     await journal.compact(finished, (record, owner) => active.has(keyOf(record.identity))
@@ -242,11 +292,16 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
     await previous;
     try {
       await compactJournal(identity.principalId, authority, options).catch(() => {});
-      const claimed = await journal.claim(identity, localInputs(), originSurface, { pid: process.pid, instance: PROCESS_INSTANCE, host: NATIVE_HOST_IDENTITY });
+      const claimed = await journal.claim(identity, localInputs(), originSurface, { pid: process.pid, instance: PROCESS_INSTANCE, ...NATIVE_HOST_FACTS });
       if (claimed) { active.set(keyOf(identity), owned); claimedHere.add(keyOf(identity)); reserve(); }
       return claimed;
     } catch (error) {
-      if (error instanceof NativeHostedTurnJournalError && error.code === 'surface-conflict') throw new NativeHostedTurnError('stale');
+      // Refusals raised before any claim is written: nothing was claimed, so each is answered with its next step.
+      if (error instanceof NativeHostedTurnJournalError) {
+        if (error.code === 'surface-conflict' || error.code === 'conflict') throw new NativeHostedTurnError('stale');
+        if (error.code === 'session-unresolved') throw new NativeHostedTurnError('recovery-required');
+        if (error.code === 'journal-limit') throw new NativeHostedTurnError('unavailable', undefined, NATIVE_HOSTED_TURN_JOURNAL_LIMIT_NEXT_STEP);
+      }
       throw error;
     } finally { release(); }
   }
@@ -531,8 +586,8 @@ export function createNativeHostedTurnHost(deps: NativeHostedTurnDependencies & 
       return !active.has(key) && await settleStranded(record, key);
     }
     const owner = await journal.owner(record.identity);
-    // Unknown host (a record that does not say) or another host: this machine cannot see that process, so it is kept.
-    if (!owner || owner.host !== NATIVE_HOST_IDENTITY || owner.instance === PROCESS_INSTANCE || (owner.pid !== process.pid && processAlive(owner.pid))) return false;
+    // An owner that is not recorded, or one this machine cannot prove ended (another machine, another namespace), is kept.
+    if (!owner || !claimOwnerEnded(owner)) return false;
     if (record.sessionId === null || record.brokerInputId === null) return true;
     const reservation = deps.broker.getInputsSince(record.sessionId).find(item => item.id === record.brokerInputId);
     return reservation === undefined || BROKER_TERMINAL.has(reservation.state ?? '');

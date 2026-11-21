@@ -82,32 +82,42 @@ function requestHostname(input: Parameters<typeof fetch>[0]): string {
  * A fetch that presents the Access service token to the protected daemon
  * hostname, read from the settings on every request, so a client that turns
  * Access on, or is pointed at the daemon's Cloudflare hostname, presents it
- * with no restart. Per request: three in-memory setting reads, and a URL parse
- * only while Access is on. The token is looked up once per setting change; a
- * missing one is looked up again on the next request to that host.
+ * with no restart. Per request: four in-memory setting reads, and a URL parse
+ * only while Access is on. The token is looked up again when its settings
+ * change, after a request to that host is rejected (401 or 403, so a token
+ * replaced in the secret store is picked up), and while none is stored.
  */
 export function createCloudflareAccessFetch(
   configManager: Pick<ConfigManager, 'get'>,
   secretsManager: Pick<SecretsManager, 'get' | 'getGlobalHome'> | null | undefined,
   base: typeof fetch = fetch,
 ): typeof fetch {
-  let cached: { readonly key: string; readonly credentials: Promise<CloudflareAccessCredentials | null> } | null = null;
-  const credentialsFor = (key: string): Promise<CloudflareAccessCredentials | null> => {
-    if (cached?.key === key) return cached.credentials;
+  type Entry = { readonly key: string; readonly credentials: Promise<CloudflareAccessCredentials | null> };
+  let cached: Entry | null = null;
+  const entryFor = (key: string): Entry => {
+    if (cached?.key === key) return cached;
     const credentials = resolveAccessCredentials(configManager, secretsManager).catch(() => null);
     const entry = { key, credentials };
     cached = entry;
     void credentials.then((value) => {
       if (value === null && cached === entry) cached = null;
     });
-    return credentials;
+    return entry;
   };
   const wrapped = async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]): Promise<Response> => {
     const appId = configManager.get('cloudflare.accessAppId');
     const hostname = appId ? normalizeHostname(configManager.get('cloudflare.daemonHostname')) : '';
     if (!hostname || requestHostname(input) !== hostname) return base(input, init);
-    const credentials = await credentialsFor(`${hostname}\u0000${appId}\u0000${configManager.get('cloudflare.accessServiceTokenRef')}`);
-    return credentials ? withCloudflareAccess(base, hostname, credentials)(input, init) : base(input, init);
+    const entry = entryFor([
+      hostname,
+      appId,
+      configManager.get('cloudflare.accessServiceTokenRef'),
+      configManager.get('cloudflare.accessServiceTokenId'),
+    ].join('\u0000'));
+    const credentials = await entry.credentials;
+    const response = await (credentials ? withCloudflareAccess(base, hostname, credentials)(input, init) : base(input, init));
+    if ((response.status === 401 || response.status === 403) && cached === entry) cached = null;
+    return response;
   };
   return Object.assign(wrapped, base) as typeof fetch;
 }

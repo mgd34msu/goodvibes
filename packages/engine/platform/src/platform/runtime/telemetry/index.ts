@@ -261,15 +261,22 @@ export function createTelemetryProvider(config?: TelemetryConfig, options: Telem
  * this existed the provider had no callers at all, so every mode behaved like
  * 'off'.
  *
+ * The process has one composed tracer: the first composition builds and
+ * installs it, and every later one while it is held (the daemon's hosted
+ * workspaces) is handed the same provider, so no span still open on it is
+ * cut off by a replacement. Its mode follows the first composition.
+ *
  * Returns the provider so a host that wants the meter as well can keep it.
  */
 export function installComposedTelemetry(
   featureFlags: Pick<FeatureFlagManager, 'isEnabled'>,
 ): { tracer: RuntimeTracer; meter: RuntimeMeter } {
   composedTelemetryHolders += 1;
+  if (composedTelemetryProvider !== null) return composedTelemetryProvider;
   const provider = createTelemetryProvider(undefined, { featureFlags });
   const previous = platformTracer();
   installPlatformTracer(provider.tracer);
+  composedTelemetryProvider = provider;
   // A tracer this replaces would otherwise keep spans still waiting in its exporters, unsent.
   if (previous !== provider.tracer) void previous.shutdown();
   return provider;
@@ -309,6 +316,8 @@ const instrumentedBuses = new WeakMap<RuntimeEventBus, { holders: number; readon
 
 /** Compositions that installed telemetry and have not released it. The tracer is process-wide, so it outlives all but the last. */
 let composedTelemetryHolders = 0;
+/** The provider the first holder built; later holders are handed it until the last one releases. */
+let composedTelemetryProvider: { tracer: RuntimeTracer; meter: RuntimeMeter } | null = null;
 
 /**
  * Release one composition's hold on the process tracer. Only the last release
@@ -319,6 +328,7 @@ let composedTelemetryHolders = 0;
 export async function releaseComposedTelemetry(): Promise<void> {
   composedTelemetryHolders = Math.max(0, composedTelemetryHolders - 1);
   if (composedTelemetryHolders > 0) return;
+  composedTelemetryProvider = null;
   const tracer = platformTracer();
   installPlatformTracer(null);
   await tracer.shutdown();

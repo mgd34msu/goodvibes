@@ -318,6 +318,8 @@ export const PAYMENTS_COMMAND: CommandDescription<PaymentsCommandContext> = {
         const host = hostOf();
         if (!mayOfferCardEntryFlow(host.cardEntrySurface)) throw commandRefusal(describeCardEntryRefusal(host.cardEntrySurface));
         if (!ctx.beginConcealedInput) throw commandRefusal('Hidden entry is not available on this surface, so a card cannot be typed here.', 'Use the terminal app or the web UI.');
+        // A daemon that cannot list cards cannot take one: found before any card field is asked.
+        try { await host.listCards(ctx); } catch (error) { throw commandRefusal(describeCardFailure(error, 'start')); }
         ctx.print(`Entering ${CARD_ENTRY_FIELDS.length} card fields, each hidden; Esc stops at any point. The card is sent to the selected daemon after the last one.`);
         host.promptCardFields(ctx, CARD_ENTRY_FIELDS, 0);
       },

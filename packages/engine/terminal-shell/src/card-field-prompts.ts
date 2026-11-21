@@ -209,12 +209,21 @@ export function createCardEntryPrompter<Context extends CardPromptContext>(
  * with. The daemon's own message is never passed through: a refusal can quote
  * the request, and the request held the card.
  */
-export function describeCardFailure(error: unknown, attempt: 'add' | 'remove' = 'add'): string {
+export function describeCardFailure(error: unknown, attempt: 'start' | 'add' | 'remove' = 'add'): string {
   if (error instanceof CardHostError) return error.message;
-  const unchanged = attempt === 'add' ? 'Nothing was saved' : 'Nothing was removed';
-  const rerun = attempt === 'add' ? '/payments add-card' : '/payments remove-card <card>';
   const status = failureStatus(error);
   const category = classifyFailure(error)?.category;
+  if (attempt === 'start') {
+    // The card list is read before any field is asked, so a daemon that cannot take the card is found first.
+    const why = category === 'authentication' || category === 'authorization'
+      ? 'it refused this terminal\'s credential for payments; check the selected host, its pairing and the payments scope'
+      : status === 409 ? 'its card store cannot be read; the daemon\'s log names the file to repair'
+        : status !== undefined ? 'it could not list its cards; the daemon\'s log has the reason'
+          : 'it did not answer';
+    return `Card entry did not start: the selected daemon could not take a card (${why}). Nothing was asked or sent; run /payments add-card again once it can.`;
+  }
+  const unchanged = attempt === 'add' ? 'Nothing was saved' : 'Nothing was removed';
+  const rerun = attempt === 'add' ? '/payments add-card' : '/payments remove-card <card>';
   if (status === 400 || status === 422) {
     return attempt === 'add'
       ? `The daemon rejected a card field as invalid (it needs a number with enough digits, an expiry month from 1 to 12 with a four-digit year, and a 3 or 4 digit security code). ${unchanged}; run ${rerun} to enter the card again.`

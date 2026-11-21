@@ -161,6 +161,8 @@ const CONVERSATION_REQUEST_SCHEMA = objectSchema(
     kind: enumSchema(['preview', 'rewind', 'undo']),
     /** Undo requests: the snapshot to restore the conversation from. */
     undoSnapshotId: STRING_SCHEMA,
+    /** Rewind requests: the conversation's revision the apply was confirmed against; another revision cuts nothing. */
+    expectedRevision: STRING_SCHEMA,
     expiresAt: NUMBER_SCHEMA,
   },
   ['requestId', 'sessionId', 'turnId', 'kind', 'expiresAt'],

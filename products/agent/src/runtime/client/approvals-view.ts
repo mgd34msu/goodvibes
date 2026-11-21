@@ -233,8 +233,8 @@ export function describeApprovalsUnavailable(snapshot: ApprovalsPanelSnapshot): 
   const shown = held === 0
     ? 'Nothing is shown below, and that is not the same as nothing waiting.'
     : held === 1
-      ? '1 ask raised in this process is shown below; anything waiting on the host is not.'
-      : `${held} asks raised in this process are shown below; anything waiting on the host is not.`;
+      ? '1 ask is shown below (raised in this process or pushed from the host since); other asks waiting on the host may not be.'
+      : `${held} asks are shown below (raised in this process or pushed from the host since); other asks waiting on the host may not be.`;
   return `Approvals on the connected host could not be read: ${reason} ${shown}`;
 }
 
@@ -332,7 +332,11 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
         });
         for (const record of pushed.values()) merged = applyApprovalUpdate(merged, record);
         hostRows = merged;
+        const wasRead = hostReason === null;
         hostReason = reason;
+        // With the stream open, the timer runs only while the list is unread:
+        // start it when a read fails, stop it once one succeeds.
+        if (started && liveUpdates && wasRead !== (reason === null)) armTimer();
         return build(hostRows, hostReason);
       })
       .finally(() => {
@@ -349,8 +353,10 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
     if (!started) return;
     if (timer !== null) clearInterval(timer);
     timer = null;
-    // While the stream is open it carries every transition; nothing re-reads on a timer.
-    if (liveUpdates) return;
+    // While the stream is open it carries every transition, so nothing re-reads on
+    // a timer once the list has been read; until a list read succeeds the list
+    // keeps being re-read at the same cadence.
+    if (liveUpdates && hostReason === null) return;
     timer = setInterval(() => { void tick(); }, pollIntervalMs);
     timer.unref?.();
   };
@@ -381,9 +387,9 @@ export function createApprovalsView(options: ApprovalsViewOptions): ApprovalsVie
         // leaves the moment anyone decides it, on any surface.
         hostRows = applyApprovalUpdate(hostRows, record);
         pushedDuringRead?.set(record.id, record);
-        // A transition arriving IS a successful read of the daemon's record,
-        // so a view whose first poll had failed stops claiming it is blind.
-        hostReason = null;
+        // A frame carries one approval, not the host's list: asks already
+        // pending that no frame has named stay unread, so only a successful
+        // list read clears the reason.
       },
       onTerminate: () => {
         terminated = true;

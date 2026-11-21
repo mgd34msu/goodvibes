@@ -47,7 +47,9 @@ export type DaemonExpectationToken =
 
 /** Where one daemon expectation stands, as `email.expectation.wait` answers. */
 export interface DaemonExpectationState {
-  readonly state: 'waiting' | 'arrived' | 'expired' | 'capability-lost' | 'cancelled' | 'unknown';
+  readonly state: 'waiting' | 'arrived' | 'expired' | 'capability-lost' | 'cancelled' | 'replaced' | 'unknown';
+  /** With `replaced`: the id of the expectation that replaced this one. */
+  readonly replacedBy?: string | undefined;
   readonly expectation?: { readonly id: string; readonly serviceDomain: string; readonly recipientAddress: string; readonly expiresAt: string; readonly remainingMs?: number | undefined } | undefined;
   readonly token?: DaemonExpectationToken | undefined;
   readonly detail?: string | undefined;
@@ -97,6 +99,9 @@ export function describeDaemonExpectationState(id: string, result: DaemonExpecta
   }
   if (result.state === 'unknown') return { ok: false, text: `No verification expectation ${id} is open or remembered by the daemon. Open one with accounts action:"alias".` };
   if (result.state === 'cancelled') return { ok: false, text: `Verification expectation ${id} for ${domain} was cancelled.` };
+  if (result.state === 'replaced') {
+    return { ok: false, text: `Verification expectation ${id} for ${domain} was replaced by a newer one for the same address${result.replacedBy === undefined ? '' : `; call google action:"mail.verification" expectationId:"${result.replacedBy}" to wait on it`}.` };
+  }
   return { ok: false, text: `${result.detail ?? `Verification expectation ${id} for ${domain} ended (${result.state}).`}${watching}` };
 }
 

@@ -347,7 +347,7 @@ A profile is an isolated Agent home: its own settings, sessions, VIBE.md, memory
 | `profiles templates export <id> <path> [--include-vibe] --yes`, `profiles templates import <path> --yes` | Move a starter template. |
 | `profiles templates from-discovered <id> [--include-vibe] [--replace] --yes`, `profiles create-from-discovered <name> --yes` | Build a starter or a profile from the current personas, skills and routines. |
 
-Built-in templates: `household`, `research`, `travel`, `operations`, `personal-productivity`. Each seeds one persona, two skills and one routine.
+Built-in templates: `household`, `research`, `travel`, `operations`, `personal-productivity`. Each seeds one persona, two skills and one routine. A local or imported template's persona, skills and routines are held for review, and its VIBE text is written as `VIBE.md.pending` (not read) until it is renamed to `VIBE.md`.
 
 ```text
 $ goodvibes-agent profiles create household --template household
@@ -393,7 +393,7 @@ An Agent skill is a stored procedure the Agent can follow, with optional require
 
 | Form | Effect |
 | --- | --- |
-| `skills list`, `skills enabled`, `skills active`, `skills attention`, `skills search <query>`, `skills show <id>` | Read; `attention` lists skills with missing requirements or review work. |
+| `skills list`, `skills enabled`, `skills active`, `skills attention`, `skills search <query>`, `skills show <id>` | Read; `active` lists the skills and bundles applied to turns (enabled or in an applied bundle, reviewed and setup-ready; a bundle also needs every member reviewed); `attention` lists skills with missing requirements or review work. |
 | `skills create --name <name> --description <summary> --procedure <steps> [--tags a,b] [--triggers a,b] [--requires-env A,B] [--requires-command gh,jq] [--enabled]` | Create one. |
 | `skills update <id> [...]`, `skills enable <id>`, `skills disable <id>`, `skills review <id>`, `skills stale <id> <reason>`, `skills delete <id> --yes` | Manage one. |
 | `skills discover`, `skills import-discovered <name> [--enabled] --yes` | Import skills found on this machine. |
@@ -485,10 +485,10 @@ Agent Knowledge is the Agent's own knowledge store on the connected host, under 
 | `knowledge list [--kind sources|nodes|issues] [--limit <n>]`, `knowledge get <id>`, `knowledge map [query] [--limit <n>]` | Read. |
 | `knowledge connectors [connectorId|doctor <connectorId>]` | Ingest connectors and their checks. |
 | `knowledge ingest-url <url> [--title <title>] [--tags a,b] --yes` | Ingest a page. |
-| `knowledge ingest-file <path> [--title <title>] [--tags a,b] --yes` | Ingest a file inside the workspace; its bytes are sent, so a remote host ingests exactly that file. |
+| `knowledge ingest-file <path> [--title <title>] [--tags a,b] --yes` | Ingest a file on this machine; it is read here and its bytes are sent, so a remote host ingests exactly that file. A file that cannot be read exits `1` with nothing sent. |
 | `knowledge ingest-artifact <artifactId> [--title <title>] [--tags a,b] --yes` | Ingest a saved artifact. |
-| `knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] --yes` | Ingest through a connector. |
-| `knowledge import-urls <path> --yes`, `knowledge import-bookmarks <path> --yes`, `knowledge import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] --yes` | Bulk import (browser history is capped at 500 rows). Exits `0` only when every item was imported; a partial batch exits `1` and lists each failed item with its reason (JSON: `outcome.failed`). `--browsers` and `--sources` left out read every installed browser and both kinds. |
+| `knowledge ingest-connector <connectorId> [--input <json-or-text>|--path <path>|--content <text>] --yes` | Ingest through a connector; a `--path` file is read here and sent as the connector's content. |
+| `knowledge import-urls <path> --yes`, `knowledge import-bookmarks <path> --yes`, `knowledge import-browser-history [--browsers chrome,firefox] [--sources history,bookmark] --yes` | Bulk import (browser history is capped at 500 rows). Exits `0` only when every item was imported; a partial batch exits `1` and lists each failed item with its reason (JSON: `outcome.failed`). `--browsers` and `--sources` left out read every installed browser and both kinds. A URL or bookmarks list is read here and sent as its content, never as a path the host opens. `--home <dir>` (a browser profile home) is refused with exit `2` when the knowledge host is another machine. |
 | `knowledge reindex --yes` | Rebuild the index. |
 
 Options that would target another space (`--space`, `--knowledge-space`, `--knowledge-space-id`, `--include-all-spaces`) are refused.
@@ -578,7 +578,7 @@ GoodVibes Agent browser
 #### `goodvibes-agent relay` and `fleet`
 
 `relay status` reads the connected host's relay registration and the Agent's imported `relay.*` settings; `relay pair [name]` mints the payload one phone scans to reach the host through the relay, carrying a relay code for that phone alone; `relay codes` lists the phones' relay codes (id, name, created, last used; never the code) and `relay revoke <id>` cuts one phone off the relay at its next request while every other keeps working.
-`fleet attempts list [--workstream <id>]` lists best-of-N attempt groups held for a winner pick; `fleet attempts judge <groupId>` asks the judge model to propose a winner (labelled as a proposal); `fleet attempts pick <groupId> <winnerItemId> --yes` merges the winner and removes the losing worktrees, waiting up to ten seconds for each and reporting it as seen: cleaned, still cleaning (with `git worktree list` to check), or not cleaned with the reason (a worktree holding work that exists nowhere else is kept); a loser that was not cleaned makes the command exit 1.
+`fleet attempts list [--workstream <id>]` lists best-of-N attempt groups held for a winner pick; `fleet attempts judge <groupId>` asks the judge model to propose a winner (labelled as a proposal); `fleet attempts pick <groupId> <winnerItemId> --yes` merges the winner and removes the losing worktrees, waiting up to ten seconds for each and reporting it as seen: cleaned, still cleaning (with `git worktree list` to check), or not cleaned with the reason (a worktree holding work that exists nowhere else is kept); a loser that was not cleaned makes the command exit 1. A pick that times out, gets a 5xx or loses its connection is reported as `fleet_attempts_outcome_unknown` (exit 1): the winner may already be merged, so run `fleet attempts list` first; a group no longer listed was picked. `connected_host_unavailable` is used only when no request reached the host.
 Both need the connected host; without it they print the reason and exit `1`.
 
 #### `goodvibes-agent compat` (alias `compatibility`)
@@ -650,7 +650,7 @@ Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`)
 `/agents open`, `Ctrl+O` and `F2` (and a click on the running indicator) open Your agents, the same panel as the terminal app's (see "Views" there): waiting rows first, one line per running agent, the agents finished this session, `Scheduled`, and `Background services  N healthy ›` (`b` opens it; an unhealthy service is listed by itself). `Enter` opens an agent full screen, where the composer steers it (a background process opens in the process monitor when it cannot open full screen), `s` stops it (asks first), `n` hosts a coding agent found on `PATH` on the connected host. It reads this process's agents and the connected host's. Notices that used to collect in the Activity view's recent list are in the notices (`Ctrl+N`, `/notifications`), as in the terminal app. The calendar events the Activity view listed as coming up are in `/calendar upcoming`; on a day with events the panel shows `N events today ›` under `Scheduled`, and `Enter` on it prints `/calendar upcoming --days 1`.
 `/brief` (one action) prints a briefing with next actions: the model in use, what is ready (including spoken replies and whether this device is paired with its host), the work plan and schedules.
 `/context files` lists the project instruction files (AGENTS.md, CLAUDE.md and the like) read into each turn, any cut short and any held back with why; `/context given` shows what the last turns were given (memories, persona, skills, routines, what was left out, roughly how many tokens). `/tasks processes` lists the commands running in the background and whether a running one can be given input, a terminal or sudo. The terminal app refuses these three with the reason.
-The `/setup` topic's "Import GoodVibes settings" row reads the terminal app's settings once, shows the plan (counts per family, every permission and provider change, sign-ins by name) and asks in the confirm dialog; "Import them" writes exactly that plan, and previous values are saved to `~/.goodvibes/agent/settings-import-undo.json`.
+The `/setup` topic's "Import GoodVibes settings" row reads the terminal app's settings once, shows the plan (counts per family, every permission and provider change, sign-ins by name) and asks in the confirm dialog; "Import them" writes exactly that plan, and the previous setting values are appended to `~/.goodvibes/agent/settings-import-undo.json` (`{ version, imports: [{ createdAt, settings }] }`, oldest first, so each import can be reversed in order). Replaced provider sign-ins are not kept; sign in again to restore one.
 
 ## The Agent's slash commands
 

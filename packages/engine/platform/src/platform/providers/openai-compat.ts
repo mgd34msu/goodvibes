@@ -158,6 +158,12 @@ export interface OpenAICompatOptions {
   modelsAsOf?: string | undefined;
   /** On-disk cache path for live-discovered model lists (TTL cached). */
   modelsCachePath?: string | undefined;
+  /**
+   * How this backend caches prompts, when the caller knows it from something
+   * other than the name (a discovered server's type); otherwise the name's
+   * row in the cache capability table.
+   */
+  cacheCapability?: ProviderCacheCapability | undefined;
 }
 
 /**
@@ -248,7 +254,8 @@ export class OpenAICompatProvider implements LLMProvider {
   private embeddingModel: string;
   private readonly configured: boolean;
   private reasoningFormat: NonNullable<OpenAICompatOptions['reasoningFormat']>;
-  private cacheCapability: ProviderCacheCapability;
+  /** How this backend caches prompts; the capability registry reports it as this provider's caching. */
+  readonly cacheCapability: ProviderCacheCapability;
   private readonly authEnvVars: readonly string[];
   private readonly serviceNames: readonly string[];
   private readonly subscriptionProviderId?: string | undefined;
@@ -296,7 +303,7 @@ export class OpenAICompatProvider implements LLMProvider {
     this.embeddingModel = opts.embeddingModel ?? opts.defaultModel;
     this.configured = opts.authConfigured ?? Boolean(opts.apiKey);
     this.reasoningFormat = opts.reasoningFormat ?? 'none';
-    this.cacheCapability = getCacheCapability(opts.name);
+    this.cacheCapability = opts.cacheCapability ?? getCacheCapability(opts.name);
     this.authEnvVars = opts.authEnvVars ?? [];
     this.serviceNames = opts.serviceNames ?? [];
     this.subscriptionProviderId = opts.subscriptionProviderId;

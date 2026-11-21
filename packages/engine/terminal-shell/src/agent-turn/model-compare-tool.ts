@@ -226,27 +226,29 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
           );
           const comparison = await loadComparisonFromArtifact(deps.artifactStore, artifactId);
           if (comparison) {
-            const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds, previewBytes);
+            const reveal = readFlag(args.reveal, 'reveal', false);
+            const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds, reveal, previewBytes);
             rememberComparison(comparisons, comparison);
             return output(formatSideBySideReview({
               sourceKind: 'comparison',
               sourceArtifactId: artifactId,
               comparisonId: comparison.comparisonId,
               comparison,
-              reveal: readFlag(args.reveal, 'reveal', false),
+              reveal,
               relatedArtifacts,
               previewBytes,
             }));
           }
           const judgment = await loadJudgmentFromArtifact(deps.artifactStore, artifactId);
           if (!judgment) return failure('Unknown comparison or judgment artifact. Pass a saved blind model comparison artifactId.');
-          const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds, previewBytes);
+          const judgmentReveal = readFlag(args.reveal, 'reveal', false) && judgment.revealIncludedInJudgment;
+          const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds, judgmentReveal, previewBytes);
           return output(formatSideBySideReview({
             sourceKind: 'judgment',
             sourceArtifactId: artifactId,
             comparisonId: judgment.comparisonId,
             judgment,
-            reveal: readFlag(args.reveal, 'reveal', false) && judgment.revealIncludedInJudgment,
+            reveal: judgmentReveal,
             relatedArtifacts,
             previewBytes,
           }));
@@ -532,7 +534,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
                 'This operation requires current recorded effect admission.',
               ].join('\n'));
             }
-            const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds);
+            const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds, reveal);
             const artifact = await saveComparisonHandoffArtifact({
               artifactStore: deps.artifactStore,
               sourceArtifactId: artifactId,
@@ -576,7 +578,7 @@ export function createAgentModelCompareTool(sourceDeps: AgentModelCompareToolDep
               'This operation requires current recorded effect admission.',
             ].join('\n'));
           }
-          const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds);
+          const relatedArtifacts = await loadHandoffRelatedArtifacts(deps.artifactStore, relatedArtifactIds, reveal);
           const artifact = await saveComparisonHandoffArtifact({
             artifactStore: deps.artifactStore,
             sourceArtifactId: artifactId,

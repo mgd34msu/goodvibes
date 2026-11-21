@@ -17,7 +17,7 @@
  */
 
 import { realpathSync } from 'node:fs';
-import { relative, resolve, sep } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { CapturedExecAuthority } from './captured-exec.js';
 import type { ExecCommandResult } from './schema.js';
 import { decideExecContainment, type ExecContainmentRequirement } from './containment.js';
@@ -83,7 +83,8 @@ export function sandboxWorkspaceRefusal(
   if (!plan?.sandboxed || !policy.workspaceRoot) return null;
   const root = realOrResolved(policy.workspaceRoot);
   const rel = relative(root, realOrResolved(workingDirectory));
-  if (rel === '' || (!rel.startsWith('..') && !rel.split(sep).includes('..') && !rel.startsWith(sep))) return null;
+  // A first segment such as '..cache' is a folder inside the root; only '..' itself leaves it.
+  if (rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`))) return null;
   return refusedResult(
     cmdStr,
     `Command refused: working_dir '${workingDirectory}' is outside this session's project root '${policy.workspaceRoot}', `

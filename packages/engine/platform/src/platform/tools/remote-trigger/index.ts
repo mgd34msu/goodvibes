@@ -107,9 +107,12 @@ export function createRemoteTool(registry: RemoteRunnerRegistry, options: Remote
         if (!registry.listContracts().some((contract) => contract.runnerId === input.runnerId)) {
           return { success: false, error: `Unknown runner: ${input.runnerId}. Nothing was assigned. Use mode=contracts to see the runners that can be assigned.` };
         }
+        const previousPoolId = registry.getContract(input.runnerId)?.poolId;
         const pool = registry.assignRunnerToPool(input.poolId, input.runnerId);
         if (!pool) return { success: false, error: `Pool ${input.poolId} is full (maxRunners ${target.maxRunners ?? 'unset'}); ${input.runnerId} was not assigned. Unassign a runner first or use another pool.` };
-        return { success: true, output: JSON.stringify(pool) };
+        // A runner is in one pool at a time: movedFrom names the pool it left.
+        const movedFrom = previousPoolId !== undefined && previousPoolId !== input.poolId ? previousPoolId : undefined;
+        return { success: true, output: JSON.stringify({ pool, ...(movedFrom !== undefined ? { movedFrom } : {}) }) };
       }
 
       if (input.mode === 'unassign') {

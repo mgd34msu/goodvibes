@@ -70,7 +70,7 @@ The command is `/todo`, the same in the Agent. `/todo` alone opens its list of a
 | --- | --- |
 | `/todo open` | Open the to-do panel |
 | `/todo add <title> [--owner <for whom>] [--notes <notes>] [--source <where it came from>]` | Add an item; `/todo add` alone opens the form |
-| `/todo edit <item> <title> [--owner ...] [--notes ...] [--source ...]` | Change an item; `/todo edit <item>` alone opens the form with the item chosen |
+| `/todo edit <item> <title> [--owner ...] [--notes ...] [--source ...]` | Change an item; `/todo edit <item>` alone opens the form with the item chosen. A detail left out stays as it is; `-` clears it (`--owner -`) |
 | `/todo list` | Print the list |
 | `/todo markdown` | Print the list rendered as Markdown |
 | `/todo export` | Write that same Markdown rendering to a file under `~/.goodvibes/tui/work-plans/` and print its path |

@@ -61,7 +61,10 @@ function readRows(output: unknown): readonly ScheduleRow[] {
       timing: scheduleTimingWords(job.schedule),
       next: enabled ? whenLabel(typeof job.nextRunAt === 'number' ? job.nextRunAt : null) : '',
       prompt,
-      outcome: job.lastOutcome === 'failed' || job.lastOutcome === 'not-delivered' ? `last run ${String(job.lastOutcome).replace('-', ' ')}` : '',
+      outcome: job.lastOutcome === 'failed' ? 'last run failed'
+        : job.lastOutcome === 'not-delivered' ? 'last run not delivered'
+          : job.lastOutcome === 'partly-delivered' ? 'last run delivered to some, not all'
+            : '',
     };
   }).filter((row) => row.id);
 }

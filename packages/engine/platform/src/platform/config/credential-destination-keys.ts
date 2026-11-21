@@ -8,9 +8,10 @@
  * value) or clear it. The Agent's settings tool refuses these keys outright
  * (gate/policy/agent-settings-refusals.ts): only the owner moves a credential.
  *
- * `judgment.fallbacks` is a destination whose credential lives inside each
- * target (`keySource`/`keyName` beside `endpoint`), so every write of the chain
- * states each target's credential with its endpoint; it has no separate key.
+ * `judgment.fallbacks` and `surfaces.email.inbound.mailboxes` are destinations
+ * whose credential lives inside each entry (`keySource`/`keyName` beside
+ * `endpoint`; `passwordRef` beside `host`), so every write of the list states
+ * each entry's credential with its destination; they have no separate key.
  */
 import { refusal, type Refusal } from '@goodvibes/engine/errors';
 
@@ -30,6 +31,14 @@ function surface(credentialKey: string): CredentialDestination {
   return { credentialKeys: [credentialKey], configured: nonEmpty(credentialKey) };
 }
 
+/** A destination any of several credential settings is sent to; configured when any of them is. */
+function anyOf(credentialKeys: readonly string[]): CredentialDestination {
+  return { credentialKeys, configured: (get) => credentialKeys.some(key => nonEmpty(key)(get)) };
+}
+
+/** The mail passwords a mail host setting receives as the login password: the shared one and the IMAP and SMTP ones. */
+const MAIL_PASSWORDS = ['surfaces.email.password', 'surfaces.email.imap.password', 'surfaces.email.smtp.password'] as const;
+
 /** A setting that names where a stored credential is sent, and the settings that name that credential. */
 export const CREDENTIAL_DESTINATIONS: Readonly<Record<string, CredentialDestination>> = Object.freeze({
   'judgment.endpoint': {
@@ -47,6 +56,11 @@ export const CREDENTIAL_DESTINATIONS: Readonly<Record<string, CredentialDestinat
   'surfaces.bluebubbles.serverUrl': surface('surfaces.bluebubbles.password'),
   'surfaces.mattermost.baseUrl': surface('surfaces.mattermost.botToken'),
   'surfaces.matrix.homeserverUrl': surface('surfaces.matrix.accessToken'),
+  'surfaces.email.host': anyOf(MAIL_PASSWORDS),
+  'surfaces.email.imap.host': anyOf(MAIL_PASSWORDS),
+  'surfaces.email.smtp.host': anyOf(['surfaces.email.smtp.password', 'surfaces.email.password']),
+  'surfaces.email.inbound.mailboxes': { credentialKeys: [], configured: () => false },
+  'surfaces.msteams.serviceUrl': surface('surfaces.msteams.appPassword'),
 });
 
 /** Whether `key` names where a stored credential is sent. */

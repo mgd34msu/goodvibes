@@ -188,6 +188,26 @@ export function parseMultistatus(xml: string): DavMultistatusEntry[] {
   }
 }
 
+/**
+ * True when `xml` is a WebDAV multistatus document: its root element is
+ * `multistatus` in the `DAV:` namespace. An HTML page or any other body is
+ * not, even when the HTTP status was 2xx; a well-formed empty
+ * `<multistatus/>` is.
+ */
+export function isMultistatusDocument(xml: string): boolean {
+  if (typeof xml !== 'string') return false;
+  const body = xml
+    .replace(/^﻿/, '')
+    .replace(/<\?[\s\S]*?\?>/g, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<!DOCTYPE[^>]*>/gi, '')
+    .trimStart();
+  const root = /^<(?:([A-Za-z0-9_.-]+):)?multistatus(\s[^>]*?)?\/?>/.exec(body);
+  if (!root) return false;
+  const declaration = root[1] === undefined ? 'xmlns' : `xmlns:${root[1]}`;
+  return new RegExp(`\\s${escapeRegExp(declaration)}\\s*=\\s*(["'])DAV:\\1`).test(root[2] ?? '');
+}
+
 /** True when a parsed `resourcetype` prop value (comma-joined local names) denotes a calendar collection. */
 export function isCalendarResourceType(resourceTypeValue: string | undefined): boolean {
   if (!resourceTypeValue) return false;

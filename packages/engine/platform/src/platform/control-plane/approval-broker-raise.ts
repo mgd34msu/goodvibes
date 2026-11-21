@@ -48,6 +48,7 @@ import type {
   SharedApprovalRecord,
 } from './approval-broker.js';
 import { isOpenApprovalStatus, type ApprovalRequester } from './approval-lifecycle.js';
+import { ordinaryApprovalDecision } from './approval-disposition.js';
 import { logger } from '../utils/logger.js';
 import { assertPermissionActive } from '../permissions/cancellation.js';
 import { currentGuestChannel } from '../security/turn-boundary.js';
@@ -232,6 +233,17 @@ export async function raiseSharedApproval(
       // A wire raiser's hold is part of the record, so a restart keeps it and its receipt can be read.
       const held = await deps.addHold(approval.id, holdId);
       if (held) approval = held;
+      else {
+        // The ask settled while the hold waited for the write queue: hand back its decision, with no hold to release.
+        const settled = deps.approvals.get(approval.id);
+        if (settled && !isOpenApprovalStatus(settled.status) && settled.decision) {
+          return { approval: settled, coalesced: true, decision: Promise.resolve(ordinaryApprovalDecision(settled.decision)) };
+        }
+        // Settled and already pruned from the map: its waiters are gone, so there is nothing to join.
+        if (deps.pendingResolvers.get(approval.id) !== existing.pending) {
+          return { approval, coalesced: true, decision: Promise.resolve({ approved: false, remember: false }) };
+        }
+      }
     }
     return {
       approval,

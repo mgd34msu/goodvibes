@@ -94,9 +94,9 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
     constValue: 'json',
     summary: 'Shorthand for --output json.',
   },
-  { tokens: ['--just-vibes'], field: 'permissionMode', kind: 'const', constValue: 'just-vibes', summary: 'Work without interrupting you for this launch: anything that needs you is held and listed at the end (permissions.mode just-vibes).' },
+  { tokens: ['--just-vibes'], field: 'permissionMode', kind: 'const', constValue: 'just-vibes', exclusive: true, summary: 'Work without interrupting you for this launch: anything that needs you is held and listed at the end (permissions.mode just-vibes).' },
   // --no-worries-just-vibes is kept as an unlisted spelling of --yolo.
-  { tokens: ['--yolo', '--no-worries-just-vibes'], unlistedTokens: ['--no-worries-just-vibes'], field: 'permissionMode', kind: 'const', constValue: 'yolo', summary: 'Run every action without safety denials for this launch (permissions.mode yolo).' },
+  { tokens: ['--yolo', '--no-worries-just-vibes'], unlistedTokens: ['--no-worries-just-vibes'], field: 'permissionMode', kind: 'const', constValue: 'yolo', exclusive: true, summary: 'Run every action without safety denials for this launch (permissions.mode yolo).' },
   { tokens: ['--no-alt-screen'], field: 'noAltScreen', kind: 'boolean', summary: 'Do not use the terminal alt screen.' },
   { tokens: ['--open'], field: 'open', kind: 'boolean', summary: 'Open a browser window for the web surface.' },
   { tokens: ['--continue'], field: 'continueLast', kind: 'boolean', summary: 'Resume the last conversation.' },

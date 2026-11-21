@@ -29,11 +29,11 @@ import {
   type SandboxSessionRegistry,
 } from '@goodvibes/engine/platform/platform/runtime/sandbox';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
-import { commandRefusal } from './command-confirmation.js';
+import { commandRefusal, refuseModelWriteOutsideWorkingDirectory } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { ActionDescription, CommandActionContext, CommandReport, InputDescription } from './command-actions/types.js';
-import { choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
+import { REPLACE_FILE_INPUT, choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
 
 type AttackPathInput = Parameters<typeof buildMcpAttackPathReview>[0];
 
@@ -96,11 +96,6 @@ const SANDBOX_SESSIONS = defineList<CommandActionContext>({
 });
 
 const PATH_INPUT = (help: string): InputDescription => textInput({ id: 'path', label: 'File', help, why: 'a file path', kind: 'path', typed: { position: 1 } });
-const REPLACE_INPUT: InputDescription = choiceInput({
-  id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
-  choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
-  optional: { default: 'no', means: 'keep it and stop' },
-});
 const SESSION_INPUT: InputDescription = {
   id: 'session', label: 'Sandbox session', help: 'The sandbox sessions started here', kind: 'choice',
   choices: { list: SANDBOX_SESSIONS, allowOther: { reason: 'a session id' } }, required: true, typed: { position: 1 },
@@ -245,7 +240,7 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
     },
     {
       id: 'save-trust', label: 'Save the trust summary to a file', word: 'save-trust',
-      inputs: [PATH_INPUT('Where to write it; only you can read it'), REPLACE_INPUT],
+      inputs: [PATH_INPUT('Where to write it; only you can read it'), REPLACE_FILE_INPUT],
       sentence: 'The trust summary (secret names, not values) will be written to {path}, until you change it.',
       done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
       operator: { terminalOnly: 'The file is written on the terminal app\'s machine.' }, example: { path: 'trust-review.json' },
@@ -465,12 +460,14 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
     }),
     {
       id: 'save-sandbox', label: 'Save a sandbox session\'s record to a file', word: 'save-sandbox',
-      inputs: [SESSION_INPUT, { ...PATH_INPUT('Where to write it'), typed: { position: 2 } }],
+      inputs: [SESSION_INPUT, { ...PATH_INPUT('Where to write it'), typed: { position: 2 } }, REPLACE_FILE_INPUT],
       sentence: 'The record of sandbox session {session} will be written to {path}, until you change it.',
       done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
       operator: TERMINAL_SESSIONS, example: { session: 'sbx-1a2b', path: 'sandbox-session.json' },
       async run(values, ctx) {
         const target = policy.resolvePath(ctx, values.path!);
+        refuseModelWriteOutsideWorkingDirectory(ctx, policy.resolvePath(ctx, '.'), target);
+        if (existsSync(target) && values.replace !== 'yes') throw commandRefusal(`${target} already exists; nothing was written.`, `Write over it: /security save-sandbox ${values.session} ${values.path} --replace`);
         sessions(ctx).exportArtifact(values.session!, target, policy.sandboxConfig(ctx));
         return `Saved the record of sandbox session ${values.session} to ${target}.`;
       },

@@ -73,6 +73,7 @@ const AUDIT_ACTIONS = new Set<DistributedRuntimeAuditRecord['action']>([
   'work-failed',
   'work-cancelled',
   'work-expired',
+  'work-requeued',
 ]);
 
 
@@ -411,7 +412,8 @@ export function requeueDistributedExpiredClaims(state: DistributedRuntimeManager
     const leaseLapsed = item.status === 'claimed' && item.leaseExpiresAt !== undefined && item.leaseExpiresAt <= now;
     if (!deadlinePassed && !leaseLapsed) continue;
     const requeues = readRequeueCount(item) + (leaseLapsed ? 1 : 0);
-    if (deadlinePassed || requeues > MAX_DISTRIBUTED_WORK_REQUEUES) {
+    const settles = deadlinePassed || requeues > MAX_DISTRIBUTED_WORK_REQUEUES;
+    if (settles) {
       if (!distributedWorkLifecycle.can(item.status, 'expired')) continue;
       const settled: DistributedPendingWork = {
         ...item,
@@ -447,12 +449,12 @@ export function requeueDistributedExpiredClaims(state: DistributedRuntimeManager
     }
     recordDistributedRuntimeAudit(state, {
       id: `drt-audit-${workId}-${now}`,
-      action: 'work-expired',
+      action: settles ? 'work-expired' : 'work-requeued',
       actor: 'distributed-runtime',
       peerId: item.peerId,
       workId,
       createdAt: now,
-      note: item.command,
+      note: settles ? item.command : `${item.command}: lease lapsed (${requeues} of ${MAX_DISTRIBUTED_WORK_REQUEUES}); offered again`,
       metadata: {},
     });
     const peer = state.peers.get(item.peerId);

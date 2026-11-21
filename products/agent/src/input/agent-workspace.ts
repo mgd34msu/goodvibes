@@ -202,10 +202,18 @@ export class AgentWorkspace {
     if (this.actionSearchActive) return this.actionSearchResults.map((result) => result.action);
     const base = this.selectedCategory.actions.filter((action) => isAgentWorkspaceActionVisible(this.context, action)
       && (!this._onlyActionIds || this._onlyActionIds.has(action.id)));
-    if (shouldShowOnboardingFinishFooter(this.selectedCategory, base, this._onlyGroup === 'ONBOARDING' ? this._onboardingState?.readyToChat : undefined)) {
+    if (shouldShowOnboardingFinishFooter(this.selectedCategory, base, this.onboardingReadyToChat)) {
       return [...base, ONBOARDING_COMPLETE_SYNTHETIC_ACTION];
     }
     return base;
+  }
+
+  /**
+   * Whether setup can finish now (a model answers), the one rule the finish row and
+   * Apply & close both follow; undefined when no onboarding state is known.
+   */
+  get onboardingReadyToChat(): boolean | undefined {
+    return this._onlyGroup === 'ONBOARDING' ? this._onboardingState?.readyToChat : undefined;
   }
 
   get selectedAction(): AgentWorkspaceAction | null {

@@ -65,6 +65,10 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
   const threadName = readString(thread?.name);
 
   const providerMessageId = readString(message?.name);
+  // Google marks a one-to-one space with the app as DM (space.type, or spaceType
+  // DIRECT_MESSAGE with singleUserBotDm); the policy and the binding both read
+  // this one test, and a thread inside that space is a thread of a direct message.
+  const direct = googleChatDirect(space);
   const outcome = await runSurfaceMessage(context, {
     ingress: {
       surface: 'google-chat',
@@ -73,7 +77,8 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
       groupId: spaceName,
       threadId: threadName,
       workspaceId: readString(payload.hostApp),
-      conversationKind: threadName ? 'thread' : 'channel',
+      conversationKind: threadName ? 'thread' : direct ? 'direct' : 'channel',
+      ...(direct ? { parentConversationKind: 'direct' as const } : {}),
       text,
       mentioned: googleChatMentioned(payload, message, space),
       metadata: {
@@ -94,9 +99,8 @@ export async function handleGoogleChatSurfaceWebhook(req: Request, context: Surf
         eventType,
         userName: readString(user?.name),
         // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
-        // Google marks a one-to-one space with the app as DM (space.type, or spaceType DIRECT_MESSAGE with singleUserBotDm).
         ...(readString(user?.name) ? { userId: readString(user?.name) } : {}),
-        conversationKind: threadName ? 'thread' : googleChatDirect(space) ? 'direct' : 'channel',
+        conversationKind: threadName ? 'thread' : direct ? 'direct' : 'channel',
       },
     },
     text,

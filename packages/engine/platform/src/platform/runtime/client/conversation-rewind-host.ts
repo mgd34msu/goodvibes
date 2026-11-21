@@ -79,6 +79,8 @@ interface HostRequest {
   readonly turnId: string | null;
   readonly kind: 'preview' | 'rewind' | 'undo';
   readonly undoSnapshotId?: string;
+  /** Rewind requests: the revision the apply was confirmed against; the port cuts nothing when the conversation moved on. */
+  readonly expectedRevision?: string;
   readonly expiresAt: number;
 }
 
@@ -249,7 +251,7 @@ export function createConversationRewindHost(options: ConversationRewindHostOpti
       return { messagesToDrop: preview.messagesToDrop, messagesRemaining: preview.messagesRemaining,
         ...(preview.revision ? { revision: preview.revision } : {}) };
     }
-    const outcome = await options.port.rewind(anchor);
+    const outcome = await options.port.rewind(anchor, request.expectedRevision);
     if (outcome.available === false) return isCurrent(offer) ? unavailable(outcome.unavailableReason) : undefined;
     // The conversation has been cut. The daemon owns the record of that and is
     // waiting for the dropped count and the undo handle, so the outcome is

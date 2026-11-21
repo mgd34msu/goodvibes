@@ -7,6 +7,7 @@ import { Select } from "../ui/Select";
 import { Input } from "../ui/Field";
 import { Button } from "../ui/Button";
 import { formatError } from "../../lib/errors";
+import { OwnerApprovalPendingError } from "../../lib/owner-approval";
 
 /** Writes settings that belong together as one update (config.setMany). */
 export type CommitSettings = (entries: readonly (readonly [string, unknown])[]) => Promise<void>;
@@ -36,8 +37,11 @@ export function JudgmentModelField({
     setError("");
     try {
       await onCommit(model);
-    } catch {
-      setError("Unable to save the decision model. Check the settings connection.");
+    } catch (err) {
+      // A change put to the owner is shown by the owner-approval notices, not as a failure.
+      if (!(err instanceof OwnerApprovalPendingError)) {
+        setError(`The decision model was not saved: ${formatError(err)}`);
+      }
     } finally {
       setSaving(false);
     }
@@ -115,7 +119,9 @@ export function JudgmentProviderField({
         }),
       );
     } catch (err) {
-      setError(`The decision provider was not saved: ${formatError(err)}`);
+      if (!(err instanceof OwnerApprovalPendingError)) {
+        setError(`The decision provider was not saved: ${formatError(err)}`);
+      }
     } finally {
       setSaving(false);
     }

@@ -14,6 +14,7 @@ import type { RewindAnchor, RewindScope } from '../../rewind/index.js';
 import { RewindTokenError, type UnifiedRewindService } from '../../rewind/index.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
+import { admitOnSession } from './session-admission.js';
 
 const REWIND_SCOPES: readonly RewindScope[] = ['files', 'conversation', 'both'];
 
@@ -41,18 +42,33 @@ function readAnchor(params: Record<string, unknown>): { anchor: RewindAnchor; sc
   return { anchor: turnId !== undefined ? { sessionId, turnId } : { sessionId }, scope };
 }
 
-export function createRewindPlanHandler(service: Pick<UnifiedRewindService, 'plan'>): GatewayMethodHandler {
+/** Who owns a session (its principals), for the session-owner admission of a conversation rewind. */
+export type RewindSessionOwners = (sessionId: string) => readonly string[];
+
+/**
+ * A rewind that cuts a conversation acts on that session as steering it does:
+ * only its owners (or an owner or admin credential) may. A files-only rewind
+ * is workspace-wide, as checkpoints.restore is, and is not checked here.
+ */
+function admitConversationRewind(invocation: Parameters<GatewayMethodHandler>[0], scope: RewindScope, sessionId: string, owners: RewindSessionOwners): void {
+  if (scope === 'files') return;
+  admitOnSession(invocation, ['session.steer'], owners(sessionId));
+}
+
+export function createRewindPlanHandler(service: Pick<UnifiedRewindService, 'plan'>, owners: RewindSessionOwners): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const { anchor, scope } = readAnchor(params);
+    admitConversationRewind(invocation, scope, anchor.sessionId, owners);
     return service.plan(anchor, scope);
   };
 }
 
-export function createRewindApplyHandler(service: Pick<UnifiedRewindService, 'apply'>): GatewayMethodHandler {
+export function createRewindApplyHandler(service: Pick<UnifiedRewindService, 'apply'>, owners: RewindSessionOwners): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
     const { anchor, scope } = readAnchor(params);
+    admitConversationRewind(invocation, scope, anchor.sessionId, owners);
     const confirmToken = optionalString(params.confirmToken, 'confirmToken');
     try {
       return await service.apply(anchor, scope, { confirmToken });
@@ -108,11 +124,14 @@ function isUndoPort(port: object | null | undefined): port is RewindConversation
 export function createRewindUndoHandler(
   service: Pick<UnifiedRewindService, 'anchorsRestored'>,
   deps: RewindUndoDeps,
+  owners: RewindSessionOwners,
 ): GatewayMethodHandler {
   const local = isUndoPort(deps.local) ? deps.local : null;
   return async (invocation): Promise<RewindUndoResult> => {
     const params = readInvocationParams(invocation);
     const sessionId = requireStringValue(params.sessionId, 'sessionId');
+    // An undo replaces the session's conversation: the session's owners' act.
+    admitOnSession(invocation, ['session.steer'], owners(sessionId));
     const undoSnapshotId = requireStringValue(params.undoSnapshotId, 'undoSnapshotId');
     const refused = (code: string, state: string, reason: string, next: readonly string[]): RewindUndoResult =>
       ({ undone: false, sessionId, undoSnapshotId, refusal: { code, state, reason, next } });
@@ -192,14 +211,18 @@ export function createRewindUndoHandler(
   };
 }
 
-/** Attach the rewind.plan, rewind.apply and rewind.undo handlers to their descriptors. Missing descriptor is a silent no-op. */
-export function registerRewindGatewayMethods(catalog: GatewayMethodCatalog, service: UnifiedRewindService, undo: RewindUndoDeps = {}): void {
+/**
+ * Attach the rewind.plan, rewind.apply and rewind.undo handlers to their
+ * descriptors. Missing descriptor is a silent no-op. `owners` names a
+ * session's owners, for the session-owner admission of a conversation rewind.
+ */
+export function registerRewindGatewayMethods(catalog: GatewayMethodCatalog, service: UnifiedRewindService, owners: RewindSessionOwners, undo: RewindUndoDeps = {}): void {
   const planDescriptor = catalog.get('rewind.plan');
-  if (planDescriptor) catalog.register(planDescriptor, createRewindPlanHandler(service), { replace: true });
+  if (planDescriptor) catalog.register(planDescriptor, createRewindPlanHandler(service, owners), { replace: true });
 
   const applyDescriptor = catalog.get('rewind.apply');
-  if (applyDescriptor) catalog.register(applyDescriptor, createRewindApplyHandler(service), { replace: true });
+  if (applyDescriptor) catalog.register(applyDescriptor, createRewindApplyHandler(service, owners), { replace: true });
 
   const undoDescriptor = catalog.get('rewind.undo');
-  if (undoDescriptor) catalog.register(undoDescriptor, createRewindUndoHandler(service, undo), { replace: true });
+  if (undoDescriptor) catalog.register(undoDescriptor, createRewindUndoHandler(service, undo, owners), { replace: true });
 }

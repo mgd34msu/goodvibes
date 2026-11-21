@@ -11,7 +11,10 @@
  *
  * Scope of what this reads (documented, not faked):
  *  - VCALENDAR framing, X-WR-CALNAME for a calendar display name.
- *  - VEVENT: UID, SUMMARY, LOCATION, DESCRIPTION, ORGANIZER, DTSTART, DTEND, RRULE.
+ *  - VEVENT: UID, SUMMARY, LOCATION, DESCRIPTION, ORGANIZER, DTSTART, DTEND,
+ *    DURATION, RRULE. Without DTEND, the end is DTSTART plus DURATION, in the
+ *    start's own form (whole days for a DATE, the wall clock for a zoned or
+ *    floating time, the instant for a UTC time).
  *  - DTSTART/DTEND as VALUE=DATE ('YYYYMMDD') or date-time ('YYYYMMDDTHHMMSS'),
  *    read through the CalDAV reader's `parseICalDate`, so an impossible date is
  *    refused and a TZID is checked against the runtime's zone data: trailing 'Z'
@@ -39,10 +42,11 @@ import type {
 } from './types.js';
 import { describeRecurrence } from './rrule.js';
 import { contentDigest } from '../utils/target-ref.js';
+import { isKnownTimeZone } from '../utils/timezone.js';
 import {
-  isKnownTimeZone,
   parseContentLine as parseWireContentLine,
   parseICalDate,
+  parseICalDuration,
   unescapeText,
   unfoldContentLines,
 } from './caldav-ics.js';
@@ -141,6 +145,9 @@ interface VEventDraft {
   attendees?: string[];
   start?: EventDateTime;
   end?: EventDateTime;
+  /** DURATION in milliseconds, used for the end when DTEND is absent. */
+  durationMs?: number;
+  durationLine?: number;
   rrule?: string;
   exdates: EventDateTime[];
   rdates: EventDateTime[];
@@ -255,6 +262,16 @@ export function parseIcs(text: string, options: { readonly source?: string | und
         draft.end = parsed.value;
         break;
       }
+      case 'DURATION': {
+        try {
+          draft.durationMs = parseICalDuration(cl.value);
+          draft.durationLine = cl.line;
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error);
+          diagnostics.push({ line: cl.line, component: 'DURATION', message: `${reason}; event kept without an end.` });
+        }
+        break;
+      }
       case 'RRULE':
         draft.rrule = cl.value.trim();
         break;
@@ -325,6 +342,30 @@ export function parseIcs(text: string, options: { readonly source?: string | und
   };
 }
 
+const DAY_MS = 86_400_000;
+
+/**
+ * DTSTART plus a DURATION, in the start's own form (RFC 5545 §3.3.6): whole
+ * days added to a DATE; for a UTC time the milliseconds added to the instant;
+ * for a zoned or floating time the duration added to the wall clock (days are
+ * nominal), keeping the zone and TZID.
+ */
+function endFromDuration(start: EventDateTime, durationMs: number): { readonly value: EventDateTime } | { readonly error: string } {
+  if (durationMs < 0) return { error: 'a negative DURATION would end the event before it starts' };
+  if (start.kind === 'date') {
+    if (durationMs % DAY_MS !== 0) return { error: 'an all-day event takes a DURATION of whole days or weeks' };
+    const end = new Date(Date.parse(`${start.value}T00:00:00Z`) + durationMs);
+    return { value: { ...start, value: end.toISOString().slice(0, 10) } };
+  }
+  if (start.zone === 'utc') {
+    const end = new Date(Date.parse(start.value) + durationMs);
+    return { value: { ...start, value: `${end.toISOString().slice(0, 19)}Z` } };
+  }
+  // The wall clock is stepped as if it were UTC, so a day is always 24 wall hours.
+  const end = new Date(Date.parse(`${start.value}Z`) + durationMs);
+  return { value: { ...start, value: end.toISOString().slice(0, 19) } };
+}
+
 function finalizeEvent(
   draft: VEventDraft,
   events: CalendarEvent[],
@@ -353,6 +394,16 @@ function finalizeEvent(
     }
   }
 
+  let end = draft.end;
+  if (end === undefined && draft.durationMs !== undefined) {
+    const derived = endFromDuration(draft.start, draft.durationMs);
+    if ('error' in derived) {
+      diagnostics.push({ line: draft.durationLine ?? draft.startLine, component: 'DURATION', message: `Event '${summary}': ${derived.error}; event kept without an end.` });
+    } else {
+      end = derived.value;
+    }
+  }
+
   const event: CalendarEvent = {
     uid,
     summary,
@@ -360,7 +411,7 @@ function finalizeEvent(
     ...(draft.description !== undefined ? { description: draft.description } : {}),
     ...(draft.organizer !== undefined ? { organizer: draft.organizer } : {}),
     start: draft.start,
-    ...(draft.end !== undefined ? { end: draft.end } : {}),
+    ...(end !== undefined ? { end } : {}),
     ...(recurrence !== undefined ? { recurrence } : {}),
     ...(draft.attendees !== undefined ? { attendees: draft.attendees } : {}),
     ...(isOverride ? { isOverride: true as const, recurrenceId: draft.recurrenceId } : {}),

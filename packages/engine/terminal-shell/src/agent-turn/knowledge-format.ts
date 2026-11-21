@@ -427,17 +427,33 @@ export async function tallyBatchIngest(data: unknown): Promise<Tally> {
   return tally(imported + failedCount, items);
 }
 
+export type BatchIngestState = 'imported' | 'empty' | 'partial' | 'failed';
+
+/** The verdict of a batch import, from the host's imported, failed, sources and errors counts; the headline and the tool's success read it. */
+export function batchIngestState(data: unknown): BatchIngestState {
+  const record = isRecord(data) ? data : {};
+  const sources = readArray(record, 'sources');
+  const errors = readArray(record, 'errors');
+  const importedCount = readNumber(record, 'imported') ?? sources.length;
+  const failedCount = readNumber(record, 'failed') ?? errors.length;
+  if (failedCount === 0 && errors.length === 0) return importedCount === 0 ? 'empty' : 'imported';
+  return importedCount === 0 ? 'failed' : 'partial';
+}
+
+const BATCH_INGEST_HEADLINES: Readonly<Record<BatchIngestState, string>> = {
+  imported: 'imported',
+  empty: 'imported nothing (nothing was found to import)',
+  partial: 'partly imported',
+  failed: 'failed: nothing was imported',
+};
+
 export function formatBatchIngest(data: unknown, label: string): string {
   const record = isRecord(data) ? data : {};
   const imported = readNumber(record, 'imported');
   const failed = readNumber(record, 'failed');
   const sources = readArray(record, 'sources');
   const errors = readArray(record, 'errors');
-  const importedCount = imported ?? sources.length;
-  const failedCount = failed ?? errors.length;
-  const headline = failedCount === 0 && errors.length === 0
-    ? importedCount === 0 ? 'imported nothing (nothing was found to import)' : 'imported'
-    : importedCount === 0 ? 'failed: nothing was imported' : 'partly imported';
+  const headline = BATCH_INGEST_HEADLINES[batchIngestState(data)];
   return [
     `Agent Knowledge ${label} ${headline}`,
     `  imported ${imported ?? sources.length}`,

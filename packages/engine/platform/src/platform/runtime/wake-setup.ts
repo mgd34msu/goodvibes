@@ -71,14 +71,13 @@ import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js'
  * file that must travel with it. A client that can fetch the bytes but not the
  * NOTICE cannot satisfy the terms it received them under.
  */
-export type WakeModelComponent =
-  | 'classifier'
-  | 'tflite'
-  | 'embedding'
-  | 'notice'
-  | 'embedding-notice'
-  | 'vad'
-  | 'vad-notice';
+export const WAKE_MODEL_COMPONENTS = ['classifier', 'tflite', 'embedding', 'notice', 'embedding-notice', 'vad', 'vad-notice'] as const;
+export type WakeModelComponent = typeof WAKE_MODEL_COMPONENTS[number];
+
+/** True when `value` names a component this service serves. */
+export function isWakeModelComponent(value: unknown): value is WakeModelComponent {
+  return typeof value === 'string' && (WAKE_MODEL_COMPONENTS as readonly string[]).includes(value);
+}
 
 /** Largest chunk a single read returns, before base64. */
 export const WAKE_MODEL_CHUNK_MAX_BYTES = 512 * 1024;

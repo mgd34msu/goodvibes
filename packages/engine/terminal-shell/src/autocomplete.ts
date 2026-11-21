@@ -87,11 +87,14 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
     if (held) return held;
     if (!this.lists) return [];
     const source = this.lists;
-    this.listRows.set(key, 'reading');
+    // A read lands in the map of the dropdown it was started for; once that dropdown is reset, nothing reads it.
+    const rowsMap = this.listRows;
+    rowsMap.set(key, 'reading');
     void readList(list, source.context(), earlier).then(
-      (rows) => { this.listRows.set(key, rows); },
-      () => { this.listRows.set(key, []); },
+      (rows) => { rowsMap.set(key, rows); },
+      () => { rowsMap.set(key, []); },
     ).then(() => {
+      if (this.listRows !== rowsMap) return;
       if (!this.state.active || !this.state.argument) return;
       this.update(this.state.query);
       source.rowsArrived();
@@ -188,7 +191,7 @@ export class AutocompleteEngine<Command extends AutocompleteCommand = Autocomple
 
   /** Reset autocomplete to inactive state. */
   reset(): void {
-    this.listRows.clear();
+    this.listRows = new Map();
     this.state = {
       active: false,
       query: '',

@@ -106,33 +106,64 @@ export type HostedHandoffOutcome =
 export const HOSTED_HANDOFF_CLIENT_ID = 'agent';
 
 /**
- * Where the conversation -> hosted session mapping survives a restart. The
- * daemon's own `attachedClients` cannot carry it: a lapsed lease and a daemon
- * restart both empty that list while a `survive` session stays live.
+ * What survives a restart: which hosted session carries each conversation, and
+ * which inputs were last sent as a create that got no definite answer.
  */
-export interface HostedHandoffMappingStore {
-  load(): Record<string, string>;
-  save(mapping: Record<string, string>): void;
+export interface HostedHandoffState {
+  /** shared session id -> the daemon-hosted session carrying that conversation. */
+  readonly conversations: Record<string, string>;
+  /** Input ids whose create may have been taken by the daemon; each is retried as that same keyed create. */
+  readonly pendingCreates: readonly string[];
 }
 
-/** A JSON file store; an unreadable or malformed file is an empty mapping, never a refusal. */
+/**
+ * Where the hand-off state survives a restart. The daemon's own
+ * `attachedClients` cannot carry it: a lapsed lease and a daemon restart both
+ * empty that list while a `survive` session stays live, and it says nothing
+ * about which input opened the session.
+ */
+export interface HostedHandoffMappingStore {
+  load(): HostedHandoffState;
+  save(state: HostedHandoffState): void;
+}
+
+function stringRecord(value: object): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(value)) if (typeof entry === 'string' && entry.length > 0) out[key] = entry;
+  return out;
+}
+
+/**
+ * A JSON file store; an unreadable or malformed file is an empty state, never a
+ * refusal. A file holding only the flat conversation mapping (the form written
+ * before pending creates were kept) is read as the conversations.
+ */
 export function createHostedHandoffFileStore(path: string): HostedHandoffMappingStore {
   return {
     load: () => {
+      const empty: HostedHandoffState = { conversations: {}, pendingCreates: [] };
       try {
         const parsed: unknown = JSON.parse(readFileSync(path, 'utf8'));
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {};
-        const out: Record<string, string> = {};
-        for (const [key, value] of Object.entries(parsed)) if (typeof value === 'string' && value.length > 0) out[key] = value;
-        return out;
+        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return empty;
+        const conversations: unknown = Reflect.get(parsed, 'conversations');
+        if (typeof conversations !== 'object' || conversations === null || Array.isArray(conversations)) {
+          return { conversations: stringRecord(parsed), pendingCreates: [] };
+        }
+        const pending: unknown = Reflect.get(parsed, 'pendingCreates');
+        return {
+          conversations: stringRecord(conversations),
+          pendingCreates: Array.isArray(pending)
+            ? pending.filter((entry): entry is string => typeof entry === 'string' && entry.length > 0)
+            : [],
+        };
       } catch {
-        return {};
+        return empty;
       }
     },
-    save: (mapping) => {
+    save: (state) => {
       mkdirSync(dirname(path), { recursive: true });
       const temp = `${path}.tmp`;
-      writeFileSync(temp, JSON.stringify(mapping), 'utf8');
+      writeFileSync(temp, JSON.stringify(state), 'utf8');
       renameSync(temp, path);
     },
   };
@@ -257,29 +288,33 @@ export function createHostedConversationHandoff(
   const log = options.log ?? logger;
   /** shared session id -> the daemon-hosted session carrying that conversation. */
   const promoted = new Map<string, string>();
+  /**
+   * Inputs whose last attempt was a create that got no definite answer, by
+   * input id: a retry re-sends that keyed create, and the daemon answers it with
+   * the session it made. Kept in the store with the mapping, because after a
+   * restart a find-then-steer would put the opening message into that session a
+   * second time (the daemon never recorded it as a steer, so the steer's key does
+   * not match it).
+   */
+  const unconfirmedCreates = new Set<string>();
   const persist = (): void => {
     if (!options.store) return;
     try {
-      options.store.save(Object.fromEntries(promoted));
+      options.store.save({ conversations: Object.fromEntries(promoted), pendingCreates: [...unconfirmedCreates] });
     } catch (error) {
-      // The in-memory mapping still serves this process; only restart recovery is lost.
+      // The in-memory state still serves this process; only restart recovery is lost.
       log.warn('[hosted handoff] could not persist the conversation mapping', { reason: describeConnectedHostVerbError(error) });
     }
   };
   // A stale entry is not checked here: a steer into a terminated or missing
   // session answers 409/404 and the conversation is re-created with that message.
   if (options.store) {
-    for (const [sessionId, hostedSessionId] of Object.entries(options.store.load())) promoted.set(sessionId, hostedSessionId);
+    const stored = options.store.load();
+    for (const [sessionId, hostedSessionId] of Object.entries(stored.conversations)) promoted.set(sessionId, hostedSessionId);
+    for (const inputId of stored.pendingCreates) unconfirmedCreates.add(inputId);
   }
   /** Per shared session, the tail of its queued promotions: one at a time, in arrival order. */
   const queues = new Map<string, Promise<unknown>>();
-  /**
-   * Inputs whose last attempt was a create that got no definite answer, by
-   * input id: a retry re-sends that keyed create. In memory: after a restart the
-   * daemon's attachedClients find the session and the keyed steer is answered
-   * from the input it recorded.
-   */
-  const unconfirmedCreates = new Set<string>();
 
   const refuse = (reason: string): HostedHandoffOutcome => ({ promoted: false, reason, disabled: false });
   /** A failure that is a definite refusal falls back to the local answer; any other may have been acted on. */
@@ -294,8 +329,11 @@ export function createHostedConversationHandoff(
   /** A create's failure: an unconfirmed one is remembered so its retry is the same keyed create. */
   const createFailed = (request: HostedHandoffRequest, error: unknown): HostedHandoffOutcome => {
     const outcome = failed(error);
-    if (!outcome.promoted && outcome.unconfirmed) unconfirmedCreates.add(request.inputId);
+    const wasPending = unconfirmedCreates.has(request.inputId);
+    const pending = !outcome.promoted && outcome.unconfirmed === true;
+    if (pending) unconfirmedCreates.add(request.inputId);
     else unconfirmedCreates.delete(request.inputId);
+    if (pending !== wasPending) persist();
     return outcome;
   };
 
@@ -338,9 +376,10 @@ export function createHostedConversationHandoff(
       initialPrompt: request.body.trim().length > 0 ? request.body : request.task,
       clientId: conversationClientId(request.sessionId),
     }, { idempotencyKey: hostedHandoffKey(request.sessionId, request.inputId) });
-    unconfirmedCreates.delete(request.inputId);
+    const wasPending = unconfirmedCreates.delete(request.inputId);
     const hostedSessionId = reply?.session?.id;
     if (typeof hostedSessionId !== 'string' || hostedSessionId.length === 0) {
+      if (wasPending) persist();
       // A reply this build cannot read is a real answer about the host, not a
       // promotion: say so and let the message be answered locally.
       return refuse('the connected host accepted sessions.hosted.create but returned no session id this build could read.');

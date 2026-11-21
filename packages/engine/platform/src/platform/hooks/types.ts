@@ -93,9 +93,13 @@ export interface HookDefinition {
   timeout?: number | undefined;
   /** Custom status message shown while hook runs */
   statusMessage?: string | undefined;
-  /** Run in the background: the turn neither waits for it nor cancels it; its own deadline still applies. */
+  /**
+   * Run in the background: the turn neither waits for it nor cancels it; its own deadline still applies.
+   * Its answer is discarded, so it is refused under a point that waits for its hooks to deny, ask or
+   * rewrite the call (a `Pre` point); an observer belongs under a `Post` or `Fail` point.
+   */
   async?: boolean | undefined;
-  /** Run once then auto-remove */
+  /** Runs once per daemon or app run, then is removed; a restart or an edit to the entry arms it again. */
   once?: boolean | undefined;
   /** Description for documentation */
   description?: string | undefined;
@@ -118,13 +122,13 @@ export interface ChainStep {
   match: string;
   /** Values kept from the matching event: a name for each, mapped to the event payload field it is read from. */
   capture?: Record<string, string> | undefined;
-  /** How long after the previous step this step may arrive, such as `30s` or `5m`; later, the chain starts over. */
+  /** How long after the previous step this step may arrive, a number with `ms`, `s`, `m` or `h` (such as `30s` or `5m`); later, the chain starts over. A chain with a value that is not a duration is not registered. */
   within?: string;
   /** An expression over the event payload fields that must be true for the event to count (`===`, `!==`, `<`, `<=`, `>`, `>=`, `&&`, `||`, `!`), such as `exitCode !== 0`. */
   condition?: string;
   /** The step may be skipped: an event for the next step moves past it. */
   optional?: boolean | undefined;
-  /** For an optional step: wait this long after its last matching event (such as `2s`) before moving on, so a burst counts once. */
+  /** For an optional step: wait this long after its last matching event (a number with `ms`, `s`, `m` or `h`, such as `2s`) before moving on, so a burst counts once; an event for the next step ends the wait early. A chain with a value that is not a duration is not registered. */
   debounce?: string;
 }
 

@@ -121,9 +121,12 @@ export class SocketSurfaceSupervisor {
 
   constructor(private readonly options: SocketSurfaceSupervisorOptions) {}
 
-  /** The surface this node is currently contesting, or null. */
+  /**
+   * The surface this node is currently contesting, or null. A known identity
+   * whose gate was withdrawn (a dropped or refused socket) is not contested.
+   */
   get contestedSurface(): ClusterSurfaceKey | null {
-    return this.identity === null ? null : providerSurface(this.options.kind, this.identity);
+    return this.identity === null || this.withdraw === null ? null : providerSurface(this.options.kind, this.identity);
   }
 
   /**

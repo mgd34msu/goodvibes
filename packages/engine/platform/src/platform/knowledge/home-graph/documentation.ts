@@ -4,6 +4,7 @@ import type { KnowledgeStore } from '../store.js';
 import {
   HOME_GRAPH_CONNECTOR_ID,
   buildHomeGraphMetadata,
+  mergeSourceStatus,
   readRecord,
   readString,
   uniqueStrings,
@@ -32,7 +33,8 @@ export async function upsertIntegrationDocumentationCandidates(
       canonicalUri: identity.canonicalUri,
       summary: `Suggested documentation source for the ${domain} Home Assistant integration.`,
       tags: uniqueStrings(['homeassistant', 'home-graph', 'documentation', 'suggested-source', domain, candidate.kind]),
-      status: 'pending',
+      // A candidate already fetched and indexed stays indexed when the integration changes.
+      status: mergeSourceStatus('pending', store.getSource(identity.id)?.status),
       metadata: buildHomeGraphMetadata(spaceId, installationId, {
         homeGraphSourceKind: 'documentation-candidate',
         suggested: true,

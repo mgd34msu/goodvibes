@@ -195,7 +195,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
     includeFinished: !archived,
     hostedStreamConnected: sessionSubscriptionActive,
   });
-  const { asks } = useOpenAsks(!archived);
+  const { asks, inboxError, retryInbox } = useOpenAsks(!archived);
   const closeDetail = useCallback(() => {
     dismissedRef.current = true;
     setSelectedKey('');
@@ -458,6 +458,13 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
           <Button size="sm" variant="ghost" onClick={() => void failed.refetch()}>Retry</Button>
         </p>
       ))}
+      {!archived && inboxError && (
+        <p className="dv-notice dv-notice--bad work-notice" role="alert">
+          Questions and purchase windows could not be read: {inboxError}.
+          {' '}
+          <Button size="sm" variant="ghost" onClick={retryInbox}>Retry</Button>
+        </p>
+      )}
       {data.hostedUnreadable && (
         <p className="dv-notice work-notice" role="note">
           The daemon answered the hosted session list in a shape this client does not understand, so hosted sessions are not shown.
@@ -534,7 +541,9 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
                 {data.moreSessions && (
                   <Row
                     className="work-row work-row--board"
-                    title={data.moreSessions.loading ? 'Loading…' : 'Show older sessions'}
+                    title={data.moreSessions.loading ? 'Loading…'
+                      : data.moreSessions.error ? `Older sessions could not be read: ${data.moreSessions.error}. Select to try again.`
+                        : 'Show older sessions'}
                     onSelect={data.moreSessions.loading ? undefined : data.moreSessions.load}
                   />
                 )}

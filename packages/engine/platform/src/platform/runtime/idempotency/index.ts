@@ -18,8 +18,8 @@
  * that was replaced under the same key has a new epoch, so the original
  * owner's late `complete` or `fail` changes nothing and returns false.
  *
- * TTL-based eviction runs automatically whenever the store exceeds `maxRecords`.
- * An in-flight record is evicted only once it is older than `inFlightTimeoutMs`,
+ * TTL-based eviction runs automatically whenever the store reaches 80% of
+ * `maxRecords`. An in-flight record is evicted only once it is older than `inFlightTimeoutMs`,
  * which marks its caller as gone.
  */
 

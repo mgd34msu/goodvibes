@@ -277,9 +277,11 @@ export function createGoodVibesAuthClient(
   autoRefreshOptions?: AutoRefreshOptions,
   /**
    * Optional pre-built `AutoRefreshCoordinator`. When provided, it is reused
-   * directly (no new coordinator is constructed). This allows `createGoodVibesPlatform`
-   * to share a single coordinator instance between the transport middleware and
-   * the auth client, avoiding duplicate refresh calls.
+   * directly (no new coordinator is constructed) and it must be the one the
+   * operator's transport runs as its auto-refresh middleware, as
+   * `createGoodVibesPlatform` installs it: the transport then owns the
+   * pre-flight refresh and the one refresh-and-retry on a 401, and `current()`
+   * adds no second retry of its own. `null` means no coordinator at all.
    */
   existingCoordinator?: AutoRefreshCoordinator | null,
 ): GoodVibesAuthClient {
@@ -287,6 +289,9 @@ export function createGoodVibesAuthClient(
   // The facade delegates to these rather than duplicating logic.
   const ts: TokenStore | null = tokenStore ? new TokenStore(tokenStore) : null;
   const sm: SessionManager = new SessionManager(operator, ts, observer);
+  // A caller's coordinator already runs as the transport's middleware, so the
+  // transport refreshes and retries; only a coordinator built here wraps calls.
+  const transportRefreshes = existingCoordinator !== undefined && existingCoordinator !== null;
 
   // Use the provided coordinator if available; otherwise build one.
   // `existingCoordinator !== undefined` handles the null case: null means
@@ -326,7 +331,7 @@ export function createGoodVibesAuthClient(
       return new PermissionResolver(snapshot);
     },
     async current(): Promise<GoodVibesCurrentAuth> {
-      if (coordinator) {
+      if (coordinator && !transportRefreshes) {
         await coordinator.ensureFreshToken();
         return coordinator.withRetryOn401(() => sm.current());
       }

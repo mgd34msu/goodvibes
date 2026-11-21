@@ -36,6 +36,7 @@ import { openSqliteFile, type SqliteFile, type SqliteMigration } from '../state/
 import type { RevisionSource } from '../utils/revision.js';
 import { logger } from '../utils/logger.js';
 import { canonicalFilePath } from '../utils/canonical-path.js';
+import { isClaimGone } from './owner-asker-liveness.js';
 import type { OwnerAnswer, OwnerAnswerSource, OwnerItemKind } from './owner-inbox.js';
 
 /**
@@ -65,6 +66,9 @@ export const OWNER_ANSWER_AGENT_METADATA = 'answerAgent';
  * the project store as well as the id; owner-asker-liveness.ts `sessionAskerKey`).
  */
 export const OWNER_ASKER_SESSION_FILE_METADATA = 'askerSessionFile';
+
+/** The metadata that names who asked: a keyed post returns an open item only when all of these match. */
+const ASKER_METADATA = [OWNER_ANSWER_SESSION_METADATA, OWNER_ANSWER_AGENT_METADATA, OWNER_ASKER_SESSION_FILE_METADATA] as const;
 
 /**
  * Whether an item recorded with saved file `recorded` belongs to the session
@@ -350,12 +354,14 @@ export class QuestionStore implements RevisionSource {
   }
 
   /**
-   * Append a new item, or return the open one the same poster already posted
-   * under the same key: the dedupe key is (kind, poster, key), so a post never
-   * hands back an item another principal posted. Posts made in-process (no
-   * `postedBy`) share one poster. `stillOpen` says whether that one still
-   * counts (an expired item does not). Checked and written in one transaction,
-   * so two processes posting the same key at once ask once.
+   * Append a new item, or return the open one the same asker already posted
+   * under the same key: the dedupe key is (kind, poster, session, answering
+   * agent, key), so a post never hands back an item another principal, another
+   * session or another agent posted. Posts made in-process (no `postedBy`)
+   * share one poster and are told apart by session and agent. `stillOpen` says
+   * whether that one still counts (an expired item does not). Checked and
+   * written in one transaction, so two processes posting the same key at once
+   * ask once.
    */
   post(
     item: Omit<StoredOwnerItem, 'id' | 'createdAt'>,
@@ -370,7 +376,9 @@ export class QuestionStore implements RevisionSource {
         ).all(item.kind, item.key);
         for (const row of rows) {
           const existing = this.#decode(row);
-          if (existing && existing.item.postedBy === item.postedBy && stillOpen(existing)) return { created: false, entry: existing };
+          if (existing && existing.item.postedBy === item.postedBy && existing.item.sessionId === item.sessionId
+            && ASKER_METADATA.every((key) => metadataText(existing.item, key) === metadataText(item, key))
+            && stillOpen(existing)) return { created: false, entry: existing };
         }
       }
       // Short enough to type as an answer target; 48 random bits is ample for one owner's inbox.
@@ -398,9 +406,31 @@ export class QuestionStore implements RevisionSource {
       'AND applying_token IS NULL AND (expires_at IS NULL OR expires_at > ?)', [now]);
   }
 
-  /** The producer takes an open item back (its window closed, its session ended). Refused while a decision on it is being applied. */
+  /**
+   * The producer takes an open item back (its window closed, its session
+   * ended). Refused while a decision on it is being applied by a live process;
+   * a claim whose process died is let go first.
+   */
   withdraw(id: string, reason: string, now: number): QuestionStoreAnswerResult | undefined {
+    this.#releaseDeadClaim(this.#read(id), now);
     return this.#close(id, 'withdrawn_reason = ?', [reason], now, 'AND applying_token IS NULL', []);
+  }
+
+  /**
+   * Let go of an open row's decision claim when the process that took it is
+   * gone (owner-asker-liveness.ts `isClaimGone`): that process can never
+   * commit or release it, so the row is open again and can be withdrawn,
+   * settled or closed at its deadline. One stat and at most one lock attempt,
+   * only for a row that holds a claim. Returns whether it let one go.
+   */
+  #releaseDeadClaim(entry: StoredOwnerEntry | undefined, now: number): boolean {
+    const held = entry?.applyingToken;
+    if (entry === undefined || held === undefined || entry.closedAt !== undefined || !isClaimGone(this.#path, held)) return false;
+    const changed = this.#open().db.query<never, [number, string, string]>(
+      'UPDATE owner_items SET applying_token = NULL, updated_at = ? WHERE id = ? AND applying_token = ?',
+    ).run(now, entry.item.id, held).changes;
+    if (changed > 0) this.#wrote();
+    return changed > 0;
   }
 
   /**
@@ -495,10 +525,12 @@ export class QuestionStore implements RevisionSource {
       const rows = file.db.query<ItemRow, [string]>(
         `SELECT ${ROW_COLUMNS} FROM owner_items WHERE answer_session = ? AND ${UNDELIVERED}`,
       ).all(sessionId);
-      const ids = rows
+      const entries = rows
         .map((row) => this.#decode(row))
-        .filter((entry): entry is StoredOwnerEntry => entry !== null && inScope(entry, { session: sessionId, sessionFile }))
-        .map((entry) => entry.item.id);
+        .filter((entry): entry is StoredOwnerEntry => entry !== null && inScope(entry, { session: sessionId, sessionFile }));
+      // A decision claimed by a process that died is let go, so it closes with the rest.
+      for (const entry of entries) this.#releaseDeadClaim(entry, now);
+      const ids = entries.map((entry) => entry.item.id);
       for (const id of ids) {
         file.db.query<never, [string, number, number, string]>(
           'UPDATE owner_items SET withdrawn_reason = ?, closed_at = ?, updated_at = ? WHERE id = ? AND closed_at IS NULL AND applying_token IS NULL',
@@ -689,6 +721,13 @@ export class QuestionStore implements RevisionSource {
   #trimOnOpen(file: SqliteFile): void {
     try {
       const now = Date.now();
+      // An open decision claimed by a process that died is let go first, so past its deadline it closes as expired like any other.
+      const claimed = file.db.query<ItemRow, []>(`SELECT ${ROW_COLUMNS} FROM owner_items WHERE closed_at IS NULL AND applying_token IS NOT NULL`).all();
+      for (const row of claimed) {
+        const held = row.applying_token;
+        if (held === null || !isClaimGone(this.#path, held)) continue;
+        file.db.query<never, [number, string, string]>('UPDATE owner_items SET applying_token = NULL, updated_at = ? WHERE id = ? AND applying_token = ?').run(now, row.id, held);
+      }
       file.db.query<never, [number, number]>(
         `UPDATE owner_items SET closed_at = json_extract(item, '$.expiresAt'), updated_at = ?
           WHERE closed_at IS NULL AND answer IS NULL AND withdrawn_reason IS NULL AND applying_token IS NULL

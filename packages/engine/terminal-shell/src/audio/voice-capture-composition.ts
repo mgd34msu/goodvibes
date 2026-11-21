@@ -65,7 +65,10 @@ export function wireTerminalWakeCapture(
   });
   return { wake, unsubs: runtime.startWakeRuntime(wake, { subscribeConfig: ports.subscribeConfig }) };
 }
-/** Voice drafts share composer writes; a pending pairing prompt must first relinquish ownership. */
+/**
+ * Voice drafts share composer writes; a pending pairing prompt must first relinquish ownership.
+ * A draft the person was typing is kept and the transcript added after it.
+ */
 export function writeVoiceDraft(
   buffer: {
     prompt: string;
@@ -76,7 +79,9 @@ export function writeVoiceDraft(
   render: () => void,
 ): void {
   buffer.hostPairing?.cancelForTakeover();
-  buffer.prompt = text;
-  buffer.cursorPos = text.length;
+  const draft = buffer.prompt;
+  const next = draft.trim() === '' ? text : `${draft}${/\s$/.test(draft) ? '' : ' '}${text}`;
+  buffer.prompt = next;
+  buffer.cursorPos = next.length;
   render();
 }

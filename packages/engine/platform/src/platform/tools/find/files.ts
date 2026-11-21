@@ -3,8 +3,8 @@ import { paginateFindResult } from './pagination.js';
 import { assertCapturedInputPathContext } from '../../contract/input-authority.js';
 import { DirectoryWalk, type WalkDirOptions } from '../../utils/walk-dir.js';
 import { isAbsolute, relative } from 'node:path';
-import { statSync, lstatSync } from 'node:fs';
-import type { FilesQuery, OutputOptions } from './shared.js';
+import { lstat, stat } from 'node:fs/promises';
+import type { FilesQuery, FindDiagnostics, OutputOptions } from './shared.js';
 import {
   addDiscoveryCutWarning,
   addFindWarning,
@@ -15,6 +15,7 @@ import {
   directoryIgnoreFiles,
   heldSearchFiles,
   NESTED_IGNORE_FILES_SHOWN,
+  SEARCH_READ_CONCURRENCY,
   makeCountResult,
   makeFilesResult,
   matchesGlob,
@@ -24,6 +25,12 @@ import {
 import { summarizeError } from '../../utils/error-display.js';
 import { createSafeRegex } from '../../utils/safe-regex.js';
 import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } from '../shared/read-access.js';
+
+/** The warning files mode adds when the time budget ends its per-file pass before every file was checked. */
+function addFilesBudgetStopWarning(diagnostics: FindDiagnostics, checked: number, total: number): void {
+  addFindWarning(diagnostics, `Stopped at the time budget: checked ${checked} of ${total} files, so the list is incomplete. `
+    + "Narrow 'path' or 'patterns', or pass a larger timeout_ms, to check the rest.");
+}
 
 async function scanFilesQuery(
   query: FilesQuery,
@@ -134,25 +141,38 @@ async function scanFilesQuery(
 
   let entries: FileEntry[] = Array.from(matchedFiles).map((p) => ({ path: p }));
 
+  let budgetStopped = false;
   if (needStats) {
     const withStats: FileEntry[] = [];
-    for (const entry of entries) {
-      try {
-        const s = followSymlinks ? statSync(entry.path) : lstatSync(entry.path);
-        entry.size = s.size;
-        entry.mtimeMs = s.mtimeMs;
-      } catch (err) {
-        addFindWarning(diagnostics, `Could not stat '${entry.path}'; filters and sorting may be incomplete: ${summarizeError(err)}`);
+    const statOf = followSymlinks ? stat : lstat;
+    // A few files are stat-ed at once off the event loop; between groups the call's
+    // cancel and time budget are checked, and a budget stop keeps what was stat-ed.
+    for (let start = 0; start < entries.length; start += SEARCH_READ_CONCURRENCY) {
+      current();
+      if (options.shouldContinue?.() === false) {
+        addFilesBudgetStopWarning(diagnostics, start, entries.length);
+        budgetStopped = true;
+        break;
       }
-
-      if (query.min_size !== undefined && (entry.size ?? 0) < query.min_size) continue;
-      if (query.max_size !== undefined && (entry.size ?? 0) > query.max_size) continue;
-      if (query.is_empty === true && (entry.size ?? 0) !== 0) continue;
-      if (query.is_empty === false && (entry.size ?? 0) === 0) continue;
-      if (modifiedAfterMs !== undefined && (entry.mtimeMs ?? 0) < modifiedAfterMs) continue;
-      if (modifiedBeforeMs !== undefined && (entry.mtimeMs ?? 0) >= modifiedBeforeMs) continue;
-
-      withStats.push(entry);
+      const chunk = entries.slice(start, start + SEARCH_READ_CONCURRENCY);
+      await Promise.all(chunk.map(async (entry) => {
+        try {
+          const s = await statOf(entry.path);
+          entry.size = s.size;
+          entry.mtimeMs = s.mtimeMs;
+        } catch (err) {
+          addFindWarning(diagnostics, `Could not stat '${entry.path}'; filters and sorting may be incomplete: ${summarizeError(err)}`);
+        }
+      }));
+      for (const entry of chunk) {
+        if (query.min_size !== undefined && (entry.size ?? 0) < query.min_size) continue;
+        if (query.max_size !== undefined && (entry.size ?? 0) > query.max_size) continue;
+        if (query.is_empty === true && (entry.size ?? 0) !== 0) continue;
+        if (query.is_empty === false && (entry.size ?? 0) === 0) continue;
+        if (modifiedAfterMs !== undefined && (entry.mtimeMs ?? 0) < modifiedAfterMs) continue;
+        if (modifiedBeforeMs !== undefined && (entry.mtimeMs ?? 0) >= modifiedBeforeMs) continue;
+        withStats.push(entry);
+      }
     }
     entries = withStats;
   }
@@ -168,7 +188,12 @@ async function scanFilesQuery(
 
   if (hasContentRegex) {
     const filtered: FileEntry[] = [];
-    for (const entry of entries) {
+    for (const [index, entry] of entries.entries()) {
+      current();
+      if (options.shouldContinue?.() === false) {
+        if (!budgetStopped) addFilesBudgetStopWarning(diagnostics, index, entries.length);
+        break;
+      }
       if (restrictedPaths.has(entry.path)) continue; // cannot read to verify content
       try {
         if (capturedReadAccess && !await capturedReadAccess(entry.path)) throw new Error('file read is access-restricted');

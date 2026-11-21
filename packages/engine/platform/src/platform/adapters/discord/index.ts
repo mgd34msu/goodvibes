@@ -84,12 +84,14 @@ async function dispatchDiscordInteraction(
   if (interaction.type === DiscordInteractionType.ApplicationCommand) {
     const promptOption = interaction.commandOptions?.find((option) => option.name === 'prompt');
     const task = typeof promptOption?.value === 'string' ? promptOption.value.trim() : '';
+    // The policy and the binding both read this one test.
+    const direct = discordInteractionDirect(interaction);
     const policy = await context.authorizeSurfaceIngress({
       surface: 'discord',
       userId: interaction.userId,
       channelId: interaction.channelId,
       groupId: interaction.channelId,
-      conversationKind: interaction.channelId ? 'channel' : 'service',
+      conversationKind: direct ? 'direct' : interaction.channelId ? 'channel' : 'service',
       text: task,
       mentioned: true,
       metadata: {
@@ -118,7 +120,7 @@ async function dispatchDiscordInteraction(
       metadata: {
         userId: interaction.userId,
         // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
-        conversationKind: discordInteractionDirect(interaction) ? 'direct' : 'channel',
+        conversationKind: direct ? 'direct' : 'channel',
         commandName: interaction.commandName,
         applicationId: interaction.applicationId,
         // The interaction token edits this one command's response for 15 minutes.
@@ -229,7 +231,7 @@ async function dispatchDiscordInteraction(
         userId: interaction.userId,
         channelId: interaction.channelId,
         groupId: interaction.channelId,
-        conversationKind: interaction.channelId ? 'channel' : 'service',
+        conversationKind: discordInteractionDirect(interaction) ? 'direct' : interaction.channelId ? 'channel' : 'service',
         text: customId,
         mentioned: true,
         metadata: { interactive: true },
@@ -279,6 +281,9 @@ export async function handleDiscordGatewayDispatchPayload(
   const mentioned = typeof applicationId === 'string' && applicationId.length > 0
     && Array.isArray(dispatch.d.mentions)
     && dispatch.d.mentions.some((mention) => (mention as { readonly id?: unknown } | null)?.id === applicationId);
+  // A bot is never in a group DM, so a gateway message without a guild is a
+  // direct message; the policy and the binding both read this one test.
+  const direct = guildId === undefined;
   const outcome = await runSurfaceMessage(context, {
     ingress: {
       surface: 'discord',
@@ -286,7 +291,7 @@ export async function handleDiscordGatewayDispatchPayload(
       channelId,
       groupId: channelId,
       workspaceId: guildId,
-      conversationKind: channelId ? 'channel' : 'service',
+      conversationKind: direct ? 'direct' : channelId ? 'channel' : 'service',
       text: content,
       mentioned,
       metadata: {
@@ -304,8 +309,7 @@ export async function handleDiscordGatewayDispatchPayload(
       metadata: {
         userId,
         // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
-        // A bot is never in a group DM, so a gateway message without a guild is a direct message.
-        conversationKind: guildId ? 'channel' : 'direct',
+        conversationKind: direct ? 'direct' : 'channel',
         messageId,
         gatewayEvent: dispatch.t,
       },

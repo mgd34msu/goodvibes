@@ -498,12 +498,18 @@ export async function configureDns(
     input.steps.push({ name: 'dns', status: 'warning', message: 'DNS automation skipped because no Cloudflare zone was selected.' });
     return [];
   }
+  // Only records GoodVibes uses are returned: one left alone because it is someone else's is named in a warning step instead.
   const records: CloudflareDnsRecordLike[] = [];
+  let attempted = 0;
+  const keep = (record: CloudflareDnsRecordLike | null): void => {
+    attempted += 1;
+    if (record) records.push(record);
+  };
   if (input.daemonHostname && input.tunnelId && input.withholdDaemonHostname) {
     input.steps.push({ name: 'dns-daemon-hostname', status: 'warning', message: `Did not publish ${input.daemonHostname}: ${input.withholdDaemonHostname}` });
   } else if (input.daemonHostname && input.tunnelId) {
     if (hostnameBelongsToZone(input.daemonHostname, input.zone.name)) {
-      records.push(await ensureCnameRecord(client, input.zone.id, input.daemonHostname, `${input.tunnelId}.cfargotunnel.com`, input.steps, 'dns-daemon-hostname'));
+      keep(await ensureCnameRecord(client, input.zone.id, input.daemonHostname, `${input.tunnelId}.cfargotunnel.com`, input.steps, 'dns-daemon-hostname'));
     } else {
       input.steps.push({ name: 'dns-daemon-hostname', status: 'warning', message: `Skipped daemon DNS record because ${input.daemonHostname} does not belong to selected zone ${input.zone.name}.` });
     }
@@ -511,12 +517,12 @@ export async function configureDns(
   const workerTarget = hostnameFromUrl(input.workerBaseUrl);
   if (input.workerHostname && workerTarget) {
     if (hostnameBelongsToZone(input.workerHostname, input.zone.name)) {
-      records.push(await ensureCnameRecord(client, input.zone.id, input.workerHostname, workerTarget, input.steps, 'dns-worker-hostname'));
+      keep(await ensureCnameRecord(client, input.zone.id, input.workerHostname, workerTarget, input.steps, 'dns-worker-hostname'));
     } else {
       input.steps.push({ name: 'dns-worker-hostname', status: 'warning', message: `Skipped Worker DNS record because ${input.workerHostname} does not belong to selected zone ${input.zone.name}.` });
     }
   }
-  if (records.length === 0 && !input.withholdDaemonHostname) input.steps.push({ name: 'dns', status: 'skipped', message: 'No daemonHostname/tunnelId or workerHostname/workerBaseUrl pair was available for DNS automation.' });
+  if (attempted === 0 && !input.withholdDaemonHostname) input.steps.push({ name: 'dns', status: 'skipped', message: 'No daemonHostname/tunnelId or workerHostname/workerBaseUrl pair was available for DNS automation.' });
   return records;
 }
 
@@ -605,7 +611,7 @@ async function ensureCnameRecord(
   target: string,
   steps: CloudflareProvisionStep[],
   stepName: string,
-): Promise<CloudflareDnsRecordLike> {
+): Promise<CloudflareDnsRecordLike | null> {
   const existing = await collectAsync(client.dns!.records.list({ zone_id: zoneId, type: 'CNAME', name: { exact: hostname } }) ?? []);
   const match = existing.find((record) => record.name === hostname && record.type === 'CNAME');
   const params = {
@@ -625,7 +631,7 @@ async function ensureCnameRecord(
     if (match.comment !== DNS_RECORD_COMMENT) {
       // Pointing someone else's record at the daemon would take their site down.
       steps.push({ name: stepName, status: 'warning', message: `A CNAME for ${hostname} already exists pointing at ${match.content} and was not created by GoodVibes, so it was left unchanged. Delete it in Cloudflare or choose another hostname.`, resourceId: match.id });
-      return match;
+      return null;
     }
     const updated = await client.dns!.records.update(match.id, params);
     steps.push({ name: stepName, status: 'ok', message: `Updated CNAME ${hostname} -> ${target}.`, resourceId: updated.id });
@@ -640,7 +646,7 @@ async function ensureCnameRecord(
     if (!recovered?.id) throw error;
     if (recovered.content !== target && recovered.comment !== DNS_RECORD_COMMENT) {
       steps.push({ name: stepName, status: 'warning', message: `A CNAME for ${hostname} already exists pointing at ${recovered.content} and was not created by GoodVibes, so it was left unchanged.`, resourceId: recovered.id });
-      return recovered;
+      return null;
     }
     const updated = await client.dns!.records.update(recovered.id, params);
     steps.push({ name: stepName, status: 'ok', message: `Updated existing CNAME ${hostname} -> ${target} after create retry: ${summarizeError(error)}`, resourceId: updated.id });

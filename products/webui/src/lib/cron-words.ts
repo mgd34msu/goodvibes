@@ -44,7 +44,9 @@ export function cronInWords(expression: string): string | null {
   const step = /^\*\/(\d+)$/.exec(minuteField);
   if (step && hourField === '*') {
     const every = Number(step[1]);
-    return every === 1 ? 'Every minute' : `Every ${every} minutes`;
+    if (every === 1) return 'Every minute';
+    // The step restarts at :00 every hour, so only a step that divides 60 is an even cadence.
+    return every >= 2 && every <= 30 && 60 % every === 0 ? `Every ${every} minutes` : null;
   }
   return null;
 }

@@ -12,7 +12,7 @@ let stopped = false;
  * tokens the daemon prints, so a new phase is added here and nowhere else.
  */
 export const NATIVE_STARTUP_PHASES = Object.freeze([
-  'runtime-base', 'base-project-context', 'base-credentials', 'base-providers', 'base-knowledge',
+  'runtime-base', 'base-project-context', 'base-credentials', 'base-knowledge',
   'base-native-intake-storage', 'base-native-intake-ready', 'runtime-base-failed',
   'handler-surfaces', 'contract-recovery', 'provider-preload', 'listener-construction',
   'secondary-listener-construction', 'cluster-startup', 'device-recovery', 'device-grant-sweep',

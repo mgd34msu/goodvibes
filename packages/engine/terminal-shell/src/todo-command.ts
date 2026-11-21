@@ -53,6 +53,8 @@ const ITEM: InputDescription = listInput({ id: 'item', label: 'Item', help: 'The
 const OWNER: InputDescription = textInput({ id: 'owner', label: 'For whom', help: 'Who the item is for', why: 'a name you choose', typed: { flag: '--owner' }, optional: { default: '', means: 'nobody in particular' } });
 const NOTES: InputDescription = textInput({ id: 'notes', label: 'Notes', help: 'Anything to remember about it', why: 'your own words', kind: 'long-text', typed: { flag: '--notes' }, optional: { default: '', means: 'no notes' } });
 const SOURCE: InputDescription = textInput({ id: 'source', label: 'Where it came from', help: 'A short label for where the item came from', why: 'a label you choose', typed: { flag: '--source' }, optional: { default: '', means: 'added by hand' } });
+/** What `/todo edit` takes for owner, notes or source to clear that detail; empty leaves it as it is. */
+const CLEARS = '-';
 const OWNER_ONLY = { reason: 'the to-do list is yours to change from the command line', instead: 'The model keeps its own plan with its work_plan tool.' } as const;
 
 function change<Ctx>(fields: Omit<ActionDescription<Ctx>, 'touches' | 'lasts' | 'done' | 'ownerOnly' | 'operator'> & Partial<Pick<ActionDescription<Ctx>, 'done'>>): ActionDescription<Ctx> {
@@ -124,19 +126,23 @@ function todoDescription<Ctx extends TodoCommandContext>(openPanel: (ctx: Ctx) =
         inputs: [
           ITEM,
           textInput({ id: 'title', label: 'Title', help: 'What there is to do (change it or keep it)', why: 'your own words', typed: { tail: true } }),
-          { ...OWNER, required: { default: '', defaultMeans: 'stays as it is' } },
-          { ...NOTES, required: { default: '', defaultMeans: 'stay as they are' } },
-          { ...SOURCE, required: { default: '', defaultMeans: 'stays as it is' } },
+          { ...OWNER, help: `${OWNER.help}; ${CLEARS} clears it`, required: { default: '', defaultMeans: `stays as it is; ${CLEARS} clears it` } },
+          { ...NOTES, help: `${NOTES.help}; ${CLEARS} clears them`, required: { default: '', defaultMeans: `stay as they are; ${CLEARS} clears them` } },
+          { ...SOURCE, help: `${SOURCE.help}; ${CLEARS} clears it`, required: { default: '', defaultMeans: `stays as it is; ${CLEARS} clears it` } },
         ],
         sentence: 'Item {item} becomes "{title}", with the other details you gave, until you change it.',
         risk: 'none',
         example: { item: 't-3f2a', title: 'write and post the release notes' },
         async run(values, ctx) {
+          // Empty keeps a detail; the clear mark removes it (null is stored as cleared).
+          const detail = (value: string | undefined): string | null | undefined =>
+            value === undefined || value === '' ? undefined : value.trim() === CLEARS ? null : value;
+          const owner = detail(values.owner), source = detail(values.source), notes = detail(values.notes);
           const patch = {
             title: values.title!,
-            ...(values.owner ? { owner: values.owner } : {}),
-            ...(values.source ? { source: values.source } : {}),
-            ...(values.notes ? { notes: values.notes } : {}),
+            ...(owner !== undefined ? { owner } : {}),
+            ...(source !== undefined ? { source } : {}),
+            ...(notes !== undefined ? { notes } : {}),
           };
           const { task } = await storeOf(ctx).update(values.item!, patch);
           return `Changed item ${task.taskId}: ${task.title}`;

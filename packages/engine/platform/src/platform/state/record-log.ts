@@ -82,16 +82,19 @@ export interface RecordLog<T> extends RevisionSource {
 }
 
 /**
- * A log whose rewrite was published (renamed into place) but whose descriptor
- * could not be moved onto it. Appending through the old descriptor would write
- * into the replaced file, which no reader opens again, so the log refuses every
- * append and flush until the process opens it afresh.
+ * A log that can no longer be written safely, so it refuses every append,
+ * compaction and flush until the process opens it afresh. Either its rewrite
+ * was published (renamed into place) but the descriptor could not be moved
+ * onto it, so an append would land in the replaced file no reader opens again;
+ * or a sync of appended records failed, and a later sync on the same
+ * descriptor can report success for records the kernel already dropped.
+ * `reason` says which, as the words after the path.
  */
 export class RecordLogBrokenError extends Error {
   readonly code = 'RECORD_LOG_BROKEN';
   readonly path: string;
-  constructor(path: string, cause: unknown) {
-    super(`The log ${path} was rewritten but could not be reopened (${cause instanceof Error ? cause.message : String(cause)}); nothing more is written to it. Restart the daemon to open it again.`, { cause });
+  constructor(path: string, cause: unknown, reason: 'was rewritten but could not be reopened' | 'had appended records that could not be synced to disk') {
+    super(`The log ${path} ${reason} (${cause instanceof Error ? cause.message : String(cause)}); nothing more is written to it. Restart the daemon to open it again.`, { cause });
     this.name = 'RecordLogBrokenError';
     this.path = path;
   }
@@ -182,8 +185,16 @@ class FileRecordLog<T> implements RecordLog<T> {
     const position = starts.push(start) - 1;
     if (this.#options.key) (this.#indexed ? this.#keys : this.#pendingKeys).set(this.#options.key(record), position);
     this.#revision += 1;
-    if (this.#options.fsync === 'each') fdatasyncSync(this.#fd);
-    else this.#scheduleSync();
+    if (this.#options.fsync === 'each') {
+      try {
+        fdatasyncSync(this.#fd);
+      } catch (error) {
+        // As in #syncNow: a second sync on this descriptor would not report the loss.
+        this.#broken = new RecordLogBrokenError(this.path, error, 'had appended records that could not be synced to disk');
+        logger.error('[record-log] could not sync an appended record; the log refuses appends until the daemon restarts', { path: this.path, error: error instanceof Error ? error.message : String(error) });
+        throw this.#broken;
+      }
+    } else this.#scheduleSync();
   }
 
   get(key: string): T | undefined {
@@ -261,7 +272,7 @@ class FileRecordLog<T> implements RecordLog<T> {
       this.#ino = fstatSync(next).ino;
     } catch (error) {
       if (next !== -1) { try { closeSync(next); } catch { /* already failing */ } }
-      this.#broken = new RecordLogBrokenError(this.path, error);
+      this.#broken = new RecordLogBrokenError(this.path, error, 'was rewritten but could not be reopened');
       logger.error('[record-log] a rewritten log could not be reopened; it refuses appends until the daemon restarts', { path: this.path, error: error instanceof Error ? error.message : String(error) });
       throw this.#broken;
     }
@@ -440,15 +451,17 @@ class FileRecordLog<T> implements RecordLog<T> {
         if (!error) { resolve(); return; }
         // A descriptor closed or replaced by compaction was already synced by that step.
         if (this.#closed || fd !== this.#fd) { resolve(); return; }
-        this.#unsynced = true;
+        // Linux reports a writeback error once per open file: syncing this
+        // descriptor again would succeed for lines already dropped, so the
+        // failure is final and every later append and flush refuses with it.
         failed = true;
-        logger.error('[record-log] could not sync appended records', { path: this.path, code: error.code });
-        reject(error);
+        this.#broken = new RecordLogBrokenError(this.path, error, 'had appended records that could not be synced to disk');
+        logger.error('[record-log] could not sync appended records; the log refuses appends until the daemon restarts', { path: this.path, code: error.code });
+        reject(this.#broken);
       });
     }).finally(() => {
       if (this.#syncing === run) this.#syncing = null;
-      // Records appended while this sync ran are covered by the next one. After
-      // a failure the next append or flush tries again; nothing spins here.
+      // Records appended while this sync ran are covered by the next one.
       if (!failed && this.#unsynced && !this.#closed) this.#scheduleSync();
     });
     this.#syncing = run;

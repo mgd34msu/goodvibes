@@ -714,6 +714,28 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
     });
   };
 
+  /**
+   * A notice the route refused for a reason retrying cannot change: reported,
+   * noted, and posted to the owner inbox (keyed by its announce id, so a repeat
+   * posts one item), whether the notice was fresh or held.
+   */
+  const refuseStructurally = (
+    where: Pick<HeldNotice, 'account' | 'mailbox'>,
+    refusal: { readonly reason: string; readonly detail: string; readonly fix: string },
+    notice: StructuredNotice | undefined,
+    key: InboundMailMessageKey,
+    at: string,
+  ): void => {
+    deps.noticeHealth?.refused({ ...refusal, at });
+    noteFor(where, 'notice-refused', `${refusal.reason}: ${refusal.detail} ${refusal.fix}`, at);
+    // No conversation carries it: the owner inbox does, so the owner sees the message anyway.
+    if (notice && deps.notices.toInbox) {
+      void deps.notices.toInbox(notice, mailNoticeAnnounces(key)).catch((error: unknown) => {
+        noteFor(where, 'notice-refused', `the owner inbox did not keep the notice either: ${summarizeError(error)}`, at);
+      });
+    }
+  };
+
   const scheduleRetry = (): void => {
     if (held.size === 0 || stopped) {
       if (retryTimer !== null) clearTimeout(retryTimer);
@@ -770,9 +792,7 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
         if (deps.noticeHealth?.get() === null) routeDown(delivery.error, at);
         return 'route-down';
       }
-      const refusal = { reason: delivery.reason, ...STRUCTURAL_REFUSALS[delivery.reason] };
-      deps.noticeHealth?.refused({ ...refusal, at });
-      noteFor(entry, 'notice-refused', `${refusal.reason}: ${refusal.detail} ${refusal.fix}`, at);
+      refuseStructurally(entry, { reason: delivery.reason, ...STRUCTURAL_REFUSALS[delivery.reason] }, entry.notice, entry.key, at);
       await entry.settle(delivery.reason, delivery.error).catch((error: unknown) => {
         noteFor(entry, 'post-notice-write-failed', `a held notice's refusal could not be recorded (${summarizeError(error)}).`, at);
       });
@@ -1038,16 +1058,7 @@ export function createInboundMailIntake(deps: InboundMailIntakeDeps): InboundMai
     // ─── Past this line the notice is out. Nothing below may throw. ───
 
     if (refusal !== null) {
-      deps.noticeHealth?.refused({ ...refusal, at: receivedAt.iso });
-      note(deps.observer, message, 'notice-refused',
-        `${refusal.reason}: ${refusal.detail} ${refusal.fix}`, receivedAt.iso);
-      // No conversation carries it: the owner inbox does, so the owner sees the message anyway.
-      const unrouted = plan.notice;
-      if (unrouted && deps.notices.toInbox) {
-        void deps.notices.toInbox(unrouted, mailNoticeAnnounces(key)).catch((error: unknown) => {
-          note(deps.observer, message, 'notice-refused', `the owner inbox did not keep the notice either: ${summarizeError(error)}`, receivedAt.iso);
-        });
-      }
+      refuseStructurally(message, refusal, plan.notice, key, receivedAt.iso);
     } else if (status === 'delivered' && plan.kind === 'send') {
       deps.noticeHealth?.announced(receivedAt.iso);
     }

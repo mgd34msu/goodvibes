@@ -3,14 +3,13 @@
  * No default reader or judgment transport is installed here. The caller owns
  * that policy; unavailable or held readings never authorize disclosure/write.
  */
-import { randomUUID } from 'node:crypto';
-import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { executePolicyCheck } from '../gate/execute-policy-check.js';
 import { withProcessLockSync } from '../utils/process-lock.js';
 import {
-  accountSafetyFields, boundAccountRecords, buildAccountRecord, formatStore,
-  parseAccountFields, sweepAccountRecords, validateAccountCreateFields,
+  accountSafetyFields, boundAccountRecords, buildAccountRecord,
+  parseAccountFields, sweepAccountRecords, validateAccountCreateFields, writeAccountStoreFile,
   type AccountStoreFile, type AgentAccountCreateInput, type AgentAccountRecord,
   type AgentAccountSnapshot, type AgentAccountSweepInput, type AgentAccountSweepResult,
   type ParsedStore,
@@ -205,7 +204,7 @@ export class AsyncAgentAccountRegistry {
         mkdirSync(dirname(this.storePath), { recursive: true });
         withProcessLockSync(`${this.storePath}.writer.sqlite`, () => {
           assertCurrentRevision(this.storePath, revision);
-          this.writeStore(write);
+          writeAccountStoreFile(this.storePath, write, { keepPreviousCopy: parsed.dropped > 0 });
         }, { waitMs: 1_000 });
       } else {
         assertCurrentRevision(this.storePath, revision);
@@ -216,17 +215,5 @@ export class AsyncAgentAccountRegistry {
     pathTails.set(this.storePath, tail);
     void tail.then(() => { if (pathTails.get(this.storePath) === tail) pathTails.delete(this.storePath); });
     return executePolicyCheck(() => pending, signal);
-  }
-
-  private writeStore(store: AccountStoreFile): void {
-    mkdirSync(dirname(this.storePath), { recursive: true });
-    const temporary = `${this.storePath}.${randomUUID()}.tmp`;
-    try {
-      writeFileSync(temporary, formatStore(store), { encoding: 'utf8', flag: 'wx', mode: 0o600 });
-      renameSync(temporary, this.storePath);
-    } finally {
-      try { unlinkSync(temporary); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    }
   }
 }

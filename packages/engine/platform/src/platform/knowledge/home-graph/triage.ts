@@ -47,7 +47,11 @@ export interface HomeGraphTriageOptions {
   readonly issueCodes?: readonly string[] | undefined;
   /** Extra rules merged over the built-ins (by code), the extensibility hook. */
   readonly additionalRules?: readonly HomeGraphTriageRule[] | undefined;
-  /** Whole reading-pass timeout in ms, at most 60 seconds. */
+  /**
+   * Whole reading-pass time limit in ms; unset or 0 sets none (the pass ends when
+   * every reading settles or the caller cancels); a negative, non-finite or
+   * larger-than-2147483647 value is held as budget.
+   */
   readonly timeoutMs?: number | undefined;
   /** Legacy display label. Automatic triage never creates an operator review. */
   readonly reviewer?: string | undefined;

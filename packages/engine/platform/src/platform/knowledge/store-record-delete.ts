@@ -1,4 +1,5 @@
 import type { SQLiteStore } from '../state/sqlite-store.js';
+import { knowledgeRawRepresentation } from './store-record-representation.js';
 import { selectRecords } from './store-row-table.js';
 import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
 
@@ -8,7 +9,8 @@ import type { KnowledgeNodeRecord, KnowledgeSourceRecord } from './types.js';
  * refinement tasks; node delete also
  * purges revision history and source delete purges derived extraction/enrichment
  * rows. Honest hard delete, no soft-hide. Each cascade is one indexed or
- * filtered DELETE; the tables read the database, so nothing else is updated.
+ * filtered DELETE, and a node a source delete keeps is rebound by one UPDATE of
+ * its row; the tables read the database, so nothing else is updated.
  */
 export interface KnowledgeRecordDeleteView {
   readonly sqlite: SQLiteStore;
@@ -89,18 +91,36 @@ export function deleteKnowledgeNodeRecord(view: KnowledgeRecordDeleteView, id: s
 }
 
 /**
+ * Rebinds a kept node to the surviving source that supports it: the row's
+ * `source_id` becomes that source, `metadata.sourceId` names it when it named
+ * the deleted source, and the deleted id leaves `metadata.compiledFrom` and
+ * `metadata.sourceIds`. The metadata is written as the node row writer writes
+ * it (its stored representation as JSON).
+ */
+function planNodeRebind(plan: DeletePlan, node: KnowledgeNodeRecord, ownerId: string, deletedSourceId: string): void {
+  const metadata: Record<string, unknown> = { ...knowledgeRawRepresentation(node).metadata };
+  if (metadata.sourceId === deletedSourceId) metadata.sourceId = ownerId;
+  if (metadata.compiledFrom === deletedSourceId) delete metadata.compiledFrom;
+  if (Array.isArray(metadata.sourceIds)) metadata.sourceIds = metadata.sourceIds.filter((entry) => entry !== deletedSourceId);
+  planDelete(plan, 'UPDATE knowledge_nodes SET source_id = ?, metadata = ? WHERE id = ?', [ownerId, JSON.stringify(metadata), node.id]);
+}
+
+/**
  * Removes the source, what was derived from it, and the nodes it owns. A node
  * that another source that still exists supports is kept, whether the support
  * is named in its metadata or is an edge between them: deleting it would lose
- * knowledge the surviving source still backs.
+ * knowledge the surviving source still backs. The kept node is rebound to its
+ * surviving source (the first one its metadata names, else the first joined
+ * by an edge), so its owner and recorded evidence no longer name the deleted source.
  */
 export function deleteKnowledgeSourceRecord(view: KnowledgeRecordDeleteView, id: string): boolean {
   if (!view.sources.has(id)) return false;
   const plan = newPlan();
   for (const node of selectRecords(view.nodes, 'source_id = ?', [id], '', (record) => record.sourceId === id)) {
-    if (otherSupportingSourceIds(node, id).some((other) => view.sources.has(other))) continue;
-    if (edgeSupportingSourceIds(view, node.id, id).some((other) => view.sources.has(other))) continue;
-    planNodeDelete(plan, node.id);
+    const survivor = otherSupportingSourceIds(node, id).find((other) => view.sources.has(other))
+      ?? edgeSupportingSourceIds(view, node.id, id).find((other) => view.sources.has(other));
+    if (survivor !== undefined) planNodeRebind(plan, node, survivor, id);
+    else planNodeDelete(plan, node.id);
   }
   planDelete(plan, "DELETE FROM knowledge_edges WHERE (from_kind = 'source' AND from_id = ?) OR (to_kind = 'source' AND to_id = ?)", [id, id]);
   planDelete(plan, 'DELETE FROM knowledge_extractions WHERE source_id = ?', [id]);

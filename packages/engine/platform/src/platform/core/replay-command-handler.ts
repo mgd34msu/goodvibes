@@ -39,7 +39,8 @@ const ledgerOfEngine = new WeakMap<DeterministicReplayEngine, ReplayLedgerReader
 
 /** Turn events recorded per run; the per-chunk text deltas are left out. */
 const SKIPPED_TURN_EVENTS = new Set(['STREAM_DELTA']);
-const TURN_ENDS = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL']);
+/** The events a turn ends with; a turn refused before it ran (context overflow, a duplicate submission) ends with PREFLIGHT_FAIL alone. */
+const TURN_ENDS = new Set(['TURN_COMPLETED', 'TURN_ERROR', 'TURN_CANCEL', 'PREFLIGHT_FAIL']);
 /** A turn this long is written out in parts, so a runaway turn does not hold its events in memory. */
 const MAX_HELD_ENTRIES = 500;
 /** Text kept per recorded field: enough for the outcome line and a value comparison. */
@@ -95,6 +96,8 @@ export function startReplayRecording(options: {
   const revisions = new Map<string, number>();
   const held = new Map<string, LedgerEntry[]>();
   let activeTurn: string | undefined;
+  /** The turn that was active when each run was submitted, given back the attribution when that run ends first. */
+  const activeBefore = new Map<string, string>();
   const writeHeld = (runId: string): void => {
     const entries = held.get(runId);
     held.delete(runId);
@@ -113,12 +116,18 @@ export function startReplayRecording(options: {
     if (SKIPPED_TURN_EVENTS.has(payload.type)) return;
     const runId = payload.turnId ?? envelope.turnId ?? activeTurn;
     if (!runId) return;
-    if (payload.type === 'TURN_SUBMITTED') activeTurn = runId;
+    if (payload.type === 'TURN_SUBMITTED') {
+      if (activeTurn !== undefined && activeTurn !== runId) activeBefore.set(runId, activeTurn);
+      activeTurn = runId;
+    }
     record(runId, payload.type, payload, envelope.ts);
     if (TURN_ENDS.has(payload.type)) {
       writeHeld(runId);
       revisions.delete(runId);
-      if (activeTurn === runId) activeTurn = undefined;
+      const earlier = activeBefore.get(runId);
+      activeBefore.delete(runId);
+      // A turn refused while another ran gives the attribution back to the one still running.
+      if (activeTurn === runId) activeTurn = earlier !== undefined && revisions.has(earlier) ? earlier : undefined;
     }
   });
   const inTurn = (envelope: { readonly ts: number; readonly turnId?: string | undefined; readonly payload: unknown }): void => {

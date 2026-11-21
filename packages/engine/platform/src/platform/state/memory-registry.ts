@@ -319,7 +319,7 @@ export class MemoryRegistry {
   async reloadIfChanged(): Promise<void> {
     const store = this.store, before = store.externalRevision;
     await store.reloadIfChanged();
-    if (store.externalRevision !== before) for (const fn of this.listeners) fn();
+    if (store.externalRevision !== before) this.notify();
   }
 }
 

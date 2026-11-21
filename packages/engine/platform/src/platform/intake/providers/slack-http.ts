@@ -3,7 +3,7 @@ import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { Client, interceptors, type Dispatcher } from 'undici/index.js';
 import { responseStream } from '../../security/source-screening/direct-client.js';
 import { POLL_CADENCE_MS } from '../provider-adapter.js';
-import type { SlackInboxHttp } from './slack.js';
+import { SLACK_TOKEN_PATTERN, type SlackInboxHttp } from './slack.js';
 import type { InboxHttpFailure, InboxHttpResult } from './inbox-http.js';
 
 const ORIGIN = 'https://slack.com';
@@ -73,7 +73,7 @@ function capture(input: URL, request: Parameters<SlackInboxHttp>[1]) {
     exactKeys(headers, ['Authorization', 'Accept']);
     const { Authorization: authorization, Accept: accept } = headers;
     if (verb !== 'GET' || accept !== 'application/json' || typeof authorization !== 'string'
-      || !/^Bearer xox[bp]-[A-Za-z0-9-]{1,4096}$/.test(authorization)) throw invalid();
+      || !authorization.startsWith('Bearer ') || !SLACK_TOKEN_PATTERN.test(authorization.slice('Bearer '.length))) throw invalid();
     if (signal !== undefined && !(signal instanceof AbortSignal)) throw invalid();
     if (signal !== undefined) isAborted(signal); // Validate the native brand without invoking caller accessors.
     return { method, path: `${url.pathname}${url.search}`, authorization, signal };

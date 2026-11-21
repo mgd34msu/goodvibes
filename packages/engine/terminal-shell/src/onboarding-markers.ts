@@ -50,14 +50,22 @@ export function createOnboardingMarkerStorage(surfaceRoot: string) {
     }
     function readOnboardingMarker(shellPaths: OnboardingShellPaths, scope: OnboardingStateScope, fileName: string): OnboardingCheckMarkerState {
         const path = resolveMarkerPath(shellPaths, scope, fileName);
-        const parsed = readVersioned<OnboardingCheckMarkerPayload & {
-            version: number;
-        }>(path, { currentVersion: 1, onUnknown: 'quarantine' });
+        const existedBefore = existsSync(path);
+        let parsed: (OnboardingCheckMarkerPayload & { version: number }) | null;
+        try {
+            parsed = readVersioned<OnboardingCheckMarkerPayload & {
+                version: number;
+            }>(path, { currentVersion: 1, onUnknown: 'quarantine' });
+        }
+        catch (error) {
+            const code = (error as NodeJS.ErrnoException | undefined)?.code ?? (error instanceof Error ? error.message : String(error));
+            return buildParseErrorState(scope, path, `Onboarding marker could not be read: ${code}`);
+        }
         if (parsed === null) {
-            const nowExists = existsSync(path), quarantined = existsSync(path + '.unrecognized');
-            if (!nowExists && !quarantined)
+            // Missing before this read: missing, whatever older quarantine copies sit beside it.
+            if (!existedBefore)
                 return buildMissingMarkerState(scope, path);
-            return buildParseErrorState(scope, path, quarantined ? 'Unrecognised or corrupt marker file; quarantined.' : 'Invalid onboarding check marker payload.');
+            return buildParseErrorState(scope, path, existsSync(path) ? 'Invalid onboarding check marker payload.' : 'Unrecognised or corrupt marker file; quarantined.');
         }
         if (!isCheckMarkerPayload(parsed))
             return buildParseErrorState(scope, path, 'Invalid onboarding check marker payload.');

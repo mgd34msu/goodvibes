@@ -54,6 +54,20 @@ export const DAEMON_ROUTE_MANIFEST: readonly DaemonRouteDeclaration[] = [
   { method: ANY, path: /^\/api\/projects\/planning\/(?:state|evaluate|language)$/, id: 'route POST /api/projects/planning/*', kind: 'retired', reason: 'answers 410 to everyone: the planning interview is retired and nothing runs' },
 ];
 
+/** Where the Agent's own knowledge is served: the `/api/knowledge` routes over another store, held to the same methods. */
+export const AGENT_KNOWLEDGE_PREFIX = '/api/goodvibes-agent/knowledge';
+
+/**
+ * The cataloged path a request path is served as: a path under the Agent
+ * knowledge prefix is the `/api/knowledge` path with the same suffix; any
+ * other path is itself. The router serves the alias at this path and the gate
+ * and the replay key look the method up by it, so the two cannot drift.
+ */
+export function catalogPathname(pathname: string): string {
+  if (pathname !== AGENT_KNOWLEDGE_PREFIX && !pathname.startsWith(`${AGENT_KNOWLEDGE_PREFIX}/`)) return pathname;
+  return `/api/knowledge${pathname.slice(AGENT_KNOWLEDGE_PREFIX.length)}`;
+}
+
 function matches(entry: DaemonRouteDeclaration, method: string, pathname: string): boolean {
   return (entry.method === ANY || entry.method === method) && entry.path.test(pathname);
 }

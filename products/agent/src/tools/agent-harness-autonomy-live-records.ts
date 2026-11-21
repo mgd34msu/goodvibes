@@ -23,8 +23,8 @@ export interface AutonomyLiveRecordBundle {
   readonly researchRuns: readonly AutonomyQueueLiveRecord[];
   /** Records the source holds beyond what each list shows, so a count can say "N of M". */
   readonly omitted?: Readonly<Record<'tasks' | 'approvals' | 'automationRuns' | 'watcherReceipts' | 'schedules' | 'researchRuns', number>>;
-  /** Sources that could not be read this time; their lanes are missing, not empty. */
-  readonly unavailable?: readonly string[];
+  /** Sources that could not be read this time (empty when every source was read); their lanes are unknown, not empty. */
+  readonly unavailable: readonly LiveSourceName[];
 }
 
 const LIVE_RECORD_LIMIT = 20;
@@ -49,12 +49,15 @@ export interface AutonomyLiveNativeFacts {
   readonly watcherReceipts: readonly AutonomyLiveNativeFact[];
   readonly schedules: readonly AutonomyLiveNativeFact[];
   readonly researchRuns: readonly AutonomyLiveNativeFact[];
+  /** Sources that could not be read this time; their facts are unknown, not empty. */
+  readonly unavailable: readonly LiveSourceName[];
 }
 
 /** How many of the newest artifacts are looked through for watcher receipts. */
 const RECEIPT_SCAN_LIMIT = 500;
 
-type LiveSourceName = 'tasks' | 'approvals' | 'automation' | 'artifacts' | 'researchRuns';
+/** A live source the queue reads; `artifacts` holds the durable watcher receipts. */
+export type LiveSourceName = 'tasks' | 'approvals' | 'automation' | 'artifacts' | 'researchRuns';
 
 /**
  * One read of each source. A listing is correct for the moment it was taken;
@@ -92,8 +95,9 @@ function readLiveSources(context: CommandContext) {
 
 /** Startup observes only literal native statuses and cancellation flags. */
 export function autonomyLiveNativeFacts(context: CommandContext): AutonomyLiveNativeFacts {
-  const { tasks, approvals, automation, artifacts, researchRuns } = readLiveSources(context);
+  const { tasks, approvals, automation, artifacts, researchRuns, unavailable } = readLiveSources(context);
   return {
+    unavailable,
     tasks: (tasks?.tasks ?? []).map(task => ({ status: task.status, cancellable: task.cancellable && ['queued', 'running', 'blocked'].includes(task.status) })),
     approvals: (approvals?.approvals ?? []).map(approval => ({ status: approval.status, cancellable: isOpenApprovalStatus(approval.status) })),
     automationRuns: nonWatcherRuns(automation).map(run => ({ status: run.status, cancellable: run.status === 'queued' || run.status === 'running' })),
@@ -147,7 +151,7 @@ export async function captureAutonomyLiveRecords(context: CommandContext, option
       schedules: omittedFrom(data.automation?.jobs.length ?? 0, LIVE_RECORD_LIMIT),
       researchRuns: omittedFrom(data.researchRuns.length, RESEARCH_RECORD_LIMIT),
     },
-    ...(data.unavailable.length > 0 ? { unavailable: data.unavailable } : {}),
+    unavailable: data.unavailable,
   };
 }
 
@@ -343,12 +347,7 @@ function taskOutputDescriptor(task: UiTasksSnapshot['tasks'][number]): AutonomyQ
 }
 
 function taskDiagnostics(task: UiTasksSnapshot['tasks'][number]): readonly string[] {
-  const retry = task.retryPolicy
-    ? `retry attempt ${task.retryPolicy.currentAttempt}/${task.retryPolicy.maxAttempts} backoff ${task.retryPolicy.backoff} delay ${task.retryPolicy.delayMs}ms categories ${task.retryPolicy.retryOn.join(',')}`
-    : '';
   return [
-    retry,
-    task.retryAt ? `retry eligible ${formatEpochMs(task.retryAt)}` : '',
     task.exitCode !== undefined ? `exit code ${task.exitCode}` : '',
     task.parentTaskId ? `parent ${task.parentTaskId}` : '',
     task.childTaskIds.length > 0 ? `children ${task.childTaskIds.join(',')}` : '',
@@ -445,9 +444,6 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
     const canRetry = task.status === 'failed' || task.status === 'cancelled';
     const cancelRoute = operatorMethodRoute('tasks.cancel', { taskId: task.id });
     const retryRoute = operatorMethodRoute('tasks.retry', { taskId: task.id });
-    const retry = task.retryPolicy
-      ? `attempt ${task.retryPolicy.currentAttempt}/${task.retryPolicy.maxAttempts}`
-      : '';
     const summary = [
       `${task.status} ${task.kind}`,
       `owner ${task.owner}`,
@@ -455,8 +451,6 @@ function taskLiveRecords(snapshot: UiTasksSnapshot | null): readonly AutonomyQue
       formatTimeFragment('queued', task.queuedAt),
       formatTimeFragment('started', task.startedAt),
       formatTimeFragment('ended', task.endedAt),
-      retry,
-      task.retryAt ? `retry ${formatEpochMs(task.retryAt)}` : '',
       task.error ? `error ${compactUnknown(task.error)}` : '',
       task.result !== undefined ? `result ${compactUnknown(task.result)}` : compactUnknown(task.description),
     ].filter(Boolean).join(' | ');

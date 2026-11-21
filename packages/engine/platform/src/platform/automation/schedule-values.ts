@@ -11,6 +11,7 @@ import { REASONING_EFFORT_SEVERITY, reasoningEffortRank } from '../config/reason
 import type { CreateAutomationJobInput } from './manager-runtime-helpers.js';
 import { buildAutonomySchedulePrompt } from './autonomy-prompt.js';
 import { readNaturalLanguageSchedule } from './schedule-reading.js';
+import { zonedWallClockToUtcMs } from '../utils/timezone.js';
 import {
   formatEveryInterval,
   getNextAutomationOccurrence,
@@ -66,6 +67,27 @@ export function scheduleStaggerMs(values: ScheduleValues): number | undefined {
   throw new ScheduleValuesError(`"${text}" is not a duration to spread the start by (such as 5m). Nothing was kept.`);
 }
 
+const WALL_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d+)?)?)?$/;
+const ZONED_DATE_TIME = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?\s*(?:Z|[+-]\d{2}(?::?\d{2})?)$/i;
+
+/**
+ * The instant a typed date and time names: one with `Z` or an offset is that
+ * exact instant; one without (`2026-12-01T09:00`, or a date alone for its
+ * midnight) is that wall clock in `zone`. NaN when it is neither, or names a
+ * day or hour that does not exist.
+ */
+function readScheduleDateTime(text: string, zone: string): number {
+  const trimmed = text.trim();
+  if (ZONED_DATE_TIME.test(trimmed)) return Date.parse(trimmed);
+  const m = WALL_DATE_TIME.exec(trimmed);
+  if (!m) return Number.NaN;
+  const [y, mo, d, h, mi, s] = [m[1], m[2], m[3], m[4] ?? '0', m[5] ?? '0', m[6] ?? '0'].map(Number) as [number, number, number, number, number, number];
+  const wall = Date.UTC(y, mo - 1, d, h, mi, s);
+  const probe = new Date(wall);
+  if (probe.getUTCMonth() !== mo - 1 || probe.getUTCDate() !== d || h > 23 || mi > 59 || s > 59) return Number.NaN;
+  return zonedWallClockToUtcMs(wall, zone);
+}
+
 /**
  * The timing given as a date (`at`), an interval (`every`) or a pattern
  * (`cron`); undefined when none of the three was given (a described time, or
@@ -78,9 +100,9 @@ export function explicitScheduleTiming(values: ScheduleValues, options: { readon
     if (values.cron) return normalizeCronSchedule(values.cron, timezone, staggerMs);
     if (values.every) return normalizeEverySchedule(values.every);
     if (values.at) {
-      const at = Date.parse(values.at);
-      if (Number.isNaN(at)) throw new Error(`"${values.at}" is not a date and time. Use one such as 2026-12-01T09:00 (read in ${options.zone} when it has no zone).`);
-      if (at <= options.now) throw new Error(`${formatScheduleTime(at, options.zone)} has already passed.`);
+      const at = readScheduleDateTime(values.at, timezone);
+      if (Number.isNaN(at)) throw new Error(`"${values.at}" is not a date and time. Use one such as 2026-12-01T09:00 (read in ${timezone} when it has no zone).`);
+      if (at <= options.now) throw new Error(`${formatScheduleTime(at, timezone)} has already passed.`);
       return normalizeAtSchedule(at);
     }
   } catch (error) {

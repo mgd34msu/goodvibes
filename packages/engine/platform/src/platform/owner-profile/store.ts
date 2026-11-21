@@ -23,6 +23,7 @@ import {
   forget as forgetLines,
   forgetProseByText,
   ProfileChangedDuringWriteError,
+  ProfilePublishedThenStoppedError,
   persistProfileText,
   profileTextFromLines,
   setField,
@@ -827,6 +828,7 @@ export class OwnerProfileStore {
     }
 
     const text = profileTextFromLines(edit.lines);
+    let stoppedAfterSave = false;
     try {
       await persistProfileText(
         this.filePath, text, this.options.persistIo, options.lifetime,
@@ -834,17 +836,21 @@ export class OwnerProfileStore {
       );
     } catch (error) {
       if (error instanceof ProfileChangedDuringWriteError) return refusal(error.message);
-      logger.warn('owner-profile: write failed', {
-        path: this.filePath,
-        fields: edit.changes.map((change) => change.fieldId ?? change.section),
-        error: summarizeError(error),
-      });
-      return {
-        ok: false,
-        reason: `Your profile could not be written: ${summarizeError(error)} (${this.filePath})`,
-        changes: [],
-        disclosure: '',
-      };
+      // The file holds the new text: record it as written so the caller is told it is saved and does not retry.
+      if (!(error instanceof ProfilePublishedThenStoppedError)) {
+        logger.warn('owner-profile: write failed', {
+          path: this.filePath,
+          fields: edit.changes.map((change) => change.fieldId ?? change.section),
+          error: summarizeError(error),
+        });
+        return {
+          ok: false,
+          reason: `Your profile could not be written: ${summarizeError(error)} (${this.filePath})`,
+          changes: [],
+          disclosure: '',
+        };
+      }
+      stoppedAfterSave = true;
     }
 
     this.ownWrite = statOf(this.filePath);
@@ -855,11 +861,12 @@ export class OwnerProfileStore {
       path: this.filePath,
       changes: edit.changes.map((change) => ({ kind: change.kind, field: change.fieldId ?? change.section })),
     });
+    const disclosure = describeProfileWrite(edit.changes);
     return {
       ok: true,
       reason: null,
       changes: edit.changes,
-      disclosure: describeProfileWrite(edit.changes),
+      disclosure: stoppedAfterSave ? `${disclosure} The request was cancelled after the change was saved.`.trim() : disclosure,
     };
   }
 }

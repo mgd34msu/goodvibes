@@ -190,9 +190,10 @@ export function listMemorySnapshots(dbPath: string | null): MemorySnapshotInfo[]
 }
 
 /**
- * The copy `selector` names: its exact file name, `latest` (the newest copy of
- * any kind) or the start of one name (a date such as `2026-11-16`) that only
- * one copy has.
+ * The copy `selector` names: its exact file name, `latest` (the newest copy
+ * not taken by a restore, so it names the same copy before and after one and
+ * a repeated restore writes the same records again) or the start of one name
+ * (a date such as `2026-11-16`) that only one copy has.
  */
 export function resolveMemorySnapshot(dbPath: string | null, selector: string): StoreSnapshotInfo {
   const path = requireFileStore(dbPath);
@@ -201,7 +202,13 @@ export function resolveMemorySnapshot(dbPath: string | null, selector: string): 
   if (copies.length === 0) {
     throw new MemorySnapshotError('MEMORY_SNAPSHOT_NOT_FOUND', 'There are no memory copies yet: the first daily copy is taken within an hour of start. Nothing was changed.');
   }
-  if (wanted === '' || wanted === 'latest') return copies[0]!;
+  if (wanted === '' || wanted === 'latest') {
+    // A restore's undo copy is reached by its exact name, never as `latest`.
+    const latest = copies.find((copy) => copy.reason !== 'pre-restore');
+    if (latest) return latest;
+    throw new MemorySnapshotError('MEMORY_SNAPSHOT_NOT_FOUND',
+      `Every memory copy was taken by a restore (${copies.map((copy) => basename(copy.path)).join(', ')}); name the one to restore in full. Nothing was changed.`);
+  }
   const exact = copies.find((copy) => basename(copy.path) === wanted);
   if (exact) return exact;
   const matches = copies.filter((copy) => basename(copy.path).startsWith(wanted));

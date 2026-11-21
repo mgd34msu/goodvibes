@@ -1,6 +1,7 @@
 import { inferProviderFromModel } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
 import type { CliCatalog, CommandFlagSpec, CommandOptionSpec, CommandSpec } from '@goodvibes/engine/terminal-shell';
 import type { GoodVibesCliCommand, GoodVibesCliFlags } from './types.ts';
+import { MEMORY_FLAG_OPTIONS, MEMORY_VALUE_OPTIONS } from './memory-command.ts';
 export const COMMAND_ALIASES: Readonly<Record<string, GoodVibesCliCommand>> = {
   run: 'run',
   exec: 'run',
@@ -277,9 +278,9 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<FlagField>[] = [
     kind: 'string',
     summary: 'Agent session',
   },
-  { field: 'permissionMode', tokens: ['--just-vibes'], kind: 'const', constValue: 'just-vibes', summary: 'Work without interrupting you for this launch: anything that needs you is held and listed at the end (permissions.mode just-vibes)' },
+  { field: 'permissionMode', tokens: ['--just-vibes'], kind: 'const', constValue: 'just-vibes', exclusive: true, summary: 'Work without interrupting you for this launch: anything that needs you is held and listed at the end (permissions.mode just-vibes)' },
   // --no-worries-just-vibes is kept as an unlisted spelling of --yolo.
-  { field: 'permissionMode', tokens: ['--yolo', '--no-worries-just-vibes'], kind: 'const', constValue: 'yolo', summary: 'Run every action without safety denials for this launch (permissions.mode yolo)' },
+  { field: 'permissionMode', tokens: ['--yolo', '--no-worries-just-vibes'], kind: 'const', constValue: 'yolo', exclusive: true, summary: 'Run every action without safety denials for this launch (permissions.mode yolo)' },
   // run limits and native intake recovery: parsed here like every flag; parseNativeShellCli reads them.
   { field: 'intakeMode', tokens: ['--intake-status'], kind: 'const', constValue: 'status', exclusive: true, summary: 'run: print the host\'s state of the saved native input instead of sending a new one; exits 0 when the host has a record of it' },
   { field: 'intakeMode', tokens: ['--intake-retry'], kind: 'const', constValue: 'retry', exclusive: true, summary: 'run: request admission again for the same saved input' },
@@ -318,11 +319,11 @@ const KNOWLEDGE_OPTIONS = [
 ];
 const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptionSpec[]>> = {
   doctor: options('strict'),
-  onboarding: options('apply', 'name'),
+  onboarding: [...options('apply'), ...valued('name')],
   profiles: options('description', 'include-vibe', 'name', 'persona', 'profile-name', 'replace', 'routines', 'skills', 'starter', 'starter-id', 'template', 'template-id', 'yes'),
   personas: options('body', 'description', 'name', 'provenance', 'tags', 'triggers', 'use', 'yes'),
   skills: options('description', 'enabled', 'name', 'procedure', 'provenance', 'requires-command', 'requires-commands', 'requires-env', 'skills', 'tags', 'triggers', 'yes'),
-  memory: options('by', 'cls', 'confidence', 'detail', 'file', 'label', 'limit', 'reason', 'review-state', 'scope', 'semantic', 'session', 'tags', 'task', 'turn', 'vector', 'yes'),
+  memory: [...valued(...MEMORY_VALUE_OPTIONS), ...options(...MEMORY_FLAG_OPTIONS)],
   routines: [...options('description', 'enabled', 'name', 'requires-command', 'requires-commands', 'requires-env', 'steps', 'tags', 'triggers', 'yes'), ...ROUTINE_PROMOTE_OPTIONS],
   ci: options('delivery-channel', 'pr', 'ref', 'trigger-fix-session', 'yes'),
   principals: options('channel', 'clear-identities', 'identity', 'kind', 'name', 'value', 'yes'),
@@ -338,7 +339,7 @@ const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptio
   search: KNOWLEDGE_OPTIONS,
   delegate: KNOWLEDGE_OPTIONS,
   secrets: options('user', 'project', 'secure', 'plaintext', 'stdin'),
-  pair: options('name'),
+  pair: valued('name'),
   import: options('apply', 'apply-permissions'),
   // `bundle import <path> --yes [--include-security]` (the shared support-bundle command).
   bundle: options('yes', 'include-security'),

@@ -16,10 +16,12 @@
  * - each command by the gate's one command walk (command-walk.ts): through
  *   `sudo`, `env`, `xargs`, `timeout`, `setsid`, `flock` and the other
  *   wrappers, into `sh -c` / `bash -c` / `eval` strings, `$(...)` and
- *   backticks, `find -exec`, an `alias` definition, and a shell script the
- *   command runs (`sh publish.sh`, `./publish.sh`, `source x.sh`), read from
- *   disk, with quoting removed the way the shell removes it (`g''it`,
- *   `"git"`, `g\it`).
+ *   backticks, `find -exec`, an `alias` definition, the shell's grouping and
+ *   keywords (`( ... )`, `{ ...; }`, `if ...; then ...`), and a shell script
+ *   the command runs (`sh publish.sh`, `bash -o pipefail publish.sh`,
+ *   `./publish.sh`, `source x.sh`, `bash < publish.sh`), read from disk from
+ *   the directory the command's own `cd` left it in, with quoting removed the
+ *   way the shell removes it (`g''it`, `"git"`, `g\it`).
  *
  * A command whose program, or whose arguments after a matching program, are
  * built when it runs (`$(printf git) push`, `git $X`, `xargs git`) matches:
@@ -28,7 +30,10 @@
  * a rule, since a shell can receive a command in pieces. Code handed to an
  * interpreter (`repl`, a script in another language) matches when it names the
  * rule's words in order within a few words. A command nested too deeply to
- * read, or a script too large to read, matches: code cannot see what it runs.
+ * read, a script too large to read, and a script that cannot be read (one the
+ * command writes before it runs it, a missing file, commands a shell reads
+ * from its standard input such as `echo 'git push' | sh`, a relative script
+ * after a `cd` code cannot follow) match: code cannot see what they run.
  *
  * Not seen: what a program does on its own once started (a git alias defined
  * before the rule, a compiled program, a script in another language that
@@ -101,6 +106,7 @@ function neverRunWalker(patterns: readonly NeverRunPattern[], directory: string 
     directory,
     tooDeep: (name) => ({ rule: first, why: `${name} runs a command nested too deeply to read, so what it runs cannot be checked` }),
     onScriptTooLarge: (path) => ({ rule: first, why: `it runs the script ${path}, which is too large to read, so what it runs cannot be checked` }),
+    onUnread: (what) => ({ rule: first, why: `it runs ${what}, so what it runs cannot be checked` }),
     // Code that is not shell, and text the parser cannot read, still match by their words in order.
     onCode: (text) => codeMatch(text, patterns),
     fromScript: (path, found) => ({ rule: found.rule, why: `the script ${path} it runs ${found.why === 'it runs that command' ? 'runs that command' : found.why}` }),

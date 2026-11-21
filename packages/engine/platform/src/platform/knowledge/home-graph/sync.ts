@@ -25,7 +25,7 @@ import {
   normalizeHomeGraphObjectInput,
   readRecord,
 } from './helpers.js';
-import { linkHomeGraphSnapshotObjectReferences } from './link-node.js';
+import { linkHomeGraphSnapshotObjectReferences, resolveHomeGraphSnapshotObjectReferences } from './link-node.js';
 import { refreshHomeGraphQualityReport } from './quality.js';
 import { HomeGraphQualityAnswerMemo } from './quality-answer-memo.js';
 import { HomeGraphQualityHeldError } from './quality/reader.js';
@@ -174,6 +174,13 @@ export async function runHomeGraphSyncEnrichment(input: {
   readonly signal?: AbortSignal | undefined;
 }): Promise<HomeGraphSyncEnrichmentResult> {
   const { store, artifactStore, spaceId, installationId, signal } = input;
+  // What this pass reads from, taken before it reads anything: a document,
+  // extraction or fact someone else writes during the pass makes the stored key
+  // differ, so the next sync runs enrichment again. The pass's own writes
+  // (edges, issues, generated-page sources) are not part of the key. The
+  // decision-model mark is added at the end, so a pass that fell back to running
+  // without a model during its course is recorded as one.
+  const inputs = homeGraphEnrichmentInputs(store, spaceId);
   const issuesBefore = new Set(store.listIssuesInSpace(spaceId).map((issue) => issue.id));
   // Devices whose content did not change since the last pass keep their quality answers.
   const qualityAnswers = HomeGraphQualityAnswerMemo.fromMetadata(
@@ -211,7 +218,7 @@ export async function runHomeGraphSyncEnrichment(input: {
       await store.upsertSource({ id: snapshotSource.id, connectorId: snapshotSource.connectorId, sourceType: snapshotSource.sourceType,
         status: snapshotSource.status, metadata: {
           ...(answers ? { homeGraphQualityAnswers: answers } : {}),
-          ...(complete ? { homeGraphEnrichmentInputs: homeGraphEnrichmentInputsKey(store, spaceId) } : {}),
+          ...(complete ? { homeGraphEnrichmentInputs: homeGraphEnrichmentInputsKey(store, spaceId, inputs) } : {}),
         } });
     }
   }
@@ -223,8 +230,7 @@ export async function runHomeGraphSyncEnrichment(input: {
  * unchanged home is skipped only by a pass of the same kind, so once a decision
  * model is in use the next sync reads the quality and rebuilds the pages checked.
  */
-function homeGraphEnrichmentInputsKey(store: KnowledgeStore, spaceId: string): string {
-  const inputs = homeGraphEnrichmentInputs(store, spaceId);
+function homeGraphEnrichmentInputsKey(store: KnowledgeStore, spaceId: string, inputs = homeGraphEnrichmentInputs(store, spaceId)): string {
   return isClassicOperation() ? `without-decision-model:${inputs}` : inputs;
 }
 
@@ -343,11 +349,21 @@ async function upsertSnapshotObjects(
         : [...(captured.members.get(nodeKindForHomeGraphObject(kind))?.get(homeGraphObjectId(nodeKindForHomeGraphObject(kind), object)) ?? [])];
       const nodeInput = { ...baseInput, metadata: buildHomeGraphMetadata(spaceId, installationId, { ...baseInput.metadata,
         homeAssistant: { ...readRecord(baseInput.metadata.homeAssistant), snapshotGroups: membership } }) };
-      // The same object from the same snapshot source was written last time: its node,
-      // its source_for edge, its reference links and documentation candidates are as
-      // they were, so nothing is written. One hash per object decides it.
-      const inputHash = knowledgeRecordVersion({ nodeInput, sourceId, kind });
-      if (previous && previous.status === 'active' && previous.sourceId === sourceId && previous.metadata.homeGraphInputHash === inputHash) {
+      // The references whose targets resolve now are part of the hash, so a device,
+      // area or integration that a later snapshot brings changes it and the link is written.
+      const references = resolveHomeGraphSnapshotObjectReferences(identities, { spaceId, nodeId: baseInput.id, nodeKind, object });
+      // The same object from the same snapshot source with the same resolved references
+      // was written last time: its node, its source_for edge, its reference links and
+      // documentation candidates are as they were, so nothing is written. One hash per
+      // object decides it, and the edges are confirmed in place in case a sync stopped
+      // between the node write and its edges.
+      const inputHash = knowledgeRecordVersion({ nodeInput, sourceId, kind, references });
+      const edgeHeld = (toId: string, relation: string) => {
+        const edge = store.findEdge({ fromKind: 'node', fromId: baseInput.id, toKind: 'node', toId, relation });
+        return edge !== undefined && edgeIsActive(edge);
+      };
+      if (previous && previous.status === 'active' && previous.sourceId === sourceId && previous.metadata.homeGraphInputHash === inputHash
+        && edgeHeld(homeNodeId, 'source_for') && references.every((reference) => edgeHeld(reference.toId, reference.relation))) {
         activeNodeIds.add(previous.id);
         count += 1;
         await yieldEvery(count, 16);
@@ -364,7 +380,7 @@ async function upsertSnapshotObjects(
         relation: 'source_for',
         metadata: buildHomeGraphMetadata(spaceId, installationId),
       });
-      await linkHomeGraphSnapshotObjectReferences(store, { spaceId, installationId, node, object }, identities);
+      await linkHomeGraphSnapshotObjectReferences(store, { spaceId, installationId, nodeId: node.id, references });
       if (node.kind === 'ha_integration') {
         await upsertIntegrationDocumentationCandidates(store, spaceId, installationId, node, object);
       }

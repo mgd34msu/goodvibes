@@ -21,26 +21,26 @@
  *     companion),
  *   - the storage root, the live config manager and the daemon's lifetime.
  *
- * Constructing this starts nothing. `startHousekeeping()` is called from the
- * bootstrap tail: grants and captures both outlive a restart, so a grant whose
- * phone is gone, or a capture torn by a crash, is reaped BEFORE the first
- * request of this run is served, and the periodic sweep after it is what keeps
- * a long-running daemon from going days without one. A failed sweep is logged
- * and the app still runs: housekeeping failing is a reason to say so, not a
- * reason to refuse to start.
+ * Constructing this starts nothing. The daemon host awaits
+ * `devicePosture.startHousekeeping()` during its start: grants and captures
+ * both outlive a restart, so a grant whose phone is gone, or a capture torn by
+ * a crash, is reaped BEFORE the first request of this run is served, and the
+ * periodic sweep armed after it keeps a long-running daemon from going days
+ * without one. The rule is the engine's (device-posture-runtime.ts): a grant
+ * sweep that fails refuses the start, since a departed phone's grant must not
+ * be honoured on the first request; a capture sweep that fails is logged and
+ * the start goes on; the periodic sweep is armed either way.
  */
 import { nativeDeviceRecoveryObserver } from './startup-observation.js';
-import { logger } from '@goodvibes/engine/platform/platform/utils';
-import { createDevicePostureRuntime, registerDevicePhoneTool } from '@goodvibes/engine/platform/platform/devices';
+import { createDevicePostureRuntime } from '@goodvibes/engine/platform/platform/devices';
 import type {
   DeviceApprovalBridge,
   DevicePeerTransport,
-  DevicePhoneToolRegistry,
   DevicePostureRuntime,
   DevicePostureRuntimeOptions,
 } from '@goodvibes/engine/platform/platform/devices';
 import { registerDevicesGatewayMethods } from '@goodvibes/engine/platform/platform/control-plane';
-import type { GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
+import type { ApprovalBroker, GatewayMethodCatalog } from '@goodvibes/engine/platform/platform/control-plane';
 import { isEffectiveDangerMode, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
 
 /** Who this surface records in the device audit trail. */
@@ -52,7 +52,8 @@ export interface DevicePostureCompositionOptions {
   readonly signal?: AbortSignal | undefined;
   /** The runtime devices pair onto; its listPeers/invokePeer are the transport. */
   readonly distributedRuntime: DevicePeerTransport;
-  readonly approvals: DeviceApprovalBridge;
+  /** The shared approval broker the owner's question rides; its settled record names who answered. */
+  readonly approvals: Pick<ApprovalBroker, 'raiseApproval' | 'getApproval'>;
   /** The authority record the durable grants live on, shared with every machine of the group. */
   readonly authority: DevicePostureRuntimeOptions['authority'] | undefined;
   /** Surface-scoped directory the grants ledger, captures and disclosure live in. */
@@ -93,13 +94,29 @@ function listingEveryPeer(source: DevicePeerTransport): DevicePeerTransport {
   };
 }
 
+/**
+ * The broker as the device bridge: raise the ask, await its decision, and read
+ * who answered off the settled record, so a durable grant and its audit entry
+ * name that principal rather than a generic `operator`.
+ */
+function deviceApprovalsFrom(broker: DevicePostureCompositionOptions['approvals']): DeviceApprovalBridge {
+  return {
+    async requestApproval(input) {
+      const raised = await broker.raiseApproval(input);
+      const decision = await raised.decision;
+      const decidedBy = broker.getApproval(raised.approval.id)?.resolvedBy;
+      return decidedBy !== undefined ? { ...decision, decidedBy } : decision;
+    },
+  };
+}
+
 /** Build the device posture runtime and bind the device verbs to it. */
 export function createDevicePostureServices(options: DevicePostureCompositionOptions): DevicePostureServices {
   if (!options.authority) throw new Error('The paired-device feature needs the authority record its grants live on, and this runtime graph has none.');
   const devicePosture = createDevicePostureRuntime({
     authority: options.authority,
     transport: listingEveryPeer(options.distributedRuntime),
-    approvals: options.approvals,
+    approvals: deviceApprovalsFrom(options.approvals),
     config: options.configManager,
     nativeDataWriter: options.configManager.getNativeDataWriter?.(),
     ...(nativeDeviceRecoveryObserver ? { observeRecovery: nativeDeviceRecoveryObserver } : {}),
@@ -113,35 +130,4 @@ export function createDevicePostureServices(options: DevicePostureCompositionOpt
   });
   if (options.gatewayMethods) registerDevicesGatewayMethods(options.gatewayMethods, devicePosture);
   return { devicePosture };
-}
-
-/**
- * Everything a host with a tool registry has to do once it is up: register the
- * `phone` tool, the only path that reaches the capability service, so without it
- * the posture keys govern nothing a session can observe, and start housekeeping.
- *
- * One call, because these two belong to the same feature and a host that did the
- * first and forgot the second would serve requests while never reaping a grant
- * whose phone is gone.
- */
-export function installDevicePosture(
-  toolRegistry: DevicePhoneToolRegistry,
-  devicePosture: DevicePostureRuntime,
-): void {
-  registerDevicePhoneTool(toolRegistry, devicePosture);
-  startDeviceHousekeeping(devicePosture);
-}
-
-/**
- * The recovery sweep plus the periodic timer. Separate from construction so
- * composing a runtime in a test starts no timer and touches no disk, and
- * separate from the call above so this daemon, which registers no tools,
- * still sweeps.
- */
-export function startDeviceHousekeeping(devicePosture: DevicePostureRuntime): void {
-  void devicePosture.startHousekeeping().catch((error: unknown) => {
-    logger.warn('Device housekeeping sweep failed at startup', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-  });
 }

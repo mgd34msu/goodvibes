@@ -1,4 +1,5 @@
 import { RefusalError, readRefusal, refusal, type TargetChange } from '@goodvibes/engine/errors';
+import { isPathWithinRoot } from '@goodvibes/engine/platform/platform/runtime/shell-paths';
 
 /**
  * What a slash command throws when it did not do what was asked: an unknown id,
@@ -15,6 +16,16 @@ export function commandRefusal(text: string, next?: string, code?: string): Refu
     reason: trimmed.replace(/^(Refused|Error):\s*/i, ''),
     next: next ? [next] : [],
   }));
+}
+
+/**
+ * A file a model-run command writes stays inside the working directory, where
+ * the model's own file tools may write; the owner may name any path. Links are
+ * followed, so a link inside that points outside is outside.
+ */
+export function refuseModelWriteOutsideWorkingDirectory(ctx: { readonly invokedByModel?: boolean | undefined }, workingDirectory: string, target: string): void {
+  if (ctx.invokedByModel !== true || isPathWithinRoot(workingDirectory, target)) return;
+  throw commandRefusal(`${target} is outside the working directory; nothing was written.`, 'Name a path inside the working directory, or ask the owner to run the command.');
 }
 
 export interface CommandConfirmationContext {

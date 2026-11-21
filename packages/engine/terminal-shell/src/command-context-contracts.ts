@@ -72,7 +72,8 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
 
 export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget> {
   reloadSystemPrompt?: () => string;
-  openModelPicker?: () => void;
+  /** `onClosed` hears once how this picker session ends: true when a main-model selection was applied. */
+  openModelPicker?: (onClosed?: (chosen: boolean) => void) => void;
   openModelPickerWithTarget?: (target: Target) => boolean;
   openProviderModelPickerWithTarget?: (target: Target) => boolean;
   openProviderPicker?: () => void;

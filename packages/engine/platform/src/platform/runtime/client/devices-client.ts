@@ -172,6 +172,7 @@ function readField<T>(payload: unknown, methodId: string, key: string, kind: 'ar
 /** The key each list verb returns its rows under, held to the generated operator types. */
 const NODES_KEY = 'nodes' satisfies keyof OperatorMethodOutput<'devices.nodes.list'>;
 const GRANTS_KEY = 'grants' satisfies keyof OperatorMethodOutput<'devices.grants.list'>;
+const CAPABILITY_OK_KEY = 'ok' satisfies keyof OperatorMethodOutput<'devices.capability.request'>;
 type ArtifactsListWire = OperatorMethodOutput<'devices.artifacts.list'>;
 type ArtifactReadWire = OperatorMethodOutput<'devices.artifacts.read'>;
 
@@ -215,7 +216,7 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
       // No try/catch around the outcome: a refusal is already `ok: false` in
       // the body, so anything that throws here is a genuine transport or
       // argument failure and belongs to the caller to report as one.
-      return await verbs.invoke<DeviceCapabilityOutcomeWire>('devices.capability.request', {
+      const answer = await verbs.invoke<DeviceCapabilityOutcomeWire>('devices.capability.request', {
         nodeId: input.nodeId,
         capabilityId: input.capabilityId,
         reason: input.reason,
@@ -223,6 +224,9 @@ export function createDevicesClient(verbs: DaemonVerbCaller): DevicesClient {
         ...(input.sessionId === undefined ? {} : { sessionId: input.sessionId }),
         ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
       });
+      // An answer without `ok` is no refusal by the person or policy: it is reported as a failed request.
+      readField<boolean>(answer, 'devices.capability.request', CAPABILITY_OK_KEY, 'boolean');
+      return answer;
     },
 
     listArtifacts: async (options = {}) => {

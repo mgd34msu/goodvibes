@@ -56,7 +56,9 @@ export function buildSubscriptionEntries(manager: SubscriptionManager | null, se
             nextActions: providers.get(provider)?.nextActions ?? [hints.login(provider)],
         });
     }
+    const pendingProviders = new Set<string>();
     for (const pending of manager.listPending()) {
+        pendingProviders.add(pending.provider);
         providers.set(pending.provider, {
             provider: pending.provider,
             state: 'pending',
@@ -80,11 +82,19 @@ export function buildSubscriptionEntries(manager: SubscriptionManager | null, se
                 : lifecycle === 'expiring'
                     ? ['Stored subscription session expires within 24 hours and cannot renew itself.']
                     : [];
-        const nextActions = lifecycle === 'revoked' || lifecycle === 'expired'
-            ? [hints.login(subscription.provider)]
-            : lifecycle === 'expiring'
-                ? [`Sign in to ${subscription.provider} again before it expires: ${hints.login(subscription.provider)}`]
-                : [];
+        // A sign-in started over the stored session is finished, not started
+        // again: a new start replaces the pending attempt and its code.
+        const signInPending = pendingProviders.has(subscription.provider);
+        const nextActions = signInPending
+            ? [hints.finish(subscription.provider)]
+            : lifecycle === 'revoked' || lifecycle === 'expired'
+                ? [hints.login(subscription.provider)]
+                : lifecycle === 'expiring'
+                    ? [`Sign in to ${subscription.provider} again before it expires: ${hints.login(subscription.provider)}`]
+                    : [];
+        const routeReason = subscription.overrideAmbientApiKeys
+            ? 'Subscription route overrides ambient API-key resolution for this provider.'
+            : 'Subscription route is stored for supported flows without automatically replacing ambient API-key resolution.';
         providers.set(subscription.provider, {
             provider: subscription.provider,
             state: 'active',
@@ -94,9 +104,9 @@ export function buildSubscriptionEntries(manager: SubscriptionManager | null, se
             activeRoute: freshness === 'expired' ? 'unconfigured' : 'subscription',
             preferredRoute: 'subscription',
             authFreshness: freshness,
-            routeReason: subscription.overrideAmbientApiKeys
-                ? 'Subscription route overrides ambient API-key resolution for this provider.'
-                : 'Subscription route is stored for supported flows without automatically replacing ambient API-key resolution.',
+            routeReason: signInPending
+                ? `${routeReason} A new sign-in is waiting to be finished; the stored session stays in use until it is.`
+                : routeReason,
             issues,
             nextActions,
         });
@@ -112,6 +122,11 @@ export function inferSubscriptionRouteReason(entry: SubscriptionEntry): string |
     return 'oauth configuration present; ambient key override will apply after activation.';
   }
   return undefined;
+}
+
+/** What the settings screen says when a sign-out removed the record but its tokens stayed in the secret store; `reason` is the failure, summarized. */
+export function subscriptionTokensNotRemovedMessage(provider: string, reason: string): string {
+  return `Signed out ${provider}, but its sign-in tokens could not be removed from the secret store: ${reason} Run /provider sign-out ${provider} to try again.`;
 }
 
 export type AuthorizationInput =

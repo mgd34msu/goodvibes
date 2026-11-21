@@ -13,7 +13,9 @@
  * delivery path: the general path is the channel delivery router, which every
  * surface has a strategy for. An unimplemented surface therefore THROWS by
  * name, returning quietly is what let a caller read "nothing was sent" as
- * "the message went out".
+ * "the message went out". The same holds for a reply with nowhere to go (no
+ * response URL or channel, no ntfy topic, no or an unsafe webhook callback):
+ * each throws naming what is missing.
  *
  * Every function takes its collaborators as an object rather than a bound
  * method: passing `configManager.get` on its own loses the receiver and throws
@@ -86,9 +88,8 @@ export async function deliverSurfaceProgress(
       }, { resolveHost: deps.resolveHost });
       return;
     }
-    if (pending.channelId) {
-      await slack.postMessage(pending.channelId, `Progress for ${pending.agentId}: ${progress.slice(0, 180)}`);
-    }
+    if (!pending.channelId) throw new Error('Slack progress was not sent: the reply has no response URL and no channel id');
+    await slack.postMessage(pending.channelId, `Progress for ${pending.agentId}: ${progress.slice(0, 180)}`);
     return;
   }
   if (pending.surfaceKind === 'discord') {
@@ -100,14 +101,13 @@ export async function deliverSurfaceProgress(
       await discord.editOriginalResponse(pending.applicationId, pending.interactionToken, `Progress: ${progress.slice(0, 180)}`);
       return;
     }
-    if (pending.channelId) {
-      await discord.postMessage(pending.channelId, `Progress for ${pending.agentId}: ${progress.slice(0, 180)}`);
-    }
+    if (!pending.channelId) throw new Error('Discord progress was not sent: the reply has no interaction token and no channel id');
+    await discord.postMessage(pending.channelId, `Progress for ${pending.agentId}: ${progress.slice(0, 180)}`);
     return;
   }
   if (pending.surfaceKind === 'ntfy') {
     const topic = pending.topic ?? (await readNtfyTopics(deps)).topic;
-    if (!topic) return;
+    if (!topic) throw new Error('ntfy progress was not sent: no topic is set on the reply or in surfaces.ntfy');
     const ntfy = new NtfyIntegration(ntfyBaseUrl(deps.configManager), await ntfyToken(deps));
     await ntfy.publish(topic, progress.slice(0, 300), {
       title: `Agent ${pending.agentId}`,
@@ -145,9 +145,8 @@ export async function deliverSlackAgentReply(
     }, { resolveHost: deps.resolveHost });
     return;
   }
-  if (pending.channelId) {
-    await slack.postMessage(pending.channelId, message, slack.formatAgentResult(pending.agentId, pending.task, message));
-  }
+  if (!pending.channelId) throw new Error('Slack reply was not sent: the reply has no response URL and no channel id');
+  await slack.postMessage(pending.channelId, message, slack.formatAgentResult(pending.agentId, pending.task, message));
 }
 
 export async function deliverDiscordAgentReply(
@@ -174,9 +173,8 @@ export async function deliverDiscordAgentReply(
     });
     if (edited) return;
   }
-  if (pending.channelId) {
-    await discord.postMessage(pending.channelId, message, [discord.formatAgentResult(pending.agentId, pending.task, message)]);
-  }
+  if (!pending.channelId) throw new Error('Discord reply was not sent: the reply has no interaction token and no channel id');
+  await discord.postMessage(pending.channelId, message, [discord.formatAgentResult(pending.agentId, pending.task, message)]);
 }
 
 function ntfyPriority(deps: SurfaceDirectDeliveryDeps): { priority?: 1 | 2 | 3 | 4 | 5 } {
@@ -190,7 +188,7 @@ export async function deliverNtfyAgentReply(
   message: string,
 ): Promise<void> {
   const topic = pending.topic ?? (await readNtfyTopics(deps)).topic;
-  if (!topic) return;
+  if (!topic) throw new Error('ntfy reply was not sent: no topic is set on the reply or in surfaces.ntfy');
   const ntfy = new NtfyIntegration(ntfyBaseUrl(deps.configManager), await ntfyToken(deps));
   // undefined = nothing configured resolves to an address a phone could
   // reach; publish without a click target rather than with a dead one. The
@@ -213,14 +211,10 @@ export async function deliverWebhookAgentReply(
   message: string,
 ): Promise<void> {
   const callbackUrl = pending.callbackUrl ?? await deps.resolveWebhookDefaultTarget() ?? '';
-  if (!callbackUrl) return;
+  if (!callbackUrl) throw new Error('Webhook reply was not sent: the reply has no callback URL and surfaces.webhook.defaultTarget is not set');
   const validation = validatePublicWebhookUrl(callbackUrl);
   if (!validation.ok) {
-    logger.warn('DaemonServer: refusing unsafe webhook callback URL', {
-      agentId: pending.agentId,
-      reason: validation.error,
-    });
-    return;
+    throw new Error(`Webhook reply was not sent: the callback URL was refused as unsafe (${validation.error})`);
   }
   const timeoutMs = Number(deps.configManager.get('surfaces.webhook.timeoutMs') ?? DEFAULT_CONFIG.surfaces.webhook.timeoutMs);
   const body = JSON.stringify({

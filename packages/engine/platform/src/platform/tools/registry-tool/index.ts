@@ -78,14 +78,33 @@ async function listRegistrySkills(roots: RegistryToolRoots, source: RegistryTool
   }));
 }
 
-/** The agents in one `.goodvibes/agents` directory: flat `<name>.md` files and `<folder>/AGENT.md`. */
-async function scanAgentDirectory(dir: string, source: RegistryToolSource): Promise<RegistryMatch[]> {
+/** An agent directory or file a live search could not list or read, and why. */
+interface RegistrySkip {
+  readonly path: string;
+  readonly reason: string;
+}
+
+/** Whether a read failed only because the entry is no longer there. */
+function isMissingEntry(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+/**
+ * The agents in one `.goodvibes/agents` directory: flat `<name>.md` files and `<folder>/AGENT.md`.
+ * Only a missing entry counts as absent. A captured source's refusal is rethrown so the whole
+ * output is withheld, never returned partial; a live entry that cannot be listed or read is
+ * named in `skipped` with its reason.
+ */
+async function scanAgentDirectory(dir: string, source: RegistryToolSource, skipped: RegistrySkip[]): Promise<RegistryMatch[]> {
   if (!await source.exists(dir)) return [];
   const results: RegistryMatch[] = [];
   let entries: readonly string[];
   try {
     entries = await source.list(dir);
-  } catch {
+  } catch (error) {
+    if (!source.live) throw error;
+    if (!isMissingEntry(error)) skipped.push({ path: dir, reason: summarizeError(error) });
     return [];
   }
   for (const entry of entries) {
@@ -95,7 +114,9 @@ async function scanAgentDirectory(dir: string, source: RegistryToolSource): Prom
     let content = '';
     try {
       content = await source.read(filePath);
-    } catch {
+    } catch (error) {
+      if (!source.live) throw error;
+      if (!isMissingEntry(error)) skipped.push({ path: filePath, reason: summarizeError(error) });
       continue;
     }
     const { metadata: frontmatter, body } = parseMarkdownFrontmatter(content);
@@ -113,9 +134,9 @@ async function scanAgentDirectory(dir: string, source: RegistryToolSource): Prom
   return results;
 }
 
-async function listRegistryAgents(roots: RegistryToolRoots, source: RegistryToolSource): Promise<RegistryMatch[]> {
+async function listRegistryAgents(roots: RegistryToolRoots, source: RegistryToolSource, skipped: RegistrySkip[]): Promise<RegistryMatch[]> {
   const agents: RegistryMatch[] = [];
-  for (const dir of registryAgentDirectories(roots)) agents.push(...await scanAgentDirectory(dir, source));
+  for (const dir of registryAgentDirectories(roots)) agents.push(...await scanAgentDirectory(dir, source, skipped));
   return dedupeAgents(agents);
 }
 
@@ -305,12 +326,13 @@ async function runSearch(
   const query = input.query ?? '';
   const typeFilter = input.type ?? 'all';
   const all: RegistryMatch[] = [];
+  const skipped: RegistrySkip[] = [];
 
   if (typeFilter === 'skills' || typeFilter === 'all') {
     all.push(...await listRegistrySkills(roots, source));
   }
   if (typeFilter === 'agents' || typeFilter === 'all') {
-    all.push(...await listRegistryAgents(roots, source));
+    all.push(...await listRegistryAgents(roots, source, skipped));
   }
   if (typeFilter === 'tools' || typeFilter === 'all') {
     all.push(...listTools(toolRegistry));
@@ -329,6 +351,8 @@ async function runSearch(
       count: results.length,
       ...(ranking?.note ? { note: ranking.note } : {}),
       results,
+      // Agent files that exist but could not be read, so a missing agent is not taken for an absent one.
+      ...(skipped.length > 0 ? { skipped } : {}),
     }),
   };
 }

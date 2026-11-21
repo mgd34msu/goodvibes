@@ -30,7 +30,7 @@
  * real fetch-backed port against an in-process HTTP server).
  */
 
-import { isCalendarResourceType, parseCalendarDataEvents, parseMultistatus, type CalDavEventRecord } from './caldav-parse.js';
+import { isCalendarResourceType, isMultistatusDocument, parseCalendarDataEvents, parseMultistatus, type CalDavEventRecord } from './caldav-parse.js';
 import { isIP } from 'node:net';
 import { registrableDomain } from '../security/public-suffix.js';
 
@@ -99,6 +99,13 @@ export interface CalDavProblem {
 }
 
 export type CalDavResult<T> = ({ readonly ok: true } & T) | ({ readonly ok: false } & CalDavProblem);
+
+/** A 2xx answer to a listing that is not a multistatus document (an HTML page, a proxy's answer): not "nothing there". */
+const NOT_MULTISTATUS: { readonly ok: false } & CalDavProblem = {
+  ok: false,
+  problem: 'the server answered but not with a CalDAV multistatus document',
+  fix: 'confirm the address is a CalDAV calendar endpoint and nothing between you and it is replacing the answer',
+};
 
 export interface CalDavCalendar {
   readonly href: string;
@@ -328,6 +335,7 @@ export class CalDavClient {
   public async listCalendars(homeUrl: string): Promise<CalDavResult<{ readonly calendars: readonly CalDavCalendar[] }>> {
     const sent = await this.send('PROPFIND', homeUrl, PROPFIND_LIST_CALENDARS_BODY, '1');
     if (!sent.ok) return sent;
+    if (!isMultistatusDocument(sent.body)) return NOT_MULTISTATUS;
     const entries = parseMultistatus(sent.body);
     const calendars: CalDavCalendar[] = [];
     for (const entry of entries) {
@@ -351,6 +359,7 @@ export class CalDavClient {
     }
     const sent = await this.send('REPORT', calendarUrl, buildCalendarQueryBody(range.start, range.end), '1');
     if (!sent.ok) return sent;
+    if (!isMultistatusDocument(sent.body)) return NOT_MULTISTATUS;
     const entries = parseMultistatus(sent.body);
     const events: CalDavListedEvent[] = [];
     for (const entry of entries) {

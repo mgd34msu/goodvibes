@@ -7,6 +7,7 @@ import { fileObservationIdentity } from '../utils/file-observation.js';
 import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { ProcessLockBusyError, withProcessLockSync } from '../utils/process-lock.js';
 import { SettingsAuthorityUnavailableError } from './settings-authority.js';
+import { reservedPrincipalForm } from '../pairing/principal-ids.js';
 
 export interface AuthUser {
   username: string;
@@ -751,6 +752,10 @@ export class UserAuthManager {
       if (settled.upgrade) {
         try { user = this.saveUpgradedHash(username, user, await hashPasswordAsync(password, settled.upgrade)); }
         catch (error) { logger.warn('Password hash upgrade could not be computed; the login continues', { username, error: String(error) }); }
+        // The stronger hash took a second wait: a password changed or a user deleted meanwhile refuses this sign-in, as above.
+        if (user === settled.user && this.#passwordMoved(username, settled.user.passwordHash)) {
+          return { ok: false, passwordChangedDuringSignIn: true };
+        }
       }
       return this.completeAttempt(attempt, password, user);
     });
@@ -815,9 +820,15 @@ export class UserAuthManager {
     return { user, upgrade: { N: Math.max(target.N, verified.params.N), r: Math.max(target.r, verified.params.r), p: Math.max(target.p, verified.params.p) } };
   }
 
-  /** The user with the stronger hash when it was saved, otherwise the user as read. */
+  /**
+   * The user with the stronger hash when it was saved, otherwise the user as
+   * read. The hash goes onto the record as it is now, so roles and scopes
+   * changed while the hash was computed are kept.
+   */
   private saveUpgradedHash(username: string, stored: AuthUser, passwordHash: string): AuthUser {
-    const updated = { ...stored, passwordHash };
+    const current = this.users.get(username);
+    if (current === undefined) return stored;
+    const updated = { ...current, passwordHash };
     // The login itself is already verified; a failed upgrade write only keeps the old hash.
     // A password another writer changed while the scrypt check ran is theirs: the upgrade is dropped, never written over it.
     try {
@@ -1136,6 +1147,10 @@ export class UserAuthManager {
   addUser(username: string, password: string, roles: readonly string[] = ['admin'], scopes?: readonly string[]): AuthUserRecord {
     const normalized = username.trim();
     if (!normalized) throw new Error('Username is required.');
+    const reserved = reservedPrincipalForm(normalized);
+    if (reserved !== undefined) {
+      throw new Error(`Username ${normalized} has the reserved form ${reserved}, which another kind of credential signs in as; choose another name.`);
+    }
     if (this.users.has(normalized)) throw new Error(`User already exists: ${normalized}`);
     if (!password || password.length < 8) throw new Error('Password must be at least 8 characters.');
     const user: AuthUser = {
@@ -1322,6 +1337,9 @@ export class UserAuthManager {
    * only when the file changed, one read, on a user write (rare), never on a sign-in check.
    */
   private persist(next: Map<string, AuthUser>, onlyIfHash?: { readonly username: string; readonly passwordHash: string }): boolean {
+    // A write that holds only while the password is unchanged is refused once any writer moved it:
+    // this process (a rotation or an authority-record change taken in meanwhile) as well as another one on disk.
+    if (onlyIfHash && this.users.get(onlyIfHash.username)?.passwordHash !== onlyIfHash.passwordHash) return false;
     if (this.persistUsers) {
       let written: Map<string, AuthUser> | null;
       try {

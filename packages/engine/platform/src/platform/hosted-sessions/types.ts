@@ -133,6 +133,8 @@ export interface HostedSessionHistoryMessage {
   readonly toolCalls?: readonly HostedSessionHistoryToolCall[] | undefined;
   /** The call a tool row answers. */
   readonly callId?: string | undefined;
+  /** On a user or assistant row: the correlation id of the submitted request whose turn wrote it; absent when that turn carried none. */
+  readonly correlationId?: string | undefined;
 }
 
 /** One tool call of an assistant history row. */

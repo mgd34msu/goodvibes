@@ -1,7 +1,6 @@
 /**
  * Shared flag/positional parser for the connected-host operator CLI commands
- * (ci, principals, channel-profiles). Mirrors parseRoutineOptions in
- * routines-command.ts: `--flag value`, `--flag=value`, bare `--flag` booleans,
+ * (ci, principals, channel-profiles, fleet) and routines: `--flag value`, `--flag=value`, bare `--flag` booleans,
  * and a `--yes` confirmation flag, with `--` starting pure positionals.
  */
 

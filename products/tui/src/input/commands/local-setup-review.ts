@@ -14,6 +14,7 @@ import { VERSION } from '../../version.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink } from './deep-link.ts';
 import { maskLiteralSecrets, type SetupReviewSnapshot } from './local-setup-transfer.ts';
 import {
+  requireHookWorkbench,
   requireProfileManager,
   requireProviderApi,
   requireReadModels,
@@ -70,7 +71,7 @@ async function buildPlatformReview(ctx: CommandContext): Promise<Record<string, 
 /**
  * Writes a bundle for a support thread: the startup review, the platform review
  * (install, storage key names, integration helpers, sandbox, deep links), and the
- * service registry and managed hooks, with every literal credential masked by
+ * service registry and the hooks file the dispatcher loads, with every literal credential masked by
  * the shared redaction rule. Returns the directory and how many values were masked.
  */
 export async function exportSetupSupportBundle(targetDirArg: string, snapshot: SetupReviewSnapshot, ctx: CommandContext): Promise<{ readonly targetDir: string; readonly masked: number }> {
@@ -83,7 +84,7 @@ export async function exportSetupSupportBundle(targetDirArg: string, snapshot: S
   writeFileSync(join(targetDir, 'platform-review.json'), JSON.stringify(maskLiteralSecrets(platformReview, masked, 'platform-review.json'), null, 2) + '\n', 'utf-8');
   const copies: ReadonlyArray<readonly [string, string]> = [
     [shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'services.json'), 'services.json'],
-    [shellPaths.resolveProjectPath('hooks.managed.json'), 'hooks.managed.json'],
+    [requireHookWorkbench(ctx).getHooksFilePath(), 'hooks.json'],
   ];
   for (const [source, name] of copies) {
     if (!existsSync(source)) continue;
@@ -99,7 +100,7 @@ const textList = (value: unknown): readonly string[] => (Array.isArray(value) ? 
 const asRecord = (value: unknown): Record<string, unknown> => (value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
 
 /**
- * Reads back a support bundle `/setup support-bundle <dir>` wrote: the files it
+ * Reads back a support bundle `/startup support-bundle <dir>` wrote: the files it
  * holds and, from platform-review.json, the install, secure-storage,
  * integration-helper, sandbox and deep-link facts (key names only, as written).
  * Throws when the directory holds no platform review.
@@ -138,7 +139,7 @@ const collectSetupReview = createSetupReviewCollector<
   CommandContext,
   { sandboxMcpIsolation: string; sandboxSecureModeReady: boolean }
 >(
-  { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, discoverSkills },
+  { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, requireHookWorkbench, discoverSkills },
   {
     serviceArea: 'services',
     serviceNoun: 'service',
@@ -147,13 +148,8 @@ const collectSetupReview = createSetupReviewCollector<
       sandboxMcpIsolation: String(context.platform.configManager.get('sandbox.mcpIsolation')),
       sandboxSecureModeReady: buildSandboxReview(context.platform.configManager).host.secureSandboxReady,
     }),
-    // Hooks and remote runners are optional: none configured is information, not an issue.
+    // Remote runners are optional: none configured is information, not an issue.
     extraChecks: (snapshot) => [
-      {
-        severity: snapshot.managedHookCount > 0 || snapshot.managedHookChainCount > 0 ? 'pass' : 'info',
-        area: 'hooks',
-        message: snapshot.managedHookCount + ' managed hook(s), ' + snapshot.managedHookChainCount + ' chain(s)',
-      },
       {
         severity: snapshot.remoteRunnerCount > 0 ? 'pass' : 'info',
         area: 'remote',

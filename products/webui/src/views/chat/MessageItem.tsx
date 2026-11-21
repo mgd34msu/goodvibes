@@ -11,7 +11,6 @@ import { ToolActivityGroup } from './ToolActivityGroup';
 import { failureReadingOf, TurnFailureRow } from './TurnFailureRow';
 import { readMemoryProvenanceIds } from '../../lib/memory-provenance';
 import { useWebUiPreferences } from '../../lib/ui-preferences';
-import { asRecord } from '../../lib/object';
 import { isCompactionHandoffMessage } from '../../lib/compaction';
 import {
   attachmentLabel,
@@ -48,8 +47,8 @@ interface MessageItemProps {
   onCopyMessage: (message: ChatMessage) => void;
   onResendMessage: (message: ChatMessage) => void;
   onRegenerateFrom: (messageId: string) => void;
-  /** Called when the user submits an edited version of a user message. */
-  onEditMessage?: (message: ChatMessage, newText: string) => void;
+  /** Called when the user submits an edited version of a user message; resolves true once it was accepted. */
+  onEditMessage?: (message: ChatMessage, newText: string) => Promise<boolean>;
   /** This is the newest failed reply: its failure row keeps its next steps. */
   latestFailure?: boolean;
   /** "Use another model" on a failed reply: open the model menu, then try the same prompt with the model chosen. */
@@ -112,13 +111,20 @@ export const MessageItem = memo(function MessageItem({
     setEditDraft('');
   }, []);
 
+  // The editor stays open with its text until the edit is accepted, so a refused
+  // edit leaves the typed words in place under the error the chat shows.
+  const [editSubmitting, setEditSubmitting] = useState(false);
   const handleEditSubmit = useCallback(() => {
     const trimmed = editDraft.trim();
-    if (!trimmed || isSendPending) return;
-    onEditMessage?.(message, trimmed);
-    setIsEditing(false);
-    setEditDraft('');
-  }, [editDraft, isSendPending, message, onEditMessage]);
+    if (!trimmed || isSendPending || editSubmitting || !onEditMessage) return;
+    setEditSubmitting(true);
+    void onEditMessage(message, trimmed).then((accepted) => {
+      setEditSubmitting(false);
+      if (!accepted) return;
+      setIsEditing(false);
+      setEditDraft('');
+    });
+  }, [editDraft, editSubmitting, isSendPending, message, onEditMessage]);
 
   const handleEditKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -160,7 +166,7 @@ export const MessageItem = memo(function MessageItem({
           size="sm"
           className="message-edit-submit"
           onClick={handleEditSubmit}
-          disabled={!editDraft.trim() || isSendPending}
+          disabled={!editDraft.trim() || isSendPending || editSubmitting}
           aria-label="Send edited message (Ctrl+Enter)"
         >
           Send
@@ -201,7 +207,10 @@ export const MessageItem = memo(function MessageItem({
           onOtherModel={() => onUseAnotherModel?.(id)}
         />
       )}
-      {!text && attachments.length === 0 && !failedReply && <p>{JSON.stringify(asRecord(message))}</p>}
+      {/* A turn that only ran tools says what it did in the tool fold above. */}
+      {!text && attachments.length === 0 && !failedReply && !(message.toolActivity && message.toolActivity.length > 0) && (
+        <p className="message-empty">{isAssistant ? 'This reply has no text.' : 'This message has no text.'}</p>
+      )}
     </div>
   );
 

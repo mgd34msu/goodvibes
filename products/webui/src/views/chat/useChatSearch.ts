@@ -226,8 +226,8 @@ export function useChatSearch(query: string): UseChatSearchReturn {
   // fetched for, so a slow load-more response that lands after the user has
   // already changed the query/toggle is discarded rather than silently applied.
   const activeSessionParamsRef = useRef({ query: '', includeClosed });
-  // Monotonic generation counter, bumped every time a FRESH search begins (see
-  // runSessionSearch). The param check above can't catch the query-changed-then-changed-
+  // Monotonic generation counter, bumped every time the query or the toggle
+  // changes (the session-search effect). The param check above can't catch the query-changed-then-changed-
   // BACK case: a load-more launched against generation N, whose page lands after the user
   // retyped the SAME query (a new fresh search, generation N+1, with its own backend
   // cursor), would pass the param equality test and append a stale page onto fresh
@@ -245,10 +245,15 @@ export function useChatSearch(query: string): UseChatSearchReturn {
       return;
     }
 
+    // The new search owns the stage from the first keystroke: the empty state
+    // is shown only for a query that was answered, and the superseded search's
+    // cursor cannot be used with the new query.
+    setMessageSearchState('searching');
+    setMessageCursor(undefined);
+    setHasMoreResults(false);
+    setLoadMoreResultsError(undefined);
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      setMessageSearchState('searching');
-      setLoadMoreResultsError(undefined);
       void (async () => {
         try {
           const page = await fetchMessageSearchPage(query, includeClosed, controller.signal);
@@ -305,18 +310,6 @@ export function useChatSearch(query: string): UseChatSearchReturn {
   // `includeClosed` toggling in addition to `query` changes.
   const runSessionSearch = useCallback(
     async (term: string, closed: boolean, signal: AbortSignal): Promise<void> => {
-      // A fresh search supersedes any in-flight load-more from a prior generation.
-      searchGenerationRef.current += 1;
-      setLoadMoreSessionsError(undefined);
-      if (!term.trim()) {
-        setSessionResults([]);
-        setSessionSearchState('idle');
-        setNextCursor(undefined);
-        setHasMoreSessions(false);
-        return;
-      }
-
-      setSessionSearchState('searching');
       try {
         const page = await fetchSessionSearchPage(term, closed);
         if (signal.aborted) return;
@@ -341,6 +334,9 @@ export function useChatSearch(query: string): UseChatSearchReturn {
 
   useEffect(() => {
     sessionSearchAbortRef.current?.abort();
+    // A fresh search supersedes any in-flight load-more from a prior generation.
+    searchGenerationRef.current += 1;
+    setLoadMoreSessionsError(undefined);
 
     if (!query.trim()) {
       setSessionResults([]);
@@ -350,6 +346,11 @@ export function useChatSearch(query: string): UseChatSearchReturn {
       return;
     }
 
+    // As in the message stage: searching from the first keystroke, and the
+    // superseded search's cursor is dropped.
+    setSessionSearchState('searching');
+    setNextCursor(undefined);
+    setHasMoreSessions(false);
     const controller = new AbortController();
     sessionSearchAbortRef.current = controller;
 

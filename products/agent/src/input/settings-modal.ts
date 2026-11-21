@@ -30,7 +30,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { modelPickerLaunchForKey, parseNumberEditBuffer } from '@goodvibes/engine/terminal-shell/settings-behavior';
 import { CVV_PROMPT_TRADEOFF_WARNING } from '@goodvibes/engine/platform/platform/payments';
 import { setSecretBackedSettingValue, type SettingsSecretsManager } from './settings-modal-secrets.ts';
-import { buildSubscriptionEntries } from './settings-modal-subscriptions.ts';
+import { buildSubscriptionEntries, subscriptionTokensNotRemovedMessage } from './settings-modal-subscriptions.ts';
 import { buildMcpEntries } from './settings-modal-mcp-entries.ts';
 import { keepMcpTrustModeFromSettings, MCP_TOOL_RULE_EDIT_WORDS, mcpGuidedActionFromSettings } from '@goodvibes/engine/terminal-shell/settings-mcp-entries';
 import { buildFlagEntries } from './settings-modal-flag-entries.ts';
@@ -492,6 +492,7 @@ export class SettingsModal extends TerminalSettingsModalState<
         const provider = entry.provider;
         void this.subscriptionManager?.logout(provider).catch((error: unknown) => {
           logger.warn('Signed out, but the sign-in tokens could not be removed from the secret store', { provider, error: summarizeError(error) });
+          this.lastSettingEffectMessage = subscriptionTokensNotRemovedMessage(provider, summarizeError(error));
         }).finally(() => { this._loadSubscriptionEntries(); this.requestHostSettingRender?.(); });
         this._loadSubscriptionEntries();
         this.subscriptionLogoutConfirmationTarget = null;

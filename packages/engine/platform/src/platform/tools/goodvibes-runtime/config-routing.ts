@@ -39,6 +39,7 @@ import { DEFAULT_CONFIG_SNAPSHOT } from '../../config/manager-bootstrap.js';
 import { isSharedConfigKey, persistSharedKey } from '../../config/shared-config-tier.js';
 import { isValidConfigKey, type ConfigKey } from '../../config/schema.js';
 import { isSecretBearingConfigKey } from '../../config/secret-bearing-config-keys.js';
+import { admitSettingValue } from '../../config/write-admission.js';
 import { agentSettingsWriteRefusal } from '../../gate/policy/agent-settings-refusals.js';
 import { currentAdmittedToolDecision } from '../../gate/admitted-decision.js';
 import { agentActor, localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
@@ -275,6 +276,17 @@ export function usesClientOwnedStore(key: string, options: ConfigRoutingOptions)
 }
 
 /**
+ * Why the settings owner refuses a model's write of `key` = `value` for the
+ * current turn's writer and the gate's admitted decision on this call (a change
+ * that loosens security, made by an actor that may not), or null when it may
+ * stand. Nothing is written.
+ */
+export function routedLoosenRefusal(configManager: ConfigManager, key: ConfigKey, value: unknown): ReturnType<ConfigManager['loosenRefusal']> {
+  const writer = agentActor(currentTurn()?.actor ?? localOwnerActor());
+  return configManager.loosenRefusal(key, value, writer, currentAdmittedToolDecision());
+}
+
+/**
  * Apply a write to the runtime that owns the key, then confirm the OWNING store
  * holds it.
  *
@@ -302,7 +314,7 @@ export async function applyRoutedConfigWrite(
   // routing cannot skip it.
   const decision = currentAdmittedToolDecision();
   const writer = agentActor(currentTurn()?.actor ?? localOwnerActor());
-  const loosening = configManager.loosenRefusal(key, value, writer, decision);
+  const loosening = routedLoosenRefusal(configManager, key, value);
   if (loosening) throw new ConfigError(loosening.reason);
 
   // A client-owned key for a turn that belongs to ANOTHER surface is written to
@@ -316,9 +328,14 @@ export async function applyRoutedConfigWrite(
   // surface picks the change up through the config file watcher it already has.
   if (usesClientOwnedStore(key, options)) {
     const store = options.clientOwnedStore!;
-    persistSharedKey(store.settingsPath, key, value);
+    // The same schema admission every other write path runs (type, allowed
+    // values, validator), since this file is written directly, not through setMany.
+    const setting = configManager.getSchema().find(entry => entry.key === key);
+    const admitted = admitSettingValue(key, setting, value);
+    if (!admitted.ok) throw new ConfigError(`${key} was not changed: ${admitted.reason}.`);
+    persistSharedKey(store.settingsPath, key, admitted.value);
     const onDisk = readKeyFromFile(store.settingsPath, key);
-    if (!onDisk.present || !valuesMatch(onDisk.value, value)) {
+    if (!onDisk.present || !valuesMatch(onDisk.value, admitted.value)) {
       throw new Error(
         `${key} was written to ${store.settingsPath}, the ${store.surface} surface's own store, but reading it `
         + 'back does not show the requested value. The setting is NOT applied.',

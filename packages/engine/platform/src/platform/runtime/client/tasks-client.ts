@@ -81,22 +81,23 @@ export interface TasksClient {
   retry(taskId: string): Promise<void>;
 }
 
-/** Read the task array off `tasks.list`, which wraps it beside its counters. */
-function readTasks(payload: unknown): readonly RuntimeTask[] {
-  if (Array.isArray(payload)) return payload as readonly RuntimeTask[];
-  if (payload && typeof payload === 'object') {
-    const value = (payload as Record<string, unknown>)['tasks'];
-    if (Array.isArray(value)) return value as readonly RuntimeTask[];
-  }
-  return [];
+/** The sentence for an answer that lacks the field its verb promises. */
+function unexpectedAnswer(verb: 'tasks.list' | 'tasks.get', field: 'tasks' | 'task'): string {
+  return `${verb} answered without ${field}; the daemon may be a different version than this surface`;
 }
 
+/** The task array `tasks.list` answers beside its counters, or null when the answer carries none. */
+function readTasks(payload: unknown): readonly RuntimeTask[] | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const value = (payload as Record<string, unknown>)['tasks'];
+  return Array.isArray(value) ? value as readonly RuntimeTask[] : null;
+}
+
+/** The task `tasks.get` answers as `{ task }`, or null when the answer carries none. */
 function readTask(payload: unknown): RuntimeTask | null {
-  if (!payload || typeof payload !== 'object') return null;
-  const record = payload as Record<string, unknown>;
-  const nested = record['task'];
-  if (nested && typeof nested === 'object') return nested as RuntimeTask;
-  return typeof record['id'] === 'string' ? payload as RuntimeTask : null;
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+  const nested = (payload as Record<string, unknown>)['task'];
+  return nested && typeof nested === 'object' && !Array.isArray(nested) ? nested as RuntimeTask : null;
 }
 
 export function createTasksClient(deps: {
@@ -131,8 +132,11 @@ export function createTasksClient(deps: {
     if (!probe.available) return { found: null, daemonUnavailable: probe.reason };
     try {
       const task = readTask(await deps.verbs.invoke('tasks.get', { taskId }));
-      return { found: task ? { task, origin: 'daemon' } : null, daemonUnavailable: null };
+      if (!task) return { found: null, daemonUnavailable: unexpectedAnswer('tasks.get', 'task') };
+      return { found: { task, origin: 'daemon' }, daemonUnavailable: null };
     } catch (error) {
+      // The daemon answered that it holds no such task: a real "not found", not a failure to ask.
+      if ((error as { status?: unknown } | null)?.status === 404) return { found: null, daemonUnavailable: null };
       const reason = summarizeError(error);
       logger.debug('[tasks] the daemon could not answer for this task', { taskId, error: reason });
       return { found: null, daemonUnavailable: reason };
@@ -150,6 +154,7 @@ export function createTasksClient(deps: {
       try {
         // The daemon sends only its newest `limit`; the union keeps the same cap.
         const daemonTasks = readTasks(await deps.verbs.invoke('tasks.list', { limit: Math.max(1, limit) }));
+        if (daemonTasks === null) return { tasks: local, daemonUnavailable: unexpectedAnswer('tasks.list', 'tasks') };
         return {
           tasks: [
             ...local,

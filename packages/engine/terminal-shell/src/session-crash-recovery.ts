@@ -200,6 +200,7 @@ export function restoreCrashSnapshot(input: CrashRecoveryInput): CrashRecoveryRe
     }
   };
   const persist = (messages: ConversationMessageSnapshot[]): void => {
+    // The recovered session becomes the live one, so this terminal opens it for writing.
     input.sessionManager.save(sessionId, messages as never[], {
       title: conversation.title || '',
       model: runtime.model,
@@ -208,7 +209,7 @@ export function restoreCrashSnapshot(input: CrashRecoveryInput): CrashRecoveryRe
       titleSource: conversation.getTitleSource(),
       // Recovered on purpose; a retention sweep must not expire it.
       saveSource: 'user',
-    }, undefined, undefined, carriedBranches());
+    }, undefined, undefined, carriedBranches(), { open: true });
   };
   const result = applyRecoverySnapshot({ sessionId, conversation, surface, persistSnapshot: persist, confirmation: input.confirmation });
   if (!result.applied) {

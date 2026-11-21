@@ -41,6 +41,8 @@ export type ApprovalRaiser = (input: {
   readonly request: import('../../permissions/prompt.js').PermissionPromptRequest;
   /** In-process cancellation, excluded from persisted/wire request data. */
   readonly signal?: AbortSignal | undefined;
+  /** The session the ask is raised under. */
+  readonly sessionId?: string | undefined;
   readonly routeId?: string | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
 }) => Promise<PermissionPromptDecision>;
@@ -87,6 +89,8 @@ export function createPolicyRuntimeState(
       managed: isFeatureGateEnabled(featureFlags, 'policy-signing'),
       ...(signingKey ? { signingKey } : {}),
       provenanceSource: 'local-file',
+      // A path-scope pattern of ~ or ~/... names this home (the injected one when set).
+      homeDirectory: configManager.getHomeDirectory() ?? undefined,
     },
   }));
   loadConfiguredPolicyBundle(configManager, featureFlags, policyRuntimeState);

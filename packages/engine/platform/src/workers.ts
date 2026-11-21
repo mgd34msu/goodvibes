@@ -103,6 +103,11 @@ export type GoodVibesCloudflareQueuePayload =
       readonly payloadKey?: string | undefined;
       /** Stable id minted when the job is queued; every redelivery sends the same one as `source.id` unless the body names its own `id`. */
       readonly jobId?: string | undefined;
+      /**
+       * The id the daemon files the job under (`source.id`), sent with a body kept in R2: a
+       * redelivery that finds the body already deleted asks the daemon for the job by it.
+       */
+      readonly sourceId?: string | undefined;
       readonly enqueuedAt?: number | undefined;
     };
 
@@ -150,6 +155,8 @@ type DaemonUrlResolution = { readonly baseUrl: string } | { readonly refusal: Re
 type BudgetAnswer = {
   readonly allowed: boolean;
   readonly unmetered?: boolean;
+  /** The coordinator could not be reached or gave no usable answer; the message is refused. */
+  readonly unavailable?: boolean;
   readonly used?: { readonly ops: number; readonly messages: number };
   readonly limits?: { readonly ops: number; readonly messages: number };
   readonly resetsAt?: number;
@@ -381,6 +388,7 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
     if (!namespace) return null;
     const stub = namespace.get(namespace.idFromName('queue-budget'));
     const response = await stub.fetch(`https://coordinator${path}`, { method: 'POST', body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(`the coordinator answered ${response.status}`);
     return toRecord(await response.json());
   }
 
@@ -391,7 +399,14 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
     };
     if (limits.ops === 0 && limits.messages === 0) return { allowed: true };
     const reserved = { ops: queueOpsFor(bytes), messages: 1 };
-    const answer = await coordinatorCall(env, '/budget/reserve', { ...reserved, limits });
+    let answer: Record<string, unknown> | null;
+    try {
+      answer = await coordinatorCall(env, '/budget/reserve', { ...reserved, limits });
+    } catch (error) {
+      // The budget exists to cap spend, so a coordinator that cannot answer refuses the message.
+      console.warn('GoodVibes worker could not reach the queue budget coordinator', { error: String(error) });
+      return { allowed: false, unavailable: true };
+    }
     if (!answer) return { allowed: true, unmetered: true };
     return answer['allowed'] === true ? { ...(answer as BudgetAnswer), reserved } : answer as BudgetAnswer;
   }
@@ -442,7 +457,23 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
     }
   }
 
-  function budgetRefusal(answer: BudgetAnswer): Response {
+  /** `direct` is the way around the queue for a refused enqueue; null for a budget read. */
+  function coordinatorUnavailable(direct: string | null): Response {
+    return json({
+      error: direct
+        ? 'The queue budget coordinator could not be reached, so nothing was queued'
+        : 'The queue budget coordinator could not be reached',
+      code: 'BUDGET_COORDINATOR_UNAVAILABLE',
+      next: [
+        ...(direct ? [direct] : []),
+        'Send the request again',
+        'Check the coordinator Durable Object binding in the Cloudflare dashboard',
+      ],
+    }, 503);
+  }
+
+  function budgetRefusal(answer: BudgetAnswer, direct: string): Response {
+    if (answer.unavailable) return coordinatorUnavailable(direct);
     const used = answer.used ?? { ops: 0, messages: 0 };
     const limits = answer.limits ?? { ops: 0, messages: 0 };
     const resetsAt = answer.resetsAt ?? 0;
@@ -451,7 +482,7 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
       code: 'QUEUE_BUDGET_EXHAUSTED',
       state: `used ${used.ops} of ${limits.ops || 'unlimited'} queue operations and ${used.messages} of ${limits.messages || 'unlimited'} messages today (UTC)`,
       next: [
-        'Post /batch/jobs to send the job straight to the daemon without the queue',
+        direct,
         `Wait until ${new Date(resetsAt).toISOString()} when the budget resets`,
         'Raise cloudflare.maxQueueOpsPerDay or batch.maxQueueMessagesPerDay and provision again',
       ],
@@ -476,6 +507,13 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
     } catch {
       return null;
     }
+  }
+
+  /** Records a job the daemon holds as delivered, with the daemon's id from its answer (`{ job }` or the job itself). */
+  async function recordDelivered(env: GoodVibesCloudflareWorkerEnv, jobId: string, answer: Response): Promise<void> {
+    const created = toRecord(await answer.json().catch(() => ({})));
+    const daemonJob = toRecord(created['job'] ?? created);
+    await kvPut(env, `job:${jobId}`, { state: 'delivered', daemonJobId: typeof daemonJob['id'] === 'string' ? daemonJob['id'] : undefined, deliveredAt: Date.now() });
   }
 
   function payloadKey(jobId: string): string {
@@ -534,7 +572,7 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
     if (body instanceof Response) return body;
     const message = { type: 'batch.tick' as const, force: toRecord(body)['force'] === true, enqueuedAt: Date.now() };
     const budget = await reserveQueue(env, utf8Bytes(JSON.stringify(message)));
-    if (!budget.allowed) return budgetRefusal(budget);
+    if (!budget.allowed) return budgetRefusal(budget, 'Post /batch/tick to run the tick on the daemon without the queue');
     const failed = await sendQueued(env, queue, message, budget);
     if (failed) return failed;
     return json({ queued: true }, 202);
@@ -580,10 +618,10 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
     }
     const enqueuedAt = Date.now();
     const message: GoodVibesCloudflareQueuePayload = useR2
-      ? { type: 'batch.job.create', jobId, payloadKey: payloadKey(jobId), enqueuedAt }
+      ? { type: 'batch.job.create', jobId, payloadKey: payloadKey(jobId), sourceId: sourceIdFor(body, jobId), enqueuedAt }
       : { type: 'batch.job.create', body, jobId, enqueuedAt };
     const budget = await reserveQueue(env, utf8Bytes(JSON.stringify(message)));
-    if (!budget.allowed) return budgetRefusal(budget);
+    if (!budget.allowed) return budgetRefusal(budget, 'Post /batch/jobs to send the job straight to the daemon without the queue');
     // The status record is written before the message is sent: the consumer may deliver the job
     // before this request continues, and its 'delivered' must never be overwritten by a later 'queued'.
     await kvPut(env, `job:${jobId}`, { state: 'queued', enqueuedAt, payload: useR2 ? 'r2' : 'queue' });
@@ -690,7 +728,15 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
           const namespace = env.GOODVIBES_COORDINATOR;
           if (!namespace) return json({ error: 'No coordinator is bound, so queue use is not counted', code: 'BUDGET_NOT_COUNTED' }, 404);
           const stub = namespace.get(namespace.idFromName('queue-budget'));
-          const used = toRecord(await (await stub.fetch('https://coordinator/budget')).json());
+          let used: Record<string, unknown>;
+          try {
+            const answer = await stub.fetch('https://coordinator/budget');
+            if (!answer.ok) throw new Error(`the coordinator answered ${answer.status}`);
+            used = toRecord(await answer.json());
+          } catch (error) {
+            console.warn('GoodVibes worker could not read the queue budget', { error: String(error) });
+            return coordinatorUnavailable(null);
+          }
           return json({
             ...used,
             limits: { ops: envNumber(env.GOODVIBES_MAX_QUEUE_OPS_PER_DAY), messages: envNumber(env.GOODVIBES_MAX_QUEUE_MESSAGES_PER_DAY) },
@@ -758,9 +804,7 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
             const response = await handleQueuePayload(payload, env, options);
             if (response.ok) {
               if (jobId) {
-                const created = toRecord(await response.json().catch(() => ({})));
-                const daemonJob = toRecord(created['job'] ?? created);
-                await kvPut(env, `job:${jobId}`, { state: 'delivered', daemonJobId: typeof daemonJob['id'] === 'string' ? daemonJob['id'] : undefined, deliveredAt: Date.now() });
+                await recordDelivered(env, jobId, response);
                 const key = payload['payloadKey'];
                 if (typeof key === 'string' && key && env.GOODVIBES_ARTIFACTS) await env.GOODVIBES_ARTIFACTS.delete(key).catch(() => undefined);
               }
@@ -771,6 +815,21 @@ function goodVibesWorkerRuntime(): GoodVibesWorkerRuntime {
               // Any other 4xx (a bad body) fails the same way every time.
               const refusal = toRecord(await response.json().catch(() => ({})));
               const code = typeof refusal['code'] === 'string' ? refusal['code'] : undefined;
+              // The R2 body is deleted only after the daemon accepted the job, so a redelivery
+              // that finds it gone asks the daemon whether it already holds the job.
+              if (jobId && code === 'PAYLOAD_MISSING') {
+                const sourceId = typeof payload['sourceId'] === 'string' && payload['sourceId'] ? payload['sourceId'] : jobId;
+                const held = await proxyDaemonJson(env, options, `/api/batch/jobs/${encodeURIComponent(sourceId)}`, { method: 'GET' });
+                if (held.ok) {
+                  await recordDelivered(env, jobId, held);
+                  message.ack?.();
+                  continue;
+                }
+                if (held.status !== 404 && isRetryableStatus(held.status)) {
+                  message.retry?.();
+                  continue;
+                }
+              }
               console.warn('GoodVibes worker queue message rejected by the daemon', { status: response.status, code, jobId: jobId || undefined });
               if (jobId) await kvPut(env, `job:${jobId}`, { state: 'rejected', status: response.status, code, rejectedAt: Date.now() });
               message.ack?.();

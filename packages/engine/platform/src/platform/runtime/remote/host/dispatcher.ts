@@ -139,6 +139,21 @@ export class RemoteDispatcher {
   }
 
   /**
+   * Remove what the backends already built hold for one peer, after it was
+   * removed or replaced. A backend that was never built holds nothing. A
+   * failure is logged without exception or credential text.
+   */
+  async forget(peerId: string): Promise<void> {
+    await Promise.all([...(this.backendMap?.values() ?? [])].map(async (backend) => {
+      try { await backend.forget?.(peerId); }
+      catch {
+        try { this.logger.warn('remote backend cleanup failed', { backendKind: backend.kind, peerId }); }
+        catch { /* Logging must not interrupt other owned cleanup. */ }
+      }
+    }));
+  }
+
+  /**
    * Close admission, stop every backend that was built, and await accepted
    * dispatches. Backend cleanup failures are reported without exception or
    * credential text; shutdown never closes the caller-owned registry.

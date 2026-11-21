@@ -103,26 +103,34 @@ export function scheduleAutomationFailureFollowUp(
   retryAllowed: boolean,
   deliverNotice = true,
 ): void {
+  // The notice describes the failed run, so it reads the job as it was passed in.
   if (deliverNotice) context.deliverFailureNotice(job, run);
-  if (!job.enabled) return;
+  // The policy acts on the job as it stands now: a job removed or disabled while
+  // the failure was being read is left removed or disabled, never written back.
+  // A one-shot switched off because its only occurrence fired may still retry
+  // that occurrence, as startRetry below allows.
+  const current = context.jobs.get(job.id);
+  if (!current) return;
+  if (!current.enabled && current.pausedReason !== 'one-shot-complete') return;
 
-  if (job.failure.action === 'cooldown') {
+  if (current.failure.action === 'cooldown') {
+    if (!current.enabled) return;
     const cooled: AutomationJob = {
-      ...job,
-      nextRunAt: Date.now() + Math.max(1_000, job.failure.cooldownMs),
+      ...current,
+      nextRunAt: Date.now() + Math.max(1_000, current.failure.cooldownMs),
       updatedAt: Date.now(),
     };
-    context.jobs.set(job.id, cooled);
+    context.jobs.set(current.id, cooled);
     context.scheduleJob(cooled);
-    saveJobsAsync(context, 'failure-cooldown', job.id);
+    saveJobsAsync(context, 'failure-cooldown', current.id);
     return;
   }
 
   // The failure policy's retry policy rules; an explicit per-job
   // execution.maxAttempts (older jobs) overrides its attempt count.
-  const retryPolicy = job.failure.retryPolicy;
-  const maxAttempts = Math.max(1, job.execution.maxAttempts ?? retryPolicy.maxAttempts);
-  if (job.failure.action !== 'retry' || run.attempt >= maxAttempts || !retryAllowed) {
+  const retryPolicy = current.failure.retryPolicy;
+  const maxAttempts = Math.max(1, current.execution.maxAttempts ?? retryPolicy.maxAttempts);
+  if (current.failure.action !== 'retry' || run.attempt >= maxAttempts || !retryAllowed) {
     return;
   }
   const retryKey = `${job.id}:${run.id}`;
@@ -284,6 +292,15 @@ function buildFailureNoticeMessage(job: AutomationJob, run: AutomationRun): stri
 }
 
 /**
+ * The identity of a failed or missed run's notice (AutomationRun.notice), the
+ * same for every attempt: the delivery manager's `announces` for a failure
+ * notice, so a surface that drops repeats drops a second copy after a restart.
+ */
+export function automationNoticeEffect(runId: string): string {
+  return `automation:${runId}:failure-notice`;
+}
+
+/**
  * Deliver a failure (or missed-run) notice for a job's run.
  *
  * The notice flows to the job's own delivery targets by default so a failed or
@@ -291,14 +308,16 @@ function buildFailureNoticeMessage(job: AutomationJob, run: AutomationRun): stri
  * configured failure route. `onUndelivered` is called when the notice reached
  * no one: the job names no target (no reason: the notice simply belongs in the
  * owner inbox), or, with the reason, delivery is unavailable or no attempt
- * across the primary and fallback targets was sent. The returned
- * promise settles when the notice was sent or given up on, and never rejects.
+ * across the primary and fallback targets was sent. `record` is awaited once an
+ * attempt was sent, to clear what the run owes. The returned promise settles
+ * when the notice was sent and recorded or given up on, and never rejects.
  */
 export function maybeDeliverAutomationFailureNotice(
   deliveryManager: AutomationDeliveryManager | null,
   job: AutomationJob,
   run: AutomationRun,
   onUndelivered: (job: AutomationJob, run: AutomationRun, reason: string | undefined) => void,
+  record: () => Promise<void>,
 ): Promise<void> {
   const { primary, fallback } = resolveAutomationFailureNoticeTargets(job);
   if (primary.length === 0 && fallback.length === 0) {
@@ -334,6 +353,17 @@ function undeliveredReason(attempts: readonly AutomationDeliveryAttempt[]): stri
   return attempts.length === 0
     ? 'No delivery target of this job could be reached.'
     : `Not delivered: ${attempts.map((attempt) => attempt.error ?? attempt.status).join('; ')}.`;
+}
+
+/** Which targets a partly delivered answer missed and why, as the owner inbox says it. */
+function partlyDeliveredReason(missed: readonly AutomationDeliveryAttempt[]): string {
+  const each = missed.map((attempt) => `${deliveryTargetWords(attempt.target)} (${attempt.error ?? attempt.status})`);
+  return `Delivered to some targets, not to ${each.join('; ')}.`;
+}
+
+/** A delivery target as a person recognises it: its label, else its address or route, else its kind. */
+function deliveryTargetWords(target: AutomationDeliveryTarget): string {
+  return target.label?.trim() || target.address?.trim() || target.routeId?.trim() || target.surfaceKind || target.kind;
 }
 
 /**
@@ -412,16 +442,25 @@ export function maybeDeliverAutomationRun(
   context.deliveryInFlight.add(run.id);
   const delivering = context.deliveryManager.deliverJobRun(job, run)
     .then(async (deliveryAttempts) => {
+      const missed = deliveryAttempts.filter((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
       // Every named target failed (or none could be resolved): the answer goes to the owner inbox instead.
-      const undelivered = deliveryAttempts.every((attempt) => attempt.status === 'failed' || attempt.status === 'dead_lettered');
-      const fallback = context.unattendedRuns && undelivered
-        ? await context.unattendedRuns.postToInbox(automationRunAnswer(job, run), undeliveredReason(deliveryAttempts))
+      const undelivered = missed.length === deliveryAttempts.length;
+      // Some targets were reached and some were not: the owner inbox gets the answer with the targets it missed named.
+      const partly = !undelivered && missed.length > 0;
+      const fallback = context.unattendedRuns && (undelivered || partly)
+        ? await context.unattendedRuns.postToInbox(
+          automationRunAnswer(job, run),
+          partly ? partlyDeliveredReason(missed) : undeliveredReason(deliveryAttempts),
+        )
         : undefined;
       const reached = !undelivered || fallback?.to === 'inbox';
-      if (run.status === 'completed') context.noteJobOutcome?.(job.id, undelivered ? 'not-delivered' : 'delivered');
+      if (run.status === 'completed') context.noteJobOutcome?.(job.id, undelivered ? 'not-delivered' : partly ? 'partly-delivered' : 'delivered');
       if (fallback && !reached) keptOwed(fallback);
       // The attempts (or the inbox) are the delivery's record; the run owes nothing more once its answer reached someone.
-      await record(deliveryAttempts, reached || !context.unattendedRuns);
+      // A partly delivered answer is settled once the inbox note naming the missed targets landed.
+      const settled = partly ? fallback?.to === 'inbox' : reached;
+      if (partly && fallback && fallback.to !== 'inbox') keptOwed(fallback);
+      await record(deliveryAttempts, settled || !context.unattendedRuns);
     })
     .catch((error) => {
       logger.warn('AutomationManager: delivery failed', {

@@ -27,7 +27,7 @@ export function wireCapabilityIndex(input: {
     workingDirectory: input.workingDirectory,
     configValuePresent: (key) => configValueIsPresent(input.configManager, key),
     secretPresent: (key) => secretValueIsPresent(input.secretsManager, key),
-    mcpServers: safeMcpServerPosture(input.commandContext),
+    mcpServers: () => safeMcpServerPosture(input.commandContext),
     servedOperatorMethodIds: servedOperatorMethodIds(),
   });
 }

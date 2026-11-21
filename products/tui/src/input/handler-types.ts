@@ -127,7 +127,8 @@ export interface InputHandlerLike {
   onboardingModelPickerCancelSnapshot: OnboardingWizardSnapshot | null;
   onboardingHydrationSerial: number;
   onboardingOperation: string | null;
-  onboardingOpenAiListenerSerial: number;
+  /** The OpenAI sign-in's callback listener while it waits on the fixed port; null when none is held. */
+  onboardingOpenAiListener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null;
 
   // ── Methods: modal lifecycle ──────────────────────────────────────────────
   saveUndoState(): void;
@@ -165,7 +166,6 @@ export interface InputHandlerLike {
   completeOpenAiSubscriptionFromListener(
     listener: Awaited<ReturnType<typeof createOAuthLocalListener>>,
     verifier: string,
-    serial: number,
   ): Promise<void>;
   handleOnboardingAction(action: OnboardingWizardAction): Promise<void>;
 }

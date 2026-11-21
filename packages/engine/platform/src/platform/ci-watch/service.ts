@@ -430,7 +430,10 @@ export class CiWatchService {
     const now = this.now();
     const terminal = report.overall === 'passed' || report.overall === 'failed';
     const changed = report.overall !== subscription.lastOverall;
-    const continuationFailure = Boolean(subscription.continuationId) && report.overall === 'failed';
+    // A failed verdict on a watch that owns a repair (a continuation, or an owner held in this
+    // process) is not delivered until the repair starts or is refused: an error waits out its backoff.
+    const repairOwned = report.overall === 'failed' && Boolean(this.deps.autonomousRepair)
+      && (Boolean(subscription.continuationId) || runtime.owner !== undefined);
     let notified = false;
     let notificationId: string | undefined;
     let fixSessionTriggered = false;
@@ -438,7 +441,7 @@ export class CiWatchService {
     let fixSessionError: string | undefined;
     let repair = subscription.repair;
 
-    if (terminal && changed && this.deps.notifier && !continuationFailure) runtime.retiring = true;
+    if (terminal && changed && this.deps.notifier && !repairOwned) runtime.retiring = true;
     if (terminal && changed && this.deps.notifier) {
       if (runtime.announced !== report.overall) {
         notificationId = await this.deps.notifier(
@@ -452,7 +455,7 @@ export class CiWatchService {
     }
     assertCurrent();
 
-    if (report.overall === 'failed' && (changed || continuationFailure)) {
+    if (report.overall === 'failed' && (changed || repairOwned)) {
       if (this.deps.autonomousRepair) {
         const jobs = failingJobs(report);
         const failureKey = failureKeyOf(subscription, jobs);
@@ -532,7 +535,7 @@ export class CiWatchService {
     const expiresAt = report.overall === 'pending' ? Math.min(now + CI_WATCH_IDLE_MS, hardEnd) : storedExpiry;
     const row: CiWatchSubscription = Object.freeze({ ...subscription, lastOverall: report.overall, updatedAt: now, expiresAt, ...(repair ? { repair } : {}) });
     // A refused repair is final for this failure: say so once and end the watch.
-    if (continuationFailure && repair?.outcome === 'denied') {
+    if (repairOwned && repair?.outcome === 'denied') {
       return this.endWatch({ subs, subscription, row, runtime, report, progress, title: 'CI repair not started',
         reason: `the repair was not started: ${repair.reason ?? 'refused'}`, next: REPAIR_REFUSED_HINT });
     }
@@ -540,9 +543,9 @@ export class CiWatchService {
     // Retirement: a watch exists to deliver ONE terminal verdict (and, for a
     // continuation, to start its repair). Without a notifier the verdict was
     // NOT delivered, so the watch stays until it expires.
-    const retired = continuationFailure ? fixSessionTriggered : terminal && changed && notified;
+    const retired = repairOwned ? fixSessionTriggered : terminal && changed && notified;
     if (!retired && now >= expiresAt) {
-      if (continuationFailure && repair?.outcome === 'error') {
+      if (repairOwned && repair?.outcome === 'error') {
         return this.endWatch({ subs, subscription, row, runtime, report, progress, title: 'CI repair not started', next: REPAIR_REFUSED_HINT,
           reason: `the repair did not start before the watch's time ran out (${repair.reason ?? 'unknown error'})` });
       }

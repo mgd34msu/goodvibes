@@ -34,7 +34,8 @@ import { homedir } from 'node:os';
 import { loadAcpLibrary } from './optional-acp-library.js';
 import type { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Agent, Client, NewSessionResponse, PromptResponse, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from './protocol.js';
-import { ACP_HANDSHAKE_TIMEOUT_MS, drainStderrTail, messageChunkText, permissionOutcomeFor, readNdJsonMessages, stopAcpChild, wellFormedPermissionOptions, withTimeout } from './protocol.js';
+import { drainStderrTail } from '../utils/stderr-tail.js';
+import { ACP_HANDSHAKE_TIMEOUT_MS, messageChunkText, permissionOutcomeFor, readNdJsonMessages, stopAcpChild, wellFormedPermissionOptions, withTimeout } from './protocol.js';
 import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { captureAutonomousSource, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { logger } from '../utils/logger.js';
@@ -578,7 +579,7 @@ export class AcpHostService {
         };
         try {
           assertCurrent();
-          admission = await admitExternalRequest(host, { connectionId: record.info.id, destination: record.info.binaryPath, signal, assertCurrent },
+          admission = await admitExternalRequest(host, { connectionId: record.info.id, destination: record.info.binaryPath, signal, assertCurrent, sessionId: record.info.sessionId },
             { sourceOf: () => operation.source, assertCurrent: () => {} }, {
               tool: owned.toolCall.title ?? 'ACP action', protocolSubject: wire.protocolSubject!,
               args: { ...(owned.toolCall.rawInput && typeof owned.toolCall.rawInput === 'object' && !Array.isArray(owned.toolCall.rawInput)

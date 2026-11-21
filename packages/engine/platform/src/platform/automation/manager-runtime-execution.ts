@@ -12,7 +12,7 @@ import type { AutomationRunTrigger } from './types.js';
 import type { ConfigManager } from '../config/manager.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { readAutomationRunTransience } from './manager-runtime-delivery.js';
+import { automationNoticeEffect, readAutomationRunTransience } from './manager-runtime-delivery.js';
 import {
   buildAutomationExecutionIntent,
   buildAutomationExecutionContext,
@@ -186,7 +186,26 @@ export async function executeAutomationJob(
       executionIntent: buildAutomationExecutionIntent(job.execution.target.kind, 'spawn'),
     };
   }
-  assertSource();
+  /**
+   * The job's prompt queued in a shared session for this run's agent. When no
+   * agent will answer it (the start failed, or the run's owner ended before the
+   * agent was spawned) it is marked failed instead of waiting there with no
+   * owning run; a retry queues its own. The input belongs to this run, so this
+   * is done even when the run's owner has ended. Best effort: a failure is logged.
+   */
+  const releaseQueuedInput = async (reason: string): Promise<void> => {
+    if (!resolved.session?.id || !resolved.inputId || resolved.continuationMode !== 'shared-session') return;
+    try { await context.sessionBroker.failInput(resolved.session.id, resolved.inputId, reason); }
+    catch (inputError) {
+      logger.warn('AutomationManager: the session input of a run that did not start could not be marked failed', { jobId: job.id, inputId: resolved.inputId, error: summarizeError(inputError) });
+    }
+  };
+  try {
+    assertSource();
+  } catch (error) {
+    await releaseQueuedInput(summarizeError(error));
+    throw error;
+  }
   const effectiveJob = resolved.updatedJob ?? job;
   const run: AutomationRun = {
     id: `autorun-${job.id}-${now}-${randomUUID().slice(0, 6)}`,
@@ -244,6 +263,8 @@ export async function executeAutomationJob(
 
   // Set once the agent exists, so a later failure can cancel and record it.
   let spawnedAgentId: string | undefined;
+  // Set once the start counted the run on the job, so a later failure does not count it again.
+  let startRecorded = false;
   try {
     if (resolveFailure) throw resolveFailure.error;
     if (resolved.continuationMode === 'continued-live') {
@@ -253,6 +274,7 @@ export async function executeAutomationJob(
       };
       const updatedJob = recordOnCurrentJob(context, job.id, startOnJob);
       if (!updatedJob) throw new AutomationJobRemovedError(job.id);
+      startRecorded = true;
       context.runs.set(runningRun.id, runningRun);
       context.onRunRecorded?.();
       await context.syncExecutionRoute(updatedJob, runningRun);
@@ -290,6 +312,7 @@ export async function executeAutomationJob(
     }
     const updatedJob = recordOnCurrentJob(context, job.id, startOnJob);
     if (!updatedJob) throw new AutomationJobRemovedError(job.id);
+    startRecorded = true;
     context.runs.set(runningRun.id, runningRun);
     context.onRunRecorded?.();
     await context.syncExecutionRoute(updatedJob, runningRun);
@@ -309,6 +332,7 @@ export async function executeAutomationJob(
         try { context.cancelTask?.(spawnedAgentId); }
         catch (cancelError) { logger.warn('AutomationManager: could not cancel the agent of a run whose owner ended', { jobId: job.id, runId: run.id, agentId: spawnedAgentId, error: summarizeError(cancelError) }); }
       }
+      await releaseQueuedInput(message);
       logger.info('AutomationManager: a run start was stopped because its owner ended; nothing was saved for it', { jobId: job.id, runId: run.id, reason: message });
       throw error;
     }
@@ -329,15 +353,7 @@ export async function executeAutomationJob(
         logger.warn('AutomationManager: could not cancel the agent of a run that failed to record', { jobId: job.id, runId: run.id, agentId: spawnedAgentId, error: summarizeError(cancelError) });
       }
     }
-    if (resolved.session?.id && resolved.inputId && resolved.continuationMode === 'shared-session') {
-      // The job's prompt was queued in the session for this run's agent. No
-      // agent will answer it now, so it is marked failed instead of waiting
-      // there; a retry queues its own.
-      try { await context.sessionBroker.failInput(resolved.session.id, resolved.inputId, message); }
-      catch (inputError) {
-        logger.warn('AutomationManager: the session input of a failed start could not be marked failed', { jobId: job.id, runId: run.id, inputId: resolved.inputId, error: summarizeError(inputError) });
-      }
-    }
+    await releaseQueuedInput(message);
     if (error instanceof AutomationJobRemovedError || !context.jobs.has(job.id)) {
       // Nothing is left to count the run against or retry: it is recorded as
       // cancelled, the way a running run of a removed job is.
@@ -365,11 +381,13 @@ export async function executeAutomationJob(
       endedAt: now,
       durationMs: 0,
       error: message,
+      // Its failure notice is owed from this save on, so a restart before the notice is sent still sends it.
+      notice: { state: 'owed', effect: automationNoticeEffect(run.id) },
       ...(spawnedAgentId !== undefined ? { agentId: spawnedAgentId } : {}),
     };
     context.runs.set(failedRun.id, failedRun);
     context.onRunRecorded?.();
-    const updatedJob = recordOnCurrentJob(context, job.id, current => context.applyFailureToJob(current, now))!;
+    const updatedJob = recordOnCurrentJob(context, job.id, current => context.applyFailureToJob(current, now, !startRecorded))!;
     try {
       await context.syncExecutionRoute(updatedJob, failedRun);
       if (failedRun.sessionId && failedRun.continuationMode !== 'continued-live') {

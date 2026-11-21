@@ -10,6 +10,7 @@
  * `SignedPolicyBundle` so callers control the loading strategy.
  */
 
+import { join } from 'node:path';
 import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { PolicyRule } from './types.js';
 import type {
@@ -135,6 +136,13 @@ export interface PolicyLoaderOptions {
    * Hosts without runtime gates can provide explicit loader options.
    */
   featureFlags?: FeatureFlagReader | undefined;
+
+  /**
+   * The home directory a path-scope pattern of `~` or `~/...` names. Each such
+   * pattern is expanded once, when the bundle is loaded. With none given, a
+   * bundle holding such a pattern is refused, since the rule could never match.
+   */
+  homeDirectory?: string | undefined;
 }
 
 // ── Core loader ───────────────────────────────────────────────────────────────
@@ -176,7 +184,8 @@ export function loadPolicyBundle(
   } = options;
   const signingEnabled = isFeatureGateEnabled(options.featureFlags, 'policy-signing');
 
-  const shapeError = describeBundleShapeError(bundle);
+  const homeDirectory = options.homeDirectory?.trim() ? options.homeDirectory : undefined;
+  const shapeError = describeBundleShapeError(bundle, homeDirectory);
   const provenanceFor = (signatureStatus: SignatureStatus): BundleProvenance => ({
     policyBundleId: typeof bundle?.bundleId === 'string' ? bundle.bundleId : '',
     signatureStatus,
@@ -235,7 +244,7 @@ export function loadPolicyBundle(
   return {
     ok: true,
     // A bundle is the managed source: every rule it carries is a managed rule.
-    rules: bundle.payload.rules.map((rule) => ({ ...rule, origin: 'managed' as const })),
+    rules: bundle.payload.rules.map((rule) => ({ ...expandHomePatterns(rule, homeDirectory), origin: 'managed' as const })),
     provenance: provenanceFor(signatureStatus),
   };
 }
@@ -253,8 +262,26 @@ function isStringList(value: unknown, nonEmpty: boolean): boolean {
   return Array.isArray(value) && (!nonEmpty || value.length > 0) && value.every((item) => typeof item === 'string' && item.length > 0);
 }
 
+/** Whether a path pattern names the home directory: exactly `~`, or starting with `~/`. */
+function isHomePattern(pattern: string): boolean {
+  return pattern === '~' || pattern.startsWith('~/');
+}
+
+/**
+ * A path-scope rule with each `~` or `~/...` pattern joined onto the home
+ * directory, the same rule the shell path service expands a path by; other
+ * rules, and every rule when no home directory is known, are returned as they are.
+ */
+function expandHomePatterns(rule: PolicyRule, homeDirectory: string | undefined): PolicyRule {
+  if (rule.type !== 'path-scope' || homeDirectory === undefined || !rule.pathPatterns.some(isHomePattern)) return rule;
+  return {
+    ...rule,
+    pathPatterns: rule.pathPatterns.map((pattern) => (pattern === '~' ? homeDirectory : pattern.startsWith('~/') ? join(homeDirectory, pattern.slice(2)) : pattern)),
+  };
+}
+
 /** What a rule of its type is missing, or undefined when the evaluator can apply it as written. */
-function describeRuleFieldError(rule: Record<string, unknown>, at: string): string | undefined {
+function describeRuleFieldError(rule: Record<string, unknown>, at: string, homeDirectory: string | undefined): string | undefined {
   const pattern = rule['toolPattern'];
   if (!(typeof pattern === 'string' && pattern.length > 0) && !isStringList(pattern, true)) {
     return `${at} needs a toolPattern: a tool name, "*", or a list of names.`;
@@ -266,8 +293,13 @@ function describeRuleFieldError(rule: Record<string, unknown>, at: string): stri
       return undefined;
     case 'arg-shape':
       return isRecord(rule['argMatchers']) && Object.keys(rule['argMatchers']).length > 0 ? undefined : `${at} needs argMatchers: an object of argument names to values or /patterns/.`;
-    case 'path-scope':
-      return isStringList(rule['pathPatterns'], true) ? undefined : `${at} needs pathPatterns: a non-empty list of path globs.`;
+    case 'path-scope': {
+      if (!isStringList(rule['pathPatterns'], true)) return `${at} needs pathPatterns: a non-empty list of path globs.`;
+      const home = homeDirectory === undefined ? (rule['pathPatterns'] as string[]).find(isHomePattern) : undefined;
+      return home === undefined
+        ? undefined
+        : `${at} pathPattern "${home}" starts with ~, and no home directory is known here to expand it; write it as an absolute path.`;
+    }
     case 'network-scope':
       if (!isStringList(rule['hostPatterns'], true)) return `${at} needs hostPatterns: a non-empty list of host globs.`;
       if (rule['ports'] !== undefined && !(Array.isArray(rule['ports']) && rule['ports'].every((port) => Number.isInteger(port) && port >= 0 && port <= 65_535))) {
@@ -288,7 +320,7 @@ function describeRuleFieldError(rule: Record<string, unknown>, at: string): stri
 }
 
 /** What is wrong with a parsed bundle's shape, or undefined when the loader can read it. Parsed JSON can be anything. */
-function describeBundleShapeError(bundle: unknown): string | undefined {
+function describeBundleShapeError(bundle: unknown, homeDirectory: string | undefined): string | undefined {
   if (!isRecord(bundle)) return 'expected an object with bundleId and payload.';
   if (typeof bundle['bundleId'] !== 'string' || bundle['bundleId'].length === 0) return 'bundleId must be a non-empty string.';
   const payload = bundle['payload'];
@@ -300,7 +332,7 @@ function describeBundleShapeError(bundle: unknown): string | undefined {
     if (rule['effect'] !== 'allow' && rule['effect'] !== 'deny') return `${at} effect must be "allow" or "deny".`;
     // A bundle is managed policy; a rule claiming to be the owner's own answer is not one.
     if (rule['origin'] !== undefined && rule['origin'] !== 'managed') return `${at} has origin "${String(rule['origin'])}"; a policy bundle carries managed rules only (omit origin or use "managed").`;
-    const fieldError = describeRuleFieldError(rule, `${at} (${rule['type']})`);
+    const fieldError = describeRuleFieldError(rule, `${at} (${rule['type']})`, homeDirectory);
     if (fieldError !== undefined) return fieldError;
   }
   return undefined;

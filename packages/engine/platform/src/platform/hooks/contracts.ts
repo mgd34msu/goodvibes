@@ -12,8 +12,6 @@ export interface HookPointContract {
   canDeny: boolean;
   canMutateInput: boolean;
   canInjectContext: boolean;
-  /** Zero means no automatic deadline; a hook can set its own timeout. */
-  timeoutMs: number;
   failurePolicy: 'fail_open' | 'fail_closed' | 'log_only';
 }
 
@@ -26,7 +24,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: true,
     canMutateInput: true,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'fail_closed',
   },
   {
@@ -37,7 +34,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -48,7 +44,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -59,7 +54,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -70,7 +64,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -81,7 +74,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: true,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'fail_open',
   },
   {
@@ -92,7 +84,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -103,7 +94,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -114,7 +104,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: true,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'fail_open',
   },
   {
@@ -125,7 +114,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -136,7 +124,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -147,7 +134,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: true,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'fail_open',
   },
   {
@@ -158,7 +144,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -169,7 +154,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -180,7 +164,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: true,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'fail_open',
   },
   {
@@ -191,7 +174,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -202,7 +184,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: true,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -213,7 +194,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -224,7 +204,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -235,7 +214,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -246,7 +224,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -257,7 +234,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -268,7 +244,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -279,7 +254,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'fail_open',
   },
   {
@@ -290,7 +264,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -301,7 +274,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -312,7 +284,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -323,7 +294,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -334,7 +304,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -345,7 +314,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -356,7 +324,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: false,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'log_only',
   },
   {
@@ -367,7 +334,6 @@ const CONTRACTS: HookPointContract[] = [
     canDeny: true,
     canMutateInput: false,
     canInjectContext: false,
-    timeoutMs: 0,
     failurePolicy: 'fail_open',
   },
 ];
@@ -415,6 +381,17 @@ export function hookPatternProblem(pattern: string): string | null {
   }
   if (CONTRACTS.some((contract) => patternsOverlap(pattern, contract.pattern))) return null;
   return `"${pattern}" is not a recognized hook event point: no registered hook point matches it (phases are Pre, Post, Fail, Change and Lifecycle, and case matters); /hooks contracts lists them`;
+}
+
+/**
+ * Whether a hooks-file key reaches a point that waits for its hooks to deny,
+ * ask or rewrite the call. A background (`async`) hook's answer is never read,
+ * so it cannot guard such a point.
+ */
+export function patternReachesDecisionPoint(pattern: string): boolean {
+  return CONTRACTS.some((contract) => contract.executionMode === 'blocking'
+    && (contract.canDeny || contract.canMutateInput)
+    && patternsOverlap(pattern, contract.pattern));
 }
 
 export function parseHookPath(path: HookEventPath): {

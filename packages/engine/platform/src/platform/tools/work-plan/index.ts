@@ -92,7 +92,10 @@ export function createWorkPlanTool(store: WorkPlanToolStore, options: WorkPlanTo
           case 'update': {
             const id = text(input.id);
             if (!id) return { success: false, error: 'update requires "id".' };
-            const title = text(input.title), owner = text(input.owner), notes = text(input.notes);
+            // A given owner or notes is passed through as is: an empty or blank one clears the field.
+            const title = text(input.title);
+            const owner = typeof input.owner === 'string' ? input.owner : undefined;
+            const notes = typeof input.notes === 'string' ? input.notes : undefined;
             if (!title && owner === undefined && notes === undefined) return { success: false, error: 'update requires at least one of "title", "owner" or "notes". Nothing was changed.' };
             const result = await store.update(id, {
               ...(title ? { title } : {}),

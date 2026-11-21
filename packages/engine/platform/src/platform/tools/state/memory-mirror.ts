@@ -48,7 +48,22 @@ export function memoryKeyOf(record: Pick<MemoryRecord, 'tags'>): string | undefi
   return tag?.slice(KEY_TAG.length + 1);
 }
 
-/** Every state-tool memory row, one per key (the newest when an older build left two). */
+/**
+ * True when `row` is the current row of its key over `other`: the newer `updatedAt`, then the lower
+ * id, so every process picks the same row of a key that holds two.
+ */
+function isCurrentOver(row: MemoryRecord, other: MemoryRecord): boolean {
+  return row.updatedAt !== other.updatedAt ? row.updatedAt > other.updatedAt : row.id < other.id;
+}
+
+/** The current row among one key's rows, or undefined when there are none. */
+function currentOf(rows: readonly MemoryRecord[]): MemoryRecord | undefined {
+  let current: MemoryRecord | undefined;
+  for (const row of rows) if (!current || isCurrentOver(row, current)) current = row;
+  return current;
+}
+
+/** Every state-tool memory row, one per key: the current row when a key holds two. */
 export async function listMemoryRecords(store: StateMemoryStore, signal?: AbortSignal): Promise<Map<string, MemoryRecord>> {
   const rows = await store.list({ tags: [KEY_TAG] }, signal ? { signal } : undefined);
   const byKey = new Map<string, MemoryRecord>();
@@ -56,7 +71,7 @@ export async function listMemoryRecords(store: StateMemoryStore, signal?: AbortS
     const key = memoryKeyOf(row);
     if (!key) continue;
     const kept = byKey.get(key);
-    if (!kept || row.updatedAt > kept.updatedAt) byKey.set(key, row);
+    if (!kept || isCurrentOver(row, kept)) byKey.set(key, row);
   }
   return byKey;
 }
@@ -64,6 +79,19 @@ export async function listMemoryRecords(store: StateMemoryStore, signal?: AbortS
 /** The rows saved under one key (normally one). */
 export async function memoryRecordsForKey(store: StateMemoryStore, key: string, signal?: AbortSignal): Promise<readonly MemoryRecord[]> {
   return store.list({ tags: [keyTag(key)] }, signal ? { signal } : undefined);
+}
+
+/** The key's current row (the one `list` shows), or undefined when the key has none. */
+export async function currentMemoryRecord(store: StateMemoryStore, key: string, signal?: AbortSignal): Promise<MemoryRecord | undefined> {
+  return currentOf(await memoryRecordsForKey(store, key, signal));
+}
+
+/** Deletes every row of the key but the current one, so duplicate rows converge on the same row in every process. */
+async function deleteSupersededRows(store: StateMemoryStore, rows: readonly MemoryRecord[], signal?: AbortSignal): Promise<void> {
+  const current = currentOf(rows);
+  for (const row of rows) {
+    if (row.id !== current?.id) await store.delete(row.id, signal ? { signal } : undefined);
+  }
 }
 
 /** Why a value cannot be saved as a memory (it would be embedded and may be sent), or undefined when it can. */
@@ -80,14 +108,18 @@ export function memoryValueRefusal(key: string, value: string): string | undefin
 }
 
 /**
- * Saves `value` under `key`: updates the key's row (resetting its review) or
- * adds one. Throws when the store cannot be reached; nothing is reported saved
- * that was not.
+ * Saves `value` under `key`: updates the key's current row (resetting its
+ * review) or adds one, then deletes any other row of the key, so a key left
+ * with two rows (an older build, or two processes adding it at once) ends with
+ * one. Throws when the store cannot be reached; nothing is reported saved
+ * that was not. Cost: one more list when the key is added, and a delete only
+ * when the key held more than one row.
  */
 export async function saveMemoryRecord(store: StateMemoryStore, key: string, value: string, signal?: AbortSignal): Promise<MemoryRecord> {
   const classic = isClassicOperation();
   const operation = signal ? { signal } : undefined;
-  const existing = (await memoryRecordsForKey(store, key, signal))[0];
+  const before = await memoryRecordsForKey(store, key, signal);
+  const existing = currentOf(before);
   const tags = [...(existing?.tags ?? [KEY_TAG, keyTag(key)]).filter((tag) => tag !== PENDING_TAG && tag !== CLASSIC_TAG),
     PENDING_TAG, ...(classic ? [CLASSIC_TAG] : [])];
   const flat = value.replace(/\s+/g, ' ').trim();
@@ -98,8 +130,15 @@ export async function saveMemoryRecord(store: StateMemoryStore, key: string, val
     if (!saved) throw new Error(`the memory row for ${key} disappeared while it was being updated; save it again`);
     // A corrected value is a new statement: a row marked stale or contradicted would otherwise stay out of prompts.
     if (saved.reviewState !== 'fresh') saved = await store.updateReview(saved.id, { state: 'fresh' }, operation) ?? saved;
+    // The key's current row now holds the value; the other rows read before the write go.
+    for (const row of before) {
+      if (row.id !== existing.id) await store.delete(row.id, operation);
+    }
   } else {
     saved = await store.add({ scope: 'project', cls: 'fact', summary, detail: value, tags, review: { state: 'fresh' } }, operation);
+    // Another process may have added the key at the same moment: read again and keep the one current row.
+    const after = await memoryRecordsForKey(store, key, signal);
+    if (after.length > 1) await deleteSupersededRows(store, after, signal);
   }
   if (!classic) classifyLater(store, saved.id, key, value);
   return saved;

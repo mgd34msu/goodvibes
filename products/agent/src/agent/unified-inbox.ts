@@ -18,7 +18,7 @@
  * not observe sends whoever reads it to fix the wrong thing.
  */
 
-import { readSurfaceMessageText, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
+import { readTriageViewText, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
 import { UNKNOWN_PRINCIPAL_LABEL } from './principal-attribution.ts';
 import { renderForModel, untrustedFrom } from './untrusted-content.ts';
@@ -258,6 +258,11 @@ function readStringOrNull(record: Record<string, unknown>, key: string): string 
 
 function toDeliveryItem(raw: Record<string, unknown>): UnifiedInboxDeliveryItem {
   const target = isRecord(raw.target) ? raw.target : {};
+  // A triage built from a real feed carries the target label and the error only
+  // inside the untrusted frame, so the plain text comes from the side channel it keeps.
+  const text = readTriageViewText(raw);
+  const label = text?.label ?? readStringOrNull(target, 'label');
+  const error = text?.error ?? readString(raw, 'error');
   return {
     kind: 'delivery',
     id: readString(raw, 'id', 'delivery'),
@@ -268,21 +273,27 @@ function toDeliveryItem(raw: Record<string, unknown>): UnifiedInboxDeliveryItem 
       kind: readString(target, 'kind', 'unknown'),
       surfaceKind: readStringOrNull(target, 'surfaceKind'),
       routeId: readStringOrNull(target, 'routeId'),
-      label: readStringOrNull(target, 'label'),
+      label: label || null,
       ...(typeof target.address === 'string' && target.address ? { address: target.address } : {}),
     },
     ...(readNumber(raw, 'startedAt') !== null ? { startedAt: readNumber(raw, 'startedAt') as number } : {}),
     ...(readNumber(raw, 'endedAt') !== null ? { endedAt: readNumber(raw, 'endedAt') as number } : {}),
-    ...(readString(raw, 'error') ? { error: readString(raw, 'error') } : {}),
+    ...(error ? { error } : {}),
     ...(readString(raw, 'responseId') ? { responseId: readString(raw, 'responseId') } : {}),
     inspectRoute: readString(raw, 'inspectRoute', `/api/deliveries/${encodeURIComponent(readString(raw, 'id', 'delivery'))}`),
   };
 }
 
+/** A triage section's host error message: kept off the section by the triage, which carries it only framed. */
+function sectionError(section: Record<string, unknown>): string | undefined {
+  const message = readTriageViewText(section)?.message ?? (typeof section.message === 'string' ? section.message : undefined);
+  return message || undefined;
+}
+
 function toSurfaceMessageItem(raw: Record<string, unknown>): UnifiedInboxSurfaceMessageItem {
   // A triage built from a real feed carries its text only inside the untrusted frame,
   // so the plain title and preview come from the side channel it keeps.
-  const text = readSurfaceMessageText(raw);
+  const text = readTriageViewText(raw);
   return {
     kind: 'surface_message',
     id: readString(raw, 'id', 'message'),
@@ -492,27 +503,21 @@ export function aggregateUnifiedInbox(
       route: '/api/deliveries',
       state: deliveriesState,
       itemCount: deliveryItems.length,
-      ...(deliveriesState === 'unavailable' && typeof deliveriesSection.message === 'string'
-        ? { error: deliveriesSection.message as string }
-        : {}),
+      ...(deliveriesState === 'unavailable' && sectionError(deliveriesSection) ? { error: sectionError(deliveriesSection) } : {}),
     },
     {
       name: 'surface_messages',
       route: '/api/control-plane/messages',
       state: messagesState,
       itemCount: surfaceMessageItems.length,
-      ...(messagesState === 'unavailable' && typeof messagesSection.message === 'string'
-        ? { error: messagesSection.message as string }
-        : {}),
+      ...(messagesState === 'unavailable' && sectionError(messagesSection) ? { error: sectionError(messagesSection) } : {}),
     },
     {
       name: 'route_bindings',
       route: '/api/routes/bindings',
       state: bindingsState,
       itemCount: routeBindingItems.length,
-      ...(bindingsState === 'unavailable' && typeof bindingsSection.message === 'string'
-        ? { error: bindingsSection.message as string }
-        : {}),
+      ...(bindingsState === 'unavailable' && sectionError(bindingsSection) ? { error: sectionError(bindingsSection) } : {}),
     },
     {
       name: 'inbound_messages',

@@ -14,6 +14,7 @@
  */
 import { CATALOG_PROVIDER_NAME_ALIASES } from '@goodvibes/engine/contracts';
 import { BUILTIN_COMPAT_PROVIDERS } from './builtin-catalog.js';
+import { DEFAULT_CONFIG } from '../config/schema.js';
 import type { CustomProviderName } from './custom-provider-files.js';
 
 /**
@@ -34,8 +35,6 @@ export function builtinProviderNames(): ReadonlySet<string> {
   return new Set<string>([...NAMED_BUILTIN_PROVIDERS, ...BUILTIN_COMPAT_PROVIDERS.map((definition) => definition.id)]);
 }
 
-/** Where `provider.model` lands when it is empty (the registry's UNCONFIGURED_MODEL_REGISTRY_KEY). */
-const UNCONFIGURED_MODEL = 'openrouter:openrouter/free';
 
 export interface SavedProviderNames {
   /** {@link builtinProviderNames}. */
@@ -58,7 +57,8 @@ const catalogOf = (name: string): string => CATALOG_PROVIDER_NAME_ALIASES[name] 
  * resolves it, or null when only the registry can say (see the file comment).
  */
 export function resolveSavedModelInUse(configured: unknown, names: SavedProviderNames): SavedModelInUse | null {
-  const raw = typeof configured === 'string' && configured.trim() ? configured.trim() : UNCONFIGURED_MODEL;
+  // An empty value lands where the registry's does: the setting's default.
+  const raw = typeof configured === 'string' && configured.trim() ? configured.trim() : DEFAULT_CONFIG.provider.model;
   const separator = raw.indexOf(':');
   if (separator <= 0 || separator === raw.length - 1) return null;
   const half = raw.slice(0, separator);

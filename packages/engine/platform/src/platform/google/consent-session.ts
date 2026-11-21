@@ -106,13 +106,12 @@ export async function storeClientCredentials(
   credentials: GoogleClientCredentials,
 ): Promise<GoogleClientRegistration> {
   const previousClientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
-  // The secret first: if the store refuses it, the configured client is
-  // untouched, instead of an id whose secret belongs to another client.
-  await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthClientSecret, credentials.clientSecret);
-  for (const entry of googleClientConfigEntries(credentials.clientId)) deps.config.set(entry.key, entry.value);
   // A refresh token is tied to the client that requested it. Left in place
   // beside a different client it would be paired with it, fail with
   // `invalid_grant` on first use, and the status would still say connected.
+  // It is cleared BEFORE the new client is recorded: if the clear fails, the
+  // old client and its token stay as they were, and the same registration
+  // repeated sees the old client again and clears it then.
   let consentRequired = false;
   if (previousClientId !== null && previousClientId !== credentials.clientId) {
     const staleToken = await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
@@ -122,6 +121,10 @@ export async function storeClientCredentials(
       consentRequired = true;
     }
   }
+  // The secret before the config: if the store refuses it, the configured
+  // client id is untouched, instead of an id whose secret belongs to another client.
+  await deps.secrets.set(GOOGLE_SECRET_KEYS.oauthClientSecret, credentials.clientSecret);
+  for (const entry of googleClientConfigEntries(credentials.clientId)) deps.config.set(entry.key, entry.value);
   return { ok: true, clientIdTail: clientIdTail(credentials.clientId), ...(consentRequired ? { consentRequired: true as const } : {}) };
 }
 

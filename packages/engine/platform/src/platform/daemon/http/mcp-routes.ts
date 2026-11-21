@@ -69,6 +69,11 @@ function parseScope(value: unknown): McpConfigScope {
   return value === 'global' ? 'global' : 'project';
 }
 
+type McpTrustMode = NonNullable<McpServerConfig['trustMode']>;
+type McpServerRole = NonNullable<McpServerConfig['role']>;
+const TRUST_MODES: readonly McpTrustMode[] = ['constrained', 'ask-on-risk', 'blocked', 'allow-all'];
+const ROLES: readonly McpServerRole[] = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'];
+
 function parseServerConfig(value: unknown): McpServerConfig | Response {
   if (!isRecord(value)) {
     return jsonErrorResponse({ error: 'Missing MCP server config object.' }, { status: 400 });
@@ -98,6 +103,13 @@ function parseServerConfig(value: unknown): McpServerConfig | Response {
   if (deniedTools instanceof Response) return deniedTools;
   const allowedTools = readShaped(value.allowedTools, 'allowedTools', 'an array of tool names', stringArray);
   if (allowedTools instanceof Response) return allowedTools;
+  // A role or trust level the server would not know is refused naming the allowed values, as the role and trust routes do.
+  const role = readShaped(value.role, 'role', `one of ${ROLES.join(', ')}`, (candidate) =>
+    typeof candidate === 'string' && (ROLES as readonly string[]).includes(candidate) ? candidate as McpServerRole : undefined);
+  if (role instanceof Response) return role;
+  const trustMode = readShaped(value.trustMode, 'trustMode', `one of ${TRUST_MODES.join(', ')}`, (candidate) =>
+    typeof candidate === 'string' && (TRUST_MODES as readonly string[]).includes(candidate) ? candidate as McpTrustMode : undefined);
+  if (trustMode instanceof Response) return trustMode;
   return {
     name: value.name.trim(),
     command,
@@ -105,8 +117,8 @@ function parseServerConfig(value: unknown): McpServerConfig | Response {
     args,
     env,
     headers,
-    role: typeof value.role === 'string' ? value.role as McpServerConfig['role'] : undefined,
-    trustMode: typeof value.trustMode === 'string' ? value.trustMode as McpServerConfig['trustMode'] : undefined,
+    role,
+    trustMode,
     allowedPaths: stringArray(value.allowedPaths),
     allowedHosts: stringArray(value.allowedHosts),
     deniedTools,
@@ -253,11 +265,6 @@ export const MCP_ROUTES: readonly { readonly method: string; readonly path: stri
   { method: 'POST', path: '/api/mcp/servers/{serverName}/accept-tools' },
 ];
 
-type McpTrustMode = NonNullable<McpServerConfig['trustMode']>;
-type McpServerRole = NonNullable<McpServerConfig['role']>;
-const TRUST_MODES: readonly McpTrustMode[] = ['constrained', 'ask-on-risk', 'blocked', 'allow-all'];
-const ROLES: readonly McpServerRole[] = ['general', 'docs', 'filesystem', 'git', 'database', 'browser', 'automation', 'ops', 'remote'];
-
 function refused(error: string, status = 400, code = 'INVALID_ARGUMENT'): Response {
   return jsonErrorResponse({ error, code }, { status });
 }
@@ -305,7 +312,13 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
     const server = parseServerConfig(body.server ?? body);
     if (server instanceof Response) return server;
     const scope = parseScope(body.scope);
-    const result = await context.mcpRegistry.upsertServerConfig(context.roots, scope, server);
+    let result: Awaited<ReturnType<McpRouteContext['mcpRegistry']['upsertServerConfig']>>;
+    try {
+      result = await context.mcpRegistry.upsertServerConfig(context.roots, scope, server);
+    } catch (error) {
+      // A name the config refuses, exempt tools aimed at the project file, a file that cannot be written: nothing was written.
+      return refused(summarizeError(error));
+    }
     return Response.json({
       scope,
       path: result.path,
@@ -421,7 +434,13 @@ export async function dispatchMcpRoutes(req: Request, context: McpRouteContext):
     const scope = parseScope(body?.scope ?? url.searchParams.get('scope'));
     const serverName = decodePathSegment(serverMatch[1]!);
     if (serverName === null) return Response.json({ error: 'Malformed server name in path' }, { status: 400 });
-    const result = await context.mcpRegistry.removeServerConfig(context.roots, scope, serverName);
+    let result: Awaited<ReturnType<McpRouteContext['mcpRegistry']['removeServerConfig']>>;
+    try {
+      result = await context.mcpRegistry.removeServerConfig(context.roots, scope, serverName);
+    } catch (error) {
+      // A file that cannot be written or is held by another writer: nothing was removed.
+      return refused(summarizeError(error));
+    }
     return Response.json({
       scope,
       path: result.path,

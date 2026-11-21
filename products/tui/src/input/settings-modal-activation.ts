@@ -15,6 +15,7 @@ import { handleConfirmInput } from '../views/confirm-state.ts';
 import type { FlagEntry, McpEntry, SettingEntry, SubscriptionEntry } from './settings-modal-types.ts';
 import { buildMcpEntries, buildSubscriptionEntries } from './settings-modal-data.ts';
 import { modelPickerLaunchForKey } from '@goodvibes/engine/terminal-shell/settings-behavior';
+import { subscriptionTokensNotRemovedMessage } from '@goodvibes/engine/terminal-shell/settings-subscriptions';
 import { PAYMENTS_CARDS_ROW_KEY } from '@goodvibes/engine/terminal-shell/payments-settings';
 import { listSettingEditText } from './settings-modal-lists.ts';
 import type { ConfigKey } from '@goodvibes/engine/platform/platform/config';
@@ -136,6 +137,8 @@ export interface HandleSubscriptionLogoutKeyContext {
   setSubscriptionLogoutConfirmationTarget(value: string | null): void;
   /** Called when the sign-out has finished removing the tokens, so the list is drawn again. */
   requestRender?(): void;
+  /** Shows a sentence on the settings screen: the sign-out's tokens could not be removed. */
+  reportFailure(message: string): void;
 }
 
 export function handleSubscriptionLogoutKey(
@@ -151,6 +154,7 @@ export function handleSubscriptionLogoutKey(
     const manager = ctx.subscriptionManager;
     void manager?.logout(target).catch((error: unknown) => {
       logger.warn('Signed out, but the sign-in tokens could not be removed from the secret store', { provider: target, error: summarizeError(error) });
+      ctx.reportFailure(subscriptionTokensNotRemovedMessage(target, summarizeError(error)));
     }).finally(() => {
       ctx.setSubscriptionEntries(buildSubscriptionEntries(manager, ctx.serviceRegistry));
       ctx.requestRender?.();

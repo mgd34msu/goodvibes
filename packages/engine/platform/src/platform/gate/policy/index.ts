@@ -1,10 +1,10 @@
 /**
- * The gate's policy surface, hoisted from the TUI and the agent: the
- * `/permissions` command logic and the policy-bundle workflow `/security` runs, the Agent's read admission and
+ * The gate's policy surface shared by the terminal apps: the functions the
+ * `/permissions` command (terminal-shell/src/permissions-command.ts) calls, the
+ * policy-bundle workflow `/security` runs, the Agent's read admission and
  * settings write wrappers, the state tool's read-only surface and the
  * execution ledger. The operator policy the Agent sends is in
- * terminal-shell/src/agent-turn/operator-policy.ts. The products keep their command
- * registrations and bootstrap, and call these.
+ * terminal-shell/src/agent-turn/operator-policy.ts.
  */
 export * from './permissions-provenance.js';
 export * from './permissions-runtime.js';

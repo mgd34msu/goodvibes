@@ -269,10 +269,12 @@ export class RouteStore {
   /** Lookup a single assignment by its composite channelId. */
   findByChannelId(channelId: string): RoutingChannelRoute | null {
     this.requireInit();
+    // Looked up by the spelling writeRoute stores, whatever spacing the caller used.
+    const parsed = parseChannelId(channelId);
     const row = this.store.get<RouteRow>(
       `SELECT assignmentId, channelId, surfaceKind, routeId, profileId, label, createdAt, updatedAt
        FROM routes WHERE channelId = ?`,
-      [channelId],
+      [buildChannelId(parsed.surfaceKind, parsed.routeId)],
     );
     return row ? rowToRoute(row) : null;
   }

@@ -148,7 +148,8 @@ export interface DistributedRuntimeAuditRecord {
     | 'work-completed'
     | 'work-failed'
     | 'work-cancelled'
-    | 'work-expired';
+    | 'work-expired'
+    | 'work-requeued';
   readonly actor: string;
   readonly peerId?: string | undefined;
   readonly requestId?: string | undefined;

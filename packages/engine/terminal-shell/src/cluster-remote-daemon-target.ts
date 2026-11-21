@@ -63,6 +63,8 @@ export interface RemoteDaemonTarget {
    * that address answers the daemon identity challenge (once per process).
    */
   readonly needsProof?: boolean | undefined;
+  /** Which credential `token` is, for naming it when the daemon refuses it: typed with --token, stored for this address, or this machine's operator token. */
+  readonly credential?: 'typed' | 'stored' | 'operator' | undefined;
 }
 
 /** The flags every remote-capable daemon subcommand accepts. */
@@ -95,7 +97,7 @@ export interface DaemonFailure {
   readonly code: DaemonFailureCode;
   readonly error: string;
   readonly fix: string;
-  /** On a `refused` failure, the daemon's own error code (`SESSION_NOT_FOUND`), when its reply named one. */
+  /** On a `refused` or `auth-refused` failure, the daemon's own error code (`SESSION_NOT_FOUND`, `ADMIN_REQUIRED`), when its reply named one. */
   readonly daemonCode?: string;
 }
 
@@ -174,10 +176,10 @@ export function resolveRemoteDaemonTarget(input: ResolveRemoteTargetInput): Remo
     return { ok: false, code: 'invalid-host', error: `'${host}' does not make a daemon address`, fix: '--host takes a host name or address, or a base URL such as https://10.0.0.7:3421' };
   }
   const explicitToken = input.flags.token?.trim();
-  if (explicitToken) return { ok: true, target: { baseUrl, token: explicitToken, isLocal } };
+  if (explicitToken) return { ok: true, target: { baseUrl, token: explicitToken, isLocal, credential: 'typed' } };
   const chosen = tokenForOrigin(origin, typed.host ? 'typed' : connected ? 'connected' : 'binding', input);
   if (!chosen.ok) return chosen;
-  return { ok: true, target: { baseUrl, token: chosen.token, isLocal, ...(chosen.needsProof ? { needsProof: true } : {}) } };
+  return { ok: true, target: { baseUrl, token: chosen.token, isLocal, credential: chosen.credential, ...(chosen.needsProof ? { needsProof: true } : {}) } };
 }
 
 /** Input of {@link resolveLocalDaemonTarget}. */
@@ -209,7 +211,7 @@ export function resolveLocalDaemonTarget(input: ResolveLocalTargetInput): Remote
   if (!token) {
     return { ok: false, code: 'token-missing', error: 'no operator token was found for this machine', fix: 'start the daemon once so it creates its operator token, or pass --token' };
   }
-  return { ok: true, target: { baseUrl, token, isLocal: true } };
+  return { ok: true, target: { baseUrl, token, isLocal: true, credential: 'operator' } };
 }
 
 /**
@@ -219,10 +221,10 @@ export function resolveLocalDaemonTarget(input: ResolveLocalTargetInput): Remote
  * to this machine's token.
  */
 function tokenForOrigin(origin: DaemonOrigin, chosenBy: 'typed' | 'connected' | 'binding', input: ResolveRemoteTargetInput):
-  { readonly ok: true; readonly token: string; readonly needsProof: boolean } | DaemonFailure {
+  { readonly ok: true; readonly token: string; readonly needsProof: boolean; readonly credential: 'stored' | 'operator' } | DaemonFailure {
   const home = input.homeDirectory;
   const stored = home ? readDaemonSessionToken(home, origin.baseUrl) ?? readConnectedDaemonToken(home, origin.baseUrl) : null;
-  if (stored) return { ok: true, token: stored, needsProof: false };
+  if (stored) return { ok: true, token: stored, needsProof: false, credential: 'stored' };
   // With nothing typed and no connected host, the address is this machine's own bind (a wildcard included).
   const place = chosenBy === 'binding' ? 'yes' : classifyDaemonOrigin(origin, input.configManager);
   if (chosenBy === 'connected' || place === 'no') {
@@ -242,7 +244,7 @@ function tokenForOrigin(origin: DaemonOrigin, chosenBy: 'typed' | 'connected' | 
       fix: 'start the daemon once so it creates its operator token, or pass --token',
     };
   }
-  return { ok: true, token, needsProof: place === 'declared' };
+  return { ok: true, token, needsProof: place === 'declared', credential: 'operator' };
 }
 
 const SCHEME_DEFAULT_PORT = { http: 80, https: 443 } as const;
@@ -434,19 +436,45 @@ export async function callDaemonVerb<T>(
   }
 
   if (response.status === 401 || response.status === 403) {
+    // The daemon's own refusal (a missing role, ADMIN_REQUIRED) says what really happened; its
+    // bare AUTH_REQUIRED says only that the credential was not accepted, so that one names the credential sent.
+    const said = await readDaemonError(response);
+    if (said && (said.fix !== undefined || said.daemonCode !== 'AUTH_REQUIRED')) {
+      return {
+        ok: false,
+        code: 'auth-refused',
+        error: `${where} refused the request: ${said.error}`,
+        fix: said.fix ?? 'pass --token with a credential that daemon accepts for this command',
+        ...(said.daemonCode ? { daemonCode: said.daemonCode } : {}),
+      };
+    }
+    const sent = target.credential === 'stored'
+      ? `the sign-in stored for ${target.baseUrl}`
+      : target.credential === 'typed' ? 'the token given with --token' : 'this machine\'s operator token';
     return {
       ok: false,
       code: 'auth-refused',
-      error: `${where} refused the operator token`,
-      fix: target.isLocal
-        ? 'the token may be stale, restart the daemon, or pass --token'
-        : 'pass --token with the operator token from that machine (its <daemon home>/operator-tokens.json)',
+      error: `${where} refused ${sent}`,
+      fix: target.credential === 'stored'
+        ? `sign in to ${target.baseUrl} again, or pass --token with the operator token from that machine`
+        : target.isLocal
+          ? 'the token may be stale, restart the daemon, or pass --token'
+          : 'pass --token with the operator token from that machine (its <daemon home>/operator-tokens.json)',
+      ...(said?.daemonCode ? { daemonCode: said.daemonCode } : {}),
     };
   }
   if (response.status === 404) {
     // A verb's own "not found" (no such session) is the daemon's answer, not a missing route.
-    const refusal = await readHandlerNotFound(response);
-    if (refusal) return { ok: false, code: 'refused', ...refusal };
+    const said = await readDaemonError(response);
+    if (said && said.daemonCode !== 'NOT_FOUND' && said.daemonCode !== 'METHOD_NOT_FOUND') {
+      return {
+        ok: false,
+        code: 'refused',
+        error: said.error,
+        fix: said.fix ?? 'check what you named with the matching list command, then try again',
+        ...(said.daemonCode ? { daemonCode: said.daemonCode } : {}),
+      };
+    }
     return {
       ok: false,
       code: 'route-missing',
@@ -481,11 +509,11 @@ export async function callDaemonVerb<T>(
 }
 
 /**
- * The error a daemon handler put on a 404, or undefined when the 404 means the
- * daemon has no such route or verb (`NOT_FOUND`, `METHOD_NOT_FOUND`, or a body
- * that is not the daemon's JSON error).
+ * The daemon's JSON error on a failed response: its `error`, the fix it named
+ * (`fix`, `hint` or the first `next` step) and its `code`. Undefined when the
+ * body is not the daemon's JSON error.
  */
-async function readHandlerNotFound(response: Response): Promise<{ error: string; fix: string; daemonCode?: string } | undefined> {
+async function readDaemonError(response: Response): Promise<{ readonly error: string; readonly fix?: string; readonly daemonCode?: string } | undefined> {
   let body: { error?: unknown; code?: unknown; fix?: unknown; hint?: unknown; next?: unknown };
   try {
     body = await response.json() as typeof body;
@@ -493,12 +521,11 @@ async function readHandlerNotFound(response: Response): Promise<{ error: string;
     return undefined;
   }
   if (!body || typeof body !== 'object' || typeof body.error !== 'string') return undefined;
-  if (body.code === 'NOT_FOUND' || body.code === 'METHOD_NOT_FOUND') return undefined;
   const next = Array.isArray(body.next) && typeof body.next[0] === 'string' ? body.next[0] : undefined;
   const fix = typeof body.fix === 'string' ? body.fix : typeof body.hint === 'string' ? body.hint : next;
   return {
     error: body.error,
-    fix: fix ?? 'check what you named with the matching list command, then try again',
+    ...(fix ? { fix } : {}),
     ...(typeof body.code === 'string' && body.code ? { daemonCode: body.code } : {}),
   };
 }

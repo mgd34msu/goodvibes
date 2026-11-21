@@ -33,6 +33,8 @@ interface HostLifetime {
   stopping: Promise<void> | null;
   startup: { readonly finish: (ready: boolean) => void } | null;
   startupError: string | null;
+  /** Set once this host came up and became the client's helper; only its loss means the browser is gone. */
+  published: boolean;
 }
 
 export class BrowserHostError extends Error {
@@ -185,6 +187,7 @@ export class BrowserHostClient {
       const started = await this.waitForReady(host);
       if (started && !host.exited && !host.stopping && !this.#closing) {
         this.child = child;
+        host.published = true;
         return;
       }
       lastError = host.startupError ?? `${runtime} did not start the browser host`;
@@ -239,7 +242,7 @@ export class BrowserHostClient {
     let drained!: () => void;
     const host: HostLifetime = {
       child, drained: new Promise<void>(resolve => { drained = resolve; }),
-      exited: false, closed: false, stopping: null, startup: null, startupError: null,
+      exited: false, closed: false, stopping: null, startup: null, startupError: null, published: false,
     };
     this.#hosts.set(child, host);
     // One parser owns hello and every response; stderr must also be consumed
@@ -263,7 +266,8 @@ export class BrowserHostClient {
       host.exited = true;
       host.startup?.finish(false);
       this.settleRetiredHost(child);
-      this.noteGone();
+      // A start-up candidate that never came up was never attached to the browser.
+      if (host.published) this.noteGone();
     };
     const error = (): void => { this.terminateHost(child); };
     const close = (): void => {

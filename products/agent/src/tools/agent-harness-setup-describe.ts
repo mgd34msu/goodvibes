@@ -158,7 +158,7 @@ export function primarySetupRepairDecision(item: SetupPlanItem): SetupRepairDeci
         effect: 'user-run',
         modelRoute: 'setup action:"item" setupItemId:"connected-host-readiness" includeParameters:true',
         userRoute: item.userRoute,
-        nextStep: 'Show the user-run Bun install, GoodVibes host install/start, binary verification, and reconnect checks for the owning host.',
+        nextStep: 'Show the release installer, binary verification, host service status/install/start, and Agent reconnect commands for the user to run on the owning host.',
         reason: lifecycle.reason,
         safety: item.bootstrapPlan?.policy ?? 'Bootstrap remains user-run guidance; Agent does not start or install the owning host implicitly.',
       };

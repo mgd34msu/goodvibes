@@ -55,6 +55,7 @@
  */
 import { judgmentPort, runDecisionOrClassic as decisionOrClassic } from '@goodvibes/engine/errors';
 import { createHash } from 'node:crypto';
+import type { JudgmentPort } from '@goodvibes/judgment';
 import { cardTalk, maskDigits } from './batteries/card-talk.js';
 
 /** The decision site the card-talk reading is logged under. */
@@ -404,9 +405,31 @@ export function findLabelledCardShapes(text: string): readonly CardShapeFinding[
   ].sort((a, b) => a.startIndex - b.startIndex);
 }
 
-/** Settled card-talk answers by digest of the masked text; bounded, oldest first out. */
-const cardTalkAnswers = new Map<string, { readonly expiry: boolean; readonly securityCode: boolean }>();
+type CardTalkAnswer = { readonly expiry: boolean; readonly securityCode: boolean };
+/** Settled card-talk answers of one decision source, as filled under one model and revision. */
+interface CardTalkMemo {
+  readonly model: string;
+  readonly revision: number | undefined;
+  /** By digest of the masked text; bounded, oldest first out. */
+  readonly answers: Map<string, CardTalkAnswer>;
+}
+const cardTalkMemos = new WeakMap<JudgmentPort, CardTalkMemo>();
 const MAX_CARD_TALK_ANSWERS = 512;
+
+/**
+ * The answers remembered for this decision source. A changed model, endpoint
+ * or credential (the port's model or revision moves) starts with none, as the
+ * card-field readings do, so an earlier model's reading never answers for it.
+ */
+function cardTalkAnswersFor(port: JudgmentPort): Map<string, CardTalkAnswer> {
+  const model = port.model;
+  const revision = port.revision?.();
+  const memo = cardTalkMemos.get(port);
+  if (memo && memo.model === model && memo.revision === revision) return memo.answers;
+  const fresh: CardTalkMemo = { model, revision, answers: new Map() };
+  cardTalkMemos.set(port, fresh);
+  return fresh.answers;
+}
 
 async function detectDecisionCardShapes(text: string): Promise<readonly CardShapeFinding[]> {
   if (text.length === 0) return [];
@@ -423,9 +446,11 @@ async function detectDecisionCardShapes(text: string): Promise<readonly CardShap
   // the same text (a subject redacted for the record and shown in the notice)
   // is read once. Keyed by a digest, so the cache never holds message text.
   const memoKey = createHash('sha256').update(asked.join(',')).update('\n').update(masked).digest('base64');
+  const port = judgmentPort(CARD_TALK_SITE);
+  const cardTalkAnswers = cardTalkAnswersFor(port);
   let answer = cardTalkAnswers.get(memoKey);
   if (answer === undefined) {
-    const run = await cardTalk.runSome(judgmentPort(CARD_TALK_SITE), masked, asked, { site: CARD_TALK_SITE });
+    const run = await cardTalk.runSome(port, masked, asked, { site: CARD_TALK_SITE });
     const gives = (item: 'security_code' | 'expiry'): boolean => {
       const reading = run.readings[item];
       // A question not asked has no candidates; one asked whose reading is absent keeps its numbers as card details.

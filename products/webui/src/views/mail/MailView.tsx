@@ -273,9 +273,19 @@ export function MailView({ tabs }: MailViewProps = {}) {
   });
 
   const attachment = useMutation({
-    mutationFn: (input: { uid: number; index: number }) => platformClient.operator.email.attachment.get(input),
+    // The mailbox generation the message was read under goes with its uid: a reset mailbox refuses instead of handing over another message's file.
+    mutationFn: (input: { uid: number; index: number; uidValidity: number | undefined }) => {
+      if (input.uidValidity === undefined) {
+        return Promise.reject(new Error('The mail server did not say which mailbox generation this message belongs to, so its attachment cannot be downloaded safely from here. Download it in another mail client.'));
+      }
+      return platformClient.operator.email.attachment.get({ uid: input.uid, index: input.index, uidValidity: input.uidValidity } as Parameters<typeof platformClient.operator.email.attachment.get>[0]);
+    },
     onSuccess: (file) => saveAttachment(file.filename, file.contentBase64),
-    onError: (error) => toast({ title: 'The attachment could not be downloaded', description: formatError(error), tone: 'danger' }),
+    onError: (error) => {
+      // A refusal may mean the mailbox was reset: the open message is read again, so the next try carries the current generation.
+      void queryClient.invalidateQueries({ queryKey: ['email', 'message'] });
+      toast({ title: 'The attachment could not be downloaded', description: formatError(error), tone: 'danger' });
+    },
   });
 
   const inboxNote = inbox.error ? mailRefusalNote(inbox.error) : null;
@@ -688,7 +698,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
           >
             <MailMessageBody
               detail={detail}
-              onDownload={(index) => { if (openMessage) attachment.mutate({ uid: openMessage.uid, index }); }}
+              onDownload={(index) => { if (openMessage) attachment.mutate({ uid: openMessage.uid, index, uidValidity: (openMessage as { readonly uidValidity?: number }).uidValidity }); }}
               downloading={attachment.isPending}
             />
           </DetailPane>

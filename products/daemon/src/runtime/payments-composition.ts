@@ -113,9 +113,12 @@ export interface OrderMailObserver {
  * failed reading, record or send is logged and rejects that mail's check, which
  * keeps it in the owner-mail relay's pending list to be checked again
  * (owner-mail-relay.ts); a check that settles resolves, and the relay drops it.
+ * A refund or settlement is recorded together with the owner's notice of it,
+ * so a send that fails after that leaves the notice owed (sent at the next
+ * start) and the mail check still resolves.
  */
 export function createOrderMailObserver(deps: {
-  readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund' | 'reportedMailKinds' | 'recordMailReported' | 'recordConfirmed' | 'get'>>;
+  readonly purchases: Pick<DaemonPurchaseLedger, 'list'> & Partial<Pick<DaemonPurchaseLedger, 'recordRefund' | 'reportedMailKinds' | 'recordMailReported' | 'recordConfirmed' | 'get' | 'settleOwnerNotice'>>;
   readonly notifier: Pick<PaymentNotifier, 'deliver'>;
   /** Absent: an unverified purchase stays unverified whatever the shop mails. */
   readonly operations?: Pick<DurablePaymentOperations, 'get' | 'recover'> | undefined;
@@ -123,9 +126,9 @@ export function createOrderMailObserver(deps: {
   const { recordConfirmed, get } = deps.purchases;
   const operations = deps.operations;
   const recordConfirmation = recordConfirmed && get && operations
-    ? (purchaseId: string, orderNumber: string | null) => confirmSubmittedPurchase({
+    ? (purchaseId: string, orderNumber: string | null, ownerNotice: string) => confirmSubmittedPurchase({
       purchases: { recordConfirmed: recordConfirmed.bind(deps.purchases), get: get.bind(deps.purchases) }, operations,
-    }, purchaseId, orderNumber)
+    }, purchaseId, orderNumber, ownerNotice)
     : undefined;
   let tail: Promise<void> = Promise.resolve();
   const observe: OwnerMailHandler = (mail) => {
@@ -139,10 +142,13 @@ export function createOrderMailObserver(deps: {
         purchases,
         send: async (message) => {
           const deliveries = await deps.notifier.deliver({ kind: 'notice', message });
-          if (!deliveries.some(delivery => delivery.delivered)) logger.warn('A purchase confirmation report reached no channel', { channels: deliveries.length });
+          const delivered = deliveries.some(delivery => delivery.delivered);
+          if (!delivered) logger.warn('A purchase confirmation report reached no channel', { channels: deliveries.length });
+          return delivered;
         },
         ...(deps.purchases.recordRefund ? { recordRefund: deps.purchases.recordRefund.bind(deps.purchases) } : {}),
         ...(recordConfirmation ? { recordConfirmation } : {}),
+        ...(deps.purchases.settleOwnerNotice ? { settleNotice: deps.purchases.settleOwnerNotice.bind(deps.purchases) } : {}),
         // Each purchase is reported once per kind (confirmed, shipped, delivered), across restarts.
         ...(deps.purchases.reportedMailKinds && deps.purchases.recordMailReported ? { reports: {
           kinds: deps.purchases.reportedMailKinds.bind(deps.purchases),

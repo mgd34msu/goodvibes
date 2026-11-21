@@ -4,6 +4,7 @@ import { formatJsonStoreWriteReport, readJsonStore, updateJsonStore, type JsonSt
 import { GOODVIBES_AGENT_SURFACE_ROOT } from './surface.js';
 import type { AgentChannelDeliveryInput, AgentChannelDeliveryResult } from './channel-delivery.js';
 import { readString } from './tool-args.js';
+import { containsSecretLikeText } from './memory-safety.js';
 import { isSecret } from '@goodvibes/engine/platform/platform/security';
 
 export type AgentChannelDeliveryReceiptSource = 'command' | 'model-tool';
@@ -62,23 +63,27 @@ function normalizeWhitespace(value: string): string {
   return value.trim().replace(/\s+/g, ' ');
 }
 
-function redactSecretLikeText(value: string): string {
-  return value
-    .replace(/\bhttps?:\/\/\S+/gi, (raw) => {
-      try {
-        const url = new URL(raw);
-        return `${url.protocol}//${url.host}/...`;
-      } catch {
-        return '[redacted-url]';
-      }
-    })
-    .replace(/\b(xox[baprs]-[A-Za-z0-9-]{8,})\b/g, '[redacted-token]')
-    .replace(/\b([A-Za-z0-9_-]{24,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,})\b/g, '[redacted-token]')
-    .replace(/\b(api[_-]?key|token|secret|password)\s*[:=]\s*\S+/gi, '$1=[redacted]');
+/** A web address keeps only its scheme and host: a webhook's path is its credential, a shape no secret pattern knows. */
+function hostOnlyUrls(value: string): string {
+  return value.replace(/\bhttps?:\/\/\S+/gi, (raw) => {
+    try {
+      const url = new URL(raw);
+      return `${url.protocol}//${url.host}/...`;
+    } catch {
+      return '[redacted-url]';
+    }
+  });
 }
 
+/**
+ * What a receipt keeps of a sent message or title. The whole text is tested with
+ * the one secret rule local records use (memory-safety) before anything is cut,
+ * so a key that would straddle the cut is still caught.
+ */
 function previewMessage(message: string): string {
-  const safe = redactSecretLikeText(normalizeWhitespace(message));
+  const normalized = normalizeWhitespace(message);
+  if (containsSecretLikeText(normalized)) return '[redacted: looks like a secret]';
+  const safe = hostOnlyUrls(normalized);
   return safe.length > MESSAGE_PREVIEW_LIMIT ? `${safe.slice(0, MESSAGE_PREVIEW_LIMIT - 1)}...` : safe;
 }
 

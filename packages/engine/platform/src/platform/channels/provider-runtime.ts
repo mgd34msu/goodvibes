@@ -169,6 +169,7 @@ export class ChannelProviderRuntimeManager {
   private readonly ntfyReconnects = new Map<string, number>();
   private readonly ntfyMessageFailures = new Map<string, number>();
   private socketLostHandler: ((kind: 'slack' | 'discord', reason: string, permanent?: boolean) => void) | null = null;
+  private ntfyTopicLostHandler: ((topic: string, reason: string) => void) | null = null;
   private readonly state: Record<ProviderRuntimeSurface, RuntimeState> = {
     slack: { ...DEFAULT_STATE, metadata: {} },
     discord: { ...DEFAULT_STATE, metadata: {} },
@@ -282,9 +283,12 @@ export class ChannelProviderRuntimeManager {
     }).catch((error: unknown) => {
       if (abort.signal.aborted) return;
       const message = summarizeError(error);
-      if (this.ntfyAborts.get(topic) === abort) this.ntfyAborts.delete(topic);
+      // A newer start for this topic owns it now; this stream's end is not news.
+      if (this.ntfyAborts.get(topic) !== abort) return;
+      this.ntfyAborts.delete(topic);
       this.failNtfyTopic(topic, message);
       logger.warn('ChannelProviderRuntimeManager: ntfy stream failed', { topic: this.ntfyTopicLabel(topic), error: message });
+      this.ntfyTopicLostHandler?.(topic, message);
     });
     return this.result('ntfy', true, 'ntfy JSON stream runtime started.');
   }
@@ -297,8 +301,10 @@ export class ChannelProviderRuntimeManager {
    * honest claim that this node has stopped reading the topic.
    */
   stopNtfyTopic(topic: string): ProviderRuntimeActionResult {
+    // A topic whose stream already ended for good keeps its reason in the
+    // status: stopping it (leadership standing down) does not make it readable.
+    if (this.ntfyAborts.has(topic)) this.ntfyTopicErrors.delete(topic);
     this.abortNtfyTopic(topic);
-    this.ntfyTopicErrors.delete(topic);
     this.ntfyReconnects.delete(topic);
     if (this.ntfyAborts.size === 0) this.markStopped('ntfy');
     else this.markStarted('ntfy', { topics: this.runningNtfyTopics().map((topic) => this.ntfyTopicLabel(topic)) });
@@ -439,7 +445,13 @@ export class ChannelProviderRuntimeManager {
       this.markStarted('discord', { gatewayUrl: gateway.url, shards: gateway.shards });
       return this.result('discord', true, 'Discord Gateway runtime started.');
     } catch (error) {
-      if (this.discordClient === client) this.discordClient = null;
+      if (this.discordClient === client) {
+        this.discordClient = null;
+        // Neither stop() nor a newer start saved the session this attempt was
+        // given, so the next start resumes it and the missed events are replayed.
+        // A session Discord rejected was already cleared by the client.
+        if (this.discordResume === null) this.discordResume = client.resumeState();
+      }
       const message = summarizeError(error);
       channelCredentials.releaseOnRefusal(error);
       if (generation === this.discordGeneration) this.markError('discord', message);
@@ -682,6 +694,13 @@ export class ChannelProviderRuntimeManager {
       remoteTopic: names.remoteTopic,
       baseUrl: this.ntfyBaseUrl(),
     });
+    // An error for a topic no longer configured (a refused name the owner has
+    // since replaced) goes; a configured topic's error belongs to its stream,
+    // which clears it, so status says what the current settings are doing.
+    const current = new Set<string>([...topics.all, ...topics.refused.map((refused) => refused.topic)]);
+    for (const topic of [...this.ntfyTopicErrors.keys()]) {
+      if (!current.has(topic)) this.ntfyTopicErrors.delete(topic);
+    }
     for (const refused of topics.refused) this.failNtfyTopic(refused.topic, refused.reason);
     return [...topics.all];
   }
@@ -753,6 +772,15 @@ export class ChannelProviderRuntimeManager {
    */
   setSocketLostHandler(handler: (kind: 'slack' | 'discord', reason: string, permanent?: boolean) => void): void {
     this.socketLostHandler = handler;
+  }
+
+  /**
+   * Learn that one ntfy topic's stream ended for good (the server refused it),
+   * so leadership stands this node down for that topic instead of holding a
+   * topic nothing here reads. Late-bound for the same reason as above.
+   */
+  setNtfyTopicLostHandler(handler: (topic: string, reason: string) => void): void {
+    this.ntfyTopicLostHandler = handler;
   }
 
   private isConfigured(surface: ProviderRuntimeSurface): boolean {

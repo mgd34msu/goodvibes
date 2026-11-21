@@ -30,6 +30,8 @@ export function validateCustomProvider(data: unknown): { valid: boolean; errors:
 
   if (typeof obj['name'] !== 'string' || obj['name'].trim() === '') {
     errors.push('"name" must be a non-empty string');
+  } else if (/[:\s]/.test(obj['name'])) {
+    errors.push('"name" must not contain ":" or spaces, because models are addressed as name:model');
   }
 
   if (typeof obj['displayName'] !== 'string' || obj['displayName'].trim() === '') {

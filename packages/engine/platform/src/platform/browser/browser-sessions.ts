@@ -133,6 +133,31 @@ function profileDirectoryFor(profileRoot: string, profileName: string): string {
   return join(profileRoot, safe);
 }
 
+/**
+ * One launched browser is open at a time. A launch is handed the open one (or
+ * joined to one starting) only when every option it stated, the profile and
+ * headless, matches; otherwise it is refused with the way to switch.
+ */
+function assertLaunchReusable(
+  options: BrowserLaunchOptions,
+  profileRoot: string,
+  openProfileDirectory: string | null,
+  openHeadless: boolean,
+  openSessionId: string | null,
+): void {
+  const requestedDirectory = options.profileName === undefined ? openProfileDirectory : profileDirectoryFor(profileRoot, options.profileName);
+  const requestedHeadless = options.headless ?? openHeadless;
+  if (requestedDirectory === openProfileDirectory && requestedHeadless === openHeadless) return;
+  const mode = (headless: boolean): string => (headless ? 'headless' : 'with a window');
+  const open = openSessionId === null ? 'A browser launch already in progress' : `Session ${openSessionId}`;
+  throw new BrowserSessionError(
+    `${open} uses profile ${openProfileDirectory} (${mode(openHeadless)}), and only one launched browser is open at a time, so it cannot serve a launch for profile ${requestedDirectory} (${mode(requestedHeadless)}).`,
+    openSessionId === null
+      ? 'Wait for that launch to finish, close it with action:"close" (its sessionId), and launch again.'
+      : `Close it with action:"close" (sessionId ${openSessionId}) and launch again.`,
+  );
+}
+
 interface DriverApi {
   readonly chromium: {
     readonly launchPersistentContext: (userDataDir: string, options: Record<string, unknown>) => Promise<BrowserContext>;
@@ -309,9 +334,15 @@ export class BrowserSessionManager {
    * first is still opening a browser waits on the SAME attempt instead of
    * starting a second browser process against the same profile directory.
    * This is what turned "the model called launch three times while the
-   * first was still opening" into three windows.
+   * first was still opening" into three windows. It records the profile
+   * directory and headless value it asked for, so a caller is joined to it
+   * only when what it stated matches.
    */
-  private launchInFlight: Promise<BrowserLaunchResult> | null = null;
+  private launchInFlight: {
+    readonly result: Promise<BrowserLaunchResult>;
+    readonly profileDirectory: string;
+    readonly headless: boolean;
+  } | null = null;
   /**
    * Consecutive launch failures, reset to 0 on any success. Capped at
    * `MAX_CONSECUTIVE_LAUNCH_FAILURES`, after that many failures in a row,
@@ -445,8 +476,11 @@ export class BrowserSessionManager {
    * Three rules live here, in order:
    *   1. One live launched session at a time, a second call reuses it
    *      instead of opening another window on the same profile directory.
+   *      A call that states a different profile or headless value is refused
+   *      with the way to close the open one, never handed the wrong browser.
    *   2. A launch already in flight is awaited rather than duplicated, so
-   *      concurrent calls cannot start two browser processes at once.
+   *      concurrent calls cannot start two browser processes at once; the
+   *      same match is required to join it.
    *   3. Failures are counted; after MAX_CONSECUTIVE_LAUNCH_FAILURES in a row
    *      launch refuses one call, and says so in plain words, instead of
    *      opening one more window that will fail the same way. The call after
@@ -462,11 +496,14 @@ export class BrowserSessionManager {
     assertProvisionCurrent(options);
     const existing = this.liveLaunchedSession();
     if (existing) {
+      assertLaunchReusable(options, this.profileRoot, existing.profileDirectory, existing.headless, existing.sessionId);
       return { ...this.describe(existing), reused: true };
     }
 
     if (this.launchInFlight) {
-      const result = await this.launchInFlight;
+      const inFlight = this.launchInFlight;
+      assertLaunchReusable(options, this.profileRoot, inFlight.profileDirectory, inFlight.headless, null);
+      const result = await inFlight.result;
       assertProvisionCurrent(options);
       return result;
     }
@@ -493,9 +530,13 @@ export class BrowserSessionManager {
         throw error;
       })
       .finally(() => {
-        if (this.launchInFlight === attempt) this.launchInFlight = null;
+        if (this.launchInFlight?.result === attempt) this.launchInFlight = null;
       });
-    this.launchInFlight = attempt;
+    this.launchInFlight = {
+      result: attempt,
+      profileDirectory: profileDirectoryFor(this.profileRoot, options.profileName ?? 'default'),
+      headless: options.headless ?? !hasDisplay(),
+    };
     return attempt;
   }
 
@@ -859,8 +900,18 @@ export class BrowserSessionManager {
   }
 
   private forgetSession(session: TrackedSession): void {
+    this.unlistSession(session);
+    this.announceSessionEnded(session);
+  }
+
+  /** Takes the session off the registry and ends its lifetime, so new operations on it are refused. */
+  private unlistSession(session: TrackedSession): void {
     if (this.sessions.get(session.sessionId) === session) this.sessions.delete(session.sessionId);
     session.lifetime.abort(new BrowserSessionError('The original browser session was closed or released.'));
+  }
+
+  /** Runs the session-ended listeners, which drop everything kept for the session. */
+  private announceSessionEnded(session: TrackedSession): void {
     for (const listener of this.#sessionEndedListeners) this.#tell('session-ended', session.sessionId, () => listener(session.sessionId));
   }
 
@@ -1147,7 +1198,10 @@ export class BrowserSessionManager {
       );
     }
     const info = this.describe(session);
-    this.forgetSession(session);
+    // Unlisted now, so nothing new starts on it while the close runs; its end
+    // is announced only once the browser is gone, so the session's snapshots
+    // and armed card material stay in force while its pages are still open.
+    this.unlistSession(session);
     return this.#operations.run('browser session operation', async () => {
       try { await this.closeContext(session.context); } catch (error) {
         // The browser is still there: list it again, with a fresh lifetime, so
@@ -1155,9 +1209,13 @@ export class BrowserSessionManager {
         if (!this.#closing && !this.sessions.has(session.sessionId)) {
           session.lifetime = new AbortController();
           this.sessions.set(session.sessionId, session);
+        } else {
+          // No one owns the session any more: drop what was kept for it.
+          this.announceSessionEnded(session);
         }
         throw error;
       }
+      this.announceSessionEnded(session);
       return info;
     });
   }

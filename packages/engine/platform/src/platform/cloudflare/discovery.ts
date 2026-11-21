@@ -36,7 +36,7 @@ export async function selectDiscoveredZone(
     readonly warnings: string[];
   },
 ): Promise<CloudflareZoneLike | undefined> {
-  const zoneId = clean(input.zoneId) || input.configuredZoneId;
+  const { zoneId, zoneName } = requestedZone(input);
   if (zoneId && client.zones) {
     try {
       return await client.zones.get({ zone_id: zoneId });
@@ -44,9 +44,26 @@ export async function selectDiscoveredZone(
       input.warnings.push(`Could not load Cloudflare zone ${zoneId}: ${summarizeError(error)}`);
     }
   }
-  const zoneName = clean(input.zoneName) || input.configuredZoneName;
   if (zoneName) return zones.find((zone) => zone.name === zoneName);
   return zones.length === 1 ? zones[0] : undefined;
+}
+
+/**
+ * The zone a request means, as a pair: an id it names wins; else a name it
+ * names (the configured id is not used, since it may be another zone); else
+ * the configured id and name together.
+ */
+function requestedZone(input: {
+  readonly zoneId?: string | undefined;
+  readonly zoneName?: string | undefined;
+  readonly configuredZoneId: string;
+  readonly configuredZoneName: string;
+}): { readonly zoneId: string; readonly zoneName: string } {
+  const zoneId = clean(input.zoneId);
+  if (zoneId) return { zoneId, zoneName: '' };
+  const zoneName = clean(input.zoneName);
+  if (zoneName) return { zoneId: '', zoneName };
+  return { zoneId: input.configuredZoneId, zoneName: input.configuredZoneName };
 }
 
 export async function resolveZone(
@@ -66,9 +83,8 @@ export async function resolveZone(
     }
     return undefined;
   }
-  const zoneId = clean(input.zoneId) || input.configuredZoneId;
+  const { zoneId, zoneName } = requestedZone(input);
   if (zoneId) return await client.zones.get({ zone_id: zoneId });
-  const zoneName = clean(input.zoneName) || input.configuredZoneName;
   const zones = await collectAsync(client.zones.list({
     ...(input.accountId ? { account: { id: input.accountId } } : {}),
     ...(zoneName ? { name: zoneName } : {}),

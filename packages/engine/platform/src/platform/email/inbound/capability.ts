@@ -125,7 +125,7 @@ const FIX_BY_REASON: Readonly<Record<InboundCapabilityReason, string>> = {
     + 'nothing to sign in with. Store one at daemon scope.',
   'credentials-rejected':
     'The mail server refused the sign-in. Replace the stored password for this '
-    + 'account (surfaces.email.imap.password); if the account uses two-factor '
+    + 'account (surfaces.email.password); if the account uses two-factor '
     + 'sign-in, that value has to be an app password, not the login password.',
   'mailbox-unreadable':
     'The sign-in worked and the mailbox did not open. Check the folder name '

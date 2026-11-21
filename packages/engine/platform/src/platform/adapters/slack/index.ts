@@ -67,12 +67,15 @@ export async function handleSlackSurfacePayload(
   const event = slack.parseEvent(bodyRecord);
   if (event.type === 'slash_command') {
     const task = event.text.trim();
+    // Slack names a direct message's channel `directmessage` on a slash command;
+    // the policy and the binding both read this one test.
+    const direct = event.channelName === 'directmessage';
     const policy = await context.authorizeSurfaceIngress({
       surface: 'slack',
       userId: event.userId,
       channelId: event.channelId,
       groupId: event.channelId,
-      conversationKind: 'channel',
+      conversationKind: direct ? 'direct' : 'channel',
       text: task,
       mentioned: true,
       metadata: {
@@ -100,8 +103,7 @@ export async function handleSlackSurfacePayload(
         userId: event.userId,
         userName: event.userName,
         // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
-        // Slack names a direct message's channel `directmessage` on a slash command.
-        conversationKind: event.channelName === 'directmessage' ? 'direct' : 'channel',
+        conversationKind: direct ? 'direct' : 'channel',
         // The one-shot reply URL belongs to this command alone. It is not kept on
         // the channel's shared binding, and any copy an earlier release stored
         // there is cleared, so later messages never reply to an expired URL.
@@ -231,6 +233,9 @@ export async function handleSlackSurfacePayload(
     // message timestamp, in its conversation, names the message across all of those
     // deliveries; the pipeline claims it once.
     const providerMessageId = event.eventTs;
+    // An event in a direct message carries channel_type `im`; the policy and
+    // the binding both read this one test.
+    const direct = slackChannelType(event.raw) === 'im';
     const outcome = await runSurfaceMessage(context, {
       ingress: {
         surface: 'slack',
@@ -239,8 +244,8 @@ export async function handleSlackSurfacePayload(
         groupId: event.channelId,
         threadId: event.threadTs ?? event.eventTs,
         workspaceId: event.teamId,
-        conversationKind: event.threadTs ? 'thread' : 'channel',
-        parentConversationKind: 'channel',
+        conversationKind: event.threadTs ? 'thread' : direct ? 'direct' : 'channel',
+        parentConversationKind: direct ? 'direct' : 'channel',
         text: task,
         mentioned,
         metadata: {
@@ -259,8 +264,7 @@ export async function handleSlackSurfacePayload(
         metadata: {
           userId: event.userId,
           // Who it is with and whether it is one-to-one: the owner's own conversations (owner-alert.ts isOwnerConversation) are read from these.
-          // An event in a direct message carries channel_type `im`.
-          conversationKind: event.threadTs ? 'thread' : slackChannelType(event.raw) === 'im' ? 'direct' : 'channel',
+          conversationKind: event.threadTs ? 'thread' : direct ? 'direct' : 'channel',
           eventType: event.eventType,
           eventTs: event.eventTs,
           // Clears a one-shot reply URL an earlier release stored on this binding.
@@ -287,7 +291,7 @@ export async function handleSlackSurfacePayload(
     }
     if (outcome.kind === 'no-text') {
       // A message that is only a file: say so in a one-to-one conversation; in a channel it is chatter.
-      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, rawEvent?.channel_type === 'im') : false;
+      const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, direct) : false;
       return Response.json({
         ok: true,
         acknowledged: true,
@@ -321,7 +325,8 @@ export async function handleSlackSurfacePayload(
       groupId: typeof (actionPayload.channel as Record<string, unknown> | undefined)?.id === 'string'
         ? (actionPayload.channel as Record<string, unknown>).id as string
         : undefined,
-      conversationKind: 'channel',
+      // A button pressed in a direct message names its channel `directmessage`, as a slash command does.
+      conversationKind: (actionPayload.channel as Record<string, unknown> | undefined)?.name === 'directmessage' ? 'direct' : 'channel',
       text: actionId,
       mentioned: true,
       metadata: { interactive: true },

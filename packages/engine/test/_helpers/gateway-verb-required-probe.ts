@@ -139,7 +139,7 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['credentials-write', (catalog) => registerCredentialWriteGatewayMethods(catalog, stubDeps())],
   ['browser', (catalog) => registerBrowserGatewayMethods(catalog, stubDeps())],
   ['calendar', (catalog) => registerCalendarGatewayMethods(catalog, stubDeps())],
-  ['channel-profiles', (catalog) => registerChannelProfilesGatewayMethods(catalog, stubDeps())],
+  ['channel-profiles', (catalog) => registerChannelProfilesGatewayMethods(catalog, stubDeps(), stubDeps())],
   ['channel-test', (catalog) => registerChannelTestGatewayMethods(catalog, stubDeps())],
   ['checkin', (catalog) => registerCheckinGatewayMethods(catalog, stubDeps())],
   ['ci', (catalog) => registerCiGatewayMethods(catalog, stubDeps())],
@@ -171,7 +171,7 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   // The accessor shape the daemon passes: the controller is built at start and
   // dropped at stop, so the verbs take a function rather than an instance.
   ['relay', (catalog) => registerRelayGatewayMethods(catalog, () => stubDeps(), stubDeps())],
-  ['rewind', (catalog) => registerRewindGatewayMethods(catalog, stubDeps())],
+  ['rewind', (catalog) => registerRewindGatewayMethods(catalog, stubDeps(), () => [])],
   // A real broker rather than a stub: it holds no I/O and no timers until a
   // request is raised, and the probe's point is to run the handler the daemon
   // runs. A stub here would probe a function that does not exist in production.

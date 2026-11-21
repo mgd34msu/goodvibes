@@ -78,6 +78,8 @@ export interface HomeAssistantChatPostResult extends HomeAssistantChatResolution
   readonly timedOut?: true | undefined;
   /** Set when the turn was stopped by a cancel (the turn's own `turn.cancelled` event), never inferred from failure prose. */
   readonly cancelled?: true | undefined;
+  /** Set when the conversation's chat already holds this message (by the caller's id): nothing was posted, `messageId` is the earlier one's. */
+  readonly replayed?: true | undefined;
 }
 
 export interface HomeAssistantChatRuntime {
@@ -101,6 +103,12 @@ export async function postHomeAssistantChatMessage(
     readonly onTurnEvent?: ((event: CompanionChatTurnEvent) => void) | undefined;
     /** Called once the conversation's chat session is known, before the message is posted. */
     readonly onResolved?: ((resolution: HomeAssistantChatResolution) => void) | undefined;
+    /**
+     * The caller's own id for this message. It is kept with the posted message
+     * in the conversation's chat transcript, and a message the chat already
+     * holds under it is not posted again, also after a daemon restart.
+     */
+    readonly clientMessageId?: string | undefined;
   } = {},
 ): Promise<HomeAssistantChatPostResult> {
   // One deadline covers grounding and the reply. Grounding is a read that
@@ -110,6 +118,13 @@ export async function postHomeAssistantChatMessage(
   const grounding = resolveHomeGraphGrounding(runtime.homeGraph, input, deadlineAt);
   const resolution = await resolveHomeAssistantChatSession(runtime, input);
   options.onResolved?.(resolution);
+  const { clientMessageId } = options;
+  if (clientMessageId !== undefined) {
+    // The chat is this conversation's own, so the caller's id is scoped to its installation and conversation.
+    const earlier = runtime.chatManager.getMessages(resolution.session.id)
+      .find((message) => message.role === 'user' && message.clientMessageId === clientMessageId);
+    if (earlier) return { ...resolution, messageId: earlier.id, replayed: true };
+  }
   const message = formatHomeAssistantUserMessage(input, await grounding);
   const clientId = options.clientId ?? `homeassistant:${input.surfaceId}:${input.conversationId}`;
   // No `ownerDirect` on either post below, deliberately. A Home Assistant
@@ -121,6 +136,7 @@ export async function postHomeAssistantChatMessage(
   if (options.wait === false) {
     const messageId = await runtime.chatManager.postMessage(resolution.session.id, message, clientId, {
       ...(options.onTurnEvent ? { onTurnEvent: options.onTurnEvent } : {}),
+      ...(clientMessageId !== undefined ? { clientMessageId } : {}),
     });
     return { ...resolution, messageId };
   }
@@ -135,6 +151,7 @@ export async function postHomeAssistantChatMessage(
         if (event.type === 'turn.cancelled') cancelled = true;
         options.onTurnEvent?.(event);
       },
+      ...(clientMessageId !== undefined ? { clientMessageId } : {}),
     },
   );
   return {

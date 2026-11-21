@@ -1,24 +1,8 @@
 import type {
-  ChannelAccountLifecycleAction,
   ChannelConversationKind,
   ChannelDirectoryScope,
 } from '../types.js';
 import type { SecretScope } from '../../config/secrets-store-paths.js';
-
-export function readLifecycleAction(value: unknown): ChannelAccountLifecycleAction | null {
-  return value === 'inspect'
-    || value === 'setup'
-    || value === 'retest'
-    || value === 'connect'
-    || value === 'disconnect'
-    || value === 'start'
-    || value === 'stop'
-    || value === 'login'
-    || value === 'logout'
-    || value === 'wait_login'
-    ? value
-    : null;
-}
 
 export function readConversationKind(value: unknown): ChannelConversationKind | null {
   return value === 'direct' || value === 'group' || value === 'channel' || value === 'thread' || value === 'service'

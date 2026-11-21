@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { assertNoSecretLikeText } from './persona-registry.js';
 
@@ -84,7 +84,7 @@ function findGitRoot(workingDirectory: string): string | null {
 
 export function pathInside(parent: string, child: string): boolean {
   const rel = relative(resolve(parent), resolve(child));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
 }
 
 /**

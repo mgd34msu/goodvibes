@@ -934,6 +934,7 @@ export function describeAgentWorkspaceTuiSettingsImportPlan(plan: TuiSettingsImp
   const pending = plan.subscriptionValues.filter((entry) => entry.kind === 'pending').map((entry) => entry.value.provider);
   if (active.length > 0) lines.push(`Provider sign-ins replaced: ${active.join(', ')}.`);
   if (pending.length > 0) lines.push(`Pending provider sign-ins replaced: ${pending.join(', ')}.`);
+  if (active.length + pending.length > 0) lines.push('A replaced sign-in is not kept in the undo file and cannot be restored from it; sign in again to get it back.');
   const skipped = plan.settings.filter((entry) => entry.status === 'skipped');
   if (skipped.length > 0) lines.push(`Not imported: ${skipped.map((entry) => `${entry.key} (${entry.reason ?? 'not importable'})`).join('; ')}.`);
   if (plan.parseErrors.length > 0) lines.push(`Could not read: ${plan.parseErrors.join('; ')}.`);
@@ -945,11 +946,41 @@ export async function importAgentWorkspaceTuiSettings(context: CommandContext | 
   return applyAgentWorkspaceTuiSettingsImport(context, planAgentWorkspaceTuiSettingsImport(context));
 }
 
+/** The undo file `{ version, imports: [{ createdAt, settings }] }`, oldest import first. */
+const SETTINGS_IMPORT_UNDO_VERSION = 1;
+
+/**
+ * The imports the undo file already holds, to append to. A file from before the
+ * list (one `{ createdAt, settings }` object) is carried forward as the first
+ * import. A file this version cannot read throws, so it is never overwritten.
+ */
+function readSettingsImportUndoEntries(path: string): readonly unknown[] {
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException | null)?.code === 'ENOENT') return [];
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error(`the undo file ${path} is not valid JSON; move it aside to keep what it holds`);
+  }
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    const record = parsed as Record<string, unknown>;
+    if (Array.isArray(record.imports)) return record.imports;
+    if (typeof record.createdAt === 'string' && Array.isArray(record.settings)) return [record];
+  }
+  throw new Error(`the undo file ${path} is not one this version reads; move it aside to keep what it holds`);
+}
+
 /**
  * Write exactly `plan`: the settings it lists as changing and the provider
  * sign-ins it holds. Before writing, the previous value of every changed
- * setting goes to an undo file beside the Agent's own state, so an import
- * can be reversed by hand.
+ * setting is appended to an undo file beside the Agent's own state, so each
+ * import can be reversed by hand. Replaced provider sign-ins are not kept.
  */
 export async function applyAgentWorkspaceTuiSettingsImport(
   context: CommandContext | null,
@@ -983,21 +1014,27 @@ export async function applyAgentWorkspaceTuiSettingsImport(
 
   const changing = plan.settings.filter((entry) => entry.status === 'would_import');
   const undoPath = shellPaths.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'settings-import-undo.json');
+  const importedAt = new Date().toISOString();
   if (changing.length > 0) {
     // A credential's previous value is kept only as the goodvibes://secrets/
     // reference that was stored in its place; a credential that was not a
     // reference is never written to this plain file and is marked not restorable.
+    // Each import is appended, oldest first, so every import can be reversed in
+    // order and the first one's original values are never overwritten.
     // Without the undo file nothing is written: an import that cannot be reversed does not start.
     try {
       writeDocument(undoPath, {
-        createdAt: new Date().toISOString(),
-        settings: changing.map((entry) => {
-          const previous: unknown = configManager.get(entry.key as Parameters<typeof configManager.get>[0]) ?? null;
-          if (!isCredentialSettingKey(entry.key)) return { key: entry.key, previous, restorable: true };
-          return previous === null || previous === '' || isSecretReferenceValue(previous)
-            ? { key: entry.key, previous, restorable: true }
-            : { key: entry.key, previous: null, restorable: false };
-        }),
+        version: SETTINGS_IMPORT_UNDO_VERSION,
+        imports: [...readSettingsImportUndoEntries(undoPath), {
+          createdAt: importedAt,
+          settings: changing.map((entry) => {
+            const previous: unknown = configManager.get(entry.key as Parameters<typeof configManager.get>[0]) ?? null;
+            if (!isCredentialSettingKey(entry.key)) return { key: entry.key, previous, restorable: true };
+            return previous === null || previous === '' || isSecretReferenceValue(previous)
+              ? { key: entry.key, previous, restorable: true }
+              : { key: entry.key, previous: null, restorable: false };
+          }),
+        }],
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
@@ -1063,7 +1100,8 @@ export async function applyAgentWorkspaceTuiSettingsImport(
         unchangedCount > 0 ? `${unchangedCount} item(s) already matched.` : '',
         ...(skipped.length > 0 ? ['Skipped:', ...skipped.map((line) => `  ${line}`)] : []),
         parseErrors.length > 0 ? `Parse issues: ${parseErrors.join('; ')}.` : '',
-        imported.length > 0 ? `Previous values were saved to ${undoPath}.` : '',
+        imported.length > 0 ? `Previous setting values were saved to ${undoPath} (import of ${importedAt}).` : '',
+        importedActive.length + importedPending.length > 0 ? 'Replaced provider sign-ins are not kept; sign in again to restore one.' : '',
       ].filter((line) => line.length > 0).join('\n'),
       safety: 'safe',
     },

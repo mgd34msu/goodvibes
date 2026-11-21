@@ -23,20 +23,6 @@ export type TaskKind =
   | 'plugin'
   | 'integration';
 
-/** Retry policy for a task. */
-export interface TaskRetryPolicy {
-  /** Maximum number of retry attempts. */
-  maxAttempts: number;
-  /** Current attempt number (1-indexed). */
-  currentAttempt: number;
-  /** Delay in ms between retries (may be exponential). */
-  delayMs: number;
-  /** Backoff strategy. */
-  backoff: 'fixed' | 'exponential';
-  /** Error categories that trigger retry. */
-  retryOn: Array<'network' | 'timeout' | 'transient' | 'tool_error'>;
-}
-
 /**
  * Full runtime task record. Every active or recently completed task
  * in the system has one of these in the tasks map.
@@ -72,22 +58,6 @@ export interface RuntimeTask {
   startedAt?: number | undefined;
   /** Epoch ms when the task completed, failed, or was cancelled. */
   endedAt?: number | undefined;
-
-  // ── Retry ────────────────────────────────────────────────────────────────
-  /** Retry policy (undefined = no retries). */
-  retryPolicy?: TaskRetryPolicy | undefined;
-  /**
-   * Computed delay in ms before the next retry attempt.
-   * Set by TaskManager.failTask() when re-queuing. The task runner is
-   * responsible for not starting the task until `retryAt` has elapsed.
-   */
-  retryDelayMs?: number | undefined;
-  /**
-   * Epoch ms at which the task is eligible to run again after a retry re-queue.
-   * Computed as `Date.now() + retryDelayMs` by TaskManager.failTask().
-   * The task runner must not dequeue this task before this timestamp.
-   */
-  retryAt?: number | undefined;
 
   // ── Result ───────────────────────────────────────────────────────────────
   /** Exit code for exec tasks. */
@@ -137,10 +107,6 @@ export interface TaskDomainState {
   totalFailed: number;
   /** Total tasks that were cancelled. */
   totalCancelled: number;
-
-  // ── Concurrency ───────────────────────────────────────────────────────────
-  /** Maximum concurrent running tasks allowed. */
-  maxConcurrency: number;
 }
 
 /**
@@ -159,6 +125,5 @@ export function createInitialTasksState(): TaskDomainState {
     totalCompleted: 0,
     totalFailed: 0,
     totalCancelled: 0,
-    maxConcurrency: 8,
   };
 }

@@ -4,16 +4,19 @@ import { matchesEventPath } from './matcher.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 
-/** Parse a duration string like "30s" or "5m" into milliseconds */
-function parseDuration(s: string): number {
-  const match = s.match(/^(\d+(\.\d+)?)(s|m|ms)$/);
-  if (!match) return 0;
+/** A chain duration (`500ms`, `30s`, `5m`, `1h`) in milliseconds, or undefined when the value is not one. */
+function parseDuration(s: unknown): number | undefined {
+  if (typeof s !== 'string') return undefined;
+  const match = s.match(/^(\d+(\.\d+)?)(ms|s|m|h)$/);
+  if (!match) return undefined;
   const value = parseFloat(match[1]!);
-  const unit = match[3]!;
-  if (unit === 'ms') return value;
-  if (unit === 's') return value * 1000;
-  if (unit === 'm') return value * 60_000;
-  return 0;
+  switch (match[3]) {
+    case 'ms': return value;
+    case 's': return value * 1000;
+    case 'm': return value * 60_000;
+    case 'h': return value * 3_600_000;
+    default: return undefined;
+  }
 }
 
 /**
@@ -267,16 +270,23 @@ interface ChainState {
 /** Runs a completed chain's action and reports how it went. */
 export type ChainActionRunner = (chain: HookChain, event: HookEvent) => Promise<HookResult>;
 
-/** Combines two results: any failure fails, the first deny wins, context joins. */
+/**
+ * How strongly a hook's decision binds an event's outcome when several answer:
+ * deny > ask > allow. A decision replaces another only when it ranks higher.
+ */
+export const DECISION_RANK: Readonly<Record<NonNullable<HookResult['decision']>, number>> = { allow: 1, ask: 2, deny: 3 };
+
+const decisionRank = (result: HookResult): number => (result.decision ? DECISION_RANK[result.decision] ?? 0 : 0);
+
+/** Combines two results: any failure fails, the higher-ranked decision wins with its reason (the first on a tie), context joins. */
 function mergeResults(a: HookResult | null, b: HookResult): HookResult {
   if (!a) return b;
   const merged: HookResult = { ok: a.ok && b.ok };
   const error = a.error ?? b.error;
   if (error !== undefined) merged.error = error;
-  const deny = a.decision === 'deny' ? a : b.decision === 'deny' ? b : undefined;
-  const decision = deny ? 'deny' : (a.decision ?? b.decision);
-  if (decision !== undefined) merged.decision = decision;
-  const reason = deny ? deny.reason : (a.reason ?? b.reason);
+  const decider = decisionRank(b) > decisionRank(a) ? b : a;
+  if (decider.decision !== undefined) merged.decision = decider.decision;
+  const reason = decider.decision !== undefined ? decider.reason : (a.reason ?? b.reason);
   if (reason !== undefined) merged.reason = reason;
   const context = [a.additionalContext, b.additionalContext].filter((part): part is string => !!part).join('\n');
   if (context) merged.additionalContext = context;
@@ -305,9 +315,20 @@ export class ChainEngine {
     }));
   }
 
-  /** Register a chain and initialize its state. Chains are tracked by name, so a repeated name is refused. */
+  /**
+   * Register a chain and initialize its state. Chains are tracked by name, so a
+   * repeated name is refused; so is a step whose `within` or `debounce` is not a
+   * duration, rather than running without that limit.
+   */
   register(chain: HookChain): void {
     if (this.states.has(chain.name)) throw new Error(`chain "${chain.name}" is already registered`);
+    chain.steps.forEach((step, index) => {
+      for (const value of [step.within, step.debounce]) {
+        if (value !== undefined && parseDuration(value) === undefined) {
+          throw new Error(`chain "${chain.name}" step ${index + 1}: "${String(value)}" is not a duration (use 500ms, 30s, 5m or 1h)`);
+        }
+      }
+    });
     this.chains.push(chain);
     this.states.set(chain.name, {
       currentStep: 0,
@@ -327,9 +348,10 @@ export class ChainEngine {
       let step = chain.steps[state.currentStep] as ChainStep | undefined;
       if (!step) continue;
 
-      if (step.within && state.lastAdvance > 0) {
-        const withinMs = parseDuration(step.within);
-        if (withinMs > 0 && Date.now() - state.lastAdvance > withinMs) {
+      if (step.within !== undefined && state.lastAdvance > 0) {
+        // register() refused a step whose duration does not parse.
+        const withinMs = parseDuration(step.within)!;
+        if (Date.now() - state.lastAdvance > withinMs) {
           this._resetState(chain.name);
           // Re-check from step 0 with same event
           state = this.states.get(chain.name)!;
@@ -338,12 +360,19 @@ export class ChainEngine {
         }
       }
 
-      // An optional step without a debounce is skipped when the event that
-      // arrives belongs to the step after it.
-      if (step.optional && !step.debounce && !matchesEventPath(step.match, event.path)) {
+      // An optional step is skipped when the event that arrives belongs to the
+      // step after it. When the step's debounce is waiting on an earlier match,
+      // that match is settled now (its captures kept), so an event for the next
+      // step ends the wait early instead of being dropped.
+      if (step.optional && !matchesEventPath(step.match, event.path)) {
         const next = chain.steps[state.currentStep + 1] as ChainStep | undefined;
         if (next && matchesEventPath(next.match, event.path)) {
-          state.currentStep++;
+          const pendingEvent = state.pendingDebounce;
+          if (state.debounceTimer !== undefined) clearTimeout(state.debounceTimer);
+          state.debounceTimer = undefined;
+          state.pendingDebounce = undefined;
+          if (pendingEvent) this._advanceState(chain, state, pendingEvent, step);
+          else state.currentStep++;
           step = next;
         }
       }
@@ -357,7 +386,7 @@ export class ChainEngine {
 
       // Handle debounce for optional steps
       if (step.debounce && step.optional) {
-        const debounceMs = parseDuration(step.debounce);
+        const debounceMs = parseDuration(step.debounce)!;
         if (state.debounceTimer !== undefined) {
           clearTimeout(state.debounceTimer);
         }

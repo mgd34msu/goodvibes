@@ -377,8 +377,13 @@ function createPeerClient(
     return (await operatorApi.invoke<{ contract: DistributedNodeHostContract }>('remote.node_host.contract')).contract;
   }
 
-  async function readPeers(limit = 500): Promise<readonly DistributedPeerRecord[]> {
-    return (await operatorApi.invoke<{ peers: readonly DistributedPeerRecord[] }>('remote.peers.list', { limit })).peers ?? [];
+  /** Every peer the daemon holds: with no limit the list is not cut. */
+  async function readAllPeers(): Promise<readonly DistributedPeerRecord[]> {
+    return (await operatorApi.invoke<{ peers: readonly DistributedPeerRecord[] }>('remote.peers.list', {})).peers ?? [];
+  }
+
+  async function readPeer(peerId: string): Promise<DistributedPeerRecord | null> {
+    return (await withNullOnNotFound(() => operatorApi.invoke<{ peer: DistributedPeerRecord }>('remote.peers.get', { peerId })))?.peer ?? null;
   }
 
   return {
@@ -411,17 +416,15 @@ function createPeerClient(
           ...(kind ? { kind } : {}),
           limit,
         })).peers ?? [],
-      get: async (peerId): Promise<DistributedPeerRecord | null> =>
-        (await withNullOnNotFound(() => operatorApi.invoke<{ peer: DistributedPeerRecord }>('remote.peers.get', { peerId })))?.peer ?? null,
+      get: readPeer,
       getSnapshot: async (peerId): Promise<HttpPeerRecordSnapshot | null> => {
-        const [snapshot, contract, peers] = await Promise.all([
+        const [snapshot, contract, peer] = await Promise.all([
           readRemoteSnapshot(),
           readNodeHostContractValue(),
-          readPeers(),
+          readPeer(peerId),
         ]);
         const pairRequests = (snapshot.distributed?.pairRequests ?? []).filter((entry) => entry.peerId === peerId || entry.requestedId === peerId);
         const work = (snapshot.distributed?.work ?? []).filter((entry) => entry.peerId === peerId);
-        const peer = peers.find((entry) => entry.id === peerId) ?? null;
         if (!peer && pairRequests.length === 0 && work.length === 0) {
           return null;
         }
@@ -503,7 +506,7 @@ function createPeerClient(
       const [remoteSnapshot, contract, peers] = await Promise.all([
         readRemoteSnapshot(),
         readNodeHostContractValue(),
-        readPeers(),
+        readAllPeers(),
       ]);
       return {
         capturedAt: Date.now(),

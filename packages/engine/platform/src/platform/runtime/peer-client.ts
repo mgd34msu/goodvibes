@@ -167,7 +167,7 @@ export interface PeerClientRunnersDomain {
     artifactId: string,
     path?: string,
   ): ReturnType<RemoteRunnerRegistry['exportArtifact']>;
-  importArtifact(path: string): ReturnType<RemoteRunnerRegistry['importArtifact']>;
+  importArtifact(path: string, options?: { readonly replace?: boolean | undefined }): ReturnType<RemoteRunnerRegistry['importArtifact']>;
   buildReviewSummary(artifactId: string): string | null;
   exportSessionBundle(path?: string): ReturnType<RemoteRunnerRegistry['exportSessionBundle']>;
   importSessionBundle(path: string, options?: { readonly replace?: boolean | undefined }): ReturnType<RemoteRunnerRegistry['importSessionBundle']>;
@@ -432,8 +432,8 @@ export function createPeerClient(deps: PeerClientDependencies): PeerClient {
       exportArtifact(artifactId: string, path?: string) {
         return resolved.remoteRunnerRegistry.exportArtifact(artifactId, path);
       },
-      importArtifact(path: string) {
-        return resolved.remoteRunnerRegistry.importArtifact(path);
+      importArtifact(path: string, options?: { readonly replace?: boolean | undefined }) {
+        return resolved.remoteRunnerRegistry.importArtifact(path, options);
       },
       buildReviewSummary(artifactId: string): string | null {
         return resolved.remoteRunnerRegistry.buildReviewSummary(artifactId);

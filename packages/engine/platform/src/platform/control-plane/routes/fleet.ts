@@ -45,6 +45,8 @@ import { summarizeError } from '../../utils/error-display.js';
 import { randomUUID } from 'node:crypto';
 import type { ApprovalRaiseService } from './approvals-raise.js';
 import { observedAgentRef } from '../../runtime/fleet/adapters/observed.js';
+import type { ObservedAgentRow } from '../../runtime/fleet/observed/source.js';
+import type { ProcessNode } from '../../runtime/fleet/types.js';
 import { compareTarget, type TargetRef } from '../../utils/target-ref.js';
 
 /**
@@ -199,6 +201,25 @@ export type FleetSteerApprovals = Pick<ApprovalRaiseService, 'raiseApproval'>;
 const STEER_APPROVAL_TIMEOUT_MS = 5 * 60_000;
 
 /**
+ * Whether `current` is still the observed process the owner was shown in
+ * `shown`: the same process (pid with start time, pane, kind, directory and
+ * command line) when it could be told apart, otherwise the same pid, agent kind
+ * and tmux pane.
+ */
+function sameObservedProcess(shown: ProcessNode, shownRef: TargetRef | null, current: ProcessNode | null): boolean {
+  if (!current || current.kind !== 'observed-external') return false;
+  if (shownRef) {
+    const currentRef = observedAgentRef(current);
+    return currentRef !== null && compareTarget(shownRef, currentRef).length === 0;
+  }
+  const before = shown.raw as ObservedAgentRow | undefined;
+  const now = current.raw as ObservedAgentRow | undefined;
+  if (!before || !now) return false;
+  const pane = (row: ObservedAgentRow): string | null => row.steer.kind === 'tmux' ? row.steer.paneId : null;
+  return before.pid === now.pid && before.externalKind === now.externalKind && pane(before) === pane(now);
+}
+
+/**
  * fleet.observed.steer handler, the drill-in steer of an observed foreign
  * agent. Scoped to 'observed-external' rows by construction: an unknown id is a
  * 404, and steering a non-observed kind through this verb is refused (400) so it
@@ -276,6 +297,10 @@ export function createFleetObservedSteerHandler(
           declined: true,
           reason: `nothing was sent: the owner did not approve typing into ${node.label}${decision.reason ? ` (${decision.reason})` : ''}`,
         };
+      }
+      // The approval names the process the owner was shown; a different one now under this id gets nothing.
+      if (!sameObservedProcess(node, observedProcess, registry.getNode(id))) {
+        return { queued: false, reason: 'nothing was sent: the session changed while the approval was pending' };
       }
       if (observedProcess && (decision.rememberTier !== undefined || decision.remember === true)) grantedSessions.set(id, observedProcess);
     }

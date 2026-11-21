@@ -4,28 +4,23 @@
  * Lists profiles from ProfileManager.list(), tracks selected index,
  * and handles load/delete/save actions.
  */
-import type { ProfileInfo, ProfileData, ProfileManager } from '@goodvibes/engine/platform/platform/profiles';
+import { PROFILE_SETTING_KEYS, type ProfileInfo, type ProfileData, type ProfileManager } from '@goodvibes/engine/platform/platform/profiles';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
-import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import { CONFIG_SCHEMA, type ConfigKey } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigManager, ConfigKey } from '@goodvibes/engine/platform/platform/config';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 /**
- * Approval behaviour (`autoApprove`, `hitlMode`) is never carried: a profile
- * from another host must not change what runs without asking.
- */
-const NOT_IN_PROFILES: ReadonlySet<string> = new Set(['behavior.autoApprove', 'behavior.hitlMode']);
-/**
- * The settings a profile carries, from the schema: every `display.<name>` and
- * `behavior.<name>` setting except the approval ones. Saving and loading read
- * this one list, so whatever is saved is what a load restores.
+ * The settings a profile carries come from the one list in the profiles
+ * module; saving and loading read it, so whatever is saved is what a load restores.
  */
 function profileKeys(section: 'display' | 'behavior'): readonly ConfigKey[] {
-  return CONFIG_SCHEMA
-    .map((setting) => setting.key)
-    .filter((key) => key.startsWith(`${section}.`) && key.split('.').length === 2 && !NOT_IN_PROFILES.has(key));
+  return PROFILE_SETTING_KEYS.filter((key) => key.startsWith(`${section}.`));
 }
 const DISPLAY_KEYS = profileKeys('display');
 const BEHAVIOR_KEYS = profileKeys('behavior');
+/** The provider settings a profile carries (the model and its reasoning effort). */
+const PROVIDER_FIELDS: ReadonlySet<string> = new Set(
+  PROFILE_SETTING_KEYS.filter((key) => key.startsWith('provider.')).map((key) => key.slice('provider.'.length)),
+);
 interface ProfileApplyOutcome {
   readonly applied: string[];
   readonly failed: string[];
@@ -157,8 +152,9 @@ export class ProfilePickerModal {
       if (data.display) {
         applyProfileCategory(configManager, 'display', data.display, DISPLAY_KEYS, outcome);
       }
-      // Apply provider settings (model + reasoningEffort only)
+      // Apply provider settings (model + reasoningEffort only); any other provider setting in the file is named as not applied.
       if (data.provider) {
+        for (const field of Object.keys(data.provider)) if (!PROVIDER_FIELDS.has(field)) outcome.skipped.push(`provider.${field}`);
         if (data.provider.model !== undefined) {
           try {
             configManager.set('provider.model', data.provider.model);

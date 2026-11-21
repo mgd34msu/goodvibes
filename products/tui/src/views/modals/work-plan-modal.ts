@@ -82,6 +82,8 @@ class WorkPlanModalSurface implements ConfigModalSurface {
   private loadSequence = 0;
   /** The plan revision the shown rows were read at; null before the first read. */
   private shownRevision: number | null = null;
+  /** The plan revision a read last failed at; it is not read again by itself until the revision moves (r reads it again). */
+  private failedRevision: number | null = null;
   private unsubscribe: (() => void) | null = null;
 
   constructor(private readonly deps: WorkPlanModalDeps) {}
@@ -133,7 +135,7 @@ class WorkPlanModalSurface implements ConfigModalSurface {
     if (this.loading || this.shownRevision === null || !this.requestRender) return;
     let current: number;
     try { current = this.deps.workPlan.revision(); } catch { return; }
-    if (current !== this.shownRevision) this.refresh();
+    if (current !== this.shownRevision && current !== this.failedRevision) this.refresh();
   }
 
   /** Reads the plan's rows (one snapshot read) and redraws when they arrive. */
@@ -144,10 +146,12 @@ class WorkPlanModalSurface implements ConfigModalSurface {
       if (sequence !== this.loadSequence) return;
       this.items = [...plan.tasks];
       this.shownRevision = plan.revision;
+      this.failedRevision = null;
       this.loadError = null;
     }, (error: unknown) => {
       if (sequence !== this.loadSequence) return;
       this.loadError = summarizeError(error);
+      try { this.failedRevision = this.deps.workPlan.revision(); } catch { this.failedRevision = null; }
     }).finally(() => {
       if (sequence !== this.loadSequence) return;
       this.loading = false;

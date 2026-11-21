@@ -16,6 +16,8 @@
  * the raw value, which stays inside the process (see `ICalAttendee`).
  */
 
+import { UnknownTimeZoneError, zonedWallClockToUtcMs } from '../utils/timezone.js';
+
 /** One ATTENDEE, split into what may be shown and what must be re-emitted. */
 export interface ICalAttendee {
   /** Display name only (CN parameter, or the local-part of the address). */
@@ -160,7 +162,12 @@ export function parseICalDate(
     assertRealDateTime(value, Number(y), Number(m), Number(d), Number(hh), Number(mm), Number(ss));
     if (!zulu && tzid !== undefined && tzid.length > 0) {
       const wall = Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss));
-      return { iso: new Date(zonedWallClockToUtcMs(wall, tzid)).toISOString(), allDay: false };
+      try {
+        return { iso: new Date(zonedWallClockToUtcMs(wall, tzid)).toISOString(), allDay: false };
+      } catch (error) {
+        if (error instanceof UnknownTimeZoneError) throw new Error(`Unsupported iCalendar TZID '${tzid}': it is not a time zone this runtime knows.`);
+        throw error;
+      }
     }
     const date = zulu
       ? new Date(Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss)))
@@ -190,69 +197,6 @@ function assertRealDateTime(
     || ss > 59
   ) {
     throw new Error(`Unrecognised iCalendar date value: ${value}`);
-  }
-}
-
-/** One formatter per zone: building an Intl.DateTimeFormat costs far more than using one. */
-const zoneFormatters = new Map<string, Intl.DateTimeFormat>();
-
-function zoneFormatter(timeZone: string): Intl.DateTimeFormat {
-  let formatter = zoneFormatters.get(timeZone);
-  if (formatter === undefined) {
-    formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      hourCycle: 'h23',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-    zoneFormatters.set(timeZone, formatter);
-  }
-  return formatter;
-}
-
-/** The offset of `timeZone` from UTC, in ms, at the UTC instant `utcMs`. */
-function zoneOffsetMs(utcMs: number, timeZone: string): number {
-  const parts = zoneFormatter(timeZone).formatToParts(new Date(utcMs));
-  const part = (type: string): number =>
-    Number(parts.find((candidate) => candidate.type === type)?.value ?? '0');
-  const asUtc = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'));
-  return asUtc - Math.floor(utcMs / 1000) * 1000;
-}
-
-/**
- * The UTC instant at which `timeZone`'s wall clock reads `wallMs` (the wall
- * clock expressed as if it were UTC). Two passes settle the offset across a
- * DST boundary. Throws for a zone this runtime does not know.
- */
-export function zonedWallClockToUtcMs(wallMs: number, timeZone: string): number {
-  try {
-    const first = wallMs - zoneOffsetMs(wallMs, timeZone);
-    return wallMs - zoneOffsetMs(first, timeZone);
-  } catch {
-    throw new Error(`Unsupported iCalendar TZID '${timeZone}': it is not a time zone this runtime knows.`);
-  }
-}
-
-/** The wall clock of `timeZone` at the UTC instant `utcMs`, expressed as if it were UTC. */
-export function utcToZonedWallClockMs(utcMs: number, timeZone: string): number {
-  try {
-    return utcMs + zoneOffsetMs(utcMs, timeZone);
-  } catch {
-    throw new Error(`Unsupported iCalendar TZID '${timeZone}': it is not a time zone this runtime knows.`);
-  }
-}
-
-/** True when the runtime knows `timeZone`. */
-export function isKnownTimeZone(timeZone: string): boolean {
-  try {
-    zoneFormatter(timeZone);
-    return true;
-  } catch {
-    return false;
   }
 }
 

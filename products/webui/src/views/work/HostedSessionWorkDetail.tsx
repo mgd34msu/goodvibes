@@ -28,7 +28,7 @@ import { SteerComposer } from '../sessions/SteerComposer';
 import { SessionChanges } from '../sessions/SessionChanges';
 import { SessionRewind } from '../sessions/SessionRewind';
 import { CheckpointsPanel } from './CheckpointsPanel';
-import { HostedTurnStop, type HostedAttachment } from './HostedSessionDetail';
+import { HostedSessionShare, HostedTurnStop, type HostedAttachment } from './HostedSessionDetail';
 import type { SessionTab } from './SessionDetail';
 import { sentenceCase } from './work-items';
 
@@ -173,6 +173,11 @@ export function HostedSessionWorkDetail({ sessionId, attachment, record, listed,
             <ul className="work-list" aria-label="Running tools">
               {attachment.activeToolCalls.map((call) => <li key={call.callId}>Running: {call.tool}</li>)}
             </ul>
+          )}
+          {!ended && (
+            <DetailSection title="Share">
+              <HostedSessionShare sessionId={sessionId} />
+            </DetailSection>
           )}
           <DetailSection title="Continue session">
             {!ended && session.status === 'running' && <HostedTurnStop sessionId={sessionId} attachment={attachment} />}

@@ -126,6 +126,8 @@ export interface ExpectationArrival {
  *  - `arrived`: a matching message yielded its token; the expectation is closed.
  *  - `expired` / `capability-lost`: ended without a token; `detail` says which and why.
  *  - `cancelled`: the workstream closed it.
+ *  - `replaced`: a later open for the same address replaced it; `replacedBy`
+ *    is the id of the expectation to follow now.
  *  - `unknown`: no expectation with this id is open or remembered.
  */
 export type ExpectationState =
@@ -133,6 +135,7 @@ export type ExpectationState =
   | { readonly state: 'arrived'; readonly expectation: VerificationExpectation; readonly messageId: string; readonly at: string; readonly token: ExpectationToken }
   | { readonly state: 'expired' | 'capability-lost'; readonly expectation: VerificationExpectation; readonly detail: string; readonly arrivals: readonly ExpectationArrival[] }
   | { readonly state: 'cancelled'; readonly expectation: VerificationExpectation }
+  | { readonly state: 'replaced'; readonly expectation: VerificationExpectation; readonly replacedBy: string }
   | { readonly state: 'unknown'; readonly id: string };
 
 /**
@@ -600,14 +603,21 @@ export class InboundExpectationRegistry {
     // so each of them is reported rather than dropped without a word.
     const lapsed = this.book.sweepExpired(request.now);
     this.report(this.expire(lapsed));
-    const expectation = this.book.openExpectation(request);
+    const { expectation, replaced } = this.book.openExpectation(request);
     try {
       await this.persist();
     } catch (error) {
       // Not durable means not promised: an expectation that the caller was told
-      // failed must not stay live and match mail.
+      // failed must not stay live and match mail. The one it displaced is still
+      // on disk, so it is put back in memory too, with its own id and window.
       this.book.closeExpectation(expectation.id);
+      if (replaced !== null) this.book.hydrateExpectation(replaced, request.now);
       throw error;
+    }
+    // A re-open for the same address ends the earlier expectation: its waiters
+    // are answered now, with the id to follow instead.
+    if (replaced !== null && replaced.id !== expectation.id) {
+      this.settle({ state: 'replaced', expectation: replaced, replacedBy: expectation.id });
     }
     for (const listener of this.openedListeners) {
       try { listener(); } catch { /* A listener's failure cannot undo an open that was persisted. */ }

@@ -155,6 +155,9 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
   const tenantId = readString(tenant?.['id']);
   const providerMessageId = readString(activity.id);
   const conversationKind = teamsConversationKind(conversationType, replyToId);
+  // A personal chat is the one-to-one conversation with the bot, a reply in it
+  // included: the policy reads a reply there as a thread of a direct message.
+  const direct = conversationType === 'personal';
   const outcome = await runSurfaceMessage(context, {
     ingress: {
       surface: 'msteams',
@@ -164,6 +167,7 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
       threadId: replyToId,
       workspaceId: teamId ?? tenantId,
       conversationKind,
+      ...(direct ? { parentConversationKind: 'direct' as const } : {}),
       text,
       mentioned: teamsMentioned(activity, conversationType, [
         readString(context.configManager.get('surfaces.msteams.botId')),
@@ -214,7 +218,7 @@ export async function handleMSTeamsSurfaceWebhook(req: Request, context: Surface
   });
   if (outcome.kind === 'no-text') {
     const attachment = hasAttachments(activity.attachments) && (activity.attachments as unknown[]).some((entry) => readString(readRecord(entry)?.contentType) !== 'text/html') ? 'attachment' : undefined;
-    const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, conversationKind === 'direct') : false;
+    const notified = attachment ? await noticeUnsupportedAttachment(context, outcome.binding, attachment, direct) : false;
     logger.info('handleMSTeamsSurfaceWebhook: activity acknowledged without queueing', {
       reason: attachment ? 'unsupported-attachment' : 'no-actionable-text',
       bindingId: outcome.binding.id,

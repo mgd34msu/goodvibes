@@ -430,25 +430,30 @@ export async function chatWithOpenAICodex(
         };
 
         const reader = response.body.getReader();
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          if (!value) continue;
-          for (const rawLine of sseBuffer.feed(value)) {
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value) continue;
+            for (const rawLine of sseBuffer.feed(value)) {
+              const line = rawLine.trim();
+              if (!line.startsWith('data: ')) continue;
+              const data = line.slice(6).trim();
+              if (!data || data === '[DONE]') continue;
+              handleDataPayload(data);
+            }
+          }
+          for (const rawLine of sseBuffer.flush()) {
             const line = rawLine.trim();
             if (!line.startsWith('data: ')) continue;
             const data = line.slice(6).trim();
-            if (!data || data === '[DONE]') continue;
-            handleDataPayload(data);
+            if (data && data !== '[DONE]') {
+              handleDataPayload(data);
+            }
           }
-        }
-        for (const rawLine of sseBuffer.flush()) {
-          const line = rawLine.trim();
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data && data !== '[DONE]') {
-            handleDataPayload(data);
-          }
+        } finally {
+          // A failed response or a throwing handler releases the connection before the retry starts.
+          await reader.cancel().catch(() => undefined);
         }
 
         if (status === 'in_progress') throw new ProviderError('OpenAI Codex stream ended without a terminal response.', {
@@ -537,12 +542,28 @@ export class OpenAISubscriptionRoute {
       try {
         return await chatWithOpenAICodex(outcome.accessToken, params, this.promptCacheSessionId);
       } catch (retryError) {
-        // A fresh token the responses surface still refuses: the account
-        // has lost the entitlement (plan lapsed, suspension).
-        if (isAuthRejection(retryError)) throw this.subscriptionEndedError();
+        // A fresh token the responses surface still refuses: the sign-in
+        // itself is good, so the refusal and its own reason are reported.
+        if (isAuthRejection(retryError)) throw this.refusedAfterRefreshError(retryError);
         throw retryError;
       }
     }
+  }
+
+  private refusedAfterRefreshError(retryError: ProviderError): ProviderError {
+    const status = retryError.statusCode === 403 ? 403 : 401;
+    const next = status === 403
+      ? 'Check that the ChatGPT account has a plan with Codex access and is not blocked.'
+      : 'Sign in to OpenAI again (/provider sign-in openai).';
+    return new ProviderError(
+      `The OpenAI subscription sign-in was refreshed, but OpenAI still refused the request (status ${status}). ${next} OpenAI's answer: ${retryError.message}`,
+      {
+        statusCode: status,
+        provider: OPENAI_CODEX_PROVIDER_NAME,
+        operation: 'chat',
+        phase: 'auth',
+      },
+    );
   }
 
   private subscriptionEndedError(): ProviderError {

@@ -257,8 +257,9 @@ export function SessionRewind({ sessionId }: SessionRewindProps) {
                 <Button
                   size="sm"
                   className="session-rewind__undo-btn"
-                  // A second restore of the same checkpoint would overwrite work done since the first undo.
-                  disabled={undoFiles.isPending || undoFiles.isSuccess}
+                  // A second restore of the same checkpoint would overwrite work done since the first undo;
+                  // a refused undo changed nothing, so it can be pressed again.
+                  disabled={undoFiles.isPending || (undoFiles.isSuccess && !undoFiles.data?.refused)}
                   onClick={() => setConfirmUndo(true)}
                 >
                   {undoFiles.isPending ? 'Undoing…' : 'Undo the file restore'}

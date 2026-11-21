@@ -43,6 +43,8 @@ export interface FileReadResult {
   binary?: boolean | undefined;
   /** Why a file's content was not returned (for example a binary skip). */
   skipped?: string | undefined;
+  /** What makes the returned content differ from the file's bytes (a lossy decode under force_text). */
+  warning?: string | undefined;
   image?: boolean | undefined;
   mediaType?: string | undefined;
   error?: string | undefined;
@@ -85,8 +87,17 @@ export interface ReadOutput {
     source_tokens?: number | undefined;
     /** Estimated tokens of the content actually returned. */
     returned_tokens?: number | undefined;
-    /** Files whose returned content stops before the requested end; continue from next_start_line. */
-    truncated?: Array<{ path: string; returned_lines: number; next_start_line: number; reason: 'max_tokens' | 'max_per_item' }> | undefined;
+    /**
+     * Files whose returned content stops before the requested end. A content or lines extract gives
+     * returned_lines and next_start_line to continue from; any other clipped result gives returned_characters.
+     */
+    truncated?: Array<{
+      path: string;
+      returned_lines?: number | undefined;
+      next_start_line?: number | undefined;
+      returned_characters?: number | undefined;
+      reason: 'max_tokens' | 'max_per_item';
+    }> | undefined;
     /** Wall time of a slow call. */
     elapsed_ms?: number | undefined;
   };
@@ -104,6 +115,9 @@ export interface ReadOutput {
  * their waits on the disk instead of queueing behind each other.
  */
 export const MAX_READ_FILE_BYTES = 128 * 1024 * 1024;
+
+/** Refuses invalid UTF-8 instead of replacing it; a leading BOM is kept, as Buffer.toString keeps it. */
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 async function oversizeReadError(target: ReadTarget): Promise<FileReadResult | undefined> {
   let size: number;
@@ -451,12 +465,16 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
   }
 
   let rawContent: string;
+  let encodingWarning: string | undefined;
   try {
-    rawContent = fullBuf.toString('utf-8');
+    rawContent = STRICT_UTF8.decode(fullBuf);
   } catch (err) {
-    const message = summarizeError(err);
-    logger.warn('read tool: utf-8 decode failed', { path: target.resolvedPath, error: message });
-    return createReadErrorResult(target, `Cannot decode file as UTF-8: ${message}`, fullBuf.length);
+    if (!fileInput.force_text) {
+      logger.debug('read tool: file is not valid UTF-8', { path: target.resolvedPath, error: summarizeError(err) });
+      return createReadErrorResult(target, 'File is not valid UTF-8 text (it may use another encoding such as Latin-1 or Shift-JIS), so it was not read. Pass force_text: true for this file to read it with each invalid byte shown as the replacement character U+FFFD; edits built on that text would rewrite those bytes.', fullBuf.length);
+    }
+    rawContent = fullBuf.toString('utf-8');
+    encodingWarning = 'This file is not valid UTF-8; each invalid byte is shown as the replacement character U+FFFD, so this is not the exact file text and an edit built on it would rewrite those bytes.';
   }
 
   // Compared with the bytes this call just read: one read, one instant.
@@ -509,6 +527,7 @@ async function readTextFile(target: ReadTarget, context: ReadExecutionContext, f
     content: extractedContent,
     lineCount,
     cache: { status: cacheResult.status },
+    ...(encodingWarning !== undefined ? { warning: encodingWarning } : {}),
   };
   if (extractedContent !== undefined && (target.extract === 'content' || target.extract === 'lines')) {
     const startLine = fileInput.range?.start ?? 1;

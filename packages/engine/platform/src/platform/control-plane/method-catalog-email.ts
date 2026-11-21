@@ -142,12 +142,15 @@ const EMAIL_EXPECTATION_OPENED_SCHEMA = objectSchema({
  * fields are present: `waiting` carries the open expectation (with remainingMs)
  * and `arrivals`; `arrived` the closed expectation, the message id, when, and the
  * `token` (a link with its host, or a code); `expired` and `capability-lost`
- * carry `detail` and `arrivals`; `cancelled` the expectation; `unknown` only the
- * `id` asked about. `watching` says whether a mailbox is being read right now.
+ * carry `detail` and `arrivals`; `cancelled` the expectation; `replaced` the
+ * expectation and `replacedBy`, the id of the later one for the same address;
+ * `unknown` only the `id` asked about. `watching` says whether a mailbox is
+ * being read right now.
  */
 const EMAIL_EXPECTATION_WAIT_SCHEMA = objectSchema({
-  state: { type: 'string', enum: ['waiting', 'arrived', 'expired', 'capability-lost', 'cancelled', 'unknown'] },
+  state: { type: 'string', enum: ['waiting', 'arrived', 'expired', 'capability-lost', 'cancelled', 'replaced', 'unknown'] },
   id: STRING_SCHEMA,
+  replacedBy: STRING_SCHEMA,
   expectation: EMAIL_EXPECTATION_SCHEMA,
   arrivals: arraySchema(objectSchema({
     messageId: STRING_SCHEMA,
@@ -338,7 +341,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     replay: IDEMPOTENCY_KEY_REPLAY,
     title: 'Create Email Draft',
     description:
-      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.',
+      'Append a draft message to the configured IMAP Drafts folder. Distinct from the local channel draft store. A draft is never sent by this verb and takes no confirmation field. To change a saved draft, use email.draft.update with its uid and uidValidity: a second create leaves two drafts. A save the mail server refused is reported as not saved, with the cause from its response code (mailbox full, Drafts folder missing, draft too large, or refused). A save whose answer from the mail server was lost is reported as one that may have been saved, never as not saved; creating the same draft again in this daemon run looks for it in the Drafts folder first (by the Message-ID it was saved under) and returns it instead of saving a second copy.',
     category: 'email',
     effects: ['email.administer'],
     http: { method: 'POST', path: '/api/email/drafts' },
@@ -368,7 +371,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     confirmation: 'not-declined',
     title: 'Replace an Email Draft',
     description:
-      'Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A draft is never sent by this verb. Answers the new draft\'s { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.',
+      'Replace one saved draft in the IMAP Drafts folder with an edited one, so the folder keeps one copy: the edited message is appended, then the draft named by `uid` is removed. `uid` and `uidValidity` are what email.drafts.list (or email.draft.create) returned; a reset Drafts folder or a draft that is gone is refused with nothing changed, and a server that cannot remove one message by UID (no UIDPLUS) is refused before anything is written. A save whose answer was lost is reported as one that may have been saved; replacing the same draft with the same edit again in this daemon run looks for the edited copy first and does not save it twice. A draft is never sent by this verb. Answers the new draft\'s { draftId, uid?, uidValidity?, mailbox } and `replaced`, the UID removed.',
     category: 'email',
     effects: ['email.administer'],
     // Served through the control-plane invoke endpoint, like email.inbox.update.
@@ -442,12 +445,12 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     id: 'email.attachment.get',
     title: 'Download an Email Attachment',
     description:
-      'Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.',
+      'Return one attachment of an inbox message as base64 bytes, by UID and its position (from 0) in the attachments list email.inbox.read returns. uidValidity is required: the mailbox generation email.inbox.read returned with the message, so a reset mailbox refuses with nothing downloaded instead of handing over an attachment of whichever message now holds that UID. Read-only (BODY.PEEK). Meant to be saved as a file, never rendered: the bytes are whatever the sender attached. Attachments over 25 MB are refused with the reason.',
     category: 'email',
     effects: ['email.inspect'],
     // Served through the control-plane invoke endpoint, like checkpoints.* and rewind.*.
     transport: ['ws'],
-    inputSchema: objectSchema({ uid: NUMBER_SCHEMA, index: NUMBER_SCHEMA }, ['uid', 'index']),
+    inputSchema: objectSchema({ uid: NUMBER_SCHEMA, index: NUMBER_SCHEMA, uidValidity: NUMBER_SCHEMA }, ['uid', 'index', 'uidValidity']),
     outputSchema: objectSchema({
       filename: STRING_SCHEMA,
       contentType: STRING_SCHEMA,
@@ -545,7 +548,7 @@ export const builtinGatewayEmailMethodDescriptors: readonly GatewayMethodDescrip
     transport: ['ws'],
     title: 'Wait For Verification Message',
     description:
-      'Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state "arrived" carries the verification link or code the daemon took from the matching message (token); "waiting" lists matching messages that held none (arrivals); "expired", "capability-lost" and "cancelled" say how it ended, with detail; "unknown" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so "nothing yet" is never confused with "nobody is looking". Call it again while the state is "waiting".',
+      'Where one expectation stands, waiting up to timeoutMs (default 0, at most 60000) for it to change. state "arrived" carries the verification link or code the daemon took from the matching message (token); "waiting" lists matching messages that held none (arrivals); "expired", "capability-lost" and "cancelled" say how it ended, with detail; "replaced" means a later email.expectation.open for the same address replaced it, and replacedBy is the id to wait on instead; "unknown" means no expectation with that id is open or remembered. watching says whether a mailbox is being read right now, so "nothing yet" is never confused with "nobody is looking". Call it again while the state is "waiting".',
     category: 'email',
     effects: ['email.inspect'],
     inputSchema: objectSchema({ id: STRING_SCHEMA, timeoutMs: NUMBER_SCHEMA }, ['id']),

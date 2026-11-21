@@ -11,7 +11,7 @@
  *    (`parseICalDate`). A TZID the runtime does not know is read the same way.
  */
 
-import { zonedWallClockToUtcMs } from './caldav-ics.js';
+import { zonedWallClockToUtcMs } from '../utils/timezone.js';
 import type { EventDateTime } from './types.js';
 
 const DATE = /^(\d{4})-(\d{2})-(\d{2})/;

@@ -33,7 +33,10 @@ export interface ToolOutputPolicy {
 
   /**
    * Hard byte ceiling for the serialised output string.
-   * Output exceeding this limit is truncated or spilled.
+   * Output exceeding this limit is truncated or spilled. A cut result,
+   * its note included, never exceeds it; a `file` spill hands the overflow
+   * handler this number as its character budget, so a spilled result keeps
+   * up to `maxBytes` characters.
    */
   maxBytes: number;
 
@@ -232,37 +235,43 @@ async function truncate(content: string, maxBytes: number, mode: ToolOutputPolic
     return content;
   }
 
-  // Byte length of the full content (for truncation messages only)
   const byteLen = encoded.length;
+  if (mode === 'summary') return await summarizeOutput(content, maxBytes, byteLen);
+
+  const note = (dropped: number): string => mode === 'head'
+    ? `[... truncated ${dropped} bytes from start]\n`
+    : mode === 'middle'
+      ? `\n[... ${dropped} bytes omitted ...]\n`
+      : `\n[... truncated ${dropped} bytes]`;
+  // The note is reserved at its longest (every byte dropped), so the cut text
+  // plus the note never exceeds maxBytes.
+  const budget = maxBytes - encoder.encode(note(byteLen)).length;
+  if (budget <= 0) return await summarizeOutput(content, maxBytes, byteLen);
+
+  // Cut edges move off UTF-8 continuation bytes (0b10xxxxxx), toward keeping
+  // less, so no code point is split and the budget still holds.
+  const continues = (index: number): boolean => index < byteLen && ((encoded[index] ?? 0) & 0xc0) === 0x80;
+  const keepBefore = (index: number): number => { let edge = index; while (edge > 0 && continues(edge)) edge -= 1; return edge; };
+  const keepFrom = (index: number): number => { let edge = index; while (edge < byteLen && continues(edge)) edge += 1; return edge; };
+  const decoder = new TextDecoder();
 
   switch (mode) {
     case 'head': {
-      // Keep the tail (most recent output), slice at string level to avoid
-      // splitting multi-byte UTF-8 code points that byte-slicing would corrupt.
-      const dropChars = Math.floor(content.length * (1 - maxBytes / byteLen));
-      const tail = content.slice(dropChars);
-      const droppedBytes = byteLen - encoder.encode(tail).length;
-      return `[... truncated ${droppedBytes} bytes from start]\n` + tail;
+      // Keep the end (most recent output).
+      const from = keepFrom(byteLen - budget);
+      return note(from) + decoder.decode(encoded.subarray(from));
     }
     case 'middle': {
-      // Keep equal portions from start and end at string level.
-      const keepRatio = maxBytes / byteLen;
-      const halfChars = Math.floor((content.length * keepRatio) / 2);
-      const start = content.slice(0, halfChars);
-      const end = content.slice(content.length - halfChars);
-      const dropped = byteLen - encoder.encode(start).length - encoder.encode(end).length;
-      return start + `\n[... ${dropped} bytes omitted ...]\n` + end;
+      const half = Math.floor(budget / 2);
+      const startEnd = keepBefore(half);
+      const endFrom = keepFrom(byteLen - (budget - half));
+      return decoder.decode(encoded.subarray(0, startEnd)) + note(endFrom - startEnd) + decoder.decode(encoded.subarray(endFrom));
     }
-    case 'summary':
-      return await summarizeOutput(content, maxBytes, byteLen);
     case 'tail':
     default: {
-      // Keep the head, slice at string level to avoid corrupting multi-byte chars.
-      const keepRatio = maxBytes / byteLen;
-      const keepChars = Math.floor(content.length * keepRatio);
-      const head = content.slice(0, keepChars);
-      const droppedBytes = byteLen - encoder.encode(head).length;
-      return head + `\n[... truncated ${droppedBytes} bytes]`;
+      // Keep the beginning.
+      const end = keepBefore(budget);
+      return decoder.decode(encoded.subarray(0, end)) + note(byteLen - end);
     }
   }
 }

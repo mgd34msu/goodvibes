@@ -195,7 +195,7 @@ export function createAgentBrowserTool(options: AgentBrowserToolOptions): Tool {
           sessionId: { type: 'string', description: 'Browser session to act on. Defaults to the open session, except action:"release" and action:"close", which require it.' },
           pageId: { type: 'string', description: 'Page/tab to act on. Defaults to the active tab.' },
           cdpEndpoint: { type: 'string', description: 'Remote debugging endpoint of a running browser, for attach.' },
-          profileName: { type: 'string', description: 'Saved profile to launch with. Keeps logins across runs.' },
+          profileName: { type: 'string', description: 'Saved profile to launch with. Keeps logins across runs. One launched browser is open at a time: to use a different profile or headless setting, close the open one first.' },
           headless: { type: 'boolean', description: 'Launch with no visible window. Sign-ins need a visible one.' },
           submit: { type: 'boolean', description: 'Press Enter after typing.' },
           replace: { type: 'boolean', description: 'Replace the field contents rather than appending. Default true.' },

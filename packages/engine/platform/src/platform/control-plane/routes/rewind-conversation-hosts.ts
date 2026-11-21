@@ -3,7 +3,9 @@
  * conversation-scope rewind.
  *
  * `rewind.plan` and `rewind.apply` (routes/rewind.ts) are the CALLER's side:
- * anyone with the scopes can ask for a rewind of any session. These five verbs
+ * a caller with the scopes asks for a rewind of a session, and one that cuts
+ * the conversation (`conversation` or `both`) is admitted only for that
+ * session's owners (or an owner or admin credential). These five verbs
  * are the other side, and only one kind of caller uses them, the surface that
  * is actually running a session's conversation. It offers that conversation,
  * takes the questions the daemon puts to it, and answers them.

@@ -33,6 +33,14 @@ function usageFailure(runtime: CliCommandRuntime, error: string): CliCommandOutp
   };
 }
 
+/** The refusal of a write typed without --yes: the same structured shape every other write command gives. */
+function confirmationRequired(runtime: CliCommandRuntime, error: string): CliCommandOutput {
+  return {
+    output: jsonOrText(runtime, { ok: false, kind: 'confirmation_required', error, next: ['repeat the command with --yes'] }, error),
+    exitCode: 2,
+  };
+}
+
 function requirePrincipalKind(value: string, usage: string): PrincipalKind {
   const normalized = value.trim().toLowerCase();
   if (!PRINCIPAL_KINDS.has(normalized)) throw new Error(`${usage}\n--kind must be one of: user, bot, service, token.`);
@@ -104,7 +112,7 @@ async function handlePrincipalsCreate(runtime: CliCommandRuntime, args: readonly
     return usageFailure(runtime, error instanceof Error ? error.message : String(error));
   }
   if (!parsed.yes) {
-    return { output: `Refusing to create principal ${name} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to create principal ${name} without --yes.`);
   }
   const payload: OperatorMethodInput<'principals.create'> = {
     name,
@@ -144,7 +152,7 @@ async function handlePrincipalsUpdate(runtime: CliCommandRuntime, args: readonly
     return usageFailure(runtime, `${PRINCIPALS_UPDATE_USAGE}\n--identity and --clear-identities cannot be used together.`);
   }
   if (!parsed.yes) {
-    return { output: `Refusing to update principal ${principalId} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to update principal ${principalId} without --yes.`);
   }
   const payload: OperatorMethodInput<'principals.update'> = {
     principalId,
@@ -173,7 +181,7 @@ async function handlePrincipalsDelete(runtime: CliCommandRuntime, args: readonly
   const principalId = parsed.positionals[0];
   if (!principalId) return usageFailure(runtime, PRINCIPALS_DELETE_USAGE);
   if (!parsed.yes) {
-    return { output: `Refusing to delete principal ${principalId} without --yes.`, exitCode: 2 };
+    return confirmationRequired(runtime, `Refusing to delete principal ${principalId} without --yes.`);
   }
   const payload: OperatorMethodInput<'principals.delete'> = { principalId };
   const connection = resolveAgentConnectedHostConnection(runtime.configManager, runtime.homeDirectory);

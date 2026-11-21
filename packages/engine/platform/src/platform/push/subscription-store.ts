@@ -7,7 +7,16 @@
  * daemon's own state directory, never on the wire.
  *
  * Delete means delete: `remove()` drops the record entirely (it does not flag a
- * tombstone), and `list()` cannot return it afterward.
+ * tombstone), and `list()` cannot return it afterward. A removal is in force on
+ * this machine at once; it reaches the other machines of the group with the
+ * authority-record write that carries it. When that write fails, the removal is
+ * kept in this file as a pending revocation: no read here serves the device,
+ * and every later write carries the revocation again until one reaches the
+ * record.
+ *
+ * Every write refuses while the authority record exists but cannot be read
+ * (`AuthorityRecordUnavailableError`), so an unreadable record never empties
+ * this file or turns a delete into a not-found.
  *
  * Dead records (see subscription-housekeeping.ts for what counts as evidence)
  * are left out of every read, and dropped from the file by whichever write
@@ -35,7 +44,7 @@
 
 import { createHash, randomUUID } from 'node:crypto';
 import { PersistentStore } from '../state/persistent-store.js';
-import type { AuthorityChange, AuthorityRecordFile } from '../cluster/authority-record-file.js';
+import { AuthorityRecordUnavailableError, type AuthorityChange, type AuthorityRecordFile } from '../cluster/authority-record-file.js';
 import type { AuthorityKey } from '../cluster/authority-record.js';
 import { withProcessLock } from '../utils/process-lock.js';
 import { logger } from '../utils/logger.js';
@@ -60,6 +69,33 @@ interface SubscriptionSnapshot extends Record<string, unknown> {
   readonly subscriptions: readonly StoredPushSubscription[];
   /** The latest removal of each principal's devices, keyed by principal id. */
   readonly lastRemovals?: Readonly<Record<string, PushSubscriptionRemoval>> | undefined;
+  /** Removals made here that have not yet reached the authority record; absent when none wait. */
+  readonly pendingRevocations?: readonly PendingRevocation[] | undefined;
+}
+
+/** A removal on its way to the authority record. */
+interface PendingRevocation {
+  readonly id: string;
+  readonly by: string;
+  readonly reason: string;
+}
+
+function readPendingRevocations(value: unknown): PendingRevocation[] {
+  if (!Array.isArray(value)) return [];
+  const pending: PendingRevocation[] = [];
+  for (const item of value as unknown[]) {
+    if (item === null || typeof item !== 'object') continue;
+    const { id, by, reason } = item as Record<string, unknown>;
+    if (typeof id === 'string' && typeof by === 'string' && typeof reason === 'string') pending.push({ id, by, reason });
+  }
+  return pending;
+}
+
+/** The union of revocation lists, one entry per id (the first one listed wins). */
+function mergeRevocations(...lists: readonly (readonly PendingRevocation[])[]): PendingRevocation[] {
+  const byId = new Map<string, PendingRevocation>();
+  for (const list of lists) for (const revocation of list) if (!byId.has(revocation.id)) byId.set(revocation.id, revocation);
+  return [...byId.values()];
 }
 
 export interface RegisterSubscriptionInput {
@@ -166,38 +202,41 @@ export class PushSubscriptionStore {
     this.now = options.now ?? ((): number => Date.now());
   }
 
-  private async loadSnapshot(): Promise<{ raw: unknown[]; lastRemovals: Record<string, PushSubscriptionRemoval> }> {
+  private async loadSnapshot(): Promise<{ raw: unknown[]; lastRemovals: Record<string, PushSubscriptionRemoval>; pending: PendingRevocation[] }> {
     const snapshot = await this.store.load();
     const raw = Array.isArray(snapshot?.subscriptions) ? [...snapshot.subscriptions] : [];
     const stored = snapshot?.lastRemovals;
     const lastRemovals = stored !== null && typeof stored === 'object' && !Array.isArray(stored) ? { ...stored } : {};
-    return { raw, lastRemovals };
+    return { raw, lastRemovals, pending: readPendingRevocations(snapshot?.pendingRevocations) };
   }
 
   /** Records from disk with the provably dead ones left out. A read never serves a dead record. */
   private async loadUsable(): Promise<StoredPushSubscription[]> {
-    const merged = this.withRecord(findDeadPushRecords((await this.loadSnapshot()).raw, this.policy(), this.now()).kept);
+    const { raw, pending } = await this.loadSnapshot();
+    const merged = this.withRecord(findDeadPushRecords(raw, this.policy(), this.now()).kept, pending);
     return [...merged.kept, ...merged.elsewhere];
   }
 
   /**
    * This file's records as the authority record has them: a record revoked
    * there (turned off, or proved dead, on any machine) is left out, and a
-   * device registered through another machine of the group is added. An
+   * device registered through another machine of the group is added. A removal
+   * made here that has not reached the record yet is left out too. An
    * unreadable record serves nothing: a device that may have been turned off
    * is never pushed to on a guess.
    */
-  private withRecord(local: readonly StoredPushSubscription[]): { kept: StoredPushSubscription[]; elsewhere: StoredPushSubscription[] } {
+  private withRecord(local: readonly StoredPushSubscription[], pending: readonly PendingRevocation[]): { kept: StoredPushSubscription[]; elsewhere: StoredPushSubscription[] } {
+    const removedHere = new Set(pending.map((revocation) => revocation.id));
     const authority = this.authority;
-    if (!authority) return { kept: [...local], elsewhere: [] };
+    if (!authority) return { kept: local.filter((record) => !removedHere.has(record.id)), elsewhere: [] };
     const view = authority.view();
     if (!view) return { kept: [], elsewhere: [] };
-    const kept = local.filter((record) => !view.isRevoked(endpointKey(record.id)));
+    const kept = local.filter((record) => !removedHere.has(record.id) && !view.isRevoked(endpointKey(record.id)));
     const held = new Set(local.map((record) => record.id));
     const elsewhere: StoredPushSubscription[] = [];
     for (const entry of view.pushEndpoints()) {
       const sealed = entry.private;
-      if (held.has(entry.id) || !sealed) continue;
+      if (held.has(entry.id) || removedHere.has(entry.id) || !sealed) continue;
       elsewhere.push({
         id: entry.id,
         principalId: entry.public.principalId,
@@ -211,19 +250,21 @@ export class PushSubscriptionStore {
   }
 
   /**
-   * Write registrations and removals to the authority record. A failure is
-   * logged: the change stands on this machine, and the next write carries it.
+   * Write registrations and removals to the authority record. Resolves true
+   * when the record has them (or there is no record), false when the write
+   * failed: the failure is logged, the change stands on this machine, and the
+   * caller keeps any removal pending so the next write carries it.
    */
-  private async publish(upserts: readonly StoredPushSubscription[], removals: readonly { readonly id: string; readonly by: string; readonly reason: string }[]): Promise<void> {
+  private async publish(upserts: readonly StoredPushSubscription[], removals: readonly PendingRevocation[]): Promise<boolean> {
     const authority = this.authority;
-    if (!authority || (upserts.length === 0 && removals.length === 0)) return;
+    if (!authority || (upserts.length === 0 && removals.length === 0)) return true;
     // Already on the record as it stands: no write, no lock (the ordinary reconcile-on-open).
     const current = authority.view();
     if (current && removals.length === 0 && upserts.every((record) => {
       const entry = current.entry('push-endpoint', record.id);
       return entry !== null && (current.isRevoked(endpointKey(record.id)) || (entry.public.endpointHash === pushEndpointHash(record.endpoint)
         && entry.private?.p256dh === record.keys.p256dh && entry.private?.auth === record.keys.auth && entry.public.deviceId === record.deviceId));
-    })) return;
+    })) return true;
     try {
       await authority.write((view) => {
         const changes: AuthorityChange<null>[] = [];
@@ -254,8 +295,17 @@ export class PushSubscriptionStore {
         }
         return changes.length === 0 ? { kind: 'none', value: null } : { kind: 'many', changes, value: null };
       });
+      return true;
     } catch (error) {
-      logger.warn('A push registration change could not be written to the authority record; it holds on this machine only until it is', { error: String(error) });
+      if (removals.length > 0) {
+        logger.warn('A push device removal is in force on this machine and is waiting to reach the other machines of the group: the authority record could not be written; the next write carries it', {
+          error: String(error),
+          waiting: removals.length,
+        });
+      } else {
+        logger.warn('A push registration change could not be written to the authority record; it holds on this machine only until it is', { error: String(error) });
+      }
+      return false;
     }
   }
 
@@ -276,8 +326,11 @@ export class PushSubscriptionStore {
   }
 
   /**
-   * Read the file for a write: the live records, the removal history, and the
-   * dead records this write drops along the way.
+   * Read the file for a write: the live records, the removal history, the
+   * dead records this write drops along the way, and the removals still on
+   * their way to the authority record. Throws AuthorityRecordUnavailableError
+   * while the authority record exists but cannot be read: merged with an
+   * unreadable record this file would hold nothing, and a write would empty it.
    */
   private async loadForWrite(): Promise<{
     records: StoredPushSubscription[];
@@ -285,19 +338,30 @@ export class PushSubscriptionStore {
     removed: PushSubscriptionRemoval[];
     /** Devices registered through another machine of the group, not in this file yet. */
     elsewhere: StoredPushSubscription[];
+    pending: PendingRevocation[];
   }> {
-    const { raw, lastRemovals } = await this.loadSnapshot();
+    const authority = this.authority;
+    if (authority && !authority.view()) throw new AuthorityRecordUnavailableError(authority.filePath);
+    const { raw, lastRemovals, pending } = await this.loadSnapshot();
     const decision = findDeadPushRecords(raw, this.policy(), this.now());
     // A record the authority record holds as revoked is dropped from this file by this write.
-    const merged = this.withRecord(decision.kept);
-    return { records: merged.kept, lastRemovals, removed: decision.removed, elsewhere: merged.elsewhere };
+    const merged = this.withRecord(decision.kept, pending);
+    return { records: merged.kept, lastRemovals, removed: decision.removed, elsewhere: merged.elsewhere, pending };
   }
 
-  /** Write the records, noting and logging every removal this write carries. */
+  /**
+   * Write the records, noting and logging every removal this write carries.
+   * The registrations in `upserts`, the removals (dead records, `revocations`
+   * and every pending one) go to the authority record first; the file is
+   * written after, keeping as pending the removals that did not reach it.
+   */
   private async persist(
     records: readonly StoredPushSubscription[],
     lastRemovals: Record<string, PushSubscriptionRemoval>,
     removed: readonly PushSubscriptionRemoval[],
+    pending: readonly PendingRevocation[],
+    upserts: readonly StoredPushSubscription[] = [],
+    revocations: readonly PendingRevocation[] = [],
   ): Promise<void> {
     for (const removal of removed) {
       lastRemovals[removal.principalId] = removal;
@@ -309,12 +373,18 @@ export class PushSubscriptionStore {
         evidence: removal.evidence,
       });
     }
+    // A device proved dead, or turned off, here is dead on every machine of the group.
+    const carried = mergeRevocations(
+      pending,
+      revocations,
+      removed.map((removal) => ({ id: removal.subscriptionId, by: 'push-delivery', reason: `${removal.reason}: ${removal.evidence}` })),
+    );
+    const reached = await this.publish(upserts, carried);
     await this.store.persist({
       subscriptions: records,
       ...(Object.keys(lastRemovals).length > 0 ? { lastRemovals } : {}),
+      ...(!reached && carried.length > 0 ? { pendingRevocations: carried } : {}),
     });
-    // A device proved dead, or turned off, here is dead on every machine of the group.
-    await this.publish([], removed.map((removal) => ({ id: removal.subscriptionId, by: 'push-delivery', reason: `${removal.reason}: ${removal.evidence}` })));
   }
 
   /**
@@ -362,7 +432,7 @@ export class PushSubscriptionStore {
     assertUsableSubscription({ endpoint: input.endpoint, keys: input.keys });
     return this.run(async () => {
       const policy = this.policy();
-      const { records, lastRemovals, removed, elsewhere } = await this.loadForWrite();
+      const { records, lastRemovals, removed, elsewhere, pending } = await this.loadForWrite();
       let existingIndex = this.matchIndex(records, input);
       // Registered through another machine of the group: the same device, under the same id.
       let adopted = false;
@@ -392,8 +462,10 @@ export class PushSubscriptionStore {
         const deviceIdAdopted = input.deviceId !== undefined && prior.deviceId !== input.deviceId;
         if (!endpointChanged && !keysChanged && !deviceIdAdopted && !mergedDuplicates && !adopted
           && (prior.consecutiveFailures ?? 0) === 0 && removed.length === 0) {
-          // The record may not have it yet (an earlier write to it failed): say so there now.
-          await this.publish([prior], []);
+          // The record may not have it yet (an earlier write to it failed): say so there now,
+          // with any removal still waiting to reach it.
+          if (pending.length === 0) await this.publish([prior], []);
+          else await this.persist(records, lastRemovals, [], pending, [prior]);
           return { record: prior, drift: 'unchanged' };
         }
         const updated: StoredPushSubscription = {
@@ -405,8 +477,7 @@ export class PushSubscriptionStore {
           consecutiveFailures: 0,
         };
         records[existingIndex] = updated;
-        await this.persist(records, lastRemovals, removed);
-        await this.publish([updated], []);
+        await this.persist(records, lastRemovals, removed, pending, [updated]);
         const drift: PushReconcileDrift = endpointChanged
           ? 'endpoint-updated'
           : keysChanged
@@ -423,8 +494,7 @@ export class PushSubscriptionStore {
         createdAt: this.now(),
       };
       records.push(record);
-      await this.persist(records, lastRemovals, removed);
-      await this.publish([record], []);
+      await this.persist(records, lastRemovals, removed, pending, [record]);
       const held = records.filter((r) => r.principalId === input.principalId).length;
       if (held > policy.warnAbovePerPrincipal) {
         logger.warn('Push subscriptions above the per-principal warning threshold', {
@@ -445,7 +515,7 @@ export class PushSubscriptionStore {
 
   /** A principal's devices and the latest removal among them, from one read. */
   async status(principalId: string): Promise<PushSubscriptionStatus> {
-    const { raw, lastRemovals } = await this.loadSnapshot();
+    const { raw, lastRemovals, pending } = await this.loadSnapshot();
     const now = this.now();
     const decision = findDeadPushRecords(raw, this.policy(), now);
     // A record that is dead but not yet dropped by a write is already gone for
@@ -454,7 +524,7 @@ export class PushSubscriptionStore {
     for (const pending of decision.removed) {
       if (pending.principalId === principalId) lastRemoval = pending;
     }
-    const merged = this.withRecord(decision.kept);
+    const merged = this.withRecord(decision.kept, pending);
     return {
       subscriptions: [...merged.kept, ...merged.elsewhere].filter((r) => r.principalId === principalId).map(toPublicSubscription),
       ...(lastRemoval ? { lastRemoval } : {}),
@@ -480,19 +550,18 @@ export class PushSubscriptionStore {
    */
   async remove(id: string, principalId?: string): Promise<boolean> {
     return this.run(async () => {
-      const { records, lastRemovals, removed, elsewhere } = await this.loadForWrite();
+      const { records, lastRemovals, removed, elsewhere, pending } = await this.loadForWrite();
       const matches = (r: StoredPushSubscription): boolean => r.id === id && (principalId === undefined || r.principalId === principalId);
       const index = records.findIndex(matches);
       const there = index < 0 ? elsewhere.find(matches) : undefined;
       if (index < 0 && !there) {
-        if (removed.length > 0) await this.persist(records, lastRemovals, removed);
+        if (removed.length > 0 || pending.length > 0) await this.persist(records, lastRemovals, removed, pending);
         return false;
       }
       const target = index >= 0 ? records[index] as StoredPushSubscription : there!;
       if (index >= 0) records.splice(index, 1);
       // Turned off by its owner: revoked on the authority record, so no machine of the group pushes to it again.
-      await this.persist(records, lastRemovals, removed);
-      await this.publish([], [{ id: target.id, by: target.principalId, reason: 'turned off by its owner' }]);
+      await this.persist(records, lastRemovals, removed, pending, [], [{ id: target.id, by: target.principalId, reason: 'turned off by its owner' }]);
       return true;
     });
   }
@@ -505,16 +574,16 @@ export class PushSubscriptionStore {
    */
   async revokePrincipal(principalId: string, evidence: string): Promise<number> {
     return this.run(async () => {
-      const { records, lastRemovals, removed, elsewhere } = await this.loadForWrite();
+      const { records, lastRemovals, removed, elsewhere, pending } = await this.loadForWrite();
       const targets = [...records, ...elsewhere].filter((record) => record.principalId === principalId);
       if (targets.length === 0) {
-        if (removed.length > 0) await this.persist(records, lastRemovals, removed);
+        if (removed.length > 0 || pending.length > 0) await this.persist(records, lastRemovals, removed, pending);
         return 0;
       }
       const kept = records.filter((record) => record.principalId !== principalId);
       const now = this.now();
       // persist() records each removal and revokes it on the authority record in its one publish.
-      await this.persist(kept, lastRemovals, [...removed, ...targets.map((record) => removalOf(record, 'access-withdrawn', evidence, now))]);
+      await this.persist(kept, lastRemovals, [...removed, ...targets.map((record) => removalOf(record, 'access-withdrawn', evidence, now))], pending);
       return targets.length;
     });
   }
@@ -534,7 +603,7 @@ export class PushSubscriptionStore {
     if (stamps.length === 0) return applied;
     return this.run(async () => {
       const now = this.now();
-      const { records, lastRemovals, removed, elsewhere } = await this.loadForWrite();
+      const { records, lastRemovals, removed, elsewhere, pending } = await this.loadForWrite();
       const byId = new Map(stamps.map((stamp) => [stamp.subscriptionId, stamp]));
       // A device registered through another machine that this machine pushed to: its outcomes are kept here from now on.
       for (const record of elsewhere) if (byId.has(record.id)) records.push(record);
@@ -582,7 +651,7 @@ export class PushSubscriptionStore {
         });
         applied.set(prior.id, { consecutiveFailures });
       }
-      await this.persist(kept, lastRemovals, removed);
+      await this.persist(kept, lastRemovals, removed, pending);
       return applied;
     });
   }

@@ -42,10 +42,16 @@ const OUTCOMES: readonly Outcome[] = ['act', 'confirm', 'escalate'];
 
 /** The window length and first window start for a set of reading times. */
 function windowing(times: readonly number[], options: DriftOptions): { readonly start: number; readonly length: number } {
-  const first = Math.min(...times);
+  // One loop, not a spread: a call with more arguments than the engine allows throws.
+  let first = Infinity;
+  let last = -Infinity;
+  for (const time of times) {
+    if (time < first) first = time;
+    if (time > last) last = time;
+  }
   if (options.windows !== undefined) {
     if (!(Number.isInteger(options.windows) && options.windows >= 1)) throw new RangeError('drift windows must be a positive integer');
-    const span = Math.max(...times) - first + 1;
+    const span = last - first + 1;
     return { start: first, length: Math.max(1, Math.ceil(span / options.windows)) };
   }
   const length = options.windowMs ?? OBSERVE_THRESHOLDS.drift.windowMs;

@@ -92,6 +92,14 @@ interface PricingIndex {
   readonly catalogProviderIds: ReadonlySet<string>;
 }
 
+/** What one custom-provider load reports: its warnings and the model names it added, removed or changed. */
+interface CustomProviderLoadResult {
+  warnings: string[];
+  added: string[];
+  removed: string[];
+  updated: string[];
+}
+
 export class ProviderRegistry {
   private providers: Map<string, LLMProvider> = new Map();
   private currentModelRegistryKey: string;
@@ -281,10 +289,16 @@ export class ProviderRegistry {
    * change replaces nothing. Runs at boot and on secrets changes.
    */
   async refreshProviderCredentials(): Promise<void> {
-    const run = this.applyResolvedCredentials();
-    this._credentialsResolved ??= run.then(() => undefined, () => undefined);
-    return run;
+    // One refresh at a time, in call order: each reads the stores after the
+    // previous one applied, so the last change is the one read last.
+    const run = (): Promise<void> => this.applyResolvedCredentials();
+    const result = this.credentialRefreshTail.then(run, run);
+    this.credentialRefreshTail = result.then(() => undefined, () => undefined);
+    this._credentialsResolved ??= this.credentialRefreshTail;
+    return result;
   }
+
+  private credentialRefreshTail: Promise<void> = Promise.resolve();
 
   /** Settled once the first credential refresh has run (the boot one); resolved, never rejected. */
   private _credentialsResolved: Promise<void> | null = null;
@@ -774,7 +788,7 @@ export class ProviderRegistry {
   getForModel(modelId: string, provider?: string): LLMProvider {
     const registry = this.getModelRegistry();
     // findModelDefinitionForProvider already resolves bare ids when a provider is given.
-    const resolvedModelId = !provider && !modelId.includes(':') ? resolveModelReference(modelId, registry) : modelId;
+    const resolvedModelId = !provider ? resolveModelReference(modelId, registry) : modelId;
     const def = provider
       ? findModelDefinitionForProvider(resolvedModelId, provider, registry, CATALOG_PROVIDER_NAME_ALIASES)
       : findModelDefinition(resolvedModelId, registry);
@@ -1225,8 +1239,36 @@ export class ProviderRegistry {
    * Load custom providers from the configured providers directory and merge them
    * into the live model registry. Returns any warnings collected during loading.
    * Call this after construction to populate custom providers.
+   *
+   * One load runs at a time. A call while one runs gets the single follow-up
+   * load that starts, reading the files afresh, once the running one settles;
+   * every call made meanwhile shares that follow-up. A slower load of older
+   * file content can therefore never commit after a newer one.
    */
-  async loadCustomProviders(): Promise<{ warnings: string[]; added: string[]; removed: string[]; updated: string[] }> {
+  loadCustomProviders(): Promise<{ warnings: string[]; added: string[]; removed: string[]; updated: string[] }> {
+    const running = this.customLoadInFlight;
+    if (!running) return this.startCustomLoad();
+    this.customLoadQueued ??= running.then(() => undefined, () => undefined).then(() => {
+      this.customLoadQueued = null;
+      return this.startCustomLoad();
+    });
+    return this.customLoadQueued;
+  }
+
+  private customLoadInFlight: Promise<CustomProviderLoadResult> | null = null;
+  private customLoadQueued: Promise<CustomProviderLoadResult> | null = null;
+
+  private startCustomLoad(): Promise<CustomProviderLoadResult> {
+    const run = this.runCustomLoad();
+    this.customLoadInFlight = run;
+    const settle = (): void => {
+      if (this.customLoadInFlight === run) this.customLoadInFlight = null;
+    };
+    run.then(settle, settle);
+    return run;
+  }
+
+  private async runCustomLoad(): Promise<CustomProviderLoadResult> {
     // A file may not replace a built-in or runtime provider; names a previous
     // custom load registered stay reloadable.
     const reservedNames = new Set([...this.providers.keys()].filter((name) => !this.customProviderNames.has(name)));

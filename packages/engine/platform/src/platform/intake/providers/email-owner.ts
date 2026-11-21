@@ -17,7 +17,7 @@ import type { OwnedInboxReadLease } from '../registration.js';
 import { digestSender, normalizeWhitespace, stripMarkup } from '../text-normalization.js';
 import type { InboundChannelItem, InboundProviderAdapter, PushedProviderSink, PushedProviderStatus, RouteResolver, SkippedMailMessage } from '../provider-adapter.js';
 import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
-import { EMAIL_OWNER_PROVIDER_ID, emailItemId } from '../email-item-id.js';
+import { EMAIL_OWNER_PROVIDER_ID, emailItemId, gmailEmailItemId, isGmailEmailItemId } from '../email-item-id.js';
 
 export interface EmailInboxAccount {
   readonly host: string;
@@ -189,7 +189,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
   const batchSkipped: SkippedMailMessage[] = [];
 
   const imapItemId = (uidValidity: number, uid: number): string => emailItemId(scopeId, uidValidity, uid);
-  const gmailItemId = (resourceId: string): string => `email:${scopeId}:gmail:${resourceId}`;
+  const gmailItemId = (resourceId: string): string => gmailEmailItemId(scopeId, resourceId);
   const held = (id: string, target: PushedProviderSink): boolean => target.has(id) || rows.some((row) => row.id === id);
 
   /** The row that stands in for a message that could not be read here, so it is not lost. */
@@ -325,7 +325,7 @@ export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInb
       const seen = observations.splice(0);
       const passed = batchSkipped.splice(0);
       const target = requireSink();
-      const generation = staged.every((row) => row.id.includes(':gmail:')) ? null : lastValidity ?? null;
+      const generation = staged.every((row) => isGmailEmailItemId(row.id)) ? null : lastValidity ?? null;
       itemCount = await target.commit(staged, generation);
       state = 'ready'; error = undefined; polled = true; lastPolledAt = Date.now();
       if (passed.length > 0) skipped = passed;

@@ -1400,6 +1400,25 @@ export class ConfigManager {
 
   /** The daemon-owned settings of an attached daemon on another machine, as it last answered; null for this machine's. */
   #remoteDaemonSettings: Record<string, unknown> | null = null;
+  /** How many daemon writes this process has sent per key, so a snapshot answer read before one does not overwrite it. */
+  readonly #daemonWriteSeq = new Map<string, number>();
+
+  /** Count a daemon write of `key` this process is sending. */
+  #noteDaemonWrite(key: string): void {
+    this.#daemonWriteSeq.set(key, (this.#daemonWriteSeq.get(key) ?? 0) + 1);
+  }
+
+  /**
+   * Hold a value an attached daemon on another machine accepted as that
+   * daemon's settings here, so a reload shows it and not the earlier answer.
+   * A reset removes the key, so the default shows.
+   */
+  #holdRemoteDaemonValue(route: DaemonWriteRoute, key: string, value: unknown, reset: boolean): void {
+    if (this.#daemonRoute !== route || !this.#daemonIsRemote()) return;
+    const held = this.#remoteDaemonSettings ??= {};
+    if (reset) deleteRawDotPath(held, key);
+    else writeRawDotPath(held, key, structuredClone(value));
+  }
 
   /** Whether the attached daemon runs on another machine, so this machine's daemon file is not its settings. */
   #daemonIsRemote(): boolean {
@@ -1416,11 +1435,21 @@ export class ConfigManager {
   async refreshDaemonSettings(): Promise<void> {
     const route = this.#daemonRoute;
     if (route === null || route.thisMachine() || !route.snapshot) return;
+    const writesBefore = new Map(this.#daemonWriteSeq);
     let snapshot: Record<string, unknown> | null;
     try { snapshot = await route.snapshot(); } catch { snapshot = null; }
     if (snapshot === null || this.#daemonRoute !== route || route.thisMachine()) return;
+    // A key this process wrote while the answer was on its way keeps what that
+    // write left: the answer may have been read before the daemon took it.
+    const written = [...this.#daemonWriteSeq].filter(([key, seq]) => writesBefore.get(key) !== seq).map(([key]) => key);
+    const held = this.#remoteDaemonSettings;
+    for (const key of written) {
+      const current = held === null ? { present: false, value: undefined } : readDotPath(held, key);
+      if (current.present) writeRawDotPath(snapshot, key, structuredClone(current.value));
+      else deleteRawDotPath(snapshot, key);
+    }
     this.#remoteDaemonSettings = snapshot;
-    const entries = collectDaemonOwnedEntries(snapshot);
+    const entries = collectDaemonOwnedEntries(snapshot).filter(entry => !written.includes(entry.key));
     const previous = entries.map(entry => readDotPath(this.#config, entry.key).value);
     const staged = this.runtimeState.fork();
     for (const entry of entries) {
@@ -1470,16 +1499,19 @@ export class ConfigManager {
    */
   adoptDaemonValue(key: ConfigKey, value: unknown): void {
     if (!isDaemonOwnedConfigKey(key)) throw new ConfigError(`${key} is not a daemon setting.`);
+    this.#noteDaemonWrite(key);
+    const route = this.#daemonRoute;
+    if (route !== null) this.#holdRemoteDaemonValue(route, key, value, false);
     this.#applyInView(key, value, 'daemon');
   }
 
   /** Set one key in the in-memory view only (no file), publish, and notify like a persisted change. */
-  #applyInView(key: ConfigKey, value: unknown, tier: 'daemon' | undefined): void {
+  #applyInView(key: ConfigKey, value: unknown, tier: ConfigKeyTier | undefined): void {
     this.#applyAllInView([{ key, value }], tier);
   }
 
   /** Set keys in the in-memory view only (no file), publish once, and notify each like a persisted change. */
-  #applyAllInView(changes: readonly { readonly key: ConfigKey; readonly value: unknown }[], tier: 'daemon' | undefined): void {
+  #applyAllInView(changes: readonly { readonly key: ConfigKey; readonly value: unknown }[], tier: ConfigKeyTier | undefined): void {
     const previous = changes.map(change => readDotPath(this.#config, change.key).value);
     const staged = this.runtimeState.fork();
     for (const change of changes) {
@@ -1505,11 +1537,20 @@ export class ConfigManager {
    */
   #forwardDaemonWrites(route: DaemonWriteRoute, changes: readonly { readonly key: ConfigKey; readonly value: unknown }[], reset: boolean): Promise<readonly DaemonWriteRefusal[]> {
     const previous = changes.map(change => readDotPath(this.#config, change.key).value);
+    const previousTiers = changes.map(change => this.runtimeState.sources.get(change.key));
+    for (const change of changes) this.#noteDaemonWrite(change.key);
     this.#applyAllInView(changes, reset ? undefined : 'daemon');
+    // An accepted write is what an attached daemon on another machine now holds.
+    const accepted = (change: { readonly key: ConfigKey; readonly value: unknown }): void => {
+      this.#holdRemoteDaemonValue(route, change.key, change.value, reset);
+    };
     const refuse = (index: number, error: unknown): DaemonWriteRefusal => {
       const change = changes[index]!;
       if (JSON.stringify(readDotPath(this.#config, change.key).value) === JSON.stringify(change.value)) {
-        try { this.#applyInView(change.key, previous[index], 'daemon'); } catch { /* the reload from the daemon's file reconciles */ }
+        // The key goes back to the value and the tier it came from.
+        try { this.#applyInView(change.key, previous[index], previousTiers[index]); } catch (restoreError) {
+          logger.warn('A refused daemon setting could not be put back in this process', { key: change.key, error: summarizeError(restoreError) });
+        }
       }
       try { route.refused?.(change.key, error); } catch { /* reporting cannot change the outcome */ }
       return { key: change.key, error };
@@ -1530,9 +1571,9 @@ export class ConfigManager {
       }
     };
     const settled: Promise<readonly (DaemonWriteRefusal | null)[]> = changes.length > 1 && !reset && route.writeMany
-      ? route.writeMany(changes).then(() => [], (error: unknown) => changes.map((_, index) => settle(index, error)))
+      ? route.writeMany(changes).then(() => { changes.forEach(accepted); return []; }, (error: unknown) => changes.map((_, index) => settle(index, error)))
       : Promise.all(changes.map((change, index) => (reset && route.reset ? route.reset(change.key) : route.write(change.key, change.value))
-        .then(() => null, (error: unknown) => settle(index, error))));
+        .then(() => { accepted(change); return null; }, (error: unknown) => settle(index, error))));
     const outcome: Promise<readonly DaemonWriteRefusal[]> = settled
       .then(results => results.filter((result): result is DaemonWriteRefusal => result !== null));
     this.#forwarding.add(outcome);

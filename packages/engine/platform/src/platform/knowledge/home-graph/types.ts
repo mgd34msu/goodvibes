@@ -328,7 +328,13 @@ export interface HomeGraphIngestResult {
   readonly artifactId?: string | undefined;
   readonly extraction?: KnowledgeExtractionRecord | undefined;
   readonly linked?: KnowledgeEdgeRecord | undefined;
-  /** Outcome of linking a document that named no target; the ingest succeeds whatever it is. */
+  /**
+   * Outcome of linking a document that named no target; the ingest succeeds whatever it is.
+   * An `unread` outcome carries a `reason`: `off` (decision models are off), `unavailable`
+   * (no decision model answered), `uncertain` (the reading did not settle), `budget` (the
+   * reading was too large to send), `deadline` (the reading ran out of time), or `stale`
+   * (the home changed while the document was read; it is read again on the next pass).
+   */
   readonly autoLink?: { readonly status: 'linked' | 'none' | 'ambiguous' | 'unread'; readonly reason?: string | undefined; readonly shortlisted: number } | undefined;
 }
 

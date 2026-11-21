@@ -54,6 +54,15 @@ export function snapshotRuntimeMetadataDeps(deps: ProviderRuntimeMetadataDeps): 
   };
 }
 
+/** A route a request can be sent over now: set up, not refused, not expired or pending. */
+export function isProviderAuthRouteUsable(route: ProviderAuthRouteDescriptor): boolean {
+  return route.configured
+    && route.usable !== false
+    && route.freshness !== 'expired'
+    && route.freshness !== 'pending'
+    && route.freshness !== 'unconfigured';
+}
+
 export function deriveProviderApiKeyEnvVar(providerId: string): string {
   const stem = providerId.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   return `${stem}_API_KEY`;
@@ -70,18 +79,18 @@ export function deriveProviderApiKeyEnvVar(providerId: string): string {
  * set" on a provider whose subscription route was healthy and serving turns.
  *
  * When the local signal says configured, it stands. Otherwise the first route
- * that is usable, or failing that the first route that is configured with a
- * real credential behind it (`freshness` not `'unconfigured'`, so a built-in
- * adapter with no stored session does not count), makes the aggregate
- * configured and the detail names that route instead of a missing env key.
+ * a request can be sent over now (`isProviderAuthRouteUsable`, the same rule
+ * the picker and the runtime snapshot use) makes the aggregate configured and
+ * the detail names that route instead of a missing env key. An expired,
+ * revoked or pending session does not count; its route's own detail and
+ * repair hint say what to do.
  */
 export function summarizeProviderAuth(
   base: { readonly configured: boolean; readonly detail: string },
   routes: readonly ProviderAuthRouteDescriptor[],
 ): { readonly configured: boolean; readonly detail: string } {
   if (base.configured) return base;
-  const winner = routes.find((route) => route.usable === true)
-    ?? routes.find((route) => route.configured && route.freshness !== 'unconfigured' && route.freshness !== 'pending');
+  const winner = routes.find((route) => route.route !== 'none' && isProviderAuthRouteUsable(route));
   if (winner === undefined) return base;
   return {
     configured: true,

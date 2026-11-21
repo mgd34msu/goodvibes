@@ -17,15 +17,18 @@ type Watcher = UiWatchersSnapshot['watchers'][number];
 
 const WATCHER_RECORD_LIMIT = 20;
 
-/** One read of each model. A model that is not composed reads as absent; one that fails reads as unavailable. */
+/** A watcher record lane: the run history (automation read model) or the provider sources (watcher read model). */
+export type WatcherRecordLane = 'runs' | 'providerSources';
+
+/** One read of each model. A model that is not composed reads as absent; one that fails is named in `unavailable`. */
 function readWatcherSources(context: CommandContext): {
-  readonly runs: readonly WatcherRun[] | null; readonly watchers: readonly Watcher[] | null; readonly unavailable: boolean;
+  readonly runs: readonly WatcherRun[] | null; readonly watchers: readonly Watcher[] | null; readonly unavailable: readonly WatcherRecordLane[];
 } {
   const models = context.platform.readModels;
-  let unavailable = false;
+  const unavailable: WatcherRecordLane[] = [];
   let runs: readonly WatcherRun[] | null = null, watchers: readonly Watcher[] | null = null;
-  try { runs = models?.automation ? models.automation.getSnapshot().runs.filter(isWatcherRun) : null; } catch { unavailable = true; }
-  try { watchers = models?.watchers ? models.watchers.getSnapshot().watchers : null; } catch { unavailable = true; }
+  try { runs = models?.automation ? models.automation.getSnapshot().runs.filter(isWatcherRun) : null; } catch { unavailable.push('runs'); }
+  try { watchers = models?.watchers ? models.watchers.getSnapshot().watchers : null; } catch { unavailable.push('providerSources'); }
   return { runs, watchers, unavailable };
 }
 
@@ -47,11 +50,17 @@ export function watcherReadModelNativeFacts(context: CommandContext): readonly {
   return [...(runs ?? []).map(run => ({ status: runStatus(run) })), ...(watchers ?? []).map(watcher => ({ status: watcher.state }))];
 }
 
-/** Which watcher lanes the host publishes: the run history (automation read model) and the provider sources (watcher read model). */
-export function watcherReadModelPublication(context: CommandContext): { readonly runs: boolean; readonly providerSources: boolean; readonly omitted: number } {
-  const { runs, watchers } = readWatcherSources(context);
+/**
+ * Which watcher lanes the host publishes: the run history (automation read
+ * model) and the provider sources (watcher read model). A lane in `unavailable`
+ * is published but could not be read this time, so it is unknown, not absent.
+ */
+export function watcherReadModelPublication(context: CommandContext): {
+  readonly runs: boolean; readonly providerSources: boolean; readonly omitted: number; readonly unavailable: readonly WatcherRecordLane[];
+} {
+  const { runs, watchers, unavailable } = readWatcherSources(context);
   const total = (runs?.length ?? 0) + (watchers?.length ?? 0);
-  return { runs: runs !== null, providerSources: watchers !== null, omitted: Math.max(0, total - WATCHER_RECORD_LIMIT) };
+  return { runs: runs !== null, providerSources: watchers !== null, omitted: Math.max(0, total - WATCHER_RECORD_LIMIT), unavailable };
 }
 
 function quote(value: string): string {

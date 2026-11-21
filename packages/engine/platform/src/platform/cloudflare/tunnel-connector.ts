@@ -311,7 +311,14 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
       }
     });
     child.on('error', (error: Error) => {
-      if (child === this.child) lastError = summarizeError(error);
+      if (child !== this.child) return;
+      lastError = summarizeError(error);
+      // A child that never started raises no 'exit': it is failed here and restarted on the backoff.
+      if (child.pid !== undefined) return;
+      this.child = null;
+      this.childScope = null;
+      if (this.stopping) return;
+      this.onExit(binary, `could not start: ${lastError}`);
     });
     child.on('exit', (code, signal) => {
       if (child !== this.child) return;

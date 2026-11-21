@@ -646,10 +646,14 @@ function newPeerId(kind: DistributedPeerKind): string {
   return `${kind}-${randomUUID().slice(0, 8)}`;
 }
 
-/** The peer a request names: the one it was approved for, else the one with its requested id. */
+/**
+ * The peer a request names: once approved, only the one under the id its
+ * approval returned (a replace approval returns the replaced peer's id);
+ * before that, the one with its requested id.
+ */
 function findPeerForRequest(state: DistributedRuntimeManagerState, request: StoredPairRequest): StoredPeerRecord | undefined {
-  return (request.peerId ? state.peers.get(request.peerId) : undefined)
-    ?? [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
+  if (request.peerId) return state.peers.get(request.peerId);
+  return [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId);
 }
 
 /**
@@ -747,6 +751,16 @@ function ensurePeerFromRequest(
     };
     state.peers.set(existing.id, merged);
     return merged;
+  }
+  // Another device verified as this id after this request was approved without a
+  // replace confirmation: taking that peer over would revoke its tokens unseen.
+  const holder = [...state.peers.values()].find((peer) => peer.requestedId === request.requestedId && peer.id !== request.replacesPeerId);
+  if (holder) {
+    throw new DistributedRuntimeRefusalError(
+      `Another device verified as ${request.requestedId} (peer ${holder.id}, ${holder.label}) after this request was approved. Request pairing again; the operator is then asked to confirm replacing that peer.`,
+      'REMOTE_PAIR_REPLACES_PEER',
+      409,
+    );
   }
   const peer = peerFromRequest(request, request.peerId ?? newPeerId(request.peerKind), undefined, metadata);
   state.peers.set(peer.id, peer);

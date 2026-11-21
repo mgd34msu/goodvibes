@@ -45,7 +45,8 @@ interface DeliveryAttemptView {
   readonly target: Record<string, unknown>;
   readonly startedAt?: number;
   readonly endedAt?: number;
-  readonly error?: string;
+  /** The target label and the provider's error text, inside the untrusted-content frame. */
+  readonly untrustedContent?: string;
   readonly responseId?: string;
   readonly inspectRoute: string;
   readonly modelRoute: string;
@@ -108,14 +109,57 @@ function redactedAddress(value: string): Record<string, unknown> {
   return { address: display };
 }
 
+/**
+ * The redacted plain text of a view built here that someone outside the owner's
+ * control wrote (a message title and body, a delivery target label and error, a
+ * binding title, a host's error message). The views carry it only inside the
+ * untrusted-content frame; a caller that frames the text itself reads it here.
+ */
+export interface TriageViewText {
+  readonly title?: string;
+  readonly bodyPreview?: string;
+  readonly label?: string;
+  readonly error?: string;
+  readonly message?: string;
+}
+
+const triageViewTexts = new WeakMap<object, TriageViewText>();
+
+/** The plain text {@link TriageViewText} kept for a view (or a section holding a route failure) built here. */
+export function readTriageViewText(view: object): TriageViewText | undefined {
+  return triageViewTexts.get(view);
+}
+
+function keepViewText<T extends object>(view: T, text: TriageViewText): T {
+  triageViewTexts.set(view, text);
+  return view;
+}
+
+function framed(surfaceId: string, origin: string, lines: readonly string[], receivedAt: number | undefined): string {
+  return renderForModel(untrustedFrom({
+    surfaceId,
+    origin: origin || surfaceId,
+    text: lines.join('\n'),
+    receivedAt: receivedAt !== undefined && Number.isFinite(new Date(receivedAt).getTime()) ? new Date(receivedAt).toISOString() : 'unknown',
+  }));
+}
+
+/** A host's error message is its own text, echoed from whatever failed; it goes out framed. */
 function routeFailureView(failure: ConnectedHostRouteFailure): Record<string, unknown> {
-  return {
+  const message = redactText(failure.message);
+  return keepViewText({
     route: failure.route,
     status: 'unavailable',
     kind: failure.kind,
     baseUrl: failure.baseUrl,
-    message: redactText(failure.message),
-  };
+    ...(message ? { untrustedContent: framed('connected-host', failure.baseUrl || failure.route, [`message: ${message}`], undefined) } : {}),
+  }, { message });
+}
+
+/** A section for a route that could not be read; its failure message is kept for {@link readTriageViewText}. */
+function unavailableSection(failure: ConnectedHostRouteFailure, empty: Record<string, unknown>): Record<string, unknown> {
+  const view = routeFailureView(failure);
+  return keepViewText({ route: failure.route, state: 'unavailable', ...view, ...empty }, readTriageViewText(view) ?? {});
 }
 
 function routeState(result: ConnectedHostRouteResult, empty: boolean): TriageRouteState {
@@ -155,13 +199,13 @@ function channelTriageReadiness(channels: readonly AgentWorkspaceChannelStatus[]
   };
 }
 
+/** The target without its label: the label is outside text and travels framed on the attempt. */
 function deliveryTargetView(target: JsonRecord): Record<string, unknown> {
   const address = readString(target, 'address');
   return {
     kind: readString(target, 'kind', 'unknown'),
     surfaceKind: readString(target, 'surfaceKind') || null,
     routeId: readString(target, 'routeId') || null,
-    label: redactText(readString(target, 'label'), 80) || null,
     ...redactedAddress(address),
   };
 }
@@ -171,36 +215,32 @@ function deliveryAttemptView(attempt: JsonRecord): DeliveryAttemptView {
   const runId = readString(attempt, 'runId');
   const jobId = readString(attempt, 'jobId');
   const responseId = readString(attempt, 'responseId');
-  const error = readString(attempt, 'error');
-  return {
+  const error = redactText(readString(attempt, 'error'));
+  const targetRecord = readRecord(attempt, 'target');
+  const label = redactText(readString(targetRecord, 'label'), 80);
+  const surfaceKind = readString(targetRecord, 'surfaceKind', 'unknown') || 'unknown';
+  const endedAt = readNumber(attempt, 'endedAt');
+  const startedAt = readNumber(attempt, 'startedAt');
+  const outside = [...(label ? [`label: ${label}`] : []), ...(error ? [`error: ${error}`] : [])];
+  return keepViewText<DeliveryAttemptView>({
     id,
     runId,
     jobId,
     status: readString(attempt, 'status', 'unknown'),
-    target: deliveryTargetView(readRecord(attempt, 'target')),
-    ...(readNumber(attempt, 'startedAt') !== undefined ? { startedAt: readNumber(attempt, 'startedAt') } : {}),
-    ...(readNumber(attempt, 'endedAt') !== undefined ? { endedAt: readNumber(attempt, 'endedAt') } : {}),
-    ...(error ? { error: redactText(error) } : {}),
+    target: deliveryTargetView(targetRecord),
+    ...(startedAt !== undefined ? { startedAt } : {}),
+    ...(endedAt !== undefined ? { endedAt } : {}),
+    ...(outside.length > 0 ? { untrustedContent: framed(surfaceKind, readString(targetRecord, 'routeId'), outside, endedAt ?? startedAt) } : {}),
     ...(responseId ? { responseId } : {}),
     inspectRoute: `/api/deliveries/${encodeURIComponent(id)}`,
     modelRoute: runId
       ? `autonomy action:"queue" query:${JSON.stringify(runId)}`
       : 'autonomy action:"queue"',
-  };
+  }, { ...(label ? { label } : {}), ...(error ? { error } : {}) });
 }
 
 function deliveryTriage(result: ConnectedHostRouteResult, limit: number): Record<string, unknown> {
-  if (!result.ok) {
-    return {
-      route: result.route,
-      state: 'unavailable',
-      ...routeFailureView(result),
-      totals: null,
-      attempts: [],
-      attentionCount: 0,
-      retryCandidates: [],
-    };
-  }
+  if (!result.ok) return unavailableSection(result, { totals: null, attempts: [], attentionCount: 0, retryCandidates: [] });
   const root = isRecord(result.body) ? result.body : {};
   const attempts = readRecordArray(root, 'attempts');
   const views = attempts.map(deliveryAttemptView);
@@ -223,54 +263,28 @@ function deliveryTriage(result: ConnectedHostRouteResult, limit: number): Record
   };
 }
 
-const surfaceMessageTexts = new WeakMap<object, { readonly title: string; readonly bodyPreview: string }>();
-
-/**
- * The redacted title and body preview of a surface message view built here, for a
- * caller that frames the text itself. Held off the view so it never serialises as
- * bare fields beside the framed copy.
- */
-export function readSurfaceMessageText(view: object): { readonly title: string; readonly bodyPreview: string } | undefined {
-  return surfaceMessageTexts.get(view);
-}
-
 function surfaceMessageView(message: JsonRecord): Record<string, unknown> {
   const surface = readString(message, 'surface', 'unknown');
   const title = redactText(readString(message, 'title'), 100);
   const bodyPreview = redactText(readString(message, 'body'), 180);
   const createdAt = readNumber(message, 'createdAt');
-  const view: Record<string, unknown> = {
+  return keepViewText<Record<string, unknown>>({
     id: readString(message, 'id', 'message'),
     surface,
     createdAt: createdAt ?? null,
     level: readString(message, 'level', 'info'),
     // The title and body were written by whoever sent the message. They only leave this
     // function inside the untrusted-content frame, never as bare fields.
-    untrustedContent: renderForModel(untrustedFrom({
-      surfaceId: surface,
-      origin: readString(message, 'surfaceId', surface),
-      text: `title: ${title}\nbody: ${bodyPreview}`,
-      receivedAt: createdAt !== undefined && Number.isFinite(new Date(createdAt).getTime()) ? new Date(createdAt).toISOString() : 'unknown',
-    })),
+    untrustedContent: framed(surface, readString(message, 'surfaceId', surface), [`title: ${title}`, `body: ${bodyPreview}`], createdAt),
     routeId: readString(message, 'routeId') || null,
     surfaceId: readString(message, 'surfaceId') || null,
     clientId: readString(message, 'clientId') || null,
     attachmentCount: Array.isArray(message.attachments) ? message.attachments.length : 0,
-  };
-  surfaceMessageTexts.set(view, { title, bodyPreview });
-  return view;
+  }, { title, bodyPreview });
 }
 
 function surfaceMessageTriage(result: ConnectedHostRouteResult, limit: number): Record<string, unknown> {
-  if (!result.ok) {
-    return {
-      route: result.route,
-      state: 'unavailable',
-      ...routeFailureView(result),
-      totalMessages: 0,
-      messages: [],
-    };
-  }
+  if (!result.ok) return unavailableSection(result, { totalMessages: 0, messages: [] });
   const root = isRecord(result.body) ? result.body : {};
   const messages = readRecordArray(root, 'messages');
   return {
@@ -286,12 +300,15 @@ async function routeBindingView(binding: JsonRecord, resolvePrincipal: ChannelPr
   const externalId = readString(binding, 'externalId');
   const surfaceKind = readString(binding, 'surfaceKind', 'unknown');
   const attribution = await resolvePrincipal(surfaceKind, externalId);
-  return {
+  // The title is a chat title, sender name or channel name an adapter copied from outside.
+  const title = redactText(readString(binding, 'title'), 100);
+  const surfaceId = readString(binding, 'surfaceId');
+  return keepViewText<Record<string, unknown>>({
     id: readString(binding, 'id', 'binding'),
     kind: readString(binding, 'kind', 'unknown'),
     surfaceKind,
-    surfaceId: readString(binding, 'surfaceId') || null,
-    title: redactText(readString(binding, 'title'), 100) || null,
+    surfaceId: surfaceId || null,
+    ...(title ? { untrustedContent: framed(surfaceKind, surfaceId, [`title: ${title}`], readNumber(binding, 'lastSeenAt')) } : {}),
     principal: attribution.principal,
     principalLabel: attribution.label,
     ...(attribution.error ? { principalResolutionError: attribution.error } : {}),
@@ -302,7 +319,7 @@ async function routeBindingView(binding: JsonRecord, resolvePrincipal: ChannelPr
     sessionId: readString(binding, 'sessionId') || null,
     runId: readString(binding, 'runId') || null,
     jobId: readString(binding, 'jobId') || null,
-  };
+  }, title ? { title } : {});
 }
 
 async function routeBindingTriage(
@@ -310,15 +327,7 @@ async function routeBindingTriage(
   limit: number,
   connection: ConnectedHostConnection,
 ): Promise<Record<string, unknown>> {
-  if (!result.ok) {
-    return {
-      route: result.route,
-      state: 'unavailable',
-      ...routeFailureView(result),
-      totalBindings: 0,
-      bindings: [],
-    };
-  }
+  if (!result.ok) return unavailableSection(result, { totalBindings: 0, bindings: [] });
   const root = isRecord(result.body) ? result.body : {};
   const bindings = readRecordArray(root, 'bindings');
   const sliced = bindings.slice(0, limit);
@@ -433,12 +442,12 @@ export async function buildAgentWorkspaceChannelTriage(
   };
 }
 
-function deliveryTargetLine(target: Record<string, unknown>): string {
+function deliveryTargetLine(target: Record<string, unknown>, label: string | undefined): string {
   const parts = [
     typeof target.kind === 'string' ? target.kind : 'target',
     typeof target.surfaceKind === 'string' ? target.surfaceKind : '',
     typeof target.routeId === 'string' ? `route=${target.routeId}` : '',
-    typeof target.label === 'string' ? `label=${target.label}` : '',
+    label ? `label=${label}` : '',
     typeof target.address === 'string' ? target.address : '',
   ].filter(Boolean);
   return parts.join(' ');
@@ -468,7 +477,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
 
   lines.push('', '  Delivery Attempts');
   if (deliveries.state === 'unavailable') {
-    lines.push(`  unavailable: ${deliveries.kind}; ${deliveries.message}`);
+    lines.push(`  unavailable: ${deliveries.kind}; ${readTriageViewText(deliveries)?.message ?? ''}`);
   } else {
     const totals = isRecord(deliveries.totals) ? deliveries.totals : {};
     lines.push(`  state: ${deliveries.state}; total: ${deliveries.totalAttempts}; failed or dead-lettered: ${deliveries.attentionCount}; in progress: ${deliveries.inProgressCount ?? 0}`);
@@ -476,15 +485,16 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
     const retryCandidates = Array.isArray(deliveries.retryCandidates) ? deliveries.retryCandidates.filter(isRecord) : [];
     for (const attempt of retryCandidates.slice(0, 5)) {
       const target = isRecord(attempt.target) ? attempt.target : {};
-      const error = readString(attempt, 'error');
-      lines.push(`  - ${readString(attempt, 'id')}: ${readString(attempt, 'status')} ${deliveryTargetLine(target)}${error ? ` error=${error}` : ''} inspect=${readString(attempt, 'inspectRoute')}`);
+      const text = readTriageViewText(attempt);
+      const error = text?.error;
+      lines.push(`  - ${readString(attempt, 'id')}: ${readString(attempt, 'status')} ${deliveryTargetLine(target, text?.label)}${error ? ` error=${error}` : ''} inspect=${readString(attempt, 'inspectRoute')}`);
     }
     if (retryCandidates.length === 0) lines.push('  no failed or dead-lettered delivery attempts reported');
   }
 
   lines.push('', '  Surface Messages');
   if (messages.state === 'unavailable') {
-    lines.push(`  unavailable: ${messages.kind}; ${messages.message}`);
+    lines.push(`  unavailable: ${messages.kind}; ${readTriageViewText(messages)?.message ?? ''}`);
   } else {
     lines.push(`  state: ${messages.state}; total: ${messages.totalMessages}`);
     const visibleMessages = Array.isArray(messages.messages) ? messages.messages.filter(isRecord) : [];
@@ -496,7 +506,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
 
   lines.push('', '  Route Bindings');
   if (bindings.state === 'unavailable') {
-    lines.push(`  unavailable: ${bindings.kind}; ${bindings.message}`);
+    lines.push(`  unavailable: ${bindings.kind}; ${readTriageViewText(bindings)?.message ?? ''}`);
   } else {
     lines.push(`  state: ${bindings.state}; total: ${bindings.totalBindings}`);
     const routeRows = Array.isArray(bindings.bindings) ? bindings.bindings.filter(isRecord) : [];

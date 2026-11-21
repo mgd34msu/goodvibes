@@ -72,8 +72,8 @@ export interface RunBuildOptions {
   readonly config: BuildConfig;
   readonly selection: TargetSelection;
   readonly nativeKey: string;
-  /** Copies a resolved native addon into place; returns false if it could not be provided. Injected so the real fs copy stays out of the policy. */
-  readonly provideAddon?: (target: BinaryTarget, sameHost: boolean) => boolean;
+  /** Copies a resolved native addon into place; returns null when provided, else why it is unavailable. Injected so the real fs copy stays out of the policy. */
+  readonly provideAddon?: (target: BinaryTarget, sameHost: boolean) => string | null;
   /** Real staging by default; injected only to test build orchestration. */
   readonly provideBunRuntime?: (target: BinaryTarget, artifacts: readonly string[]) => void;
   /**
@@ -171,8 +171,8 @@ export function runBuildBinaries(options: RunBuildOptions): BuildOutcome[] {
     }
 
     if (ok && target.nativeAddonPackage && target.nativeAddonFile && options.provideAddon) {
-      const provided = options.provideAddon(target, target.key === options.nativeKey);
-      if (!provided) { ok = false; detail = `native addon ${target.nativeAddonPackage}/${target.nativeAddonFile} unavailable`; }
+      const unavailable = options.provideAddon(target, target.key === options.nativeKey);
+      if (unavailable !== null) { ok = false; detail = `native addon ${target.nativeAddonPackage}/${target.nativeAddonFile} unavailable: ${unavailable}`; }
     }
 
     if (ok && target.capturedBunRuntime) {

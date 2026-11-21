@@ -1,6 +1,6 @@
 // check-credential-scope.ts
 //
-// CI/pre-commit gate: a credential this platform stores must be CLASSIFIED
+// CI check: a credential this platform stores must be CLASSIFIED
 // before it can be stored.
 //
 // The defect this gate exists to stop recurring. Three times now a credential

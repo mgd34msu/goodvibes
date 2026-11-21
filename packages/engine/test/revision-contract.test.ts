@@ -116,9 +116,9 @@ describe('owners move their revision on every change and not on reads', () => {
 
     expect(await pairing.rename(minted.id, 'Renamed device')).toBe(true);
     expect(revision.moved()).toBe(true);
-    expect(pairing.revoke(minted.id)).toBe(true);
+    expect(pairing.revokeWithMinted(minted.id).revoked).toBe(true);
     expect(revision.moved()).toBe(true);
-    expect(pairing.revoke(minted.id)).toBe(false);
+    expect(pairing.revokeWithMinted(minted.id).revoked).toBe(false);
     expect(revision.moved()).toBe(false);
   });
 

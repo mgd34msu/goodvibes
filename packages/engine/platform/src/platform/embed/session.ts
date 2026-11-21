@@ -318,7 +318,8 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
     // Run as the daemon's own work: its readings keep this daemon's judgment
     // port when another daemon runs in this process.
     submit: (input) => server.inJudgmentRuntime(async () => {
-      if (stopped) throw new Error('This embedded session has stopped; create a new one to submit input.');
+      const stoppedError = (): Error => new Error('This embedded session has stopped; create a new one to submit input.');
+      if (stopped) throw stoppedError();
       const body = typeof input === 'string' ? input : input.body;
       const structured = typeof input === 'string' ? undefined : input;
       // Subscribed before the submit: a run that fails at once can end before
@@ -333,6 +334,13 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
           ...(structured?.title !== undefined ? { title: structured.title } : {}),
           ...(structured?.metadata !== undefined ? { metadata: structured.metadata } : {}),
         });
+        // Stopped while the input was being recorded: nothing is started for it, and a spawn's input is failed so nothing runs it later.
+        if (stopped) {
+          if (submission.mode === 'spawn') {
+            await sessions.failInput(submission.session.id, submission.input.id, 'The embedded session stopped before the input started.').catch(() => null);
+          }
+          throw stoppedError();
+        }
         member.sessionIds.add(submission.session.id);
         if (submission.mode !== 'spawn') {
           // Only a live agent that was handed this input is working on it; a
@@ -360,6 +368,20 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
           // queued input is left that nothing will run and a retry does not double up.
           await sessions.failInput(submission.session.id, submission.input.id, error instanceof Error ? error.message : String(error)).catch(() => null);
           throw error;
+        }
+        // Stopped while the contract was starting: stop already cancelled this session's work, so this contract is cancelled here.
+        if (stopped) {
+          const reason = 'The embedded session stopped before the input started.';
+          try { server.contracts.cancel(started.contract.id, reason); }
+          catch (error) {
+            logger.warn('createEmbeddedSession: a contract started as the session stopped could not be cancelled', {
+              contractId: started.contract.id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+          server.cancelAgent(started.ownerAgentId);
+          await sessions.failInput(submission.session.id, submission.input.id, reason).catch(() => null);
+          throw stoppedError();
         }
         member.agentIds.add(started.ownerAgentId);
         member.contractIds.add(started.contract.id);

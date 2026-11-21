@@ -69,6 +69,8 @@ export interface WorkflowInstance {
   transitions: number;
   context: Record<string, unknown>;
   cancelled?: boolean | undefined;
+  /** Cancelled because it went an hour without a move; completedAt is then the moment that hour ran out. */
+  abandoned?: boolean | undefined;
 }
 
 /** How long a finished workflow is kept, and how long an unfinished one may go without a move before it is cancelled as abandoned. */
@@ -103,13 +105,16 @@ export class WorkflowManager {
   }
 
   getStatus(id: string): WorkflowInstance | null {
-    return this.workflows.get(id) ?? null;
+    return this.lookup(id) ?? null;
   }
 
   transition(id: string, targetState: string): { success: boolean; error?: string | undefined } {
-    const instance = this.workflows.get(id);
+    const instance = this.lookup(id);
     if (!instance) {
       return { success: false, error: `Workflow not found: ${id}` };
+    }
+    if (instance.abandoned) {
+      return { success: false, error: `Workflow ${id} was cancelled as abandoned after an hour without a move; start a new one.` };
     }
     if (instance.cancelled) {
       return { success: false, error: 'Workflow is cancelled' };
@@ -136,15 +141,16 @@ export class WorkflowManager {
 
   /** Why this workflow cannot be cancelled (it already ended), or undefined when it can be or does not exist. */
   cancelRefusal(id: string): string | undefined {
-    const instance = this.workflows.get(id);
+    const instance = this.lookup(id);
     if (!instance) return undefined;
+    if (instance.abandoned) return `Workflow ${id} was cancelled as abandoned after an hour without a move; there is nothing left to cancel. Start a new one if the work continues`;
     if (instance.cancelled) return `Workflow ${id} is already cancelled; there is nothing left to cancel`;
     if (instance.completedAt !== undefined) return `Workflow ${id} already finished (${instance.currentState}); a finished workflow cannot be cancelled`;
     return undefined;
   }
 
   cancel(id: string): boolean {
-    const instance = this.workflows.get(id);
+    const instance = this.lookup(id);
     if (!instance) return false;
     if (this.cancelRefusal(id) !== undefined) return false;
     instance.cancelled = true;
@@ -157,17 +163,31 @@ export class WorkflowManager {
     return Array.from(this.workflows.values());
   }
 
+  /** The workflow with the abandonment rule applied to it, so every read and move sees the same state. */
+  private lookup(id: string): WorkflowInstance | undefined {
+    const instance = this.workflows.get(id);
+    if (instance) this.settleAbandoned(instance, Date.now());
+    return instance;
+  }
+
+  /**
+   * A workflow left unfinished with no move for the eviction window is cancelled as
+   * abandoned, as of the moment the window ran out, whichever call notices it first.
+   */
+  private settleAbandoned(wf: WorkflowInstance, now: number): void {
+    if (wf.completedAt === undefined && now - wf.lastActivityAt > WORKFLOW_EVICT_AFTER_MS) {
+      wf.cancelled = true;
+      wf.abandoned = true;
+      wf.completedAt = wf.lastActivityAt + WORKFLOW_EVICT_AFTER_MS;
+    }
+  }
+
   /**
    * Cancels a workflow left unfinished with no move for the eviction window
    * (abandoned), then drops finished ones past the window and beyond the cap.
    */
   private prune(now: number): void {
-    for (const wf of this.workflows.values()) {
-      if (wf.completedAt === undefined && now - wf.lastActivityAt > WORKFLOW_EVICT_AFTER_MS) {
-        wf.cancelled = true;
-        wf.completedAt = now;
-      }
-    }
+    for (const wf of this.workflows.values()) this.settleAbandoned(wf, now);
     // Evict expired completed/cancelled workflows
     for (const [id, wf] of this.workflows) {
       if (wf.completedAt !== undefined && now - wf.completedAt > WORKFLOW_EVICT_AFTER_MS) {

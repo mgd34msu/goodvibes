@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readFileSync, readSync, lstatSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, constants as fsConstants, existsSync, fstatSync, openSync, readFileSync, readSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { basename, relative } from 'node:path';
 import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
 import { logger, summarizeError, resolveAndValidatePath, requireDefined } from '@goodvibes/engine/platform/platform/utils';
@@ -28,12 +28,35 @@ function escapeContextAttribute(value: string): string {
 }
 /** One referenced file is cut at the size the read tool returns by default (25,000 tokens). */
 const MAX_REFERENCE_CHARS = 100_000;
-function capReferenceText(content: string, label: string): string {
-    if (content.length <= MAX_REFERENCE_CHARS)
+/** The most of a referenced text file that is read: enough bytes for the kept characters at four bytes each. */
+const MAX_REFERENCE_READ_BYTES = MAX_REFERENCE_CHARS * 4;
+/**
+ * Cuts referenced text to the kept size. With `file`, the text is the start of
+ * a file of `file.bytes` bytes, read only in part when `file.partial`, and the
+ * cut is reported against the file's size.
+ */
+function capReferenceText(content: string, label: string, file?: { readonly bytes: number; readonly partial: boolean }): string {
+    if (content.length <= MAX_REFERENCE_CHARS && file?.partial !== true)
         return content;
-    const lineEnd = content.lastIndexOf('\n', MAX_REFERENCE_CHARS);
-    const keep = lineEnd > MAX_REFERENCE_CHARS * 0.8 ? lineEnd : MAX_REFERENCE_CHARS;
-    return `${content.slice(0, keep)}\n[${label} cut: kept the first ${keep} of ${content.length} characters. Ask for the rest with the read tool.]`;
+    let keep = content.length;
+    if (content.length > MAX_REFERENCE_CHARS) {
+        const lineEnd = content.lastIndexOf('\n', MAX_REFERENCE_CHARS);
+        keep = lineEnd > MAX_REFERENCE_CHARS * 0.8 ? lineEnd : MAX_REFERENCE_CHARS;
+    }
+    const whole = file ? `${file.bytes} bytes` : `${content.length} characters`;
+    return `${content.slice(0, keep)}\n[${label} cut: kept the first ${keep} characters of ${whole}. Ask for the rest with the read tool.]`;
+}
+/** The length of `bytes` without a UTF-8 sequence cut off at its end. */
+function completeUtf8Length(bytes: Buffer): number {
+    let start = bytes.length - 1;
+    // Step back over continuation bytes (10xxxxxx) to the lead byte of the last sequence.
+    while (start >= 0 && start > bytes.length - 4 && ((bytes[start] ?? 0) & 0xC0) === 0x80)
+        start -= 1;
+    if (start < 0)
+        return bytes.length;
+    const lead = bytes[start] ?? 0;
+    const needed = lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : lead >= 0xC0 ? 2 : 1;
+    return bytes.length - start < needed ? start : bytes.length;
 }
 /** A referenced path the user typed that exists but cannot be read is a refusal, not silent text. */
 function referenceFailure(reference: string, error: unknown): PromptReferenceFailure {
@@ -82,21 +105,48 @@ export function isImageFile(resolvedPath: string): boolean {
             closeSync(fd);
     }
 }
-function readReferencedFile(resolvedPath: string, attachImage: AttachReferencedImage): { readonly kind: 'text'; readonly text: string } | { readonly kind: 'image'; readonly marker: string } {
-    const bytes = readFileSync(resolvedPath);
-    const mediaType = imageMediaType(bytes);
-    if (mediaType) {
-        if (bytes.length > MAX_IMAGE_ATTACH_BYTES)
-            throw new BinaryReferenceError(`an image larger than ${formatFileSize(MAX_IMAGE_ATTACH_BYTES)} is not sent`);
-        return { kind: 'image', marker: attachImage({ data: bytes.toString('base64'), mediaType, name: basename(resolvedPath), bytes: bytes.length }) };
+/** Reads up to `length` bytes from the start of an open file. */
+function readHead(fd: number, length: number): Buffer {
+    const buffer = Buffer.alloc(length);
+    let filled = 0;
+    while (filled < length) {
+        const read = readSync(fd, buffer, filled, length - filled, filled);
+        if (read === 0)
+            break;
+        filled += read;
     }
-    if (bytes.subarray(0, 8192).includes(0))
-        throw new BinaryReferenceError('a binary file is not sent as text; images are PNG, JPEG, WebP or GIF');
+    return buffer.subarray(0, filled);
+}
+/** Opening without blocking: a FIFO named by a reference is refused after its fstat, not waited on. */
+const OPEN_REFERENCE_FLAGS = fsConstants.O_RDONLY | fsConstants.O_NONBLOCK;
+function readReferencedFile(resolvedPath: string, attachImage: AttachReferencedImage): { readonly kind: 'text'; readonly text: string; readonly bytes: number; readonly partial: boolean } | { readonly kind: 'image'; readonly marker: string } {
+    // One open serves the type check, the size check and the read, so nothing is read before both checks.
+    const fd = openSync(resolvedPath, OPEN_REFERENCE_FLAGS);
     try {
-        return { kind: 'text', text: UTF8_STRICT.decode(bytes) };
+        const stat = fstatSync(fd);
+        if (!stat.isFile())
+            throw new BinaryReferenceError(stat.isDirectory() ? 'it is a folder' : 'not a regular file');
+        const head = readHead(fd, Math.min(12, stat.size));
+        const mediaType = imageMediaType(head);
+        if (mediaType) {
+            if (stat.size > MAX_IMAGE_ATTACH_BYTES)
+                throw new BinaryReferenceError(`an image larger than ${formatFileSize(MAX_IMAGE_ATTACH_BYTES)} is not sent`);
+            const bytes = readHead(fd, stat.size);
+            return { kind: 'image', marker: attachImage({ data: bytes.toString('base64'), mediaType, name: basename(resolvedPath), bytes: bytes.length }) };
+        }
+        const bytes = readHead(fd, Math.min(stat.size, MAX_REFERENCE_READ_BYTES));
+        if (bytes.subarray(0, 8192).includes(0))
+            throw new BinaryReferenceError('a binary file is not sent as text; images are PNG, JPEG, WebP or GIF');
+        const partial = bytes.length < stat.size;
+        try {
+            return { kind: 'text', text: UTF8_STRICT.decode(partial ? bytes.subarray(0, completeUtf8Length(bytes)) : bytes), bytes: stat.size, partial };
+        }
+        catch {
+            throw new BinaryReferenceError('the file is not UTF-8 text and is not sent');
+        }
     }
-    catch {
-        throw new BinaryReferenceError('the file is not UTF-8 text and is not sent');
+    finally {
+        closeSync(fd);
     }
 }
 function readContextFileBlock(reference: string, projectRoot: string, failures: PromptReferenceFailure[], attachImage: AttachReferencedImage): string | null {
@@ -125,8 +175,8 @@ function readContextFileBlock(reference: string, projectRoot: string, failures: 
         if (file.kind === 'image')
             return file.marker;
         return [
-            `<context-file path="${label}" bytes="${stat.size}">`,
-            capReferenceText(file.text, 'File'),
+            `<context-file path="${label}" bytes="${file.bytes}">`,
+            capReferenceText(file.text, 'File', file),
             '</context-file>',
         ].join('\n');
     }
@@ -164,7 +214,7 @@ function expandTypedReferences(text: string, projectRoot: string, contextReferen
             try {
                 const resolvedPath = resolveAndValidatePath(rawReference, projectRoot);
                 const file = readReferencedFile(resolvedPath, attachImage);
-                return `${prefix}${file.kind === 'image' ? file.marker : capReferenceText(file.text, 'File')}`;
+                return `${prefix}${file.kind === 'image' ? file.marker : capReferenceText(file.text, 'File', file)}`;
             }
             catch (error) {
                 failures.push(referenceFailure(`!@${rawReference}`, error));

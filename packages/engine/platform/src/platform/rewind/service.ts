@@ -253,7 +253,9 @@ export class UnifiedRewindService {
     let undoConversation: RewindUndo['conversation'] = null;
     if (wants(scope, 'conversation')) {
       try {
-        ({ conversation, undoConversation } = await this.applyConversation(anchor, warnings));
+        // The cut is checked against the revision this apply was confirmed against, after the file restore awaited.
+        const expected = preview !== null && 'expected' in preview ? preview.expected : undefined;
+        ({ conversation, undoConversation } = await this.applyConversation(anchor, warnings, expected));
       } catch (error) {
         // Only the conversation half failed. When the files were already
         // restored, the receipt that names their undo point must still be
@@ -315,13 +317,19 @@ export class UnifiedRewindService {
   }
 
   /** The conversation's revision now, or why it cannot be rewound now. */
-  private async previewNow(anchor: RewindAnchor): Promise<{ readonly revision: string | null } | { readonly revision: null; readonly reason: string }> {
+  /**
+   * The conversation counted now. `revision` is what the confirm token binds;
+   * `expected` is the port's own revision, which the cut is checked against
+   * (absent when the port reports none).
+   */
+  private async previewNow(anchor: RewindAnchor): Promise<{ readonly revision: string | null; readonly expected?: string | undefined } | { readonly revision: null; readonly reason: string }> {
     try {
       const preview = await this.conversation!.preview(anchor);
       if (preview.available === false) {
         return { revision: null, reason: preview.unavailableReason?.trim() || 'no conversation is reachable for this session' };
       }
-      return { revision: conversationRevision(preview) };
+      const expected = preview.revision?.trim();
+      return { revision: conversationRevision(preview), ...(expected ? { expected } : {}) };
     } catch (error) {
       return { revision: null, reason: error instanceof Error ? error.message : String(error) };
     }
@@ -402,12 +410,13 @@ export class UnifiedRewindService {
   private async applyConversation(
     anchor: RewindAnchor,
     warnings: string[],
+    expectedRevision?: string,
   ): Promise<{ conversation: RewindReceiptConversation; undoConversation: RewindUndo['conversation'] }> {
     if (!this.conversation) {
       warnings.push('conversation rewind skipped: no conversation store is wired on this runtime');
       return { conversation: { rewound: false, droppedMessages: 0, undoSnapshotId: null }, undoConversation: null };
     }
-    const outcome = await this.conversation.rewind(anchor);
+    const outcome = await this.conversation.rewind(anchor, expectedRevision);
     if (outcome.available === false) {
       warnings.push(outcome.unavailableReason?.trim()
         ? `conversation rewind skipped: ${outcome.unavailableReason.trim()}`

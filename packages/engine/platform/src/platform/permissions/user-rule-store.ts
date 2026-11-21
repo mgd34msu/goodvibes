@@ -315,15 +315,31 @@ export class UserPermissionRuleStore {
     this.#lastDiskStatAt = now;
     const signature = this.signatureOfFile();
     if (signature === this.diskSignature) return;
-    this.diskSignature = signature;
-    if (signature === 'absent') { this.adoptDisk([]); return; }
+    if (signature === 'absent') { this.diskSignature = signature; this.adoptDisk([]); return; }
+    // The new signature is taken only once the file was read, so a read that
+    // failed is tried again at the next check instead of being skipped as seen.
+    let problem: string;
     try {
       const data = JSON.parse(readFileSync(this.filePath, 'utf-8')) as UserRuleFile | null;
-      if (data && Array.isArray(data.rules)) this.adoptDisk(recordsOf(data));
+      if (data && Array.isArray(data.rules)) {
+        this.adoptDisk(recordsOf(data));
+        this.diskSignature = signature;
+        this.#unreadSignature = null;
+        return;
+      }
+      problem = 'it holds no "rules" list';
     } catch (error) {
-      logger.warn('user permission rule store changed on disk but could not be read; keeping the rules already loaded', { error: summarizeError(error) });
+      problem = summarizeError(error);
+    }
+    this.#diskDirty = true;
+    if (this.#unreadSignature !== signature) {
+      this.#unreadSignature = signature;
+      logger.warn('user permission rule store changed on disk but could not be read; keeping the rules already loaded until it can be', { error: problem });
     }
   }
+
+  /** The file version last found unreadable, so its warning is logged once while each check retries it. */
+  #unreadSignature: string | null = null;
 
   /**
    * Another process's write is noticed by a watch on the rules file's

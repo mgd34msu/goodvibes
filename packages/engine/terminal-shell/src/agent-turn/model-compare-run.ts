@@ -57,11 +57,19 @@ export async function resolveCurrentModel(catalog: AgentModelCompareModelCatalog
   }
 }
 
+/**
+ * Resolves each typed reference to one selectable model. A reference that
+ * matches nothing is listed in `unresolved`; one whose loose match hits
+ * several models is listed in `ambiguous`. Two references to one model
+ * resolve to that model once.
+ */
 export function resolveRequestedModels(
   refs: readonly string[],
   selectableModels: readonly ResolvedCompareModel[],
-): readonly ResolvedCompareModel[] {
+): { readonly models: readonly ResolvedCompareModel[]; readonly unresolved: readonly string[]; readonly ambiguous: readonly string[] } {
   const resolved: ResolvedCompareModel[] = [];
+  const unresolved: string[] = [];
+  const ambiguous: string[] = [];
   for (const ref of refs) {
     const normalizedRef = ref.toLowerCase();
     const exact = selectableModels.find((model) => model.registryKey.toLowerCase() === normalizedRef)
@@ -82,8 +90,10 @@ export function resolveRequestedModels(
     }
     const fuzzy = selectableModels.filter((model) => modelSearchText(model).includes(normalizedRef));
     if (fuzzy.length === 1) resolved.push(fuzzy[0]!);
+    else if (fuzzy.length > 1 || modelIdMatches.length > 1 || displayMatches.length > 1) ambiguous.push(ref);
+    else unresolved.push(ref);
   }
-  return dedupeModels(resolved);
+  return { models: dedupeModels(resolved), unresolved, ambiguous };
 }
 
 /**
@@ -131,12 +141,17 @@ async function selectComparisonModelsInOrder(
 
   // A named model is used as named, a remote baseline included: naming it is the choice.
   if (refs.length > 0) {
-    const requested = resolveRequestedModels(refs, selectableModels);
-    const missing = refs.length - requested.length;
-    if (missing > 0) {
-      throw new Error(`Could not resolve ${missing} requested model reference(s). Use registry keys from models action:"status".`);
+    const { models: requested, unresolved, ambiguous } = resolveRequestedModels(refs, selectableModels);
+    if (unresolved.length > 0 || ambiguous.length > 0) {
+      const parts = [
+        ...(unresolved.length > 0 ? [`no selectable model matches ${unresolved.map((ref) => `"${ref}"`).join(', ')}`] : []),
+        ...(ambiguous.length > 0 ? [`${ambiguous.map((ref) => `"${ref}"`).join(', ')} matches more than one model`] : []),
+      ];
+      throw new Error(`Could not resolve the requested models: ${parts.join('; ')}. Use registry keys from models action:"status".`);
     }
-    if (requested.length < MIN_CANDIDATES) throw new Error(`Select at least ${MIN_CANDIDATES} different models.`);
+    if (requested.length < MIN_CANDIDATES) {
+      throw new Error(`The named references resolve to only ${requested.length} distinct model${requested.length === 1 ? '' : 's'}; name at least ${MIN_CANDIDATES} different models.`);
+    }
     return requested;
   }
 

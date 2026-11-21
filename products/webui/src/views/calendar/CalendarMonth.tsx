@@ -5,7 +5,7 @@
  */
 import { useMemo } from 'react';
 import { monthGrid, toIsoDate } from '../../components/ui/DateField';
-import { eventDayKey } from './calendar-time';
+import { allDayFlagOf, eventDayKey } from './calendar-time';
 
 export { eventDayKey };
 
@@ -14,6 +14,8 @@ export interface MonthEvent {
   title: string;
   start: string;
   end?: string;
+  /** The daemon's own all-day flag, which decides the day the event is filed on. */
+  allDay?: boolean;
 }
 
 export interface CalendarMonthProps {
@@ -31,7 +33,7 @@ export function CalendarMonth({ month, events, selectedId, onSelect }: CalendarM
   const byDay = useMemo(() => {
     const map = new Map<string, MonthEvent[]>();
     for (const event of events) {
-      const key = eventDayKey(event.start, event.end);
+      const key = eventDayKey(event.start, event.end, allDayFlagOf(event));
       const list = map.get(key);
       if (list) list.push(event);
       else map.set(key, [event]);

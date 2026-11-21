@@ -352,8 +352,9 @@ function createOpenAICompatibleEmbeddingDefinition(): ProviderDefinition {
         '',
       );
       const endpoint = joinUrl(baseUrl.value, 'embeddings');
-      const configured = Boolean(baseUrl.value && model.value);
-      const state: MemoryEmbeddingProviderState = configured ? 'healthy' : 'unconfigured';
+      // The built-in endpoint and model are a valid setup, so the provider is
+      // always configured; the detail says when nothing was chosen.
+      const onDefaults = baseUrl.source === 'default' && model.source === 'default';
       return {
         baseUrl: baseUrl.value,
         baseUrlSource: baseUrl.source,
@@ -364,11 +365,11 @@ function createOpenAICompatibleEmbeddingDefinition(): ProviderDefinition {
         endpoint,
         authMode: 'bearer',
         requestedDimensions,
-        configured,
-        state,
-        detail: configured
-          ? `POST ${endpoint} with model ${model.value}`
-          : 'Set LM_STUDIO_BASE_URL or OPENAI_COMPATIBLE_BASE_URL and OPENAI_COMPATIBLE_EMBEDDING_MODEL to enable OpenAI-compatible embeddings.',
+        configured: true,
+        state: 'healthy',
+        detail: onDefaults
+          ? `POST ${endpoint} with model ${model.value} (built-in default endpoint, not contacted until the first embed; set LM_STUDIO_BASE_URL / OPENAI_COMPATIBLE_EMBEDDING_MODEL to change it)`
+          : `POST ${endpoint} with model ${model.value}`,
         metadata: {
           providerKind: 'openai-compatible',
           baseUrl: baseUrl.value,
@@ -645,8 +646,9 @@ function createOllamaEmbeddingDefinition(): ProviderDefinition {
       const baseUrl = pickEnv(env, ['OLLAMA_BASE_URL', 'OLLAMA_HOST'], DEFAULT_OLLAMA_BASE_URL);
       const model = pickEnv(env, ['OLLAMA_EMBEDDING_MODEL'], DEFAULT_OLLAMA_MODEL);
       const endpoint = joinUrl(baseUrl.value, 'api/embed');
-      const configured = Boolean(baseUrl.value && model.value);
-      const state: MemoryEmbeddingProviderState = configured ? 'healthy' : 'unconfigured';
+      // The built-in endpoint and model are a valid setup, so the provider is
+      // always configured; the detail says when nothing was chosen.
+      const onDefaults = baseUrl.source === 'default' && model.source === 'default';
       return {
         baseUrl: baseUrl.value,
         baseUrlSource: baseUrl.source,
@@ -655,11 +657,11 @@ function createOllamaEmbeddingDefinition(): ProviderDefinition {
         endpoint,
         authMode: 'none',
         requestedDimensions,
-        configured,
-        state,
-        detail: configured
-          ? `POST ${endpoint} with model ${model.value}`
-          : `Set OLLAMA_BASE_URL and OLLAMA_EMBEDDING_MODEL to enable Ollama embeddings.`,
+        configured: true,
+        state: 'healthy',
+        detail: onDefaults
+          ? `POST ${endpoint} with model ${model.value} (built-in default endpoint, not contacted until the first embed; set OLLAMA_BASE_URL / OLLAMA_EMBEDDING_MODEL to change it)`
+          : `POST ${endpoint} with model ${model.value}`,
         metadata: {
           providerKind: 'ollama',
           baseUrl: baseUrl.value,

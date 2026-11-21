@@ -61,10 +61,44 @@ const PURCHASES_FILE_VERSION = 1;
 export const MAX_PURCHASE_LIST_LIMIT = 500;
 const missing = (error: unknown): boolean => error !== null && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
 
-/** The owed owner reports kept in the purchases file: purchase id -> report text. Anything malformed reads as nothing owed. */
+/** What an owed owner notice reports: the purchase itself, a refund the shop mailed, or a shop mail settling an unverified purchase. */
+export type OwnerNoticeKind = 'purchase' | 'refund' | 'settled';
+
+/** One notice the owner is owed and was not yet told. */
+export interface OwedOwnerNotice {
+  readonly purchaseId: string;
+  readonly kind: OwnerNoticeKind;
+  readonly message: string;
+}
+
+/**
+ * The key of an owed notice in the purchases file. A purchase report is keyed
+ * by its purchase id alone (as release 3.4.0 wrote it); the others add `#kind`,
+ * which no purchase id contains (checkoutRequestId), so a refund notice never
+ * replaces a purchase report still owed.
+ */
+function ownerNoticeKey(purchaseId: string, kind: OwnerNoticeKind): string {
+  return kind === 'purchase' ? purchaseId : `${purchaseId}#${kind}`;
+}
+
+function ownerNoticeFromKey(key: string, message: string): OwedOwnerNotice {
+  const mark = key.lastIndexOf('#');
+  const kind = mark === -1 ? 'purchase' : key.slice(mark + 1);
+  if (mark !== -1 && (kind === 'refund' || kind === 'settled')) return { purchaseId: key.slice(0, mark), kind, message };
+  return { purchaseId: key, kind: 'purchase', message };
+}
+
+/** The owed owner notices kept in the purchases file: notice key -> notice text. Anything malformed reads as nothing owed. */
 function readOwedNotices(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === 'string'));
+}
+
+/** The owed notices with `notice` added under its key; undefined when there is nothing to add. */
+function owingAlso(envelope: Readonly<Record<string, unknown>>, purchaseId: string, kind: OwnerNoticeKind,
+  notice: string | undefined): Record<string, string> | undefined {
+  if (notice === undefined) return undefined;
+  return { ...readOwedNotices(envelope['ownerNoticesOwed']), [ownerNoticeKey(purchaseId, kind)]: notice };
 }
 
 export class PaymentPurchaseLedgerError extends Error {
@@ -160,8 +194,7 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       const previous = this.read();
       const rows = Object.freeze([...previous.rows, row]);
       // The owner's report is owed from the same write as the record (no write of its own).
-      const owed = options.ownerNotice === undefined ? undefined
-        : { ...readOwedNotices(previous.envelope['ownerNoticesOwed']), [row.purchaseId]: options.ownerNotice };
+      const owed = owingAlso(previous.envelope, row.purchaseId, 'purchase', options.ownerNotice);
       const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows, ...(owed ? { ownerNoticesOwed: owed } : {}) };
       const contents = `${JSON.stringify(envelope, null, 2)}\n`;
       atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
@@ -221,9 +254,10 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
   /**
    * Record when the shop said this purchase was refunded, on its row. False
    * when there is no such purchase or a refund is already recorded. Credits
-   * no budget pool.
+   * no budget pool. `ownerNotice`: the refund note the owner is owed, saved in
+   * the same write, so a send that fails or a stop before it still tells them.
    */
-  async recordRefund(purchaseId: string, refundedAt: string): Promise<boolean> {
+  async recordRefund(purchaseId: string, refundedAt: string, ownerNotice?: string): Promise<boolean> {
     if (!Number.isFinite(Date.parse(refundedAt))) throw new PaymentPurchaseLedgerError('invalid-record');
     let release: (() => void) | undefined;
     try {
@@ -235,7 +269,8 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       if (!updated) throw new PaymentPurchaseLedgerError('invalid-record');
       const index = previous.rows.lastIndexOf(current);
       const rows = Object.freeze(previous.rows.map((row, at) => at === index ? updated as StoredPurchase : row));
-      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows };
+      const owed = owingAlso(previous.envelope, purchaseId, 'refund', ownerNotice);
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows, ...(owed ? { ownerNoticesOwed: owed } : {}) };
       const contents = `${JSON.stringify(envelope, null, 2)}\n`;
       atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
         assertCurrent: () => this.assertFileCurrent(previous.observation) });
@@ -259,9 +294,10 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
    * did not: a `submitted-unverified` row becomes `purchased`, taking the
    * mail's order number when the row has none. False when the row is not
    * unverified, is refunded, or the owner already recorded a finding for it;
-   * the owner's finding stands over a mail.
+   * the owner's finding stands over a mail. `ownerNotice`: the report the
+   * owner is owed for the move, saved in the same write.
    */
-  async recordConfirmed(purchaseId: string, merchantOrderId: string | null): Promise<boolean> {
+  async recordConfirmed(purchaseId: string, merchantOrderId: string | null, ownerNotice?: string): Promise<boolean> {
     let release: (() => void) | undefined;
     try {
       release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
@@ -274,7 +310,8 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
       if (!updated) throw new PaymentPurchaseLedgerError('invalid-record');
       const index = previous.rows.lastIndexOf(current);
       const rows = Object.freeze(previous.rows.map((row, at) => at === index ? updated as StoredPurchase : row));
-      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows };
+      const owed = owingAlso(previous.envelope, purchaseId, 'settled', ownerNotice);
+      const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: rows, ...(owed ? { ownerNoticesOwed: owed } : {}) };
       const contents = `${JSON.stringify(envelope, null, 2)}\n`;
       atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,
         assertCurrent: () => this.assertFileCurrent(previous.observation) });
@@ -332,20 +369,21 @@ export class DaemonPurchaseLedger implements PurchaseLedger {
     }
   }
 
-  /** Reports owed to the owner for recorded purchases (id -> text): sent at start when the process stopped before sending them. */
-  owedOwnerNotices(): ReadonlyMap<string, string> {
-    return new Map(Object.entries(readOwedNotices(this.read().envelope['ownerNoticesOwed'])));
+  /** Notices owed to the owner and not yet delivered: sent at start when a send failed or the process stopped before it. */
+  owedOwnerNotices(): readonly OwedOwnerNotice[] {
+    return Object.entries(readOwedNotices(this.read().envelope['ownerNoticesOwed'])).map(([key, message]) => ownerNoticeFromKey(key, message));
   }
 
-  /** The owed report was sent: removed from the file (one write). No-op when nothing is owed for it. */
-  async settleOwnerNotice(purchaseId: string): Promise<void> {
+  /** The owed notice reached a channel: removed from the file (one write). No-op when that notice is not owed. */
+  async settleOwnerNotice(purchaseId: string, kind: OwnerNoticeKind = 'purchase'): Promise<void> {
+    const key = ownerNoticeKey(purchaseId, kind);
     let release: (() => void) | undefined;
     try {
       release = await acquireCrossProcessLock(`${this.filePath}.mutation.lock`, { totalTimeoutMs: 10_000 });
       const previous = this.read();
       const owed = readOwedNotices(previous.envelope['ownerNoticesOwed']);
-      if (!(purchaseId in owed)) return;
-      const { [purchaseId]: _settled, ...remaining } = owed;
+      if (!(key in owed)) return;
+      const { [key]: _settled, ...remaining } = owed;
       const envelope = { ...previous.envelope, version: PURCHASES_FILE_VERSION, purchases: previous.rows, ownerNoticesOwed: remaining };
       const contents = `${JSON.stringify(envelope, null, 2)}\n`;
       atomicWriteFileSync(this.filePath, contents, { mode: 0o600, mkdirp: true,

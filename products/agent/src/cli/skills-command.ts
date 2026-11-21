@@ -1,7 +1,7 @@
 import { discoverSkills, type SkillRecord } from '../agent/skill-discovery.ts';
 import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
-import { buildAgentSkillRequirements, evaluateAgentSkillReadiness, formatAgentSkillRequirement } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
+import { buildAgentSkillRequirements, evaluateAgentSkillReadiness, formatAgentSkillRequirement, formatSkillDeleteBundleLines } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { type AgentSkillRecord } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry-types';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';
@@ -166,9 +166,9 @@ export async function handleSkillsCommand(runtime: CliCommandRuntime): Promise<C
       return success(runtime, 'agent.skills.enabled', { path: snapshot.path, skills: snapshot.enabledSkills }, renderSkillList('Enabled Agent skills', snapshot.path, snapshot.enabledSkills));
     }
     if (normalized === 'active') {
-      return success(runtime, 'agent.skills.active', { path: snapshot.path, skills: snapshot.activeSkills, bundles: snapshot.enabledBundles }, [
-        renderSkillList('Active Agent skills', snapshot.path, snapshot.activeSkills),
-        snapshot.enabledBundles.length > 0 ? renderBundleList('Enabled Agent skill bundles', snapshot.path, snapshot.enabledBundles, snapshot.skills) : '',
+      return success(runtime, 'agent.skills.active', { path: snapshot.path, skills: snapshot.activeSkills, bundles: snapshot.activeBundles }, [
+        renderSkillList('Agent skills applied to turns', snapshot.path, snapshot.activeSkills, 'No Agent skill is applied to turns. A skill applies once it is enabled or in an applied bundle, reviewed, and setup-ready.'),
+        snapshot.activeBundles.length > 0 ? renderBundleList('Agent skill bundles applied to turns', snapshot.path, snapshot.activeBundles, snapshot.skills) : '',
       ].filter(Boolean).join('\n\n'));
     }
     if (normalized === 'attention' || normalized === 'needs-setup') {
@@ -294,10 +294,15 @@ export async function handleSkillsCommand(runtime: CliCommandRuntime): Promise<C
       const id = options.positionals[0];
       if (!id) return failure(runtime, 'invalid_skill_command', 'Usage: goodvibes-agent skills delete <id> --yes', 2);
       if (!hasFlag(options, 'yes')) return failure(runtime, 'confirmation_required', `Refusing to delete Agent skill ${id} without --yes.`, 2);
-      const skill = registry.deleteSkill(id);
-      return success(runtime, 'agent.skills.delete', skill, [
+      const deleted = registry.deleteSkill(id);
+      return success(runtime, 'agent.skills.delete', {
+        ...deleted.skill,
+        removedBundles: deleted.removedBundles.map((bundle) => bundle.id),
+        changedBundles: deleted.changedBundles.map((bundle) => bundle.id),
+      }, [
         `Agent skill deleted: ${id}`,
-        `  id ${skill.id}`,
+        `  id ${deleted.skill.id}`,
+        ...formatSkillDeleteBundleLines(deleted),
       ].join('\n'));
     }
     return failure(runtime, 'invalid_skill_command', usageSkills(), 2);

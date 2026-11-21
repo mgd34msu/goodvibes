@@ -16,6 +16,7 @@
  */
 
 import { loadOptionalDependency } from '../utils/optional-dependency.js';
+import { ProviderError } from '../types/errors.js';
 
 type BedrockModule = typeof import('@anthropic-ai/bedrock-sdk');
 type BedrockAuthModule = typeof import('@anthropic-ai/bedrock-sdk/core/auth.js');
@@ -31,7 +32,7 @@ export async function loadBedrockLibrary(): Promise<BedrockModule> {
     '@anthropic-ai/bedrock-sdk',
     () => import('@anthropic-ai/bedrock-sdk'),
   );
-  if (!loaded.available) throw new Error(loaded.reason);
+  if (!loaded.available) throw missingBedrockPackage(loaded.reason);
   return loaded.module;
 }
 
@@ -44,8 +45,15 @@ export async function loadBedrockAuth(): Promise<BedrockAuthModule> {
     '@anthropic-ai/bedrock-sdk/core/auth.js',
     () => import('@anthropic-ai/bedrock-sdk/core/auth.js'),
   );
-  if (!loaded.available) throw new Error(loaded.reason);
+  if (!loaded.available) throw missingBedrockPackage(loaded.reason);
   return loaded.module;
+}
+
+function missingBedrockPackage(reason: string): ProviderError {
+  return new ProviderError(reason, {
+    category: 'config',
+    guidance: 'Install the optional @anthropic-ai/bedrock-sdk package to enable this provider.',
+  });
 }
 
 /** Whether the Bedrock providers can run in this installation, and why not. */

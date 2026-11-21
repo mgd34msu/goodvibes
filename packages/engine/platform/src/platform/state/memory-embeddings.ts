@@ -140,27 +140,46 @@ export class MemoryEmbeddingProviderRegistry {
 
   constructor(options: MemoryEmbeddingProviderRegistryOptions) {
     this.configManager = options.configManager;
-    this.register(HASHED_MEMORY_EMBEDDING_PROVIDER, { replace: true });
+    this.register(HASHED_MEMORY_EMBEDDING_PROVIDER);
     for (const provider of createBuiltinMemoryEmbeddingProviders()) {
       this.register(provider, { replace: true });
     }
     this.getDefaultProviderId();
   }
 
+  /**
+   * Register a provider. The returned disposer is the exact inverse: it puts
+   * back the provider this one replaced (or removes the id when there was
+   * none) and, when this call made it the default and the setting still names
+   * it, restores the setting's previous value. The built-in provider can never
+   * be replaced.
+   */
   register(provider: MemoryEmbeddingProvider, options: { readonly replace?: boolean; readonly makeDefault?: boolean } = {}): () => void {
     const id = provider.id.trim();
     if (!id) throw new Error('Memory embedding provider id is required');
-    if (this.providers.has(id) && !options.replace) {
+    const previous = this.providers.get(id);
+    if (previous && id === HASHED_MEMORY_EMBEDDING_PROVIDER.id) {
+      throw new Error(`Memory embedding provider '${id}' is built in and cannot be replaced`);
+    }
+    if (previous && !options.replace) {
       throw new Error(`Memory embedding provider already registered: ${id}`);
     }
     const registered = { ...provider, id };
     this.providers.set(id, registered);
+    const previousDefault = options.makeDefault ? getConfiguredEmbeddingProviderId(this.configManager) : undefined;
     if (options.makeDefault) {
       persistDefaultEmbeddingProviderId(this.configManager, id);
       this.activeProviderId = id;
     }
     return () => {
-      if (this.providers.get(id) === registered) this.unregister(id);
+      if (this.providers.get(id) === registered) {
+        if (previous) this.providers.set(id, previous);
+        else this.providers.delete(id);
+      }
+      if (previousDefault !== undefined && getConfiguredEmbeddingProviderId(this.configManager).trim() === id) {
+        persistDefaultEmbeddingProviderId(this.configManager, previousDefault);
+        this.getDefaultProviderId();
+      }
     };
   }
 

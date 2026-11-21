@@ -43,6 +43,14 @@ import type {
   KnowledgeSourceRecord,
 } from './types.js';
 
+/** The dashboards a projection can render; an unset id renders the first. */
+const KNOWLEDGE_DASHBOARD_IDS = ['source-health', 'backlinks'] as const;
+type KnowledgeDashboardId = typeof KNOWLEDGE_DASHBOARD_IDS[number];
+
+function isKnowledgeDashboardId(id: string): id is KnowledgeDashboardId {
+  return (KNOWLEDGE_DASHBOARD_IDS as readonly string[]).includes(id);
+}
+
 export interface KnowledgeProjectionServiceOptions {
   readonly connectors?: (() => readonly KnowledgeConnector[]) | undefined;
 }
@@ -121,7 +129,8 @@ export class KnowledgeProjectionService {
     const limit = Math.max(1, input.limit ?? 12);
     const target = this.resolveTarget(input.kind, input.id, scope);
     if (!target) {
-      throw new Error(`Unknown knowledge projection target: ${input.kind}${input.id ? `/${input.id}` : ''}`);
+      const known = input.kind === 'dashboard' ? ` (known dashboards: ${KNOWLEDGE_DASHBOARD_IDS.join(', ')})` : '';
+      throw new Error(`Unknown knowledge projection target: ${input.kind}${input.id ? `/${input.id}` : ''}${known}`);
     }
 
     switch (target.kind) {
@@ -224,7 +233,10 @@ export class KnowledgeProjectionService {
 
   private resolveTarget(kind: KnowledgeProjectionTargetKind, id: string | undefined, scope: PreparedProjectionScope): KnowledgeProjectionTarget | null {
     if (kind === 'overview' || kind === 'bundle') return this.createPresetTarget(kind, scope);
-    if (kind === 'dashboard') return this.createDashboardTarget(id ?? 'source-health');
+    if (kind === 'dashboard') {
+      const dashboard = id?.trim() || 'source-health';
+      return isKnowledgeDashboardId(dashboard) ? this.createDashboardTarget(dashboard) : null;
+    }
     if (kind === 'rollup') {
       if (!id?.trim()) return null;
       const node = this.store.getNode(id);
@@ -268,7 +280,7 @@ export class KnowledgeProjectionService {
     };
   }
 
-  private createDashboardTarget(id: string): KnowledgeProjectionTarget {
+  private createDashboardTarget(id: KnowledgeDashboardId): KnowledgeProjectionTarget {
     if (id === 'backlinks') {
       return {
         targetId: 'dashboard:backlinks',

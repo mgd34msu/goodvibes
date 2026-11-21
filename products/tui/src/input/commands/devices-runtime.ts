@@ -78,7 +78,8 @@ function deviceTokenStore(ctx: CommandContext): DeviceTokenStore {
     list: async () => local.list(),
     legacyRevoked: async () => local.isLegacyRevoked(),
     rename: async (id, name) => local.rename(id, name),
-    revoke: async (id) => local.revoke(id),
+    // Here and on the authority record: a device left on the record keeps authenticating on every machine of the group.
+    revoke: async (id) => (await local.revokeEverywhere(id)).revoked,
     mintForMigration: async (name) => local.mintForMigration({ name }),
   };
 }

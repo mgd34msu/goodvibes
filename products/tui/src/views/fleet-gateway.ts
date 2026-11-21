@@ -57,6 +57,8 @@ export interface FleetGateway {
   resolveConflict(itemId: string): Promise<FleetConflictResolution>;
   /** Discard a worktree directory (branch kept, dirty state preserved as a commit). */
   discardWorktree(path: string): Promise<FleetWorktreeDiscardReceipt>;
+  /** The paths of the worktrees the daemon records now (worktrees.snapshot); a discarded one is no longer among them. */
+  listWorktreePaths(): Promise<readonly string[]>;
   /** Fetch the task graph (nodes/edges/pool) for one workstream, the observability graph view. */
   getGraph(workstreamId: string): Promise<FleetGraphSnapshot>;
   /**
@@ -100,6 +102,7 @@ export function createFleetGateway(deps: FleetGatewayDeps): FleetGatewayResoluti
     pick: (input) => platformClient.operator.invoke('fleet.attempts.pick', input),
     resolveConflict: (itemId) => platformClient.operator.invoke('fleet.conflicts.resolve', { itemId }),
     discardWorktree: (path) => platformClient.operator.invoke('worktrees.discard', { path }),
+    listWorktreePaths: async () => (await platformClient.operator.invoke('worktrees.snapshot', {})).records.map((record) => record.path),
     getGraph: (workstreamId) => platformClient.operator.invoke('fleet.graph.get', { workstreamId }),
     steerObserved: (input) => platformClient.operator.invoke('fleet.observed.steer', input),
     armFixSessionAttach: deps.armFixSessionAttach,

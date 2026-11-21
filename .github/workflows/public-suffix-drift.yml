@@ -35,7 +35,9 @@ name: Public Suffix Drift
 # file by hand). No code change, and the module header carries the refresh procedure. The job's own output names each
 # suffix and says whether it is the security-relevant direction (upstream has
 # it, we do not, so two registrants compare equal) or the correctness one (we
-# carry it, upstream dropped it, so a legitimate link may be refused).
+# carry it, upstream dropped it, so a legitimate link may be refused). Both
+# sections of the list are bundled and compared; a private-section rule upstream
+# dropped is reported but does not turn the job red, since that section churns weekly.
 #
 # The data is bundled and NEVER fetched at runtime. A security gate that
 # reached the network to decide would be one an attacker could influence by

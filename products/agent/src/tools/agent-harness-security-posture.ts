@@ -554,7 +554,7 @@ export async function securityPostureSummary(context: CommandContext, args: Agen
 }
 
 export async function describeHarnessSecurityFinding(context: CommandContext, args: AgentHarnessSecurityArgs, options: CatalogRankingOptions = {}): Promise<SecurityFindingResolution> {
-  const { request, securitySnapshot, policySnapshot } = captureSecurityRequest(context, args, options);
+  const { request, securitySnapshot, unavailableReason, policySnapshot } = captureSecurityRequest(context, args, options);
   args = request.input;
   const findingId = readString(args.findingId);
   const target = readString(args.target);
@@ -573,6 +573,14 @@ export async function describeHarnessSecurityFinding(context: CommandContext, ar
   const normalized = input.toLowerCase();
   const insensitive = findings.find((finding) => finding.findingId.toLowerCase() === normalized);
   if (insensitive) return { status: 'found', finding: describeFinding(insensitive, true, { source: findingId ? 'findingId' : target ? 'target' : 'query', input, resolvedBy: 'case-insensitive-id' }) };
+  if (!securitySnapshot) {
+    // Only policy findings exist without the read model; a search could resolve a token, MCP,
+    // plugin or incident id to an unrelated policy finding, so the miss is said as it is.
+    return {
+      status: 'missing_lookup',
+      usage: `The security read model is unavailable${unavailableReason ? ` (${unavailableReason})` : ''}; only policy findings can be looked up now, so ${input} may still exist. Use mode:"security_posture" to see the status.`,
+    };
+  }
   const selected = await selectHarnessCatalog(findings, input, finding => ({ id: finding.findingId, description: finding.title }), request.options, 'agent.security.finding');
   request.assertCurrent();
   if (selected) return { status: 'found', finding: describeFinding(selected, true, { source: findingId ? 'findingId' : target ? 'target' : 'query', input, resolvedBy: 'search' }) };

@@ -7,9 +7,10 @@
 // same generic operator invoke path the fleet acts use (resolveOperatorRpc ->
 // platform.operator.invoke), reaching the SAME daemon the command layer does.
 //
-// Both thunks degrade QUIETLY: when no daemon is reachable, the probe resolves
-// to null (the pairing surface renders no tailscale affordance at all) rather
-// than throwing into a render path. Absence is never a nag.
+// They degrade QUIETLY: when no daemon is reachable, the probe resolves to null
+// (the pairing surface renders no tailscale affordance at all). Absence is
+// never a nag; a probe the daemon answered with a failure rejects, and the
+// surface shows the reason in one dim row.
 // ---------------------------------------------------------------------------
 
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
@@ -26,19 +27,16 @@ export interface PairingTailscaleGatewayDeps {
 }
 
 /**
- * Probe tailscale (tailscale.get). Returns the honest status, or null when the
- * daemon is unreachable / the call fails, the pairing surface then stays quiet.
+ * Probe tailscale (tailscale.get). Returns the honest status, or null when no
+ * daemon is reachable (the pairing surface then stays quiet). A failed call
+ * throws, so the surface can say why the check failed.
  */
 export async function probePairingTailscale(
   deps: PairingTailscaleGatewayDeps,
 ): Promise<PairingTailscaleStatus | null> {
   const rpc = resolveOperatorRpc(deps);
   if (!rpc.available) return null;
-  try {
-    return (await rpc.platformClient.operator.invoke('tailscale.get', {})) as PairingTailscaleStatus;
-  } catch {
-    return null;
-  }
+  return (await rpc.platformClient.operator.invoke('tailscale.get', {})) as PairingTailscaleStatus;
 }
 
 /**

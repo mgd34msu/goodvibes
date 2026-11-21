@@ -110,6 +110,13 @@ async function upsertIntrinsicFeatureGap(
   const existing = store.getNode(id);
   const title = `What are the complete features and specifications for ${subjectTitle(subject)}?`;
   const primarySource = sources[0]!;
+  // Each repair cycle of the gap is one issue lifecycle: a repaired (retired)
+  // gap that loses coverage again starts the next cycle, so its issue, resolved
+  // by that repair, opens again instead of staying resolved over an active gap.
+  const storedCycle = existing?.metadata.repairCycle;
+  const previousCycle = typeof storedCycle === 'number' && Number.isSafeInteger(storedCycle) && storedCycle >= 0 ? storedCycle : 0;
+  const reopening = existing?.status === 'stale' && readString(existing.metadata.repairStatus) === 'repaired';
+  const repairCycle = reopening ? previousCycle + 1 : previousCycle;
   const gapInput = prepareObservedKnowledgeNodeInput(store, {
       id,
       kind: 'knowledge_gap',
@@ -129,6 +136,7 @@ async function upsertIntrinsicFeatureGap(
         sourceIds: sources.map((source) => source.id),
         linkedObjectIds: [subject.id],
         repairStatus: readString(existing?.metadata.repairStatus) ?? 'open',
+        repairCycle,
         createdBy: 'semantic-self-improvement', ...identity.metadata,
       }),
     }, 'research-task', subject, () => { assertCurrent(); return store.getNode(subject.id); });
@@ -161,6 +169,7 @@ async function upsertIntrinsicFeatureGap(
         namespace: `knowledge:${spaceId}:semantic`,
         subjectId: subject.id,
         gapKind: 'intrinsic_features',
+        subjectRevision: `intrinsic-gap-repair-cycle:${repairCycle}`,
       }),
     };
   const existingVersion = observeKnowledgeValue(existing);

@@ -73,7 +73,14 @@ function parseJsonBookmarks(value: unknown, inheritedFolder?: string): Knowledge
     ? record.metadata as Record<string, unknown>
     : {};
   const tags = normalizeTags(record.tags);
-  const nested = parseJsonBookmarks(record.children ?? record.items ?? [], folderName);
+  // Chromium's Bookmarks file keeps its containers (bookmark_bar, other,
+  // synced) as the values of a `roots` object; each carries a name and children.
+  const roots = record.roots && typeof record.roots === 'object' && !Array.isArray(record.roots)
+    ? Object.values(record.roots as Record<string, unknown>) : [];
+  const nested = [
+    ...parseJsonBookmarks(record.children ?? record.items ?? [], folderName),
+    ...parseJsonBookmarks(roots, folderName),
+  ];
   const current = url && /^https?:\/\//i.test(url)
     ? [{
         url,
@@ -147,10 +154,18 @@ function parseUrlList(content: string): KnowledgeBookmarkSeed[] {
     .map((url) => ({ url }));
 }
 
+/**
+ * The bookmarks in an export: JSON (including Chromium's Bookmarks file),
+ * Netscape HTML, or a list of URLs one per line. Empty input yields none.
+ * Input that is not empty but holds no http(s) bookmark is refused with the
+ * format it was read as, so it never looks like an empty, successful import.
+ */
 export function parseBookmarkSeeds(content: string): KnowledgeBookmarkSeed[] {
   const trimmed = content.trim();
   if (!trimmed) return [];
 
+  let format: string;
+  let seeds: KnowledgeBookmarkSeed[];
   if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
     let parsed: unknown;
     try {
@@ -159,12 +174,17 @@ export function parseBookmarkSeeds(content: string): KnowledgeBookmarkSeed[] {
       // A truncated export must not look like an empty, successful import.
       throw new Error(`Bookmark input looks like JSON but could not be parsed: ${error instanceof Error ? error.message : String(error)}`);
     }
-    return parseJsonBookmarks(parsed);
+    format = 'JSON';
+    seeds = parseJsonBookmarks(parsed);
+  } else if (/<A\s/i.test(trimmed) && /<DL/i.test(trimmed)) {
+    format = 'Netscape bookmark HTML';
+    seeds = parseNetscapeBookmarks(trimmed);
+  } else {
+    format = 'a URL list';
+    seeds = parseUrlList(trimmed);
   }
-
-  if (/<A\s/i.test(trimmed) && /<DL/i.test(trimmed)) {
-    return parseNetscapeBookmarks(trimmed);
+  if (seeds.length === 0) {
+    throw new Error(`Bookmark input was read as ${format}, but no http(s) bookmark was found in it; nothing was imported.`);
   }
-
-  return parseUrlList(trimmed);
+  return seeds;
 }

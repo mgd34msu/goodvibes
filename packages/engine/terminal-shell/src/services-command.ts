@@ -4,8 +4,7 @@
  * project's services file defines, and moving the services list in and out of
  * a file. Each app says how it reaches its service registry and its paths.
  */
-import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import {
   atomicWriteFileSync,
   describePendingProjectService,
@@ -16,12 +15,12 @@ import {
 import { compareTarget } from '@goodvibes/engine/platform/platform/utils/target-ref';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
-import { commandRefusal, describeTargetChanges } from './command-confirmation.js';
+import { commandRefusal, describeTargetChanges, refuseModelWriteOutsideWorkingDirectory } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, CommandDescription, InputDescription } from './command-actions/types.js';
-import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
+import { REPLACE_FILE_INPUT, doAction, listInput, readAction, textInput } from './described-command-kit.js';
 
 export interface ServicesCommandContext extends CommandActionContext {
   readonly openModal?: ((name: string) => void) | undefined;
@@ -63,6 +62,36 @@ function servicesFileProblems(parsed: unknown): string[] {
     else if (typeof service.tokenKey !== 'string') problems.push(`"${name}" has no tokenKey`);
   }
   return problems;
+}
+
+/** The fields of an imported entry the import question shows; servicesFileProblems has checked authType and tokenKey. */
+interface ImportedService {
+  readonly authType: string;
+  readonly tokenKey: string;
+  readonly baseUrl?: unknown;
+}
+
+function hostOf(baseUrl: unknown): string {
+  if (typeof baseUrl !== 'string' || !baseUrl) return '(no address)';
+  try { return new URL(baseUrl).host || baseUrl; } catch { return baseUrl; }
+}
+
+/**
+ * What an import changes, as the owner is asked about it: every service that is
+ * new, or whose address, sign-in type or key differs, as `name: key -> host`,
+ * then the services no longer listed.
+ */
+function importChangeLines(current: Readonly<Record<string, { readonly authType: string; readonly tokenKey: string; readonly baseUrl?: string | undefined }>>, incoming: Readonly<Record<string, ImportedService>>): string[] {
+  const changed = Object.entries(incoming).filter(([name, next]) => {
+    const was = current[name];
+    return !was || was.authType !== next.authType || was.tokenKey !== next.tokenKey || (was.baseUrl ?? '') !== (typeof next.baseUrl === 'string' ? next.baseUrl : '');
+  }).map(([name, next]) => `  ${name}: ${next.tokenKey} -> ${hostOf(next.baseUrl)} (${next.authType}${current[name] ? ', changed' : ', new'})`);
+  const removed = Object.keys(current).filter((name) => !(name in incoming));
+  return [
+    changed.length > 0 ? 'New or changed services (the key each sends -> where):' : 'No service is new or changed.',
+    ...changed,
+    `No longer listed: ${removed.join(', ') || 'none'}`,
+  ];
 }
 
 const SERVICES = defineList<ServicesCommandContext>({
@@ -239,22 +268,26 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
       },
     },
     doAction<ServicesCommandContext>({
-      id: 'save', label: 'Save your services list to a file', word: 'export', inputs: [FILE('Where to write it, such as services.json')],
+      id: 'save', label: 'Save your services list to a file', word: 'export', inputs: [FILE('Where to write it, such as services.json'), REPLACE_FILE_INPUT],
       sentence: 'Your services list (names, addresses and the names of their keys, never the keys) is written to {path}.',
       operator: { terminalOnly: TERMINAL_ONLY },
       example: { path: 'services.json' },
       async run(values, ctx) {
         const all = readable(ctx).getAll();
-        const target = host().requireShellPaths(ctx).resolveWorkspacePath(values.path!);
-        mkdirSync(dirname(target), { recursive: true });
-        writeFileSync(target, `${JSON.stringify(all, null, 2)}\n`, 'utf-8');
+        const paths = host().requireShellPaths(ctx);
+        const target = paths.resolveWorkspacePath(values.path!);
+        refuseModelWriteOutsideWorkingDirectory(ctx, paths.workingDirectory, target);
+        if (existsSync(target) && values.replace !== 'yes') throw commandRefusal(`${target} already exists; nothing was written.`, `Write over it: /services export ${values.path} --replace`);
+        atomicWriteFileSync(target, `${JSON.stringify(all, null, 2)}\n`, { mkdirp: true });
         return `Wrote ${Object.keys(all).length} service${Object.keys(all).length === 1 ? '' : 's'} to ${target}.`;
       },
     }),
     {
       id: 'replace', label: 'Replace your services list from a file', word: 'import', inputs: [FILE('A services list, such as one /services export wrote')],
-      sentence: 'Your services list is replaced by the one in {path}, until you change it; the old one is kept beside it as a .bak file.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
+      sentence: 'Your services list is replaced by the one in {path}, until you change it; the old one is kept beside it as a .bak file; each service names which stored key it sends and to which host, so this loosens a protection and you are asked first with every new or changed one.', done: '',
+      // It asks its own question, naming each new or changed service's key and host.
+      touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true,
+      ownerOnly: { reason: 'the list names which of your stored keys each service sends and to which host', instead: 'Ask the owner to run /services import <file>.' },
       operator: { terminalOnly: TERMINAL_ONLY },
       example: { path: 'services.json' },
       async run(values, ctx) {
@@ -268,8 +301,21 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
         }
         const problems = servicesFileProblems(parsed);
         if (problems.length > 0) throw commandRefusal(`${source} is not a services list (${problems.slice(0, 3).join('; ')}). Nothing was changed.`);
-        const before = Object.keys(registry.unreadableReason?.() ? {} : registry.getAll());
-        const incoming = Object.keys(parsed as Record<string, unknown>);
+        const current = registry.unreadableReason?.() ? {} : registry.getAll();
+        const before = Object.keys(current);
+        const incomingServices = parsed as Record<string, ImportedService>;
+        const incoming = Object.keys(incomingServices);
+        const confirm = ctx.confirm;
+        const changeLines = importChangeLines(current, incomingServices);
+        if (!confirm || ctx.invokedByModel === true) {
+          throw commandRefusal(`Your services list was not replaced: it is replaced only where you can be asked with what it changes.\n${changeLines.join('\n')}`, 'Type /services import in the terminal app.', 'CONFIRMATION_REQUIRED');
+        }
+        const approved = await confirm({
+          title: `Replace your services list with the one in ${source}?`,
+          body: `${changeLines.join('\n')}\nEach service sends the stored key it names to its host. This loosens a protection.`,
+          confirmLabel: 'Replace it', cancelLabel: 'Back', tone: 'danger',
+        });
+        if (!approved) throw commandRefusal('Not confirmed: nothing was changed.', undefined, 'CANCELLED');
         const target = registry.userServicesFilePath;
         let backup: string | undefined;
         if (existsSync(target)) {

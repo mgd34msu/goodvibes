@@ -16,9 +16,12 @@
  *
  * ── The data, and how it stays current ────────────────────────────────────
  *
- * This is a BUNDLED SNAPSHOT of the ICANN section of Mozilla's Public Suffix
- * List, reduced to the rules that matter for the comparison this module
- * performs: the multi-label suffixes. A single-label suffix (`com`, `dev`,
+ * This is a BUNDLED SNAPSHOT of both sections of Mozilla's Public Suffix
+ * List: ICANN (suffixes delegated by registries) and PRIVATE (hosts that give
+ * each customer its own name, `<tenant>.weebly.com`, `<app>.onrender.com`, so
+ * two tenants under one are different registrants). It is reduced to the rules
+ * that matter for the comparison this module performs: the multi-label
+ * suffixes, wildcards and exceptions. A single-label suffix (`com`, `dev`,
  * `app`, any new gTLD) needs no rule, the fallback treats one label as the
  * suffix, which is correct for all of them.
  *
@@ -38,19 +41,30 @@ import {
   PUBLIC_SUFFIX_MULTI_LABEL,
   PUBLIC_SUFFIX_WILDCARD_PARENTS,
   PUBLIC_SUFFIX_EXCEPTIONS,
+  PUBLIC_SUFFIX_PRIVATE_MULTI_LABEL,
+  PUBLIC_SUFFIX_PRIVATE_WILDCARD_PARENTS,
+  PUBLIC_SUFFIX_PRIVATE_EXCEPTIONS,
 } from './generated/public-suffix-data.js';
 
 /**
- * The bundled tables, generated from upstream.
- *
- * The first version of this file carried a HAND-CURATED 174 suffixes out of
- * upstream's 5,484. That left 5,332 multi-label suffixes under which two
- * different registrants reduced to the same registrable domain, a link check
- * would have accepted a stranger's domain as the authorized one. The drift
- * check caught it on its first run. Curation by hand is how that happens, so
- * the data is generated now and the tables below are not edited directly.
+ * The bundled tables, generated from upstream, one set per section and rule
+ * kind. Lookups read both sections together; the drift check compares each
+ * section on its own. The tables are generated and never edited directly: a
+ * hand-kept subset leaves every suffix it omits as one under which two
+ * different registrants reduce to the same registrable domain.
  */
-const MULTI_LABEL_SUFFIXES: ReadonlySet<string> = new Set(PUBLIC_SUFFIX_MULTI_LABEL);
+const BUNDLED_RULES: BundledPublicSuffixSnapshot = {
+  icann: {
+    multiLabel: new Set(PUBLIC_SUFFIX_MULTI_LABEL),
+    wildcardParents: new Set(PUBLIC_SUFFIX_WILDCARD_PARENTS),
+    exceptions: new Set(PUBLIC_SUFFIX_EXCEPTIONS),
+  },
+  private: {
+    multiLabel: new Set(PUBLIC_SUFFIX_PRIVATE_MULTI_LABEL),
+    wildcardParents: new Set(PUBLIC_SUFFIX_PRIVATE_WILDCARD_PARENTS),
+    exceptions: new Set(PUBLIC_SUFFIX_PRIVATE_EXCEPTIONS),
+  },
+};
 
 const NON_ASCII = /[^\x00-\x7f]/;
 
@@ -90,14 +104,19 @@ function withAsciiForms(entries: Iterable<string>): ReadonlySet<string> {
   return set;
 }
 
-const MULTI_LABEL_LOOKUP: ReadonlySet<string> = withAsciiForms(PUBLIC_SUFFIX_MULTI_LABEL);
+const MULTI_LABEL_LOOKUP: ReadonlySet<string> = withAsciiForms([
+  ...BUNDLED_RULES.icann.multiLabel,
+  ...BUNDLED_RULES.private.multiLabel,
+]);
 
 /**
  * `*.parent` rules: every label directly under one of these is itself a
  * suffix, so two instances under it are different registrants.
  */
-const WILDCARD_SUFFIX_PARENTS: readonly string[] = PUBLIC_SUFFIX_WILDCARD_PARENTS;
-const WILDCARD_PARENT_SET: ReadonlySet<string> = withAsciiForms(WILDCARD_SUFFIX_PARENTS);
+const WILDCARD_PARENT_SET: ReadonlySet<string> = withAsciiForms([
+  ...BUNDLED_RULES.icann.wildcardParents,
+  ...BUNDLED_RULES.private.wildcardParents,
+]);
 
 /**
  * `!exception` rules: the exception itself is registrable despite matching a
@@ -106,22 +125,33 @@ const WILDCARD_PARENT_SET: ReadonlySet<string> = withAsciiForms(WILDCARD_SUFFIX_
  * Checked before every other rule, which is the order the PSL algorithm
  * requires, an exception that lost to its own wildcard would do nothing.
  */
-const SUFFIX_EXCEPTIONS: ReadonlySet<string> = withAsciiForms(PUBLIC_SUFFIX_EXCEPTIONS);
+const SUFFIX_EXCEPTIONS: ReadonlySet<string> = withAsciiForms([
+  ...BUNDLED_RULES.icann.exceptions,
+  ...BUNDLED_RULES.private.exceptions,
+]);
+
+/** One section's bundled rules. */
+export interface BundledPublicSuffixRules {
+  readonly multiLabel: ReadonlySet<string>;
+  readonly wildcardParents: ReadonlySet<string>;
+  readonly exceptions: ReadonlySet<string>;
+}
+
+/** The bundled rules of both sections of the list. */
+export interface BundledPublicSuffixSnapshot {
+  readonly icann: BundledPublicSuffixRules;
+  readonly private: BundledPublicSuffixRules;
+}
 
 /**
- * The bundled snapshot, for the drift check.
+ * The bundled snapshot by section, for the drift check.
  *
  * Exported so `scripts/check-public-suffix-drift.ts` compares against the data
  * this module actually uses, a drift check holding its own copy of what it is
  * checking would pass forever.
  */
-export function bundledMultiLabelSuffixes(): ReadonlySet<string> {
-  return MULTI_LABEL_SUFFIXES;
-}
-
-/** The wildcard-parent rules in the snapshot. See the header. */
-export function bundledWildcardSuffixParents(): readonly string[] {
-  return WILDCARD_SUFFIX_PARENTS;
+export function bundledPublicSuffixRules(): BundledPublicSuffixSnapshot {
+  return BUNDLED_RULES;
 }
 
 /** True when `host` has no registrant: it is itself a public suffix, a single label or malformed. */

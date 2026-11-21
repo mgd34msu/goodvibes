@@ -6,7 +6,7 @@ import { createProtectedInboxMapper } from '../protected-preview.js';
 import type { AdapterContext, InboundProviderAdapter, ProviderPollOptions, ProviderPollResult } from '../provider-adapter.js';
 import { POLL_CADENCE_MS } from '../provider-adapter.js';
 import type { OwnedInboxReadLease } from '../registration.js';
-import { createSlackInboxAdapter, type SlackInboxHttp } from './slack.js';
+import { createSlackInboxAdapter, SLACK_TOKEN_PATTERN, SLACK_TOKEN_REFUSAL, type SlackInboxHttp } from './slack.js';
 import { describeInboxHttpFailure } from './inbox-http.js';
 import { createSlackInboxHttpOwner } from './slack-http.js';
 import { resolveAccountInboxIdentity, type AccountInboxIdentity } from './account-identity.js';
@@ -77,7 +77,7 @@ function unavailable(configured?: boolean, error = 'The Slack inbox settings, cr
 }
 const OTHER_ACCOUNT = 'The token in surfaces.slack.botToken belongs to a different Slack account or workspace than this inbox is set up for; replace the token or update surfaces.slack.workspaceId and surfaces.slack.inboxUserId';
 function usableToken(token: string | null): token is string {
-  return typeof token === 'string' && (token.startsWith('xoxb-') || token.startsWith('xoxp-'));
+  return typeof token === 'string' && SLACK_TOKEN_PATTERN.test(token);
 }
 
 /** Explicit real provider owner; nothing polls, reads credentials or registers at construction. */
@@ -207,7 +207,7 @@ export async function createSlackInboxOwner(
       try {
         return await own(async () => {
           const token = await readCredential();
-          if (!usableToken(token)) { configured = false; invalidateIdentity(); delegate.forget(); return unavailable(false, 'surfaces.slack.botToken is not set to a Slack bot (xoxb-) or user (xoxp-) token'); }
+          if (!usableToken(token)) { configured = false; invalidateIdentity(); delegate.forget(); return unavailable(false, token ? SLACK_TOKEN_REFUSAL : 'surfaces.slack.botToken is not set; add a Slack bot or user token to read this inbox'); }
           configured = true;
           if (verifiedCredential !== token) { if (verifiedCredential) invalidateIdentity(); delegate.forget(); }
           pollToken = token; pollVerified = undefined;

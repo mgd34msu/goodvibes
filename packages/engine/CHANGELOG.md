@@ -1,6 +1,6 @@
 # Changelog
 
-## [3.4.0] - 2026-11-21
+## [3.4.0] - 2026-11-20
 
 The full write-up is in
 [docs/releases/3.4.0.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.0/docs/releases/3.4.0.md).
@@ -60,6 +60,8 @@ The full write-up is in
 - `/template save --everywhere`; `Template replaced` when it overwrote one.
 - WebSocket event frames carry `id`, and a socket opened with `?lastEventId=`
   is replayed from it.
+- `/exit` is accepted in both terminal programs and does what `/quit` does (it
+  is not listed).
 
 ### Changed
 
@@ -117,6 +119,12 @@ The full write-up is in
 - A send or a write whose answer was lost is not repeated: channel replies,
   notifications, Google Calendar creates, `/schedule add`, `/mail send`, keyed
   web UI writes, `contracts.dispatch` and relayed approval actions.
+- A chat reply or a notification that was rate limited (`429`) is retried and
+  arrives once, waiting as long as the server's `Retry-After` asks on Slack and
+  ntfy. A send whose outcome is unknown (a timeout or reset after sending, a
+  `5xx`) is retried only where the receiver drops repeats (Discord bot posts,
+  webhooks); otherwise it is kept as a failed notification marked "may have
+  arrived", to resend by hand.
 - A run interrupted by a restart is not retried on its own, and a due run
   starts as soon as a slot frees.
 - Many failures that read as success now say what happened: unreadable files,

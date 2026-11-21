@@ -16777,7 +16777,7 @@
         "description",
         "name"
       ],
-      "text": "export interface AutocompleteCommand { readonly name: string; readonly description: string; readonly described?: CommandDescription<never> | undefined; } ;; via CommandDescription = export interface CommandDescription<Ctx> { readonly name: string; readonly title: string; readonly summary: string; readonly group: string; readonly report?: string | undefined; readonly leadingFlagsOnly?: boolean | undefined; readonly firstScreen?: boolean | undefined; readonly firstScreenRows?: readonly (string | FirstScreenGroup)[] | undefined; readonly actions: readonly ActionDescription<Ctx>[]; }"
+      "text": "export interface AutocompleteCommand { readonly name: string; readonly description: string; readonly aliases?: readonly string[] | undefined; readonly described?: CommandDescription<never> | undefined; } ;; via CommandDescription = export interface CommandDescription<Ctx> { readonly name: string; readonly title: string; readonly summary: string; readonly group: string; readonly report?: string | undefined; readonly leadingFlagsOnly?: boolean | undefined; readonly firstScreen?: boolean | undefined; readonly firstScreenRows?: readonly (string | FirstScreenGroup)[] | undefined; readonly actions: readonly ActionDescription<Ctx>[]; }"
     },
     {
       "name": "AutocompleteEngine",
@@ -20350,6 +20350,11 @@
       "name": "createTerminalCommandRegistry",
       "kind": "function",
       "text": "export declare function createTerminalCommandRegistry<Context extends { readonly invokedByModel?: boolean | undefined; }>(options?: { readonly commonNames?: ReadonlySet<string> | undefined; readonly afterCommand?: ((context: Context) => (() => Promise<void>) | undefined) | undefined; }): TerminalCommandRegistryFactory<Context>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ReadonlySet = interface ReadonlySet<T> { forEach(callbackfn: (value: T, value2: T, set: ReadonlySet<T>) => void, thisArg?: any): void; has(value: T): boolean; readonly size: number; }"
+    },
+    {
+      "name": "isAcceptedCommandWord",
+      "kind": "function",
+      "text": "export declare function isAcceptedCommandWord(word: string): boolean;"
     },
     {
       "name": "reportDaemonWriteRefusals",

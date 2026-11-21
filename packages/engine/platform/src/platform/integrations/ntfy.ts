@@ -10,6 +10,7 @@ import { instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { HttpStatusError } from '@goodvibes/engine/errors';
+import { parseRetryAfterMs } from '@goodvibes/engine/transport-http/http-core';
 import type { ConfigManager } from '../config/manager.js';
 import { surfaceConfigDefaults } from '../config/schema-domain-surfaces.js';
 
@@ -435,7 +436,11 @@ export class NtfyIntegration {
     }));
     if (!response.ok) {
       const body = await response.text().catch(() => '');
-      throw new HttpStatusError(`NtfyIntegration.publish failed (${response.status}): ${body}`, { status: response.status });
+      // A 429 carries the wait the server names, which the caller's retry honours.
+      const retryAfterMs = parseRetryAfterMs(response.headers);
+      throw new HttpStatusError(`NtfyIntegration.publish failed (${response.status}): ${body}`, {
+        status: response.status, ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      });
     }
     await retireDeliveryResponse(response);
   }

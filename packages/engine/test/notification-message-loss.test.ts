@@ -2,6 +2,8 @@
 // Red when: Dead letters live in memory only or a resend does not remove its row, a Socket Mode envelope is acknowledged before it was taken, ntfy suppresses a repeat by its text, or the ntfy subscription reconnects from now instead of from the last message it read.
 // Proves: A notification that could not be sent is lost when a resend of it fails again.
 // Red when: A resend that fails again drops the dead letter (or duplicates it), a resend waiting to retry leaves the file, or a stop drops what waited to retry.
+// Proves: A notification is posted twice to a channel that cannot drop a repeat when its send may have arrived.
+// Red when: The delivery queue retries a send whose outcome is unknown (a reset after the request left) on a Slack webhook instead of keeping it as a failed notification.
 /**
  * Notifications and inbound chat messages are not lost: a failed notification
  * outlives a restart and can be resent, a Slack Socket Mode envelope is only
@@ -75,8 +77,8 @@ describe('failed notifications', () => {
     await expect(first.notify('AGENT_COMPLETED', { summary: 'the report is done' })).rejects.toThrow();
     await first.close();
 
-    // Slack is down for a while: the resend and a new notification each fail once and wait to retry.
-    const unavailable = { postWebhook: async () => { throw new HttpStatusError('HTTP 503: service unavailable', { status: 503 }); } } as unknown as SlackIntegration;
+    // Slack rate limits for a while (nothing was posted): the resend and a new notification each fail once and wait to retry.
+    const unavailable = { postWebhook: async () => { throw new HttpStatusError('HTTP 429: rate limited', { status: 429 }); } } as unknown as SlackIntegration;
     const second = new Notifier({ slack: unavailable });
     second.persistDeadLetters(file);
     const [resent] = second.listDeadLetters();
@@ -100,6 +102,20 @@ describe('failed notifications', () => {
     } finally {
       await afterStop.close();
     }
+  });
+
+  test('a notification whose send may have arrived on a channel that cannot drop a repeat is kept to resend by hand, not sent again', async () => {
+    const posted: string[] = [];
+    // Slack's incoming webhook took the post, then the connection was reset before its answer.
+    const cutOff = { postWebhook: async (text: string) => { posted.push(text); throw Object.assign(new Error('socket hang up'), { code: 'ECONNRESET' }); } } as unknown as SlackIntegration;
+    const notifier = new Notifier({ slack: cutOff });
+    try {
+      await expect(notifier.notify('AGENT_COMPLETED', { summary: 'done' })).rejects.toThrow();
+      expect(posted).toHaveLength(1);
+      expect(notifier.listDeadLetters().map((entry) => entry.finalError)).toEqual([
+        'The notification may have arrived: the send failed after the request left, and slack cannot drop a repeat, so it was not sent again. Check the channel before resending it from the failed list.',
+      ]);
+    } finally { await notifier.close(); }
   });
 
   test('a replay that fails again leaves one row, not two', async () => {

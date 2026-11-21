@@ -355,7 +355,8 @@ function requestHostname(input: string | URL | Request): string | undefined {
 
 const MAX_RETRY_AFTER_MS = 10 * 60 * 1000; // 10 minutes
 
-function parseRetryAfterMs(headers: Headers): number | undefined {
+/** The wait a response's Retry-After header names (seconds or an HTTP date), capped at ten minutes; undefined when it names none. */
+export function parseRetryAfterMs(headers: Headers): number | undefined {
   const retryAfter = headers.get('retry-after');
   if (!retryAfter) return undefined;
   // Numeric seconds, cap to prevent hostile/buggy huge values.

@@ -53,6 +53,8 @@ interface ChannelTransport {
    * a repeat whose first post arrived but whose answer was lost.
    */
   readonly send: (text: string, id: string) => Promise<void>;
+  /** The destination drops a repeat by that id (the Discord bot's nonce); an incoming webhook or the Slack bot does not. */
+  readonly repeatSafe: boolean;
   /** Where `send` posts. A queued retry or a resend goes only to this destination. */
   readonly destination: NotificationDestination;
 }
@@ -192,11 +194,11 @@ function transportFor(channel: NotifierChannel, integration: SlackIntegration | 
   const destination = destinationOf(channel, target, webhookUrl);
   if (target) {
     if (integration instanceof DiscordIntegration) {
-      return { channel, destination, send: (text, id) => integration.postMessage(target, text, undefined, {}, `notification:${id}`) };
+      return { channel, destination, repeatSafe: true, send: (text, id) => integration.postMessage(target, text, undefined, {}, `notification:${id}`) };
     }
-    return { channel, destination, send: (text) => integration.postMessage(target, text) };
+    return { channel, destination, repeatSafe: false, send: (text) => integration.postMessage(target, text) };
   }
-  return { channel, destination, send: (text) => integration.postWebhook(text) };
+  return { channel, destination, repeatSafe: false, send: (text) => integration.postWebhook(text) };
 }
 
 // ---------------------------------------------------------------------------
@@ -405,7 +407,7 @@ export class Notifier implements NotificationDeadLetterSource {
         // ends it in the failed list with the reason, never at the new place.
         const outcome = await this._queue.enqueue(transport.channel, event, envelope,
           (attempt) => this.sendToDestination(envelope, transport.channel, transport.destination, attempt.id),
-          { target: encodeDestination(transport.destination) });
+          { target: encodeDestination(transport.destination), repeatSafe: transport.repeatSafe });
         if (outcome === 'dead_letter') {
           failures.push(new DeliveryError(`The ${transport.channel} notification could not be delivered and was moved to the failed-notification list; resend it with /notify resend or notifications.deadLetters.replay.`, 'terminal'));
         }
@@ -487,7 +489,9 @@ export class Notifier implements NotificationDeadLetterSource {
         const now = current.get(dlqEntry.channel);
         return now ? encodeDestination(now.destination) : dlqEntry.target;
       }
-      : undefined);
+      : undefined,
+    // A resend posts only through the channel's current transport (sendToDestination), so its repeat safety is that transport's.
+    (dlqEntry) => current.get(dlqEntry.channel)?.repeatSafe === true);
     results.push(...refused);
     const found = new Set(results.map((result) => result.id));
     for (const id of ids ?? []) {

@@ -1,7 +1,7 @@
 // Proves: An agent's answer to a channel message is sent twice, or not at all, when the daemon restarts between storing it and sending it.
 // Red when: A repeated report after a restart sends the answer again, or an answer stored but not sent when the daemon stopped is never sent or is sent on every start.
-// Proves: One rate limit on the send loses the answer on the channel, or a retry repeats the parts of a long answer that already arrived.
-// Red when: dispatchFinalWithRetry gives up on a retryable failure, or deliverFinalExclusive resends delivered parts.
+// Proves: One rate limit on the send loses the answer on the channel, a send cut off after it arrived is posted twice, or a retry repeats the parts of a long answer that already arrived.
+// Red when: channelSendKnowledge counts a 429 as a possibly-arrived send, or a reset after arrival as safe to repeat on ntfy, or deliverFinalExclusive resends delivered parts.
 /**
  * An agent's answer to a channel message reaches the channel once, also when
  * the daemon restarts after sending it and the surface that ran the agent
@@ -12,13 +12,17 @@
  * Real pieces: the session broker and route bindings over their files, the
  * settings manager, secret store and service registry, the reply pipeline,
  * the daemon's surface-delivery helper and its ntfy sender. The agent
- * runtime, where the model begins, reports no running agent. The ntfy channel plugin is wired as the built-in one is
- * (its reply goes to the helper's ntfy sender); the ntfy server is a loopback
- * server that records every message it receives. A restart is a second set of
- * these objects over the same files, with the process's ntfy repeat memory
- * cleared as a new process starts without it. A rate limit is the ntfy server
- * refusing a request with 429; the pipeline's wait before a retry resolves at
- * once.
+ * runtime, where the model begins, reports no running agent. For the restart
+ * cases the ntfy plugin's reply goes to the helper's ntfy sender, where a stop
+ * inside the send can be stood in; for the rate-limit case it is wired as the
+ * daemon wires the built-in one, rendered through the channel delivery router
+ * to its ntfy strategy. The ntfy server is a loopback server that records
+ * every message it receives. A restart is a second set of these objects over
+ * the same files, with the process's ntfy repeat memory cleared as a new
+ * process starts without it. A rate limit is the ntfy server refusing a
+ * request with 429; a send cut off after it arrived is the server recording
+ * the message and resetting the connection; the pipeline's wait before a
+ * retry (the clock) resolves at once.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -41,6 +45,9 @@ import type { ConfigKey } from '../platform/src/platform/config/schema.ts';
 import { ntfyOutboundDedup } from '../platform/src/platform/integrations/ntfy.ts';
 import type { PendingSurfaceReply } from '../platform/src/platform/daemon/types.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
+import { ChannelDeliveryRouter } from '../platform/src/platform/channels/delivery-router.ts';
+import { ArtifactStore } from '../platform/src/platform/artifacts/index.ts';
+import { renderBuiltinChannelEvent } from '../platform/src/platform/channels/builtin/rendering.ts';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 afterEach(async () => {
@@ -48,8 +55,15 @@ afterEach(async () => {
   ntfyOutboundDedup.reset();
 });
 
-/** The ntfy server: every message it accepted, by topic. `refuse` answers 429 to the requests it picks, which are not received. */
-async function ntfyServer(refuse: (request: number, body: string) => boolean = () => false): Promise<{ readonly url: string; readonly received: Array<{ topic: string; body: string }> }> {
+/**
+ * The ntfy server: every message it accepted, by topic. `refuse` answers 429 to
+ * the requests it picks, which are not received. `cutOff` picks topics whose
+ * message is received and whose connection is then reset with no answer.
+ */
+async function ntfyServer(
+  refuse: (request: number, body: string) => boolean = () => false,
+  cutOff: (topic: string) => boolean = () => false,
+): Promise<{ readonly url: string; readonly received: Array<{ topic: string; body: string }> }> {
   const received: Array<{ topic: string; body: string }> = [];
   let requests = 0;
   const server: Server = createServer((req, res) => {
@@ -57,7 +71,9 @@ async function ntfyServer(refuse: (request: number, body: string) => boolean = (
     req.on('data', (chunk) => { body += String(chunk); });
     req.on('end', () => {
       if (refuse(++requests, body)) { res.writeHead(429, { 'retry-after': '1' }).end('{"error":"limit reached"}'); return; }
-      received.push({ topic: decodeURIComponent((req.url ?? '/').slice(1)), body });
+      const topic = decodeURIComponent((req.url ?? '/').slice(1));
+      received.push({ topic, body });
+      if (cutOff(topic)) { req.socket.destroy(); return; }
       res.writeHead(200).end('{}');
     });
   });
@@ -74,7 +90,7 @@ async function ntfyServer(refuse: (request: number, body: string) => boolean = (
  * stops inside its first channel send: the send never reaches the server and
  * never returns, as when the daemon is killed there; `dies` is called on arrival.
  */
-async function daemon(root: string, options: { readonly dies?: () => void } = {}) {
+async function daemon(root: string, options: { readonly dies?: () => void; readonly viaRouter?: boolean } = {}) {
   // The daemon's settings and secret store over the home's files; no ntfy credential is stored.
   const { configManager, secretsManager } = await scratchSettings({}, root);
   const serviceRegistry = new ServiceRegistry({ user: join(root, 'home', 'services.json'), project: join(root, 'project', 'services.json') },
@@ -96,7 +112,21 @@ async function daemon(root: string, options: { readonly dies?: () => void } = {}
     // As the facade decides it, with no feature-flag manager.
     surfaceDeliveryEnabled: (surface: Parameters<typeof isSurfaceDeliveryEnabled>[1]) => isSurfaceFeatureGateEnabled(null, surface) && isSurfaceDeliveryEnabled(configManager, surface),
   } as unknown as ConstructorParameters<typeof DaemonSurfaceDeliveryHelper>[0]);
-  // As the built-in ntfy plugin is registered: its reply goes to the helper's ntfy sender.
+  if (options.viaRouter) {
+    // As the built-in ntfy plugin is registered in the daemon: its reply is rendered
+    // through the channel delivery router to the ntfy strategy.
+    const deliveryRouter = new ChannelDeliveryRouter({ configManager, serviceRegistry, secretsManager, routeBindings, artifactStore: new ArtifactStore({ rootDir: join(root, 'artifacts') }) });
+    const rendering = { deps: { deliveryRouter, routeBindings } } as unknown as Parameters<typeof renderBuiltinChannelEvent>[0];
+    channelPlugins.register({
+      id: 'surface:ntfy', surface: 'ntfy', displayName: 'ntfy', capabilities: ['egress'],
+      renderEvent: (request) => renderBuiltinChannelEvent(rendering, 'ntfy', request),
+    } as Parameters<ChannelPluginRegistry['register']>[0]);
+    return {
+      configManager, routeBindings, sessionBroker, helper,
+      async stop() { channelReplyPipeline.dispose(); await sessionBroker.stop(); },
+    };
+  }
+  // The reply through the helper's ntfy sender, where a stop inside the send can be stood in.
   channelPlugins.register({
     id: 'surface:ntfy', surface: 'ntfy', displayName: 'ntfy', capabilities: ['egress'],
     deliverReply: (pending, message) => {
@@ -231,7 +261,7 @@ test('an answer a closed conversation still owed when 3.3.4 stopped is sent once
   expect(ntfy.received.filter((entry) => entry.topic === 'topic-upgrade' && entry.body.startsWith('the upgrade answer'))).toHaveLength(1);
 });
 
-test('an answer refused once by a rate limit still arrives once, and a retried part of a long answer does not repeat the part already sent', async () => {
+test('an answer refused once by a rate limit still arrives once, one cut off after it arrived is not sent again, and a retried part of a long answer does not repeat the part already sent', async () => {
   const root = mkdtempSync(join(tmpdir(), 'gv-delivery-retry-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
   const first = 'A'.repeat(1_200);
@@ -242,14 +272,21 @@ test('an answer refused once by a rate limit still arrives once, and a retried p
     if (request === 1) return true;
     if (body.includes('BBBB') && !secondPartRefused) { secondPartRefused = true; return true; }
     return false;
-  });
-  const d = await daemon(root);
+  }, (topic) => topic === 'topic-cut');
+  // The reply path the daemon takes: the built-in plugin's rendering through the delivery router.
+  const d = await daemon(root, { viaRouter: true });
   cleanups.push(() => d.stop());
   d.configManager.setMany([{ key: 'surfaces.ntfy.enabled' as ConfigKey, value: true }, { key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfy.url }], localOwnerActor());
 
   const short = await conversation(d, 'topic-short', 'agent-short');
   await d.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-short', sessionId: short, body: 'a short answer' });
   expect(ntfy.received.filter((entry) => entry.topic === 'topic-short').map((entry) => entry.body)).toEqual(['a short answer']);
+
+  // ntfy cannot drop a repeat: an answer that arrived and whose connection was then
+  // reset may have been posted, so it is reported undelivered and not sent again.
+  const cut = await conversation(d, 'topic-cut', 'agent-cut');
+  await d.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-cut', sessionId: cut, body: 'the cut-off answer' }).catch(() => undefined);
+  expect(ntfy.received.filter((entry) => entry.topic === 'topic-cut').map((entry) => entry.body)).toEqual(['the cut-off answer']);
 
   const long = await conversation(d, 'topic-long', 'agent-long');
   await d.helper.completeSurfaceReplyFromSurface({ agentId: 'agent-long', sessionId: long, body: `${first}\n\n${second}` });

@@ -6,6 +6,7 @@ import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import { fetchWithTimeout } from '../utils/fetch-with-timeout.js';
 import { HttpStatusError } from '@goodvibes/engine/errors';
+import { parseRetryAfterMs } from '@goodvibes/engine/transport-http/http-core';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -454,11 +455,11 @@ export class SlackIntegration {
     }));
     if (!res.ok) {
       const err = await res.text();
-      if (res.status === 429) {
-        // Slack posts nothing for a rate-limited call: an answered refusal, safe to send again.
-        throw new DeliveryError(`SlackIntegration.postMessage rate limited (429): ${err}`, 'retryable', 429);
-      }
-      throw new HttpStatusError(`SlackIntegration.postMessage failed (${res.status}): ${err}`, { status: res.status });
+      // A 429 carries the wait Slack names, which the caller's retry honours.
+      const retryAfterMs = parseRetryAfterMs(res.headers);
+      throw new HttpStatusError(`SlackIntegration.postMessage failed (${res.status}): ${err}`, {
+        status: res.status, ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      });
     }
     const data = (await res.json()) as { ok: boolean; error?: string };
     if (data?.ok !== true) {
@@ -466,7 +467,8 @@ export class SlackIntegration {
       // Slack answered and posted nothing; the answer's status says so to the
       // channel router, which may then send it again. Slack names the failure
       // by code; only these can clear on another attempt.
-      throw new DeliveryError(`SlackIntegration.postMessage API error: ${code}`, SLACK_TRANSIENT_API_ERRORS.has(code) ? 'retryable' : 'terminal', res.status);
+      throw new DeliveryError(`SlackIntegration.postMessage API error: ${code}`, SLACK_TRANSIENT_API_ERRORS.has(code) ? 'retryable' : 'terminal', res.status,
+        { retryAfterMs: parseRetryAfterMs(res.headers) });
     }
   }
 
@@ -492,7 +494,10 @@ export class SlackIntegration {
     }));
     if (!res.ok) {
       const err = await res.text();
-      throw new HttpStatusError(`SlackIntegration.postWebhook failed (${res.status}): ${err}`, { status: res.status });
+      const retryAfterMs = parseRetryAfterMs(res.headers);
+      throw new HttpStatusError(`SlackIntegration.postWebhook failed (${res.status}): ${err}`, {
+        status: res.status, ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+      });
     }
     await retireDeliveryResponse(res);
   }

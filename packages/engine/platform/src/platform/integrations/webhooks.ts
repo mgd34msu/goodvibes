@@ -198,7 +198,8 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
       this.queue.enqueue('webhook', event, envelope, async (attempt) => {
         try { await this.postOne(url, envelope, {}, attempt.id); }
         catch (error) { lastErrors.set(url, error); throw error; }
-      }, { target: url }));
+        // Every attempt carries the entry's identity as Idempotency-Key, so the receiver drops a repeat.
+      }, { target: url, repeatSafe: true }));
     const failure = (url: string, reason: unknown) => {
       const status = deliveryHttpStatus(reason);
       return { url, ok: false, error: describeWebhookError(reason), ...(status === undefined ? {} : { status }) };
@@ -250,7 +251,7 @@ export class WebhookNotifier implements NotificationDeadLetterSource {
         throw new DeliveryError('The webhook this notification was for is no longer configured.', 'terminal');
       }
       await this.postOne(target, this.queuedEnvelope(entry.payload), {}, entry.id);
-    }, ids));
+    }, ids, undefined, () => true));
     const found = new Set(results.map((result) => result.id));
     for (const id of ids ?? []) {
       if (!found.has(id)) results.push({ id, outcome: 'not-found' });

@@ -1,8 +1,11 @@
 import { deliveryHttpStatus, describeStructuralDeliveryError } from './delivery-diagnostics.js';
 import { logger } from '../utils/logger.js';
 import { randomInt, randomUUID } from 'node:crypto';
+import { fetchFailurePhase } from '../state/operation.js';
 import {
+  classifyFailure,
   GoodVibesError,
+  httpStatusOf,
   structuredTransience,
   type FailureClass,
   type FailureTransience,
@@ -59,6 +62,85 @@ export function deliveryTransience(error: unknown): FailureTransience {
     ?? { failureClass: 'retryable', basis: 'classic', detail: 'no status, code or error class; retried within the attempt budget' };
 }
 
+/**
+ * What is known about a failed send to a channel (a reply or a notification),
+ * decided here and nowhere else:
+ *
+ * - `not-delivered`: the far side did not take it; sending it again is safe on
+ *   every surface (the caller's retry, with any Retry-After it carries).
+ * - `not-accepted`: the far side read it and refused it; the same send fails
+ *   the same way, so it is final.
+ * - `unknown`: it may have been processed; sent again only on a surface that
+ *   drops a repeat, otherwise final as "may have arrived".
+ * - `own-check`: no transport fact at all (our own check before sending); left
+ *   to the caller's own rule.
+ *
+ * | What the send ended with | Group | Why |
+ * | --- | --- | --- |
+ * | 429 | not-delivered | Rate limited: the server says it did not take the request. |
+ * | 408 | not-delivered | The server timed out reading the request and did not process it. |
+ * | 425 | not-delivered | Too early: the server declined to process it. |
+ * | Answered refusal (DeliveryError with the answer's status, e.g. Slack `ok:false`) | not-delivered | The far side answered and posted nothing. |
+ * | Refused, unreachable or unresolved connection (`ECONNREFUSED`, `ENOTFOUND`, `EAI_AGAIN`, `EHOSTUNREACH`, `ENETUNREACH`, socket not opened) | not-delivered | No byte reached the far side. |
+ * | 400, 422 | not-accepted | The request is malformed or invalid; it will be refused again. |
+ * | 401, 403 | not-accepted | The credential or permission is refused; a repeat cannot pass until a person fixes it. |
+ * | 404, 410 | not-accepted | The conversation or endpoint does not exist. |
+ * | 413 | not-accepted | Too large; the same body is refused again. |
+ * | 409 and any other 4xx | not-accepted | The far side read the request and refused it. |
+ * | 500 and any other 5xx except the three below | unknown | The server failed while handling it; it may have posted. |
+ * | 502, 503, 504 | unknown | A gateway answered; the server behind it may have processed the request. |
+ * | Timeout or abort after the request left (`TimeoutError`, `AbortError`) | unknown | The request was sent; no answer came back. |
+ * | Reset or broken connection, or any other connection code (`ECONNRESET`, `EPIPE`, ...) | unknown | The request may have arrived before the connection broke. |
+ * | No status, code or error class | own-check | Our own refusal before anything was sent. |
+ */
+export type ChannelSendKnowledge = 'not-delivered' | 'not-accepted' | 'unknown' | 'own-check';
+
+const NOT_DELIVERED_STATUSES: ReadonlySet<number> = new Set([408, 425, 429]);
+
+export function channelSendKnowledge(error: unknown): ChannelSendKnowledge {
+  if (error instanceof DeliveryError && error.statusCode !== undefined) return 'not-delivered';
+  const status = httpStatusOf(error);
+  if (status !== undefined) {
+    if (NOT_DELIVERED_STATUSES.has(status)) return 'not-delivered';
+    if (status >= 400 && status < 500) return 'not-accepted';
+    if (status >= 500) return 'unknown';
+  }
+  if (classifyFailure(error) === undefined) return 'own-check';
+  return fetchFailurePhase(error) === 'before-send' ? 'not-delivered' : 'unknown';
+}
+
+/**
+ * The failure to act on after a failed send, by {@link channelSendKnowledge}:
+ * `not-accepted` becomes final; `unknown` where the destination cannot drop a
+ * repeat becomes a final failure saying it may have arrived; anything else is
+ * returned as it is, for the caller's retry.
+ */
+export function sendFailureAfterTable(error: unknown, context: {
+  /** The destination drops a repeat by an identity the send carries. */
+  readonly repeatSafe: boolean;
+  /** The destination, as a person reads it ("slack"). */
+  readonly where: string;
+  /** What was sent ("The message to slack"). */
+  readonly what: string;
+  /** The next step for a person. */
+  readonly next: string;
+}): unknown {
+  const knowledge = channelSendKnowledge(error);
+  if (knowledge === 'not-accepted') {
+    return classifyFailure(error)?.retryable === false
+      ? error
+      : new DeliveryError(`${context.where} refused it: ${error instanceof Error ? error.message : String(error)}`, 'terminal', undefined, { cause: error });
+  }
+  if (knowledge !== 'unknown' || context.repeatSafe) return error;
+  if (classifyFailure(error)?.retryable === false) return error;
+  return new DeliveryError(
+    `${context.what} may have arrived: the send failed after the request left, and ${context.where} cannot drop a repeat, so it was not sent again. ${context.next}`,
+    'terminal',
+    undefined,
+    { cause: error },
+  );
+}
+
 /** Classifies a delivery error as retryable or terminal (see {@link deliveryTransience}). */
 export async function classifyDeliveryError(error: unknown, _site?: string): Promise<DeliveryFailureClass> {
   return deliveryTransience(error).failureClass;
@@ -80,11 +162,13 @@ export class DeliveryError extends GoodVibesError {
     message: string,
     public readonly failureClass: DeliveryFailureClass,
     public readonly statusCode?: number,
-    options: { readonly cause?: unknown } = {},
+    /** `retryAfterMs`: the wait the far side named (its Retry-After), which a caller's retry honours. */
+    options: { readonly cause?: unknown; readonly retryAfterMs?: number | undefined } = {},
   ) {
     super(message, {
       code: 'DELIVERY_ERROR', category: 'internal', source: 'runtime', recoverable: failureClass === 'retryable',
       ...(options.cause !== undefined ? { cause: options.cause } : {}),
+      ...(options.retryAfterMs !== undefined ? { retryAfterMs: options.retryAfterMs } : {}),
     });
     this.name = 'DeliveryError';
   }
@@ -229,6 +313,8 @@ interface PendingEntry<TPayload> {
   createdAt: number;
   attempts: number;
   nextAttemptAt: number;
+  /** The destination drops a repeat by the attempt's id, so a send whose outcome is unknown may be retried. */
+  repeatSafe: boolean;
   deliver: (attempt: DeliveryAttempt) => Promise<void>;
 }
 
@@ -379,6 +465,10 @@ export class DeliveryQueue<TPayload = string> {
    * @param payload - Owned delivery payload; string by default for existing callers.
    * @param deliver - Async function that performs the actual delivery; it is
    *   told the entry's id, the same on every attempt.
+   * @param options.repeatSafe - The destination drops a repeat by that id (a
+   *   Discord nonce, an Idempotency-Key). Without it a send whose outcome is
+   *   unknown (see {@link channelSendKnowledge}) is not retried: it is kept as
+   *   a dead letter saying it may have arrived.
    * @returns The delivery outcome for the immediate attempt.
    */
   async enqueue(
@@ -386,7 +476,7 @@ export class DeliveryQueue<TPayload = string> {
     event: string,
     payload: TPayload,
     deliver: (attempt: DeliveryAttempt) => Promise<void>,
-    options: { readonly target?: string | undefined } = {},
+    options: { readonly target?: string | undefined; readonly repeatSafe?: boolean | undefined } = {},
   ): Promise<DeliveryOutcome> {
     return this._enqueue(channel, event, payload, deliver, options);
   }
@@ -396,7 +486,7 @@ export class DeliveryQueue<TPayload = string> {
     event: string,
     payload: TPayload,
     deliver: (attempt: DeliveryAttempt) => Promise<void>,
-    options: { readonly target?: string | undefined; readonly id?: string | undefined },
+    options: { readonly target?: string | undefined; readonly id?: string | undefined; readonly repeatSafe?: boolean | undefined },
   ): Promise<DeliveryOutcome> {
     this._assertOpen();
     const id = options.id ?? `${channel}:${event}:${Date.now()}:${randomUUID().slice(0, 8)}`;
@@ -409,6 +499,7 @@ export class DeliveryQueue<TPayload = string> {
       createdAt: Date.now(),
       attempts: 0,
       nextAttemptAt: 0,
+      repeatSafe: options.repeatSafe === true,
       deliver,
     };
     this._pending.set(id, entry);
@@ -461,14 +552,17 @@ export class DeliveryQueue<TPayload = string> {
     ids?: readonly string[],
     /** The destination the resent entry is for from now on; absent: the one it failed on. */
     retarget?: (entry: DeadLetterEntry<TPayload>) => string | undefined,
+    /** Whether the destination the entry is resent to drops a repeat by its id (see `enqueue`'s `repeatSafe`). */
+    repeatSafe?: (entry: DeadLetterEntry<TPayload>) => boolean,
   ): Promise<Array<{ id: string; outcome: DeliveryOutcome }>> {
-    return this._own(() => this._replay(deliver, ids, retarget));
+    return this._own(() => this._replay(deliver, ids, retarget, repeatSafe));
   }
 
   private async _replay(
     deliver: (entry: DeadLetterEntry<TPayload>) => Promise<void>,
     ids?: readonly string[],
     retarget?: (entry: DeadLetterEntry<TPayload>) => string | undefined,
+    repeatSafe?: (entry: DeadLetterEntry<TPayload>) => boolean,
   ): Promise<Array<{ id: string; outcome: DeliveryOutcome }>> {
     this._assertOpen();
     const wanted = ids === undefined ? undefined : new Set(ids);
@@ -490,7 +584,7 @@ export class DeliveryQueue<TPayload = string> {
           dlqEntry.event,
           dlqEntry.payload,
           () => deliver(dlqEntry),
-          { target: retarget ? retarget(dlqEntry) : dlqEntry.target, id: dlqEntry.id },
+          { target: retarget ? retarget(dlqEntry) : dlqEntry.target, id: dlqEntry.id, repeatSafe: repeatSafe?.(dlqEntry) === true },
         );
         results.push({ id: dlqEntry.id, outcome });
       } catch (error) {
@@ -669,9 +763,20 @@ export class DeliveryQueue<TPayload = string> {
       });
       return 'delivered';
     } catch (err: unknown) {
-      const errorMsg = this._describeError(err);
+      // The one send table decides first: refused for good is final, and an
+      // outcome that is unknown where the destination cannot drop a repeat is
+      // kept as a dead letter saying it may have arrived, never sent again.
+      const failure = sendFailureAfterTable(err, {
+        repeatSafe: entry.repeatSafe,
+        where: entry.channel,
+        what: 'The notification',
+        next: 'Check the channel before resending it from the failed list.',
+      });
+      const mayHaveArrived = failure !== err && channelSendKnowledge(err) === 'unknown';
+      // That wording is ours and carries nothing the far side said, so a structural queue keeps it too.
+      const errorMsg = mayHaveArrived && failure instanceof Error ? failure.message : this._describeError(err);
       const status = this._structuralDiagnostics ? deliveryHttpStatus(err) : undefined;
-      const decided = deliveryTransience(err);
+      const decided = deliveryTransience(failure);
       // Structural queues retain no free-form detail.
       const transience: FailureTransience = this._structuralDiagnostics ? { ...decided, detail: '' } : decided;
       const { failureClass } = transience;
@@ -681,8 +786,8 @@ export class DeliveryQueue<TPayload = string> {
         return this._moveToDlq(entry, errorMsg, transience, status);
       }
 
-      // Schedule retry
-      const delayMs = this._computeDelay(entry.attempts);
+      // Schedule retry, no sooner than the wait the far side named (Retry-After).
+      const delayMs = Math.max(this._computeDelay(entry.attempts), classifyFailure(err)?.retryAfterMs ?? 0);
       entry.nextAttemptAt = Date.now() + delayMs;
       this._retrying += 1;
       this._tally(entry.channel).retrying += 1;

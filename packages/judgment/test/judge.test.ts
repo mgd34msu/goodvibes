@@ -1,10 +1,11 @@
 // Proves: A decision a tool call or a person waits on never settles when the decision endpoint is silent.
-// Red when: judge() stops applying its deadline, so an unattended turn waits for ever with nobody told.
+// Red when: The transport stops ending an attempt at its per-attempt limit (judgment.timeoutMs), or judge() stops applying a caller's deadline, so an unattended turn waits for ever with nobody told.
 // Proves: A decision the model is unsure about is never acted on; the caller's fallback (ask) applies.
 // Red when: A 0.5 reading on a medium-stakes question settles to an answer instead of the fallback. No engine test covers an unsure reading; judge() is called from exec, edit, credential-header and hook decisions.
 import { describe, expect, test } from 'bun:test';
 import {
   createJudgeCache,
+  createSystemOnePort,
   defineBattery,
   DEFAULT_MODEL,
   judge,
@@ -53,5 +54,30 @@ describe('judge', () => {
     const pending = judge({ ...options(silent, 'git push'), deadlineMs: 60_000, signal: caller.signal });
     caller.abort();
     await expect(pending).rejects.toBeDefined();
+  });
+
+  test('a server that takes the request and never answers is ended by the per-attempt limit, and the decision takes the fallback', async () => {
+    // The clock is the stand-in: each attempt's limit expires when the silent server has the request.
+    const timers: (() => void)[] = [];
+    const caller = new AbortController();
+    const server = Bun.serve({
+      hostname: '127.0.0.1', port: 0, idleTimeout: 0,
+      fetch(request) {
+        // Control: with no per-attempt limit started, nothing else would end this wait, so the caller gives up and the case goes red.
+        queueMicrotask(() => { const expire = timers.shift(); if (expire) expire(); else caller.abort(); });
+        return new Promise<Response>((resolve) => request.signal.addEventListener('abort', () => resolve(new Response('', { status: 499 })), { once: true }));
+      },
+    });
+    try {
+      const port = createSystemOnePort({
+        signal: new AbortController().signal,
+        endpoint: { kind: 'local', baseURL: `http://127.0.0.1:${server.port}`, apiKey: '', authentication: 'none' },
+        model: DEFAULT_MODEL, timeoutMs: 30_000, retry: { backoffInitialMs: 1, backoffMaxMs: 1, backoffJitter: 0 },
+        attemptTimer: (_ms, expire) => { timers.push(expire); return () => {}; },
+      });
+      await expect(judge({ ...options(port, 'git push'), signal: caller.signal })).resolves.toMatchObject({ value: 'ask', source: 'fallback', why: 'unavailable' });
+    } finally {
+      server.stop(true);
+    }
   });
 });

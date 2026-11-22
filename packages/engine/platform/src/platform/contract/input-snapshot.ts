@@ -23,7 +23,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, type BigIntStats } from 'node:fs';
 import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
-import { tmpdir, uptime } from 'node:os';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { productWorktreePath } from '../git/product-worktree-marker.js';
 
@@ -311,26 +311,42 @@ export async function assertContractInputGitIdentity(snapshot: ContractInputSnap
     throw new Error('contract input Git directory was replaced');
 }
 
-/** Device numbers can change across boots (for example on Btrfs). Rebind only
- * that component after checking the owner and the captured view. This does not
- * recapture input, reuse judgments, or accept a replacement inode.
+/**
+ * Restores a stored contract's input after a restart. What the check is for:
+ * the work resumes from exactly the input it started from. What it compares:
+ * the recorded path (the project folder is still there, under that path, as a
+ * repository root) and the recorded content (the input commit is in that
+ * repository and holds the recorded tree, and the input view, where one is
+ * kept, still holds that commit and tree). Device and inode numbers are not
+ * compared: a folder copied, moved back or restored from a backup has new
+ * ones and the same content. When they changed, the snapshot is rebound to
+ * the current ones, so later checks within this run compare like with like.
+ * Cost: three git processes per stored contract at start-up, more only when
+ * the numbers changed.
+ * Throws, saying what could not be restored, when the path or the content is
+ * not what was recorded.
  */
-export async function restoreContractInputDevice(snapshot: ContractInputSnapshot, signal?: AbortSignal): Promise<ContractInputSnapshot> {
-  const current = directoryIdentity(await lstat(snapshot.sourceRoot, { bigint: true }));
+export async function restoreContractInput(snapshot: ContractInputSnapshot, signal?: AbortSignal): Promise<ContractInputSnapshot> {
+  const root = snapshot.sourceRoot;
+  let stat: BigIntStats;
+  try { stat = await lstat(root, { bigint: true }); }
+  catch { throw new Error(`the project folder ${root} it started from is no longer there`); }
+  const current = directoryIdentity(stat);
+  if (!stat.isDirectory() || await realpath(root) !== root) throw new Error(`${root} is no longer the project folder it started from (it is not a folder, or it now leads elsewhere)`);
+  try { if (gitText(root, ['rev-parse', '--show-toplevel']) !== root) throw new Error('not a repository root'); }
+  catch { throw new Error(`${root} is no longer the root of a Git repository`); }
+  try { assertContractInputObjects(snapshot, root); }
+  catch { throw new Error(`the repository at ${root} does not hold the commit ${snapshot.inputCommit.slice(0, 12)} with the files the contract started from`); }
+  signal?.throwIfAborted();
   if (current === snapshot.sourceIdentity) return snapshot;
-  const previous = /^(\d+):(\d+)$/.exec(snapshot.sourceIdentity);
-  const present = /^(\d+):(\d+)$/.exec(current);
-  if (!previous || !present || previous[2] !== present[2] || previous[1] === present[1]
-    || snapshot.capturedAt >= Date.now() - uptime() * 1000 - 5000)
-    throw new Error('contract input source root was replaced');
-  const replaceDevice = (value: string): string => value.startsWith(`${previous[1]}:`)
-    ? `${present[1]}${value.slice(previous[1]!.length)}` : value;
-  const restored: ContractInputSnapshot = {
-    ...snapshot,
-    sourceIdentity: current,
-    gitIdentity: snapshot.gitIdentity.split('|').map(replaceDevice).join('|'),
-  };
-  await assertContractInputView(restored, signal);
+  const restored: ContractInputSnapshot = { ...snapshot, sourceIdentity: current, gitIdentity: await repositoryIdentity(root) };
+  if (existsSync(contractInputPath(restored))) {
+    try { await assertContractInputView(restored, signal); }
+    catch (error) {
+      signal?.throwIfAborted();
+      throw new Error(`its input view ${contractInputPath(restored)} no longer holds the files it started from (${error instanceof Error ? error.message : String(error)})`);
+    }
+  }
   return restored;
 }
 

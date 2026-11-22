@@ -2,12 +2,11 @@
  * Every decision a contract asks of the decision model has a fallback, and a
  * decision that cannot be made never ends the work it was judging.
  *
- * `judgedOrNot` runs a decision phase. With no decision model in use, or when
- * Hybrid found the set model failing (the owner is told once, by the failure
- * notice), the phase's own no-model path runs. When the decision still cannot
- * be made (the endpoint refused the request, the set model failed under
- * Decision Model Only, the decision client or its log failed), the no-model
- * path runs too, told why, so the work is kept and recorded as not judged.
+ * `judgedOrNot` runs a decision phase through `decisionOrClassic`, which gives
+ * every decision the model did not make (no model in use, Hybrid found the set
+ * model failing, the endpoint refused the request, the set model failed under
+ * Decision Model Only, the decision client or its log failed) to the phase's
+ * no-model path, told why, so the work is kept and recorded as not judged.
  * Only a cancellation, and errors that are not the decision model's, pass
  * through.
  */
@@ -17,22 +16,20 @@ import { decisionModelFailure, decisionOrClassic } from '../runtime/decision-pol
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 
-/** Why the decision model could not make a decision, or undefined when the error is not the decision model's. */
-export function notJudgedReason(error: unknown): string | undefined {
-  if (error instanceof JudgmentPortMissingError) return error.message;
-  if (error instanceof JudgmentError && error.kind !== 'aborted') return error.message;
-  return undefined;
-}
-
 /**
  * Why the no-model path runs now: undefined when no decision model is in use
- * (none set, or No Decision Model chosen), else what the set model's failure was.
+ * (none set, or No Decision Model chosen); what the set model's failure was
+ * when Hybrid moved the work to its no-model path; else the failure itself.
  */
-function unavailableReason(): string | undefined {
+function notJudgedReason(failure: unknown): string | undefined {
   const state = decisionModelPolicyState();
-  if (state.reason !== 'unavailable') return undefined;
-  const failure = decisionModelFailure();
-  return failure === undefined ? 'the decision model is unavailable' : `the decision model ${failure.model} is unavailable (${failure.what})`;
+  if (state.reason === 'unavailable') {
+    const known = decisionModelFailure();
+    return known === undefined ? 'the decision model is unavailable' : `the decision model ${known.model} is unavailable (${known.what})`;
+  }
+  if (failure instanceof JudgmentPortMissingError || failure instanceof DecisionModelsDisabledError) return failure.message;
+  if (failure instanceof JudgmentError) return failure.message;
+  return undefined;
 }
 
 /**
@@ -40,15 +37,9 @@ function unavailableReason(): string | undefined {
  * model did not decide (undefined: no decision model is in use). `fallback`
  * runs at most once and must not repeat an effect `decision` already made.
  */
-export async function judgedOrNot<T>(site: string, decision: () => Promise<T>, fallback: (notJudged: string | undefined) => T | Promise<T>): Promise<T> {
-  let fellBack = false;
-  try {
-    return await decisionOrClassic(decision, () => { fellBack = true; return fallback(unavailableReason()); });
-  } catch (error) {
-    if (fellBack) throw error;
-    const reason = notJudgedReason(error) ?? (error instanceof DecisionModelsDisabledError ? error.message : undefined);
-    if (reason === undefined) throw error;
-    logger.warn('contract: a decision could not be made; its no-model path decides and the work is kept', { site, error: summarizeError(error) });
-    return fallback(reason);
-  }
+export function judgedOrNot<T>(site: string, decision: () => Promise<T>, fallback: (notJudged: string | undefined) => T | Promise<T>): Promise<T> {
+  return decisionOrClassic(decision, (failure) => {
+    if (failure !== undefined) logger.warn('contract: a decision could not be made; its no-model path decides and the work is kept', { site, error: summarizeError(failure) });
+    return fallback(notJudgedReason(failure));
+  });
 }

@@ -59,7 +59,7 @@ import { OwnerReplyRefusedError, type FailurePauseInput, type OwnerReplyOutcome 
 import { createGroupRunner, type ContractEngineInput } from './group-runner.js';
 import { takeSharedTreeForGroup } from './workstreams.js';
 import { CONTRACT_RUNNER_AGENT_ID } from './nudge.js';
-import { captureContractInput, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInputDevice } from './input-snapshot.js';
+import { captureContractInput, contractInputPath, materializeContractInput, assertContractInputView, assertContractExecutionView, prepareContractInputParent, restoreContractInput } from './input-snapshot.js';
 import { planContract, shapeContract, type ContractPlannerDeps, type PlanningOutcome, type ShapeOutcome } from './planner.js';
 import type { NativeContractDecisionHost, NativeContractServices } from './native-decisions.js';
 import { bindNativeContractSource, captureNativeContractSource, nativeSourceCriteria } from './native-source.js';
@@ -1113,7 +1113,7 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         if (restored === null) throw new DurableContractAdmissionError('checkpoint');
         contract = restored;
         assertDurableCheckpoint(contract, admission);
-        if (contract.inputSnapshot !== undefined) contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
+        if (contract.inputSnapshot !== undefined) contract.inputSnapshot = await restoreContractInput(contract.inputSnapshot);
         deps.store.hold(contract);
       }
       catch (error) { durableLeases.delete(admission.contractId); lease(); throw error; }

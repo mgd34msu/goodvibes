@@ -106,7 +106,8 @@ function readLifetime(contract: Contract, owner: NativeContractServices, signal?
  * native read. Choosing a route makes no change, so when the set decision
  * model fails while it reads the work under Hybrid, the same selector runs
  * again on the route planner's no-model path (the session's model); under
- * Decision Model Only the failure stops the work.
+ * Decision Model Only the operation keeps the model, so the selector asks it
+ * once more and a second failure is the planner's to report.
  */
 export async function nativeContractRoute(selector: ContractRouteSelector, contract: Contract, services: NativeContractServices | undefined, request: Parameters<ContractRouteSelector>[0], signal?: AbortSignal) {
   if (contract.nativeSource === undefined) {

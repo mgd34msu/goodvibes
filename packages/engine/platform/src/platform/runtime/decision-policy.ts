@@ -157,7 +157,12 @@ function observe(): DecisionModelPolicyState {
 }
 /** Make the platform's observer the process one again after something else replaced it. */
 export function installPlatformDecisionPolicyObserver(): void {
-  installDecisionModelPolicyObserver(observe, activateClassicFallback, withConfiguredDecisionModelPolicy);
+  installDecisionModelPolicyObserver(observe, activateClassicFallback, withConfiguredDecisionModelPolicy, takesDecisionFallback);
+}
+
+/** The decision model gave no usable answer (the judgment layer's one rule), or none is installed. */
+function takesDecisionFallback(error: unknown): boolean {
+  return error instanceof JudgmentPortMissingError || isDecisionModelFailure(error);
 }
 installPlatformDecisionPolicyObserver();
 
@@ -203,10 +208,9 @@ export function captureDecisionModelPolicyOperation(onChange?: (state: DecisionM
 }
 
 /**
- * Only the set model failing (unreachable, slow, a refused or missing
- * credential, a malformed answer) may downgrade Hybrid; an answer, an
- * abstention, a limit or a cancellation never does, and unrelated failures are
- * never unwrapped.
+ * A decision the decision model did not make (any judgment failure but a
+ * cancellation, or no port installed) moves a Hybrid operation to its no-model
+ * path; a cancellation never does, and unrelated failures are never unwrapped.
  */
 export function activateClassicFallback(error: unknown): boolean {
   const scope = scopes.getStore();
@@ -230,8 +234,11 @@ export function inheritClassicDecisionFallback(): boolean {
   return true;
 }
 
-/** Re-enter only a caller's side-effect-free decision phase, never replay its executed operation. */
-export function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed: () => boolean = () => true): Promise<T> {
+/**
+ * Re-enter only a caller's side-effect-free decision phase, never replay its executed operation.
+ * A decision the model did not make takes `classic`, handed the failure, under every policy.
+ */
+export function decisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>, fallbackAllowed: () => boolean = () => true): Promise<T> {
   return runDecisionOrClassic(decision, classic, fallbackAllowed);
 }
 

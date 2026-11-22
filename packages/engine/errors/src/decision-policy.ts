@@ -68,15 +68,22 @@ const defaultState: DecisionModelPolicyState = Object.freeze({
 });
 let observe: () => DecisionModelPolicyState = () => defaultState;
 let fallback: (error: unknown) => boolean = () => false;
+let decisionFailed: (error: unknown) => boolean = () => false;
 type OperationOwner = <T>(operation: () => T) => T;
 let ownOperation: OperationOwner = operation => operation();
 
-/** Install host policy observation without importing a server runtime into browser consumers. */
+/**
+ * Install host policy observation without importing a server runtime into browser consumers.
+ * `onUnavailable` moves a Hybrid operation to its no-model path; `isDecisionFailure` is the
+ * judgment layer's one rule for an error that means the decision model gave no usable answer.
+ */
 export function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState,
-  onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void {
+  onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T,
+  isDecisionFailure?: (error: unknown) => boolean): void {
   observe = observer;
   fallback = onUnavailable ?? (() => false);
   ownOperation = operationOwner ?? (operation => operation());
+  decisionFailed = isDecisionFailure ?? (() => false);
 }
 
 export function decisionModelPolicyState(): DecisionModelPolicyState { return observe(); }
@@ -97,10 +104,18 @@ export function assertDecisionModelsEnabled(feature: string): void {
 }
 
 /** Runtime-neutral pure-phase dispatch. The installed host owns operation
- * lifetime and exact availability classification; no host runtime is imported
+ * lifetime and exact failure classification; no host runtime is imported
  * by shared batteries or browser consumers. Neither callback may replay an effect.
+ *
+ * A decision the decision model did not make, for whatever reason, takes its
+ * declared fallback (`classic`) under every policy and the caller carries on;
+ * `classic` is handed that failure, so a fallback that acts for the owner can
+ * say why (the permission gate refuses the call under Decision Model Only).
+ * Under Hybrid the whole operation also moves to its no-model path. Only the
+ * caller's cancellation, an error that is not the decision model's, and a
+ * fallback that `fallbackAllowed` forbids pass through.
  */
-export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>,
+export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>,
   fallbackAllowed: () => boolean = () => true): Promise<T> {
   return ownOperation(async () => {
     if (decisionModelPolicyState().operation === 'no-decision-model') {
@@ -110,8 +125,9 @@ export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () 
     try { return await decision(); }
     catch (error) {
       const switchedBySibling = error instanceof DecisionModelsDisabledError && decisionModelPolicyState().operation === 'no-decision-model';
-      if (!fallbackAllowed() || !switchedBySibling && !tryClassicDecisionFallback(error)) throw error;
-      return classic();
+      if (!fallbackAllowed()) throw error;
+      if (!switchedBySibling && !tryClassicDecisionFallback(error) && !decisionFailed(error)) throw error;
+      return classic(error);
     }
   });
 }
@@ -122,7 +138,7 @@ export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () 
  */
 export function decisionModelFailingLine(failure: Pick<DecisionModelFailureState, 'model' | 'what' | 'nextStep'>, policy: DecisionModelPolicy): string {
   const then = policy === 'Decision Model Only'
-    ? 'so work that needs it stops until it answers again (you chose Decision Model Only for "When the decision model is missing or fails"; Hybrid would continue without it)'
+    ? 'so a tool call it cannot decide is refused and every other decision takes its fallback until it answers again (you chose Decision Model Only for "When the decision model is missing or fails"; Hybrid would decide such calls without it)'
     : 'so work continues without it until it answers again';
   const step = failure.nextStep.trim().replace(/\.$/, '');
   return `The decision model ${failure.model} is not answering (${failure.what}), ${then}; to fix it, ${step.charAt(0).toLowerCase()}${step.slice(1)}.`;

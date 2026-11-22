@@ -20,25 +20,28 @@ export function decisionModelFailureMessage(failure: DecisionModelFailure): stri
 const CHOOSE = 'or choose another one in Settings (Decision model, Decision model server).';
 
 /**
- * Whether an error is the set model failing (unreachable, slow, rate limited,
- * a refused or missing credential, a malformed or mismatched answer, a target
- * it cannot serve) rather than an answer or the caller's own doing: an
- * abstention, a context or capability limit, a cancellation, a request that
- * broke a documented limit, or a decision log that could not record.
+ * The one rule for a decision the decision model did not make: whether the
+ * error means no usable answer came back, so the decision takes its declared
+ * fallback and the work goes on. Every judgment failure but a cancellation
+ * is one: a request too large even after the transport split it, an HTTP
+ * error of any status, a refused or missing credential, a malformed,
+ * mismatched or abstaining answer, a closed connection, an attempt that had
+ * no answer within `judgment.timeoutMs`, a target it cannot serve, a request
+ * that broke a documented limit, a decision log that could not record. Only
+ * the caller's own cancellation (`aborted`) is not: that stops the work it
+ * belongs to.
  */
 export function isDecisionModelFailure(error: unknown): error is JudgmentError {
-  if (!(error instanceof JudgmentError) || error instanceof JudgmentContextLimitError) return false;
-  switch (error.kind) {
-    case 'unavailable': case 'internal': return true;
-    case 'rejected': return error.status === 401 || error.status === 403 || error.reason === 'no-credential';
-    case 'invalid-response': return error.reason === undefined || error.reason === 'malformed-response' || error.reason === 'model-mismatch' || error.reason === 'target-configuration';
-    case 'invalid-request': return error.reason === 'target-configuration' || error.reason === 'invalid-model';
-    default: return false;
-  }
+  return error instanceof JudgmentError && error.kind !== 'aborted';
 }
 
 function whatAndNext(error: JudgmentError): { readonly what: string; readonly nextStep: string } {
+  if (error instanceof JudgmentContextLimitError) {
+    return { what: 'it refused the request as larger than its token limit', nextStep: `Check the token limit of the decision model server, ${CHOOSE}` };
+  }
+  if (error.kind === 'unrecorded') return { what: 'the decision log could not record its answer, so the answer was not used', nextStep: 'Check free disk space and that no other program holds the decision log.' };
   switch (error.reason) {
+    case 'abstained': return { what: 'it abstained from answering', nextStep: `Check the decision model server, ${CHOOSE}` };
     case 'no-credential': return { what: 'it has no API key', nextStep: `Give it a key in Settings (Where the decision model key comes from, Decision model key name), ${CHOOSE}` };
     case 'unreachable': return { what: 'its endpoint could not be reached', nextStep: `Check that the decision model server is running and its address (Decision model server in Settings) is right, ${CHOOSE}` };
     case 'endpoint-timeout': return { what: 'its endpoint did not answer in time', nextStep: `Check the decision model server's load, raise "Give up on the decision model after" in Settings, ${CHOOSE}` };
@@ -58,13 +61,14 @@ function whatAndNext(error: JudgmentError): { readonly what: string; readonly ne
   if (error.kind === 'rejected') return { what: `its endpoint refused the request${error.status === undefined ? '' : ` (HTTP ${error.status})`}`, nextStep: `Check the decision service and its settings, ${CHOOSE}` };
   if (error.kind === 'invalid-response') return { what: 'it sent an answer that does not match the questions', nextStep: `Check that the Decision model server setting points at a supported decision server, ${CHOOSE}` };
   if (error.kind === 'internal') return { what: 'the decision client failed internally', nextStep: 'Restart the app; if it repeats, report it.' };
+  if (error.kind === 'invalid-request') return { what: 'a request to it broke one of its documented limits and was not sent', nextStep: 'Report it; the decisions it would have made take their fallback meanwhile.' };
   return { what: 'it could not answer', nextStep: `Check the decision model server and its key, ${CHOOSE}` };
 }
 
 /**
- * The failure a set model's error is, or undefined when the error is not the
- * model's: the caller cancelled, the request broke a limit, the decision log
- * failed, or decision models are off.
+ * The failure a decision model's error is, as the owner is told it, or
+ * undefined when the error is not a judgment failure or is the caller's own
+ * cancellation (see {@link isDecisionModelFailure}).
  */
 export function describeDecisionModelFailure(model: string, error: unknown): DecisionModelFailure | undefined {
   if (!isDecisionModelFailure(error)) return undefined;

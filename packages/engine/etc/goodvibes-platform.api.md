@@ -2764,7 +2764,7 @@ export function injectTraceparent(headers: Record<string, string>): void;
 export function injectTraceparentAsync(headers: Record<string, string>): Promise<void>;
 
 // @public
-export function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void;
+export function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T, isDecisionFailure?: (error: unknown) => boolean): void;
 
 // @public
 export function installJudgmentPort(port: JudgmentPort | undefined, options?: {
@@ -41972,7 +41972,7 @@ export type RouteSurfaceKind = (typeof ROUTE_SURFACE_KINDS)[number];
 export type RouteTargetKind = (typeof ROUTE_TARGET_KINDS)[number];
 
 // @public
-export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>;
+export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>;
 
 // @public (undocumented)
 export const RUNTIME_EVENT_DOMAINS: readonly ["session", "turn", "providers", "tools", "tasks", "agents", "contracts", "communication", "planner", "gate", "plugins", "mcp", "transport", "compaction", "ui", "ops", "forensics", "security", "automation", "routes", "control-plane", "deliveries", "watchers", "surfaces", "knowledge", "workspace", "fleet", "config"];

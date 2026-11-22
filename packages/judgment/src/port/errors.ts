@@ -2,8 +2,9 @@ import type { JudgmentLineage } from './types.ts';
 import { LIMITS } from './limits-table.ts';
 
 /**
- * Why a judgment call failed. Every decision site treats a failure as a
- * failure: there is no heuristic path to fall back to. Configured failover
+ * Why a judgment call failed. Every kind but `aborted` means the decision
+ * model gave no usable answer, and the decision takes its declared fallback
+ * (`isDecisionModelFailure`, port/model-failure.ts). Configured failover
  * exhausts after one finite chain, including a single configured target.
  */
 export type JudgmentErrorKind =

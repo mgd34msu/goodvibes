@@ -210,7 +210,7 @@ The `judgment.policy` setting says what happens when a decision model is set:
 
 - **Hybrid** (default): when it fails, work carries on without it, and you are
   told once.
-- **Decision Model Only**: when it fails, work that needs it stops and says why.
+- **Decision Model Only**: when it fails, a tool call it cannot decide is refused and says why; the turn goes on.
 - **No Decision Model**: no decision model is used.
 
 You are always told when no decision model is in use: once in the

@@ -289,17 +289,26 @@ export class WorktreeIdentityRegistry {
     current(); return current;
   }
 
-  /** Compare a privately read acquired record with the actual registered tree.
-   * This does not turn a plain supplied DTO into a fresh creation token. */
+  /**
+   * Compare a privately read acquired record with the actual registered tree:
+   * the recorded path, the recorded .git pointer, git's own binding of that
+   * pointer to this repository, and the owned branch. Inode and device stamps
+   * recorded at creation are not compared (a project copied back or restored
+   * from a backup has new ones and the same worktree); the stamps read here
+   * guard the rest of this run against a replacement.
+   * This does not turn a plain supplied DTO into a fresh creation token.
+   */
   retainAcquired(row: StoredWorktreeIdentity, path: string): () => void {
     if (!this.owned.has(row) || row.state === 'reserved' || !row.creation) throw refused(`item ${row.itemId}'s worktree record was not read from the record store or never finished creating`);
     const facts = row.creation, root = captureExistingDirectory(path), admin = captureExistingDirectory(facts.administration.path);
+    const moved = () => refused(`the worktree ${facts.worktree.path} was moved or replaced since it was created`, `Remove it with git worktree remove --force ${facts.worktree.path}, then run the item again.`);
+    if (root.canonical !== facts.worktree.path || admin.canonical !== facts.administration.path
+      || `${terminatedLine(readFileObservation(facts.gitFile.path).bytes)}\n` !== facts.gitFile.contents) throw moved();
+    const stamps = { worktree: directoryStamp(root.canonical), administration: directoryStamp(admin.canonical), gitFile: fileObservationIdentity(facts.gitFile.path) };
     const current = () => {
       this.parent.assertCurrent(); root.assertCurrent(); admin.assertCurrent();
-      if (root.canonical !== facts.worktree.path || directoryStamp(root.canonical) !== facts.worktree.physical
-        || directoryStamp(admin.canonical) !== facts.administration.physical || fileObservationIdentity(facts.gitFile.path) !== facts.gitFile.physical) {
-        throw refused(`the worktree ${facts.worktree.path} was moved or replaced since it was created`, `Remove it with git worktree remove --force ${facts.worktree.path}, then run the item again.`);
-      }
+      if (directoryStamp(root.canonical) !== stamps.worktree || directoryStamp(admin.canonical) !== stamps.administration
+        || fileObservationIdentity(facts.gitFile.path) !== stamps.gitFile) throw moved();
       if (terminatedLine(readFileObservation(facts.head.path).bytes) !== `ref: refs/heads/${facts.branch}`) {
         throw refused(`the worktree ${facts.worktree.path} is no longer on its branch ${facts.branch}`, `Switch it back with git -C ${facts.worktree.path} switch ${facts.branch}, or remove the worktree and run the item again.`);
       }

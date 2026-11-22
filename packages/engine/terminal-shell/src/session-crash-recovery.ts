@@ -389,8 +389,9 @@ function finishedUnits(contract: ContractView): string {
 
 /**
  * What a restart did with each contract that was running when the app stopped, one line each: found on disk
- * and continuing (with the step it takes up and what had finished), waiting for a slot, or stopped (with why,
- * what had finished, and the one way to go on). The line is the same for the person and for the model, so
+ * and continuing (with the step it takes up and what had finished), waiting for a slot, stopped (with why,
+ * what had finished, and the one way to go on), or held without running (with exactly what could not be
+ * restored or claimed, and what to do). The line is the same for the person and for the model, so
  * neither has to work out from files what happened. `get` reads the contract as it is now, after the resume
  * took it up; a contract the resume reaped or that failed while it was taken up reads as stopped.
  */
@@ -420,6 +421,17 @@ export function describeContractRecovery(report: ResumeReport, get: (contractId:
   for (const { contractId, step } of report.resumed) say(contractId, RESUMED_STEP[step]);
   for (const contractId of report.queued) say(contractId, 'as soon as a contract slot is free');
   for (const { contractId, reason } of report.reaped) say(contractId, null, reason);
+  for (const { contractId, code, reason } of report.held) {
+    const contract = get(contractId);
+    if (contract === null) continue;
+    const title = (contract.goal || contract.ask).replace(/\s+/g, ' ').trim();
+    const named = `Contract ${contract.id}${title ? ` ("${title.length > 80 ? `${title.slice(0, 79)}...` : title}")` : ''}`;
+    const next = code === 'input-unavailable'
+      ? `To go on: put the project back as it was at ${contract.projectRoot} and restart, and it continues; or cancel it (/agents contract ${contract.id}, or goodvibes-contract cancel ${contract.id}) and ask for the work again, which starts a new contract.`
+      : `Another GoodVibes program may be running it. If none is, restart to try again, or cancel it (goodvibes-contract cancel ${contract.id}) and ask for the work again.`;
+    lines.push({ contractId, sessionId: contract.sessionId, level: 'warning',
+      text: `[Contracts] ${named} was running when the app stopped and is held, not continued: ${reason}. Nothing of it was changed; ${finishedUnits(contract)}. ${next}` });
+  }
   return lines;
 }
 

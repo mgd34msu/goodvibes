@@ -329,8 +329,8 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
           }
         }
         const last = attempts.at(-1);
-        // Exhausting backups cannot turn a malformed answer into an availability
-        // downgrade. Hybrid may enter Classic only for actual unavailability.
+        // A malformed answer is reported as one, not as an outage, even after
+        // every backup was tried; either way the decision takes its fallback.
         if (malformedFailure) throw malformedFailure;
         // A chain no target answered is unavailable only when some target
         // failed in a way waiting can heal. When every target refused (a

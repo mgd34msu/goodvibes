@@ -650,7 +650,7 @@
     {
       "name": "installDecisionModelPolicyObserver",
       "kind": "function",
-      "text": "export declare function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void;"
+      "text": "export declare function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T, isDecisionFailure?: (error: unknown) => boolean): void;"
     },
     {
       "name": "installJudgmentPort",
@@ -770,7 +770,7 @@
     {
       "name": "runDecisionOrClassic",
       "kind": "function",
-      "text": "export declare function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export declare function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "settleCategory",

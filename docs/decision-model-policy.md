@@ -29,8 +29,8 @@ Execution permissions are in **Permissions → Execution permissions**, includin
 
 | Policy | Behavior |
 | --- | --- |
-| Hybrid (default) | Use the set decision model. When it fails (unreachable, too slow, a refused or missing key, a malformed answer), the operation continues without it and you are told once, naming the model, what failed and the next step; you are told again when it answers. |
-| Decision Model Only | Use the set decision model. When it fails, work that needs it stops and reports the model, what failed and the next step. |
+| Hybrid (default) | Use the set decision model. When it gives no usable answer, for any reason (unreachable, too slow, a request too large for it, an HTTP error, a refused or missing key, a malformed answer, a closed connection), the operation continues without it: each decision takes its fallback, and you are told once per outage, naming the model, what failed and the next step. |
+| Decision Model Only | Use the set decision model and keep asking it. While it fails, a tool call it cannot decide is refused with its error and every other decision takes its fallback; the turn goes on. |
 | No Decision Model | Make no decision-model requests. |
 
 **With no decision model set** (no `judgment.endpoint`, `judgment.model`,
@@ -61,7 +61,7 @@ call, and the table says who answers it.
 | Policy | `ask-me` | `jev-decides` | `just-vibes` | `yolo` |
 | --- | --- | --- | --- | --- |
 | Hybrid (default) | Jev reads each judgment call's risk and you are asked only about the ones it reads as critical, irreversible or security-weakening; with no model set, or while it fails, you are asked about every judgment call your tool settings do not allow. | Jev decides every judgment call; with no model set, while it fails, or (while `jev-decides` is only the default, not your choice) on a model the shipped calibration did not measure, you are asked as in `ask-me`. | You are never interrupted: Jev decides judgment calls, and what Jev would not run (with no working model, every judgment call your tool settings do not allow) is held and listed at the end of the run. | The permission gate asks you nothing except about a change asked for from a channel; purchases outside your limits still come to you, and an act only you perform (answering an approval, granting access) is refused to the model. No decision model is consulted for permission. |
-| Decision Model Only | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of asking you. | As Hybrid, except that while the set model fails, the call fails with the model's error instead of being held. | Same as Hybrid. |
+| Decision Model Only | As Hybrid, except that while the set model fails, the call is refused with the model's error instead of asking you; the turn goes on. | As Hybrid, except that while the set model fails, the call is refused with the model's error instead of asking you; the turn goes on. | As Hybrid, except that while the set model fails, the call is refused with the model's error instead of being held; the run goes on. | Same as Hybrid. |
 | No Decision Model | You are asked about every judgment call your tool settings do not allow. | You are asked about every judgment call your tool settings do not allow, exactly as in `ask-me`. | You are never interrupted: every judgment call your tool settings do not allow is held and listed at the end of the run. | Same as Hybrid. |
 
 The shipped calibration record covers the hosted endpoint and `jev-latest`

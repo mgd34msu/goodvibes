@@ -28,7 +28,7 @@
  * Every choice here is code over recorded statuses; nothing is judged. The
  * checks the resumed units get are ordinary unit checks (check.ts).
  */
-import { assertContractInputObjects, assertContractInputView, assertContractExecutionView, restoreContractInputDevice } from './input-snapshot.js';
+import { assertContractInputObjects, assertContractInputView, assertContractExecutionView, restoreContractInput } from './input-snapshot.js';
 import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 import { existsSync } from 'node:fs';
@@ -61,6 +61,8 @@ export interface ResumeReport {
   readonly reaped: readonly { readonly contractId: string; readonly reason: string }[];
   /** Contracts already running here or held by the active policy; left as they are. */
   readonly skipped: readonly string[];
+  /** Of the skipped, those held without running and why (also in `skipped`); the host tells the owner and the model. */
+  readonly held: readonly { readonly contractId: string; readonly code: ContractHoldCode; readonly reason: string }[];
   /**
    * Contracts whose checkpoint was refused on read (quarantined): not resumed
    * and not started again. Each refusal names the quarantined file and the
@@ -195,9 +197,10 @@ export interface ContractResume {
 }
 
 export function createContractResume(deps: ContractResumeDeps): ContractResume {
-  function holdContract(contract: Contract, code: ContractHoldCode, reason: string): void {
+  function holdContract(held: { contractId: string; code: ContractHoldCode; reason: string }[], contract: Contract, code: ContractHoldCode, reason: string): void {
     if (deps.hold !== undefined) deps.hold(contract, code, reason);
     else deps.store.hold(contract);
+    held.push({ contractId: contract.id, code, reason });
     logger.warn('contract runner: contract held, not resumed', { contractId: contract.id, code, reason });
   }
   async function resumeAll(): Promise<ResumeReport> {
@@ -208,6 +211,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     const queued: string[] = [];
     const reaped: { contractId: string; reason: string }[] = [];
     const skipped: string[] = [];
+    const held: { contractId: string; code: ContractHoldCode; reason: string }[] = [];
     const refused: { contractId: string; refusal: Refusal }[] = [];
     const pending: ContractRun[] = [];
     for (const contractId of deps.store.listStoredIds()) {
@@ -250,18 +254,18 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
         }
         if (claim !== 'claimed') {
           // A claim that cannot be made at all does not run the contract: another process may be running it.
-          holdContract(contract, 'claim-unavailable', claim.unavailable);
+          holdContract(held, contract, 'claim-unavailable', claim.unavailable);
           skipped.push(contractId);
           continue;
         }
         if (contract.inputSnapshot !== undefined) {
           try {
-            contract.inputSnapshot = await restoreContractInputDevice(contract.inputSnapshot);
+            contract.inputSnapshot = await restoreContractInput(contract.inputSnapshot);
           } catch (error) {
             // Do not spawn workers with an invalid input lease, or discard their
             // retained work merely because this startup could not verify it. The
             // contract is held under this process's claim: its status says so, and cancel ends it.
-            holdContract(contract, 'input-unavailable', `its recorded input could not be restored: ${error instanceof Error ? error.message : String(error)}`);
+            holdContract(held, contract, 'input-unavailable', `the input it started from could not be restored: ${error instanceof Error ? error.message : String(error)}`);
             skipped.push(contractId);
             continue;
           }
@@ -327,7 +331,7 @@ export function createContractResume(deps: ContractResumeDeps): ContractResume {
     // Legacy continuations settle here as before (the host drains recovery through this call); each ends its own contract on failure.
     await Promise.all(continuations);
     logger.info('contract runner: resumed contracts from disk', { resumed: resumed.length, queued: queued.length, reaped: reaped.length, skipped: skipped.length });
-    return { resumed, queued, reaped, skipped, refused };
+    return { resumed, queued, reaped, skipped, held, refused };
   }
 
   function prepareResume(run: ContractRun): void {

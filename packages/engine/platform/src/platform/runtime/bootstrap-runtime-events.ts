@@ -12,6 +12,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
 import { decisionModelFailure } from './decision-policy.js';
 import { isWaitingForPlannerRoute } from '../contract/planner-route-wait.js';
+import { hasContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { finishWorkstreamLabel, rememberWorkstreamLabel, workstreamLabel } from '../channels/workstream-labels.js';
 
 export interface HostRuntimeMessageRouter {
@@ -459,11 +460,13 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
 /**
  * The conversation follow-up for an agent that ended (`error` undefined: it
  * completed), or null when its end is no reply of its own: a contract's agents
- * report through the contract, and a cancelled run was stopped on purpose.
+ * (its units, its owner, and the planners that write its plan and its fix
+ * plans, whose output the contract reads itself) report through the contract,
+ * and a cancelled run was stopped on purpose.
  */
 function agentEndFollowUp(record: NonNullable<ReturnType<AgentManager['getStatus']>>, agentId: string, error: string | undefined,
   voice: AgentLineWording): ConversationFollowUpItem | null {
-  if (record.contractId) return null;
+  if (record.contractId || hasContractPlanConsumer(record)) return null;
   const facts = agentLineFacts(record, agentId, voice);
   if (error === undefined) {
     const output = record.fullOutput?.trim();

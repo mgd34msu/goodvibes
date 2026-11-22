@@ -3464,7 +3464,7 @@
     {
       "name": "installDecisionModelPolicyObserver",
       "kind": "function",
-      "text": "export declare function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void;"
+      "text": "export declare function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T, isDecisionFailure?: (error: unknown) => boolean): void;"
     },
     {
       "name": "installJudgmentPort",
@@ -3774,7 +3774,7 @@
     {
       "name": "runDecisionOrClassic",
       "kind": "function",
-      "text": "export declare function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export declare function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "sendWebSocketMessage",
@@ -9133,7 +9133,7 @@
     {
       "name": "installDecisionModelPolicyObserver",
       "kind": "function",
-      "text": "export declare function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T): void;"
+      "text": "export declare function installDecisionModelPolicyObserver(observer: () => DecisionModelPolicyState, onUnavailable?: (error: unknown) => boolean, operationOwner?: <T>(operation: () => T) => T, isDecisionFailure?: (error: unknown) => boolean): void;"
     },
     {
       "name": "installJudgmentPort",
@@ -9253,7 +9253,7 @@
     {
       "name": "runDecisionOrClassic",
       "kind": "function",
-      "text": "export declare function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export declare function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "settleCategory",
@@ -26033,13 +26033,14 @@
       "name": "ResumeReport",
       "kind": "interface",
       "required": [
+        "held",
         "queued",
         "reaped",
         "refused",
         "resumed",
         "skipped"
       ],
-      "text": "export interface ResumeReport { readonly resumed: readonly { readonly contractId: string; readonly step: ResumeStep; }[]; readonly queued: readonly string[]; readonly reaped: readonly { readonly contractId: string; readonly reason: string; }[]; readonly skipped: readonly string[]; readonly refused: readonly { readonly contractId: string; readonly refusal: Refusal; }[]; } ;; via Refusal = export interface Refusal { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[]; readonly retryable: boolean; readonly retryAfterMs?: number | undefined; readonly status?: number | undefined; readonly changes?: readonly TargetChange[] | undefined; }"
+      "text": "export interface ResumeReport { readonly resumed: readonly { readonly contractId: string; readonly step: ResumeStep; }[]; readonly queued: readonly string[]; readonly reaped: readonly { readonly contractId: string; readonly reason: string; }[]; readonly skipped: readonly string[]; readonly held: readonly { readonly contractId: string; readonly code: ContractHoldCode; readonly reason: string; }[]; readonly refused: readonly { readonly contractId: string; readonly refusal: Refusal; }[]; } ;; via ContractHoldCode = export type ContractHoldCode = 'input-unavailable' | 'claim-unavailable'; ;; Refusal = export interface Refusal { readonly code: string; readonly state: string; readonly reason: string; readonly next: readonly string[]; readonly retryable: boolean; readonly retryAfterMs?: number | undefined; readonly status?: number | undefined; readonly changes?: readonly TargetChange[] | undefined; }"
     },
     {
       "name": "ResumeStep",
@@ -61522,7 +61523,7 @@
     {
       "name": "decisionOrClassic",
       "kind": "function",
-      "text": "export declare function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export declare function decisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "isClassicOperation",
@@ -64287,7 +64288,7 @@
     {
       "name": "decisionOrClassic",
       "kind": "function",
-      "text": "export declare function decisionOrClassic<T>(decision: () => Promise<T>, classic: () => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
+      "text": "export declare function decisionOrClassic<T>(decision: () => Promise<T>, classic: (failure?: unknown) => T | Promise<T>, fallbackAllowed?: () => boolean): Promise<T>; ;; via Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; }"
     },
     {
       "name": "endDecisionPhaseWithoutModel",
@@ -72238,7 +72239,7 @@
     {
       "name": "resumeContracts",
       "kind": "function",
-      "text": "export declare function resumeContracts(runner: Pick<ContractRunner, 'resumeAll'>, projectRoot: string): Promise<ResumeReport | ContractResumeFailure>; ;; via ContractResumeFailure = export interface ContractResumeFailure { readonly failed: string; } ;; ContractRunner = export interface ContractRunner { readonly nativeMode?: boolean; startDurable(request: DurableContractRequest): Promise<DurableStartedContract>; resumeDurable(key: DurableContractKey): Promise<DurableStartedContract>; inspectDurable?(key: DurableContractKey): DurableStartedContract | null; joinDurable?(key: DurableContractKey): Promise<void>; start(input: StartContractInput, options?: ContractStartOptions): Promise<StartedContract>; startIdempotent?(input: StartContractInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlanIdempotent?(input: StartFromPlanInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlan(input: StartFromPlanInput, options?: ContractStartOptions): Promise<StartedContract>; startForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<StartedContract>; assertOwnedExecution(): void; startOwnedForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<OwnedStartedContract>; join(contractId: string): Promise<void>; get(contractId: string): ContractView | null; inspectIntegration?(contractId: string): ContractIntegrationInspection; list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined; readonly includeInputSnapshot?: boolean | undefined; readonly admit?: ((owner: ContractOwnership) => boolean) | undefined; }): ContractView[]; cancel(contractId: string, reason: string): boolean; remove?(contractId: string): ContractRemoval; retryUnit?(contractId: string, unitId: string): Promise<UnitRetryOutcome>; raiseBudget?(contractId: string, ceiling: BudgetCeiling): boolean; flushWorkPlan?(): Promise<void>; reply(contractId: string, escalationId: string, text: string): Promise<OwnerReplyOutcome>; pauseForOwnerRetry(contractId: string, failure: FailurePauseInput): { readonly escalationId: string; }; resumeAll(): Promise<ResumeReport>; importContract(snapshotJson: string, force?: boolean): boolean; serializeContract(contractId: string): string | null; hooks(): ContractSessionHooks; fleetControls(): ContractFleetControls; on(listener: (event: ContractEvent) => void): () => void; held?(contractId: string): ContractHold | null; dispose(): void; closed?(): Promise<CloseReport>; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ResumeReport = export interface ResumeReport { readonly resumed: readonly { readonly contractId: string; readonly step: ResumeStep; }[]; readonly queued: readonly string[]; readonly reaped: readonly { readonly contractId: string; readonly reason: string; }[]; readonly skipped: readonly string[]; readonly refused: readonly { readonly contractId: string; readonly refusal: Refusal; }[]; }"
+      "text": "export declare function resumeContracts(runner: Pick<ContractRunner, 'resumeAll'>, projectRoot: string): Promise<ResumeReport | ContractResumeFailure>; ;; via ContractResumeFailure = export interface ContractResumeFailure { readonly failed: string; } ;; ContractRunner = export interface ContractRunner { readonly nativeMode?: boolean; startDurable(request: DurableContractRequest): Promise<DurableStartedContract>; resumeDurable(key: DurableContractKey): Promise<DurableStartedContract>; inspectDurable?(key: DurableContractKey): DurableStartedContract | null; joinDurable?(key: DurableContractKey): Promise<void>; start(input: StartContractInput, options?: ContractStartOptions): Promise<StartedContract>; startIdempotent?(input: StartContractInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlanIdempotent?(input: StartFromPlanInput, request: IdempotentStartRequest, options?: ContractStartOptions): Promise<IdempotentStartedContract>; startFromPlan(input: StartFromPlanInput, options?: ContractStartOptions): Promise<StartedContract>; startForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<StartedContract>; assertOwnedExecution(): void; startOwnedForOwner(ownerRecord: AgentRecord, options?: ContractStartOptions): Promise<OwnedStartedContract>; join(contractId: string): Promise<void>; get(contractId: string): ContractView | null; inspectIntegration?(contractId: string): ContractIntegrationInspection; list(filter?: { readonly sessionId?: string | undefined; readonly includeTerminal?: boolean | undefined; readonly includeInputSnapshot?: boolean | undefined; readonly admit?: ((owner: ContractOwnership) => boolean) | undefined; }): ContractView[]; cancel(contractId: string, reason: string): boolean; remove?(contractId: string): ContractRemoval; retryUnit?(contractId: string, unitId: string): Promise<UnitRetryOutcome>; raiseBudget?(contractId: string, ceiling: BudgetCeiling): boolean; flushWorkPlan?(): Promise<void>; reply(contractId: string, escalationId: string, text: string): Promise<OwnerReplyOutcome>; pauseForOwnerRetry(contractId: string, failure: FailurePauseInput): { readonly escalationId: string; }; resumeAll(): Promise<ResumeReport>; importContract(snapshotJson: string, force?: boolean): boolean; serializeContract(contractId: string): string | null; hooks(): ContractSessionHooks; fleetControls(): ContractFleetControls; on(listener: (event: ContractEvent) => void): () => void; held?(contractId: string): ContractHold | null; dispose(): void; closed?(): Promise<CloseReport>; } ;; Pick = type Pick<T, K extends keyof T> = { [P in K]: T[P]; }; ;; Promise = interface Promise<T> { then<TResult1 = T, TResult2 = never>(onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null, onrejected?: ((reason: any) => TResult2 | PromiseLike<TResult2>) | undefined | null): Promise<TResult1 | TResult2>; catch<TResult = never>(onrejected?: ((reason: any) => TResult | PromiseLike<TResult>) | undefined | null): Promise<T | TResult>; } ;; ResumeReport = export interface ResumeReport { readonly resumed: readonly { readonly contractId: string; readonly step: ResumeStep; }[]; readonly queued: readonly string[]; readonly reaped: readonly { readonly contractId: string; readonly reason: string; }[]; readonly skipped: readonly string[]; readonly held: readonly { readonly contractId: string; readonly code: ContractHoldCode; readonly reason: string; }[]; readonly refused: readonly { readonly contractId: string; readonly refusal: Refusal; }[]; }"
     },
     {
       "name": "runAppendOnlyRetentionSweep",

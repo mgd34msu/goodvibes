@@ -23,7 +23,7 @@
  * yolo and just-vibes start the agents; ask-me and jev-decides put the call to
  * the owner once, and his answer stands for the rest of the conversation.
  */
-import { defineBattery, JudgmentError, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
+import { defineBattery, oneOf, STAKES_BANDS } from '@goodvibes/judgment';
 import { captureJudgmentPort, decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { snapshotJudgmentEvidence } from '../gate/judgment-input.js';
 import { prepareJudgmentResult } from '../gate/judgment-result.js';
@@ -279,10 +279,6 @@ async function readWithModel(proposal: DelegationProposal, options: { readonly s
   return verdict.choice === 'do_it_yourself' ? forbiddenByOwner(quote, proposal.tasks.length, 'jev') : overLimit(quote, proposal.tasks.length, 'jev');
 }
 
-function isAbort(error: unknown, signal: AbortSignal | undefined): boolean {
-  return signal?.aborted === true || (error instanceof JudgmentError && error.kind === 'aborted');
-}
-
 /**
  * Decides whether the proposed agents start. `owner` is the object every
  * delegating tool of this runtime shares (the contract runner): the owner's
@@ -313,16 +309,12 @@ export async function decideDelegation(owner: object, proposal: DelegationPropos
   const modelInUse = decisionModelPolicyState().operation === 'decision';
   let read: DelegationVerdict | undefined;
   let failure: string | undefined;
-  try {
-    read = await decisionOrClassic(() => readWithModel(proposal, options), () => {
-      if (!modelInUse) return { start: true, basis: 'no decision model is in use; the gate decided this call' };
-      failure = 'it did not answer';
-      return undefined;
-    });
-  } catch (error) {
-    if (isAbort(error, options.signal)) throw error;
-    failure = error instanceof Error ? error.message : String(error);
-  }
+  // A reading the decision model could not make comes here as its fallback, with the reason.
+  read = await decisionOrClassic(() => readWithModel(proposal, options), (error) => {
+    if (!modelInUse) return { start: true, basis: 'no decision model is in use; the gate decided this call' };
+    failure = error instanceof Error ? error.message : 'it did not answer';
+    return undefined;
+  });
   options.assertCurrent?.();
   if (read) {
     memory.readings.set(key, read);

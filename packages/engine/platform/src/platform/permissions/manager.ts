@@ -1287,7 +1287,21 @@ export class PermissionManager {
       const result = await this.assessDecisionExecutionSafety(input);
       if (result.result.autonomousDecision?.outcome === 'reject') rememberDecisionRefusal(this.captureRefusalAction(input));
       return result;
-    }, () => this.assessClassicExecutionSafety(input));
+    }, (failure) => failure !== undefined && decisionModelPolicyState().policy === 'Decision Model Only'
+      ? this.refusedWithoutDecision(input, failure)
+      : this.assessClassicExecutionSafety(input));
+  }
+
+  /**
+   * Under Decision Model Only the owner chose that a call the decision model
+   * could not decide is not asked about or held: this one call is refused,
+   * saying why, and the turn goes on.
+   */
+  private refusedWithoutDecision(input: SafetyInput, failure: unknown): SafetyOutcome {
+    input.assertCurrent();
+    const why = failure instanceof Error ? failure.message : String(failure);
+    return { result: this.result(false, false, 'safety_check', 'jev_defer', input.policyResult.analysis, {
+      detail: `Not run: the decision model could not decide this call (${why}), and Decision Model Only refuses what it cannot decide. Fix the decision model, or choose Hybrid for "When the decision model is missing or fails" to have such calls take the no-model path.` }) };
   }
 
   private captureRefusalAction(input: SafetyInput): RefusedDecisionAction {
@@ -1469,8 +1483,8 @@ export class PermissionManager {
       const installed = input.decoratePort?.(base) ?? base;
       // The decision waits for the model: each request ends when it answers, errors or the
       // connection fails. A failure takes the decision's fallback like any other decision: under
-      // Hybrid the no-model path decides with a notice; under Decision Model Only the call stops
-      // with that reason.
+      // Hybrid the no-model path decides with a notice; under Decision Model Only this one call is
+      // refused with that reason (assessExecutionSafety), and the turn goes on.
       port = {
         get model() { return installed.model; },
         ...(installed.recorder ? { recorder: installed.recorder } : {}),

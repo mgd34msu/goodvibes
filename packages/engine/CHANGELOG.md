@@ -61,6 +61,9 @@ The full write-up is in
 - A compaction no longer keeps a copy of the whole conversation each time.
 - A failed automatic compaction is said once.
 - The Agent says why a message runs in its own process once per machine.
+- A decision model that gives no usable answer, for any reason (a request too large for it included), no longer ends a turn: every decision takes its fallback and the outage is said once; under `Decision Model Only` the one tool call is refused with the reason.
+- A contract resumed after a restart no longer adds a `[Background work]` notice for each planner agent it runs.
+- A contract held at start because its input could not be restored is said in one line with why and what to do, and a project folder copied, moved back or restored from a backup no longer holds it.
 
 ## [3.4.2] - 2026-11-21
 

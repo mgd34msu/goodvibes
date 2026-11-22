@@ -68,6 +68,7 @@ export type FeedContextClosureKeys =
   | 'findMarkerAtPos'
   | 'cleanupMarkerRegistry'
   | 'expandPrompt'
+  | 'restoreRecalledInput'
   | 'openModelPickerWithTarget'
   | 'openProviderModelPickerWithTarget'
   | 'onModelPickerCommit';
@@ -174,6 +175,7 @@ const FEED_FORWARD_KEYS = [
   'findMarkerAtPos',
   'cleanupMarkerRegistry',
   'expandPrompt',
+  'restoreRecalledInput',
 ] as const;
 /** Resolve methods at invocation time and preserve the handler as their receiver. */
 export function projectFeedContextClosures<

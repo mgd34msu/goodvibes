@@ -375,7 +375,7 @@ Four keys are fixed and are not in the rebindable table: `F2` (open or close You
 
 | Key | Action |
 |-----|--------|
-| `Arrow Up / Down` | Scroll conversation / recall input history |
+| `Arrow Up / Down` | Scroll conversation / recall input history (a recalled message keeps its folded pastes, with their text, across restarts) |
 | `PageUp / PageDown` | Scroll by page |
 | `Ctrl+R` | Reverse input history search |
 | `Ctrl+E` | Move to end of line / next error |

@@ -13,6 +13,7 @@ import {
   moveCursorVertical as computeCursorVerticalMove,
 } from './prompt-buffer.js';
 import { captureNativeConversationInput } from './native/native-conversation-input.js';
+import { collectComposerBlocks, type ComposerMessage } from './input-content.js';
 import { commandHistoryLine } from './command-registry.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { splitSlashCommand } from './slash-command-parser.js';
@@ -88,8 +89,12 @@ export type KeyRouteState<Context extends FeedCommandContext> = {
   contentWidth: number;
   maxInputRows: number;
   inputHistory: InputHistory | null;
-  /** Collapsed pastes by id; Enter sends the pasted text, not its marker. */
-  pasteRegistry?: ReadonlyMap<string, string> | undefined;
+  /** Collapsed pastes by id; Enter sends the pasted text, not its marker, and input history keeps it. */
+  pasteRegistry: ReadonlyMap<string, string>;
+  /** Pasted images by id; input history keeps them for this run. */
+  imageRegistry: ReadonlyMap<string, { readonly data: string; readonly mediaType: string }>;
+  /** Puts a message recalled from input history in the composer, its blocks folded and holding their content; returns the composer text. */
+  restoreRecalledInput: (message: ComposerMessage) => string;
   indicatorFocused: boolean;
   conversationManager: TerminalConversationManager | null;
   commandContext: Context | undefined;
@@ -393,6 +398,8 @@ export function createFeedTokenRoutes<
           }
           return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
         }
+        // Read before expanding: expansion lets go of the composer's blocks the message does not name.
+        const blocks = collectComposerBlocks(text, state.pasteRegistry, state.imageRegistry);
         let expanded: ReturnType<typeof state.expandPrompt>;
         try {
           expanded = state.expandPrompt(text);
@@ -404,21 +411,8 @@ export function createFeedTokenRoutes<
           state.requestRender();
           return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
         }
-        const historyRecallText =
-          typeof expanded === 'string'
-            ? expanded
-            : expanded
-                .filter(
-                  (
-                    p,
-                  ): p is {
-                    type: 'text';
-                    text: string;
-                  } => p.type === 'text',
-                )
-                .map((p) => p.text)
-                .join('');
-        state.inputHistory?.add(text, { recallText: historyRecallText });
+        // History keeps the message as the composer held it: the typed text and each block's content.
+        state.inputHistory?.add(text, blocks);
         prompt = '';
         cursorPos = 0;
         if (typeof expanded === 'string') {
@@ -528,8 +522,8 @@ export function createFeedTokenRoutes<
           if (state.inputHistory && !state.isConcealedInput?.()) {
             const recalled = state.inputHistory.up(prompt);
             if (recalled !== null) {
-              prompt = recalled;
-              cursorPos = recalled.length;
+              prompt = state.restoreRecalledInput(recalled);
+              cursorPos = prompt.length;
               ensureLocalInputCursorVisible();
             } else {
               state.scroll(-3);
@@ -552,8 +546,8 @@ export function createFeedTokenRoutes<
         if (atBottom && state.inputHistory?.isBrowsing) {
           const recalled = state.inputHistory.down();
           if (recalled !== null) {
-            prompt = recalled;
-            cursorPos = recalled.length;
+            prompt = state.restoreRecalledInput(recalled);
+            cursorPos = prompt.length;
             ensureLocalInputCursorVisible();
           } else {
             indicatorFocused = true;

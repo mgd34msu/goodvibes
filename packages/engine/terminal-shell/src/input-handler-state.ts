@@ -1,6 +1,7 @@
 import { TerminalComposerController } from './composer-controller.js';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import { InputHistory, HistorySearch } from './input-history.js';
+import { restoreComposerBlocks, type ComposerMessage } from './input-content.js';
 /** Per-handler state: each terminal instance keeps its own registries, draft navigation and undo history. */
 export abstract class TerminalInputHandlerState extends TerminalComposerController {
   public cursorPos = 0;
@@ -16,7 +17,10 @@ export abstract class TerminalInputHandlerState extends TerminalComposerControll
   public bodyTopRow = 2;
   public modalReturnFocus: 'prompt' | 'indicator' = 'prompt';
   public inputHistory: InputHistory | null = null;
-  public historySearch: HistorySearch = new HistorySearch(() => this.inputHistory?.getEntries() ?? []);
+  public historySearch: HistorySearch = new HistorySearch(
+    () => this.inputHistory?.getEntries() ?? [],
+    (entry) => this.restoreRecalledInput(this.inputHistory?.recall(entry) ?? { text: entry, blocks: new Map() }),
+  );
   public lastBlockCopyTime = 0;
   public mouseDownRow = -1;
   public mouseDownCol = -1;
@@ -29,6 +33,10 @@ export abstract class TerminalInputHandlerState extends TerminalComposerControll
   public pathCompletionPrefix = '';
   public pathCompletionStart = 0;
   public contentWidth = 76;
+  /** A message recalled from input history, put in this composer as it was sent: its blocks folded, holding their content. */
+  public restoreRecalledInput(message: ComposerMessage): string {
+    return restoreComposerBlocks(this, message);
+  }
 }
 
 export function openHandlerMcpWorkspace<Context>(

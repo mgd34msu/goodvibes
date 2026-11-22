@@ -165,6 +165,7 @@ export interface InputFeedContext {
   readonly findMarkerAtPos: (pos: number) => { start: number; end: number } | null;
   readonly cleanupMarkerRegistry: (text: string) => void;
   readonly expandPrompt: (text: string) => string | import('@goodvibes/engine/platform/platform/providers').ContentPart[];
+  readonly restoreRecalledInput: (message: import('@goodvibes/engine/terminal-shell/input-content').ComposerMessage) => string;
   readonly openModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   readonly openProviderModelPickerWithTarget: (target: ModelPickerTarget, source?: 'settings' | 'onboarding') => boolean;
   readonly onModelPickerCommit: () => boolean;

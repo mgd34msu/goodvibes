@@ -380,6 +380,78 @@ export function registerPaste(state: PasteRegistryState, content: string, projec
     state.pasteRegistry.set(id, text);
     return { marker: `[TEXT: ${id}, ${lines.length} lines]`, nextPasteId: state.nextPasteId, nextImageId: state.nextImageId };
 }
+/** What a block marker in a sent message stands for: a collapsed paste's text or a pasted image. */
+export type ComposerBlock =
+    | { readonly kind: 'text'; readonly text: string }
+    | { readonly kind: 'image'; readonly data: string; readonly mediaType: string };
+/** A message as the composer held it: its text with block markers, and the block behind each marker, by the marker's id. */
+export interface ComposerMessage {
+    readonly text: string;
+    readonly blocks: ReadonlyMap<string, ComposerBlock>;
+}
+/** `[TEXT: <id>, <n> lines]`: the id is `pN` in the composer and a content key in input history. */
+export const TEXT_BLOCK_MARKER = /\[TEXT: ([^,\]\s]+), (\d+) lines\]/g;
+/** `[IMAGE: <id>, <label>]`: the id is `imgN` in the composer and a content key in input history. */
+export const IMAGE_BLOCK_MARKER = /\[IMAGE: ([^,\]\s]+), ([^\]]*)\]/g;
+/** The blocks behind the markers in `text`, read from the composer's registries. */
+export function collectComposerBlocks(text: string, pasteRegistry: ReadonlyMap<string, string>, imageRegistry: ReadonlyMap<string, {
+    readonly data: string;
+    readonly mediaType: string;
+}>): Map<string, ComposerBlock> {
+    const blocks = new Map<string, ComposerBlock>();
+    for (const match of text.matchAll(TEXT_BLOCK_MARKER)) {
+        const id = requireDefined(match[1]);
+        const content = pasteRegistry.get(id);
+        if (content !== undefined)
+            blocks.set(id, { kind: 'text', text: content });
+    }
+    for (const match of text.matchAll(IMAGE_BLOCK_MARKER)) {
+        const id = requireDefined(match[1]);
+        const image = imageRegistry.get(id);
+        if (image)
+            blocks.set(id, { kind: 'image', data: image.data, mediaType: image.mediaType });
+    }
+    return blocks;
+}
+/**
+ * Puts a recalled message back in the composer as a fresh paste would be:
+ * each block gets a new composer id and its content in the registry, and its
+ * marker in the returned text names that id. A marker with no block (a line
+ * saved before blocks were kept) stays the text it is.
+ */
+export function restoreComposerBlocks(state: PasteRegistryState, message: ComposerMessage): string {
+    if (message.blocks.size === 0)
+        return message.text;
+    const assigned = new Map<string, string>();
+    const liveId = (id: string): string | undefined => {
+        const known = assigned.get(id);
+        if (known !== undefined)
+            return known;
+        const block = message.blocks.get(id);
+        if (!block)
+            return undefined;
+        let live: string;
+        if (block.kind === 'text') {
+            live = `p${state.nextPasteId++}`;
+            state.pasteRegistry.set(live, block.text);
+        }
+        else {
+            live = `img${state.nextImageId++}`;
+            state.imageRegistry.set(live, { data: block.data, mediaType: block.mediaType });
+        }
+        assigned.set(id, live);
+        return live;
+    };
+    return message.text
+        .replace(TEXT_BLOCK_MARKER, (marker: string, id: string, lines: string) => {
+            const live = liveId(id);
+            return live === undefined ? marker : `[TEXT: ${live}, ${lines} lines]`;
+        })
+        .replace(IMAGE_BLOCK_MARKER, (marker: string, id: string, label: string) => {
+            const live = liveId(id);
+            return live === undefined ? marker : `[IMAGE: ${live}, ${label}]`;
+        });
+}
 export function expandTextPastes(pasteRegistry: Map<string, string>, text: string): string {
     const used = new Set<string>();
     const expanded = text.replace(/\[TEXT: (p\d+), (\d+) lines\]/g, (marker, id: string) => {
@@ -421,6 +493,10 @@ export function expandPrompt(pasteRegistry: Map<string, string>, imageRegistry: 
         }));
     }
     expanded = expandTextPastes(pasteRegistry, expanded);
+    // The message leaves the composer holding its pasted text, so none stays
+    // behind: a history line recalled later that names a `pN` it was saved
+    // without (its content was not kept) is not filled from an earlier message.
+    pasteRegistry.clear();
     const imageMarkerRegex = /\[IMAGE: (imgr?\d+), [^\]]+\]/g;
     const imageMarkers: {
         marker: string;

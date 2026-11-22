@@ -13,7 +13,7 @@ These work in the Agent exactly as described under the named heading of the term
 | Option parsing, `--`, typo refusal, run-only flags | "Rules of the command-line parser" |
 | `-m`, `--provider`, `-C`, `-c`, `--enable`, `--disable`, `-p`, `--print`, `-o`, `--json`, `--just-vibes`, `--yolo`, `--no-alt-screen`, `-r`, `-s`, `--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`, `-h`, `-v` | "Global options" |
 | `models`, `providers`, `subscription`, `secrets`, `sessions`, `pair`/`qrcode`, `completion`, `help`, `version`, `plugin bundles` | "Command-line commands" (the matching command) |
-| Composer markers `!`, `!#`, `# `, `@model:`, `!@<path>`, paste folding | "What the composer does with typed text" |
+| Composer markers `!`, `!#`, `# `, `@model:`, `!@<path>`, paste folding, what input history keeps of a fold | "What the composer does with typed text" |
 | Screen layout, session chips, opened agents and processes | "Screen layout" and "Views" |
 | Keys inside lists and forms | "Keys inside lists and forms" |
 | How slash commands are typed and quoted | "How slash commands work" |

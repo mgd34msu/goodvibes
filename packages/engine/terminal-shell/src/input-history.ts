@@ -1,6 +1,8 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { logger, maskCredentialCandidates, readDocument, summarizeError, writeDocument } from '@goodvibes/engine/platform/platform/utils';
+import { IMAGE_BLOCK_MARKER, TEXT_BLOCK_MARKER, type ComposerBlock, type ComposerMessage } from './input-content.js';
 /**
  * InputHistory, Persisted command history with arrow-key navigation.
  *
@@ -23,7 +25,11 @@ export class HistorySearch {
     matches: HistorySearchMatch[] = [];
     matchIndex = 0;
     savedDraft = '';
-    constructor(private getEntries: () => readonly string[]) { }
+    /**
+     * `restore` turns an accepted entry into composer text: its pasted blocks
+     * go back into the composer and their markers name them there.
+     */
+    constructor(private getEntries: () => readonly string[], private restore: (entry: string) => string) { }
     open(draft: string): void {
         this.active = true;
         this.savedDraft = draft;
@@ -71,7 +77,7 @@ export class HistorySearch {
     accept(): string {
         const match = this.currentMatch;
         this.close();
-        return match?.entry ?? '';
+        return match ? this.restore(match.entry) : '';
     }
     cancel(): string {
         const draft = this.savedDraft;
@@ -147,10 +153,49 @@ export interface InputHistoryOptions {
     /** Additional redaction rules applied on top of the built-in set. */
     readonly redactionRules?: readonly HistoryRedactionRule[] | undefined;
 }
-type StoredInputHistoryEntry = string | {
-    readonly text: string;
-    readonly recallText?: string | undefined;
-};
+/**
+ * Pasted content kept for recall, counted over the newest lines first: as
+ * much as one paste can hold (the tokenizer takes up to 8 MiB). Content of
+ * older lines past it is let go, and those lines recall as their markers.
+ */
+const MAX_KEPT_BLOCK_CHARS = 8 * 1024 * 1024;
+/** A content key: `h` and 16 hex digits of the block's SHA-256. */
+const BLOCK_KEY = /^h[0-9a-f]{16}$/;
+function blockKey(block: ComposerBlock): string {
+    const hash = createHash('sha256');
+    if (block.kind === 'text')
+        hash.update('text\0').update(block.text);
+    else
+        hash.update(`image\0${block.mediaType}\0`).update(block.data);
+    return `h${hash.digest('hex').slice(0, 16)}`;
+}
+function blockSize(block: ComposerBlock): number {
+    return block.kind === 'text' ? block.text.length : block.data.length;
+}
+/** The content keys a line's markers name, text blocks first. */
+function markerKeys(line: string): string[] {
+    const keys: string[] = [];
+    for (const match of line.matchAll(TEXT_BLOCK_MARKER))
+        if (match[1] !== undefined && BLOCK_KEY.test(match[1])) keys.push(match[1]);
+    for (const match of line.matchAll(IMAGE_BLOCK_MARKER))
+        if (match[1] !== undefined && BLOCK_KEY.test(match[1])) keys.push(match[1]);
+    return keys;
+}
+/**
+ * The file's last element when any pasted text is kept: `{ "blocks": { key: text } }`.
+ * A reader that knows only lines passes over it (it has no `text`).
+ */
+function readStoredBlocks(raw: unknown): Map<string, string> | null {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || 'text' in raw)
+        return null;
+    const blocks = (raw as { readonly blocks?: unknown }).blocks;
+    if (!blocks || typeof blocks !== 'object' || Array.isArray(blocks))
+        return null;
+    const read = new Map<string, string>();
+    for (const [key, text] of Object.entries(blocks))
+        if (BLOCK_KEY.test(key) && typeof text === 'string') read.set(key, text);
+    return read;
+}
 function resolveHistoryPath(options?: InputHistoryOptions | undefined): string {
     if (options?.historyPath) {
         return options.historyPath;
@@ -164,7 +209,10 @@ function resolveHistoryPath(options?: InputHistoryOptions | undefined): string {
     return join(userRoot, '.goodvibes', surfaceRoot, 'input-history.json');
 }
 export class InputHistory {
-    private entries: StoredInputHistoryEntry[] = [];
+    /** Each line as typed, newest first; a pasted block's marker names its content key in `blocks`. */
+    private entries: string[] = [];
+    /** Pasted content by content key, stored once however many lines name it. Images are kept for this run only. */
+    private blocks = new Map<string, ComposerBlock>();
     private position = -1; // -1 = not browsing
     private draft = ''; // Saves current input when entering history
     private maxEntries = 500;
@@ -202,41 +250,53 @@ export class InputHistory {
      * Add a new entry. Called on submit.
      * - Ignores empty/whitespace-only strings.
      * - Deduplicates consecutive identical entries.
-     * - Applies redaction rules to scrub sensitive arguments before persistence.
+     * - Applies redaction rules to scrub sensitive arguments before persistence;
+     *   pasted text goes through the same rules as typed text.
+     * - Keeps each block of `blocks` (by its composer id in `text`) under a
+     *   content key, and the line names that key in place of the composer id.
      * - Resets browsing position.
      */
-    add(text: string, options: {
-        readonly recallText?: string | undefined;
-    } = {}): void {
+    add(text: string, blocks: ReadonlyMap<string, ComposerBlock> = new Map()): void {
         const trimmed = this.applyRedaction(text.trim());
         if (!trimmed)
             return;
-        const rawRecallText = options.recallText?.trim();
-        const recallText = rawRecallText ? this.applyRedaction(rawRecallText) : undefined;
-        const entry: StoredInputHistoryEntry = recallText && recallText !== trimmed
-            ? { text: trimmed, recallText }
-            : trimmed;
+        const entry = this.keepBlocks(trimmed, blocks);
         // Lines another terminal saved go behind this one, so Up recalls what was
         // just typed here and the repeat check compares against the real neighbour.
         if (this.persist)
             this.mergeFromDisk();
         this.resetPosition();
-        if (this.entries.length > 0 && this.sameEntry(this.entries[0]!, entry))
+        if (this.entries.length > 0 && this.entries[0] === entry)
             return;
         this.entries.unshift(entry);
         if (this.entries.length > this.maxEntries) {
             this.entries.length = this.maxEntries;
         }
+        this.releaseBlocks();
         if (this.persist) {
             this.write();
         }
+    }
+    /**
+     * A stored line as the composer takes it back: its text and the content of
+     * each block its markers name. A marker whose content is not kept (a line
+     * saved with its marker only, or one past the kept size) has no block.
+     */
+    recall(line: string): ComposerMessage {
+        const blocks = new Map<string, ComposerBlock>();
+        for (const key of markerKeys(line)) {
+            const block = this.blocks.get(key);
+            if (block)
+                blocks.set(key, block);
+        }
+        return { text: line, blocks };
     }
     /**
      * Navigate up (older entry).
      * On first call, saves currentInput as draft.
      * Returns the entry to display, or null if at boundary.
      */
-    up(currentInput: string): string | null {
+    up(currentInput: string): ComposerMessage | null {
         if (this.entries.length === 0)
             return null;
         // Save draft on first navigation
@@ -246,7 +306,7 @@ export class InputHistory {
         const next = this.position + 1;
         if (next < this.entries.length) {
             this.position = next;
-            return this.getRecallText(this.entries[this.position]!);
+            return this.recall(this.entries[this.position]!);
         }
         // At oldest boundary
         return null;
@@ -256,17 +316,17 @@ export class InputHistory {
      * Returns newer entry, or draft when reaching the end.
      * Returns null if not currently browsing.
      */
-    down(): string | null {
+    down(): ComposerMessage | null {
         if (this.position === -1)
             return null;
         const prev = this.position - 1;
         if (prev >= 0) {
             this.position = prev;
-            return this.getRecallText(this.entries[this.position]!);
+            return this.recall(this.entries[this.position]!);
         }
-        // Back to draft
+        // Back to draft: its blocks are still in the composer's registries.
         this.position = -1;
-        return this.draft;
+        return { text: this.draft, blocks: new Map() };
     }
     /**
      * Reset browsing position. Called when user types new text.
@@ -285,7 +345,7 @@ export class InputHistory {
      * Return entries as readonly for use by HistorySearch.
      */
     getEntries(): readonly string[] {
-        return this.entries.map((entry) => this.getRecallText(entry));
+        return this.entries;
     }
     /**
      * Save history to disk: entries another terminal added since this process
@@ -294,20 +354,31 @@ export class InputHistory {
      */
     save(): void {
         this.mergeFromDisk();
+        this.releaseBlocks();
         this.write();
     }
     /**
-     * Only the typed text is written. The recall text is the fully expanded
-     * prompt (injected file bodies, pasted blocks), which can carry secrets and
-     * is unbounded, so it lives in memory for this session only. Losing the
-     * newest line to a power cut is acceptable for a history, so the write is
-     * a plain replace (temp file and rename) with no directory sync.
+     * The file is a JSON list of the lines as typed, newest first, then, when
+     * any pasted text is kept, one `{ "blocks": { key: text } }` element with
+     * that text, redacted like the lines and stored once per content. A
+     * referenced file is not written: `@path` is read again when the line is
+     * sent again. Pasted images stay in memory for this run. Losing the newest
+     * line to a power cut is acceptable for a history, so the write is a plain
+     * replace (temp file and rename) with no directory sync.
      */
     private write(): void {
         try {
-            const texts = this.entries.map((entry) => this.getDisplayText(entry));
-            writeDocument(this.historyPath, texts, { indent: null });
-            this.persistedTexts = new Set(texts);
+            const kept: Record<string, string> = {};
+            let anyKept = false;
+            for (const [key, block] of this.blocks) {
+                if (block.kind !== 'text')
+                    continue;
+                kept[key] = block.text;
+                anyKept = true;
+            }
+            const stored: unknown[] = anyKept ? [...this.entries, { blocks: kept }] : [...this.entries];
+            writeDocument(this.historyPath, stored, { indent: null });
+            this.persistedTexts = new Set(this.entries);
         }
         catch (err) {
             logger.debug('InputHistory save failed (non-fatal)', { error: summarizeError(err) });
@@ -324,18 +395,22 @@ export class InputHistory {
         }
         if (!Array.isArray(parsed))
             return;
-        const known = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
-        const foreign: StoredInputHistoryEntry[] = [];
+        const known = new Set(this.entries);
+        const foreign: string[] = [];
         for (const raw of parsed as unknown[]) {
+            const stored = readStoredBlocks(raw);
+            if (stored) {
+                this.takeStoredBlocks(stored);
+                continue;
+            }
             const entry = this.normalizeStoredEntry(raw);
             if (!entry)
                 continue;
-            const redacted = this.redactEntry(entry);
-            const text = this.getDisplayText(redacted);
+            const text = this.applyRedaction(entry);
             if (known.has(text) || this.persistedTexts.has(text))
                 continue;
             known.add(text);
-            foreign.push(redacted);
+            foreign.push(text);
         }
         if (foreign.length > 0) {
             this.entries = [...foreign, ...this.entries].slice(0, this.maxEntries);
@@ -361,45 +436,83 @@ export class InputHistory {
                 },
             });
             if (parsed) {
-                this.entries = parsed
-                    .map((entry) => this.normalizeStoredEntry(entry))
-                    .filter((entry): entry is StoredInputHistoryEntry => entry !== null)
-                    .map((entry) => this.redactEntry(entry))
-                    .slice(0, this.maxEntries);
-                this.persistedTexts = new Set(this.entries.map((entry) => this.getDisplayText(entry)));
+                const entries: string[] = [];
+                for (const raw of parsed) {
+                    const stored = readStoredBlocks(raw);
+                    if (stored) {
+                        this.takeStoredBlocks(stored);
+                        continue;
+                    }
+                    const entry = this.normalizeStoredEntry(raw);
+                    if (entry !== null)
+                        entries.push(this.applyRedaction(entry));
+                }
+                this.entries = entries.slice(0, this.maxEntries);
+                this.persistedTexts = new Set(this.entries);
+                this.releaseBlocks();
             }
         }
         catch (err) {
             logger.debug('InputHistory load failed (non-fatal, using empty history)', { error: summarizeError(err) });
             this.entries = [];
+            this.blocks.clear();
         }
-    }
-    private getDisplayText(entry: StoredInputHistoryEntry): string {
-        return typeof entry === 'string' ? entry : entry.text;
-    }
-    private getRecallText(entry: StoredInputHistoryEntry): string {
-        return typeof entry === 'string' ? entry : entry.recallText ?? entry.text;
-    }
-    private sameEntry(a: StoredInputHistoryEntry, b: StoredInputHistoryEntry): boolean {
-        return this.getDisplayText(a) === this.getDisplayText(b)
-            && this.getRecallText(a) === this.getRecallText(b);
     }
     /**
-     * Apply redaction rules to a loaded entry, scrubbing any sensitive text that
-     * was persisted before redaction was deployed.
+     * The line as kept: each marker whose composer id has a block in `blocks`
+     * names the block's content key instead, and the block, its text redacted
+     * as a typed line is, is kept under that key.
      */
-    private redactEntry(entry: StoredInputHistoryEntry): StoredInputHistoryEntry {
-        if (typeof entry === 'string') {
-            return this.applyRedaction(entry);
+    private keepBlocks(line: string, blocks: ReadonlyMap<string, ComposerBlock>): string {
+        if (blocks.size === 0)
+            return line;
+        const keyFor = (id: string, kind: ComposerBlock['kind']): string | undefined => {
+            const block = blocks.get(id);
+            if (!block || block.kind !== kind)
+                return undefined;
+            const kept: ComposerBlock = block.kind === 'text' ? { kind: 'text', text: this.applyRedaction(block.text) } : block;
+            const key = blockKey(kept);
+            this.blocks.set(key, kept);
+            return key;
+        };
+        return line
+            .replace(TEXT_BLOCK_MARKER, (marker: string, id: string, lines: string) => {
+                const key = keyFor(id, 'text');
+                return key === undefined ? marker : `[TEXT: ${key}, ${lines} lines]`;
+            })
+            .replace(IMAGE_BLOCK_MARKER, (marker: string, id: string, label: string) => {
+                const key = keyFor(id, 'image');
+                return key === undefined ? marker : `[IMAGE: ${key}, ${label}]`;
+            });
+    }
+    /** Pasted text read from the file, redacted again as loaded lines are; content already held is kept as is. */
+    private takeStoredBlocks(stored: ReadonlyMap<string, string>): void {
+        for (const [key, text] of stored)
+            if (!this.blocks.has(key))
+                this.blocks.set(key, { kind: 'text', text: this.applyRedaction(text) });
+    }
+    /**
+     * Keeps the content the newest lines name, up to MAX_KEPT_BLOCK_CHARS, and
+     * lets go of the rest: content no kept line names, and content of older
+     * lines that does not fit.
+     */
+    private releaseBlocks(): void {
+        const kept = new Set<string>();
+        let size = 0;
+        for (const entry of this.entries) {
+            for (const key of markerKeys(entry)) {
+                const block = this.blocks.get(key);
+                if (!block || kept.has(key))
+                    continue;
+                if (size + blockSize(block) > MAX_KEPT_BLOCK_CHARS)
+                    continue;
+                size += blockSize(block);
+                kept.add(key);
+            }
         }
-        const redactedText = this.applyRedaction(entry.text);
-        const redactedRecallText = entry.recallText !== undefined
-            ? this.applyRedaction(entry.recallText)
-            : undefined;
-        if (redactedRecallText !== undefined && redactedRecallText !== redactedText) {
-            return { text: redactedText, recallText: redactedRecallText };
-        }
-        return redactedText;
+        for (const key of [...this.blocks.keys()])
+            if (!kept.has(key))
+                this.blocks.delete(key);
     }
     /**
      * Entries persisted before CR normalization was deployed (registerPaste now
@@ -410,7 +523,7 @@ export class InputHistory {
     private launderLineBreaks(text: string): string {
         return text.replace(/\r\n?/g, '\n');
     }
-    private normalizeStoredEntry(entry: unknown): StoredInputHistoryEntry | null {
+    private normalizeStoredEntry(entry: unknown): string | null {
         if (typeof entry === 'string')
             return this.launderLineBreaks(entry);
         if (!entry || typeof entry !== 'object')

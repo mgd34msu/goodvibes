@@ -88,7 +88,8 @@ export function createWorkTreeFeedRoute<Source extends WorkTreeFeedSource>(
 const TEXT_FIELDS = ['prompt', 'cursorPos', 'commandMode', 'nextPasteId', 'nextImageId', 'pasteRegistry', 'imageRegistry',
   'inputHistory', 'commandRegistry', 'commandContext', 'autocomplete', 'filePicker', 'saveUndoState',
   'registerPaste', 'requestRender'] as const;
-const KEY_FIELDS = ['prompt', 'cursorPos', 'inputScrollTop', 'commandMode', 'contentWidth', 'inputHistory', 'pasteRegistry', 'indicatorFocused',
+const KEY_FIELDS = ['prompt', 'cursorPos', 'inputScrollTop', 'commandMode', 'contentWidth', 'inputHistory', 'pasteRegistry',
+  'imageRegistry', 'restoreRecalledInput', 'indicatorFocused',
   'conversationManager', 'commandContext', 'submitConcealedInput', 'autocomplete', 'saveUndoState',
   'ensureInputCursorVisible', 'getWrappedPromptInfo', 'moveCursorVertical', 'handlePathCompletion', 'handleBlockToggle',
   'findMarkerAtPos', 'cleanupMarkerRegistry', 'expandPrompt', 'scroll', 'exitApp', 'requestRender'] as const;

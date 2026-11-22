@@ -1,5 +1,7 @@
 // Proves: A secret typed on a command line is written in plain text to the input-history file.
 // Red when: A command's declared secret arguments are no longer applied before the line reaches history, or the history's own rule for token flags stops matching.
+// Proves: A message holding a pasted block, recalled from input history after a restart, comes back without the text that was pasted.
+// Red when: The history file keeps a pasted block's marker but not its content, so the recalled message sends the marker in place of the forty pasted lines.
 /**
  * A secret typed as a command argument is not written to input history.
  *
@@ -12,15 +14,31 @@
  *
  * Also covered: a command this app does not register (an Agent has no
  * `/local-auth`) and a token flag typed on any command line.
+ *
+ * A pasted block in a sent message is kept by the same history: a message is
+ * sent through the real prompt key route with a forty-line paste folded in
+ * it, and a second composer with its own history read from the same file (as
+ * the next start of the program has) recalls it with Up and sends it again.
  */
 import { afterEach, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SecretsManager } from '../platform/src/platform/config/secrets.ts';
 import { createCommandModeTokenHandler, type CommandRouteContext } from '../terminal-shell/src/command-mode-route.ts';
 import { createTerminalCommandRegistry } from '../terminal-shell/src/command-registry.ts';
+import {
+  createFeedTokenRoutes,
+  type FeedCommandContext,
+  type IndicatorFocusRouteState,
+  type KeyRouteState,
+  type MouseRouteState,
+  type TextRouteState,
+} from '../terminal-shell/src/feed-token-routes.ts';
+import { expandPrompt, registerPasteForHost } from '../terminal-shell/src/input-content.ts';
+import { TerminalInputHandlerState } from '../terminal-shell/src/input-handler-state.ts';
 import { InputHistory } from '../terminal-shell/src/input-history.ts';
+import { getWrappedPromptInfo } from '../terminal-shell/src/prompt-buffer.ts';
 import { createSecretsCommand, type SecretsCommandContext } from '../terminal-shell/src/secrets-command.ts';
 import { splitSlashCommand } from '../terminal-shell/src/slash-command-parser.ts';
 
@@ -86,7 +104,7 @@ function terminal() {
 function remembered(historyPath: string): string {
   const fresh = new InputHistory({ historyPath });
   const recalled: string[] = [];
-  for (let entry = fresh.up(''); entry !== null; entry = fresh.up(entry)) recalled.push(entry);
+  for (let entry = fresh.up(''); entry !== null; entry = fresh.up(entry.text)) recalled.push(entry.text);
   return `${readFileSync(historyPath, 'utf8')}\n${recalled.join('\n')}`;
 }
 
@@ -105,4 +123,71 @@ test('a token flag on any command line is not written', async () => {
   expect(kept).not.toContain('tok-typed-9d3e71');
   expect(kept).not.toContain('op-typed-5b8a20');
   expect(kept).toContain('/connect remote');
+});
+
+const { handlePromptKeyToken } = createFeedTokenRoutes<
+  FeedCommandContext,
+  IndicatorFocusRouteState,
+  TextRouteState<FeedCommandContext>,
+  KeyRouteState<FeedCommandContext>,
+  string,
+  MouseRouteState
+>({ openIndicator: () => {}, openKeyIndicator: () => {}, mouseRowOffset: 0 });
+
+/** The composer state both terminal programs keep (their input handlers extend it), with its text. */
+class Composer extends TerminalInputHandlerState {
+  prompt = '';
+}
+
+/** One start of the program: a composer, its history read from the file, and what the model was sent. */
+function composerOn(historyPath: string, project: string) {
+  const composer = new Composer(8);
+  composer.inputHistory = new InputHistory({ historyPath });
+  const sent: string[] = [];
+  const press = (key: 'enter' | 'up'): void => {
+    const result = handlePromptKeyToken({
+      prompt: composer.prompt, cursorPos: composer.prompt.length, inputScrollTop: 0, commandMode: false,
+      contentWidth: 200, maxInputRows: 8, indicatorFocused: false,
+      inputHistory: composer.inputHistory, pasteRegistry: composer.pasteRegistry, imageRegistry: composer.imageRegistry,
+      restoreRecalledInput: (message) => composer.restoreRecalledInput(message),
+      expandPrompt: (text) => expandPrompt(composer.pasteRegistry, composer.imageRegistry, text, project),
+      conversationManager: null, autocomplete: null, blockActionsMenu: { open: () => {} },
+      commandContext: { print: () => {}, submitInput: (text: string) => { sent.push(text); } },
+      saveUndoState: () => {}, ensureInputCursorVisible: () => {},
+      getWrappedPromptInfo: (width) => getWrappedPromptInfo(composer.prompt, composer.prompt.length, 0, width, 8),
+      moveCursorVertical: () => false, handlePathCompletion: () => false, handleBlockToggle: () => {},
+      findMarkerAtPos: () => null, cleanupMarkerRegistry: () => {}, scroll: () => {}, exitApp: () => {}, requestRender: () => {},
+    }, { type: 'key', name: key === 'enter' ? 'return' : 'up', logicalName: key, ctrl: false, shift: false, meta: false });
+    expect(result.handled).toBe(true);
+    composer.prompt = result.prompt;
+  };
+  return { composer, sent, press };
+}
+
+test('a pasted block recalled after a restart comes back folded with its text and is sent in full; a 3.4.3 line still loads', () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'gv-history-paste-')));
+  roots.push(root);
+  const project = join(root, 'project');
+  mkdirSync(project, { recursive: true });
+  const historyPath = join(root, 'input-history.json');
+  // What 3.4.3 wrote: the line with its marker only.
+  writeFileSync(historyPath, JSON.stringify(['[TEXT: p1, 12 lines] saved by 3.4.3']));
+  const pasted = Array.from({ length: 40 }, (_, line) => `pasted line ${line + 1}`).join('\n');
+
+  const first = composerOn(historyPath, project);
+  first.composer.prompt = `${registerPasteForHost(first.composer, pasted, project)} what do these say`;
+  first.press('enter');
+  expect(first.sent).toEqual([`${pasted} what do these say`]);
+
+  const next = composerOn(historyPath, project);
+  next.press('up');
+  expect(next.composer.prompt).toBe('[TEXT: p1, 40 lines] what do these say');
+  next.press('enter');
+  expect(next.sent).toEqual([`${pasted} what do these say`]);
+  // The line sent again is the same line, so the one before it is two presses up.
+  next.press('up');
+  next.press('up');
+  expect(next.composer.prompt).toBe('[TEXT: p1, 12 lines] saved by 3.4.3');
+  next.press('enter');
+  expect(next.sent[1]).toBe('[TEXT: p1, 12 lines] saved by 3.4.3');
 });

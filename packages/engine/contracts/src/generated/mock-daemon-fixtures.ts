@@ -23605,7 +23605,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "available": false,
             "reason": "sample"
           }
-        ]
+        ],
+        "reach": {
+          "otherDevices": false,
+          "reason": "sample",
+          "fix": "sample",
+          "steps": [
+            {
+              "state": "done",
+              "text": "sample",
+              "detail": "sample",
+              "command": false
+            }
+          ]
+        }
       }
     }
   },
@@ -23626,7 +23639,20 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "available": false,
             "reason": "sample"
           }
-        ]
+        ],
+        "reach": {
+          "otherDevices": false,
+          "reason": "sample",
+          "fix": "sample",
+          "steps": [
+            {
+              "state": "done",
+              "text": "sample",
+              "detail": "sample",
+              "command": false
+            }
+          ]
+        }
       }
     }
   },
@@ -28442,7 +28468,10 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "words": {
         "chosen": "sample",
         "inForce": "sample",
+        "chosenWhen": "sample",
+        "chosenShort": "sample",
         "because": "sample",
+        "failure": false,
         "sentence": "sample",
         "asksBefore": "sample"
       }

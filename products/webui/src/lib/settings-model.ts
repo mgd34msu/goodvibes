@@ -357,8 +357,25 @@ export function buildSettingsModel(liveConfig: unknown): SettingsGroupModel[] {
 // Search / filter
 // ---------------------------------------------------------------------------
 
-function fieldMatches(field: ConfigFieldModel, q: string): boolean {
-  return field.label.toLowerCase().includes(q) || field.key.toLowerCase().includes(q) || field.description.toLowerCase().includes(q);
+/** The words of a settings search, lower-cased, in any order. */
+export function searchWords(query: string): string[] {
+  return query.toLowerCase().split(/\s+/).filter(Boolean);
+}
+
+/** A word and its stem: "asking" is also found as "ask", "settings" as "setting". */
+function wordForms(word: string): string[] {
+  const stem = word.replace(/(?:ing|ed|es|s)$/, '');
+  return stem.length >= 3 && stem !== word ? [word, stem] : [word];
+}
+
+/** True when every word of the search is in at least one of the texts, in any order. */
+export function matchesEveryWord(texts: readonly string[], words: readonly string[]): boolean {
+  const haystack = texts.join('\n').toLowerCase();
+  return words.every((word) => wordForms(word).some((form) => haystack.includes(form)));
+}
+
+function fieldMatches(field: ConfigFieldModel, words: readonly string[]): boolean {
+  return matchesEveryWord([field.label, field.key, field.description], words);
 }
 
 const APPLIES_WHEN_WORDS: Readonly<Record<NonNullable<ConfigFieldModel['appliesWhen']>, string>> = {
@@ -373,39 +390,39 @@ export function appliesWhenWords(field: Pick<ConfigFieldModel, 'appliesWhen'>): 
   return field.appliesWhen ? APPLIES_WHEN_WORDS[field.appliesWhen] : '';
 }
 
-function unitMatches(unit: FeatureUnitModel, q: string): boolean {
+function unitMatches(unit: FeatureUnitModel, words: readonly string[]): boolean {
   return (
-    unit.feature.id.toLowerCase().includes(q) ||
-    unit.feature.name.toLowerCase().includes(q) ||
-    unit.feature.description.toLowerCase().includes(q) ||
-    (unit.enablementField !== null && fieldMatches(unit.enablementField, q)) ||
-    unit.fields.some((f) => fieldMatches(f, q))
+    matchesEveryWord([unit.feature.id, unit.feature.name, unit.feature.description], words) ||
+    (unit.enablementField !== null && fieldMatches(unit.enablementField, words)) ||
+    unit.fields.some((f) => fieldMatches(f, words))
   );
 }
 
 /**
  * Filter the model by a free-text query across group labels, feature id/name/
- * description, and config key/description. A group matches wholly when its label
- * matches; otherwise it is narrowed to matching units and rows. Empty groups drop.
+ * description, and config key/description: every word of the query must be
+ * found, in any order ("stop asking" finds what "ask" and "stop" both name). A
+ * group matches wholly when its label matches; otherwise it is narrowed to
+ * matching units and rows. Empty groups drop.
  */
 export function filterSettingsModel(groups: SettingsGroupModel[], query: string): SettingsGroupModel[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return groups;
+  const words = searchWords(query);
+  if (words.length === 0) return groups;
   const out: SettingsGroupModel[] = [];
   for (const group of groups) {
-    if (group.label.toLowerCase().includes(q)) {
+    if (matchesEveryWord([group.label], words)) {
       out.push(group);
       continue;
     }
     const featureUnits = group.featureUnits
       .map((u) =>
-        unitMatches(u, q)
+        unitMatches(u, words)
           ? u
-          : { ...u, fields: u.fields.filter((f) => fieldMatches(f, q)) },
+          : { ...u, fields: u.fields.filter((f) => fieldMatches(f, words)) },
       )
-      .filter((u) => unitMatches(u, q) || u.fields.length > 0);
-    const plainRows = group.plainRows.filter((f) => fieldMatches(f, q));
-    const rawRows = group.rawRows.filter((r) => r.key.toLowerCase().includes(q));
+      .filter((u) => unitMatches(u, words) || u.fields.length > 0);
+    const plainRows = group.plainRows.filter((f) => fieldMatches(f, words));
+    const rawRows = group.rawRows.filter((r) => matchesEveryWord([r.key], words));
     if (featureUnits.length === 0 && plainRows.length === 0 && rawRows.length === 0) continue;
     out.push({ ...group, featureUnits, plainRows, rawRows });
   }

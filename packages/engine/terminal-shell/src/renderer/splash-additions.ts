@@ -5,9 +5,11 @@
  * last row and never take part in that centring, so they cannot move it.
  *
  *   a  You're set.  Answering with rt-1 · signed in       3 of 3
- *   c  GoodVibes asks before ...  shift+tab  changes how often it asks. ...
+ *   b  The terminal app on this computer has settings.  /setup import-settings  brings them over, ...
+ *   c  GoodVibes asks before ...  shift+tab  changes when GoodVibes asks. ...
  *
- * Both are drawn only on first run. The blocks are packed with no blank row
+ * All are drawn only on first run (b only when the app was given an import
+ * command: the Agent's first launch where the terminal app has settings). The blocks are packed with no blank row
  * between them, and the sentence of block c wraps to the screen's width so it
  * takes as few rows as its words need. Both are drawn when their rows fit
  * between the splash's last row and the composer; when they do not, the
@@ -25,7 +27,7 @@ import { getSharedModeFlash } from '../session-permission-mode.js';
 const isBlank = (line: Line): boolean => line.every((cell) => cell.char === ' ' || cell.char === '');
 
 interface Block {
-  readonly kind: 'a' | 'c';
+  readonly kind: 'a' | 'b' | 'c';
   readonly rows: readonly { readonly segments: readonly StyledSegment[]; readonly right?: string | undefined }[];
 }
 
@@ -69,11 +71,20 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
     ], blockWidth);
     blocks.push({ kind: 'a', rows: rows.map((segments) => ({ segments })) });
   }
+  if (view.importCommand && firstRun?.kind !== 'pending') {
+    const rows = wrapSegments([
+      { text: 'The terminal app on this computer has settings.', tone: 'dim' },
+      { text: ' ' },
+      { text: view.importCommand, chip: true },
+      { text: ' brings them over, showing what would change first.', tone: 'dim' },
+    ], sentenceWidth);
+    blocks.push({ kind: 'b', rows: rows.map((segments) => ({ segments })) });
+  }
   if (firstRun?.kind === 'set' && view.asksBefore) {
     const rows = wrapSegments([
       { text: view.asksBefore, tone: 'dim' },
       // The key that changes the mode, as bound; with none bound, the clause about it is left out.
-      ...(options.modeKey ? [{ text: ' ' }, { text: options.modeKey, chip: true }, { text: ' changes how often it asks.', tone: 'dim' as const }] : []),
+      ...(options.modeKey ? [{ text: ' ' }, { text: options.modeKey, chip: true }, { text: ' changes when GoodVibes asks.', tone: 'dim' as const }] : []),
       { text: '   Web UI, phone, channels and everything else:', tone: 'dim' },
       { text: ' ' },
       { text: view.setupCommand, chip: true },
@@ -85,9 +96,9 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
   // Free rows: every row under the splash's last row (the composer is below the viewport).
   const free = height - 1 - last;
   const rowsOf = (list: readonly Block[]): number => list.reduce((sum, block) => sum + block.rows.length, 0);
-  // Too short for every block: the sentence goes first; block a goes last.
+  // Too short for every block: the sentence goes first, then the import line; block a goes last.
   let shown: Block[] = blocks;
-  for (const drop of ['c', 'a'] as const) {
+  for (const drop of ['c', 'b', 'a'] as const) {
     if (rowsOf(shown) <= free) break;
     shown = shown.filter((block) => block.kind !== drop);
   }

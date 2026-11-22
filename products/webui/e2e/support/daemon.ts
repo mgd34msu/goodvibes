@@ -198,7 +198,7 @@ export async function startRealDaemon(options: { commands?: readonly ScriptedCom
 
 /** Pair the browser as the owner's own device, as the terminal's pairing QR does; returns the link's fragment and token. */
 export async function ownerPairingLink(daemon: RealDaemon): Promise<{ fragment: string; token: string }> {
-  const minted = await daemon.invoke(daemon.ownerToken, 'pairing.handoff.create', { name: 'e2e-browser', offers: [] });
+  const minted = await daemon.invoke(daemon.ownerToken, 'pairing.handoff.create', { name: 'e2e-browser', offers: [], forThisMachine: true });
   const body = minted.body as { fragment?: string; token?: { token?: string } };
   if (minted.status !== 200 || !body.fragment || !body.token?.token) throw new Error(`pairing.handoff.create answered ${minted.status}: ${minted.text.slice(0, 300)}`);
   return { fragment: body.fragment, token: body.token.token };

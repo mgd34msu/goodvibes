@@ -1,6 +1,6 @@
 # GoodVibes: overview, terms, architecture and where everything is stored
 
-This file describes GoodVibes release 3.4.4 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
+This file describes GoodVibes release 3.4.5 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
 
 How to read this file:
 
@@ -454,7 +454,7 @@ Fix the JSON (or move the file away to start from defaults) and start the progra
 
 A single stored value that a setting rejects never stops a program. An ordinary setting is skipped and resolves to its default (`Setting <key> ignored (<file>): <why>.`). A setting whose default would permit more than what was stored holds its own feature closed instead, and the program says so once: `Setting <key> could not be read (<file>): it <why>. Fix it with /settings or in <file>; until it is fixed, <what is held>.` These settings and what they hold: `permissions.tools.<tool>` (every call of that tool is refused), `permissions.mode` and `policy.bundleSource`/`policy.bundlePath` (you are asked as in Ask me), `permissions.engine` (the policy engine decides), `policy.registryEnabled` and `policy.requireSignedBundles` (on), `judgment.backend`, `judgment.fallbacks`, `judgment.keyName` and `provider.decisionRouter` (no decision model is asked; `judgment.policy` reads `No Decision Model`), `relay.requireStepUpForMutations` (on), `fetch.blockedHosts` (fetch refuses every website), `conversationGate.mode` (`confirm-all`), `sandbox.mcpIsolation` (`contained`), `storage.secretPolicy` (`require_secure`), `runtime.toolBudget.*` (enforced, the unreadable limit at its tightest), and `payments.majorRetailersExcluded` (every purchase asks you while an entry names no shop). A new value a setting rejects is refused when it is saved, naming the key and the values it takes.
 
-What an earlier release left in a program's own settings file is carried forward once, when the program (or the daemon, for its own file) loads it: a key only the daemon's settings file sets (`service.*`, `judgment.*`, `power.keepAwake` and the other daemon settings) is moved to the daemon's settings file when that file does not set it, and is removed from the program's file either way; a key that a release since 3.0.0 had and this release no longer has (for example `behavior.suggestAlternativeOnProviderFail`, `judgment.decisionDeadlineMs`) is removed. Before the file is rewritten, it is copied as it was to `<file>.before-<version>` beside it (with the same permissions; a `.2`, `.3` and so on is added when that name is taken), so a value taken out is never lost. The file is rewritten once and one notice says what moved, what was removed and where the copy is: `Settings an earlier version left in ~/.goodvibes/tui/settings.json were carried forward; moved to the daemon's settings (~/.goodvibes/daemon/settings.json): service.enabled, service.autostart; removed because this version no longer has them: behavior.suggestAlternativeOnProviderFail. The file as it was is kept as ~/.goodvibes/tui/settings.json.before-3.4.4.` After that start there is nothing to say. A project's settings file is repository content and is never rewritten.
+What an earlier release left in a program's own settings file is carried forward once, when the program (or the daemon, for its own file) loads it: a key only the daemon's settings file sets (`service.*`, `judgment.*`, `power.keepAwake` and the other daemon settings) is moved to the daemon's settings file when that file does not set it, and is removed from the program's file either way; a key that a release since 3.0.0 had and this release no longer has (for example `behavior.suggestAlternativeOnProviderFail`, `judgment.decisionDeadlineMs`) is removed. Before the file is rewritten, it is copied as it was to `<file>.before-<version>` beside it (with the same permissions; a `.2`, `.3` and so on is added when that name is taken), so a value taken out is never lost. The file is rewritten once and one notice says what moved, what was removed and where the copy is: `Settings an earlier version left in ~/.goodvibes/tui/settings.json were carried forward; moved to the daemon's settings (~/.goodvibes/daemon/settings.json): service.enabled, service.autostart; removed because this version no longer has them: behavior.suggestAlternativeOnProviderFail. The file as it was is kept as ~/.goodvibes/tui/settings.json.before-3.4.5.` After that start there is nothing to say. A project's settings file is repository content and is never rewritten.
 
 Any other key the program does not know (a misspelling, or a key from a newer release), or a daemon setting in a project's file, is skipped and the rest of the file applies; so is a value that is not one the setting allows (a renamed value from an earlier release included: it is not read under its new name). It is left in the file and said once on this machine, in one short line naming the key and the file, for example `Setting display.bogusKey ignored (~/.goodvibes/tui/settings.json): not a setting this build knows.`; later starts, and other commands and programs reading the same file, do not repeat it (the announce-once store in the control-plane directory records what was said, and `<tree>/.goodvibes/settings-notices.json` the stderr copy). Fixing the key and breaking it again says it again. A running terminal app or Agent shows it on its own screen and writes nothing to stderr for it, and when the attached daemon reports the same key in the same file, the line is shown once. The full reason and its remedy are in the activity log.
 
@@ -474,9 +474,9 @@ Terms used here:
 - A provider is a model service (for example OpenRouter or Anthropic).
 - The suite is the three programs plus the web UI bundle, the browser driver and the native libraries, all from one release. When a later step of an install fails, the replaced programs are put back and so is the browser driver the run had replaced, so the programs and the driver stay from one release.
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
-- A release is a tagged GoodVibes version such as `v3.4.4`, published at `https://github.com/mgd34msu/goodvibes/releases`.
+- A release is a tagged GoodVibes version such as `v3.4.5`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
-This part describes release 3.4.4.
+This part describes release 3.4.5.
 
 ## Choosing an installation method
 
@@ -581,31 +581,31 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 On a new Linux x64 machine where `~/.local/bin` is not on `PATH`, the shell is bash and the user is `alex`, these are the lines the installer prints, in order. Words in angle brackets are filled in at run time.
 
 ```text
-Installing GoodVibes v3.4.4 for linux-x64 into /home/alex/.local/bin
+Installing GoodVibes v3.4.5 for linux-x64 into /home/alex/.local/bin
 
-Installing goodvibes v3.4.4 ...
+Installing goodvibes v3.4.5 ...
   installed  /home/alex/.local/bin/goodvibes
 
-Installing goodvibes-daemon v3.4.4 ...
+Installing goodvibes-daemon v3.4.5 ...
   installed  /home/alex/.local/bin/goodvibes-daemon
-  running:   goodvibes-daemon 3.4.4
+  running:   goodvibes-daemon 3.4.5
 
 Added /home/alex/.local/bin to PATH in /home/alex/.bashrc (installer-managed; uninstall removes it).
 
-Installed: goodvibes 3.4.4
+Installed: goodvibes 3.4.5
   installed  /home/alex/.local/bin/lib/sqlite-vec-linux-x64/vec0.so
 
-Installing the web UI v3.4.4 ...
-  installed  /home/alex/.local/bin/webui/3.4.4
+Installing the web UI v3.4.5 ...
+  installed  /home/alex/.local/bin/webui/3.4.5
   installed  /home/alex/.local/bin/playwright-core
 
-Installing goodvibes-agent v3.4.4 ...
+Installing goodvibes-agent v3.4.5 ...
   installed  /home/alex/.local/bin/goodvibes-agent
-  running:   goodvibes-agent 3.4.4
+  running:   goodvibes-agent 3.4.5
 
 Installing the wake-word model ...
   wake-word model: Wake-word model installed and verified: "hey goodvibes" <model version> (<size>). Turn it on with voice.wake.enabled, nothing further to download.
-  web UI: served by the daemon from /home/alex/.local/bin/webui/3.4.4
+  web UI: served by the daemon from /home/alex/.local/bin/webui/3.4.5
     http://127.0.0.1:3421
     reachable from this machine only (the control-plane listener is bound to loopback).
     To reach it from another device on your network:  goodvibes-daemon webui enable --lan
@@ -660,13 +660,13 @@ When `curl` itself cannot download the script (no network, DNS failure, proxy), 
 Every option can be given as an environment variable on the `sh` side of the pipe:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.4 GOODVIBES_WEBUI=0 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.5 GOODVIBES_WEBUI=0 sh
 ```
 
 Some options also exist as command-line flags. With `curl | sh`, flags follow `sh -s --`:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.4 --no-service
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.5 --no-service
 ```
 
 A downloaded copy of the script takes the same flags directly:
@@ -685,7 +685,7 @@ Usage: install.sh [--version VERSION] [--bin-dir DIR] [--from-dir DIR] [--no-ser
 GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.
 
 Options:
-  --version VERSION     Install this release, such as v3.4.4, for every program (default: latest;
+  --version VERSION     Install this release, such as v3.4.5, for every program (default: latest;
                         also GOODVIBES_VERSION).
   --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).
   --from-dir DIR        Install from DIR, a directory holding the release files and their SHA256SUMS.txt,
@@ -715,7 +715,7 @@ The complete list of installer options and environment variables, generated from
 | `--no-service` |  | Do not install the daemon as a service, and record that choice so a daemon started by hand never installs one (also GOODVIBES_DAEMON_SERVICE=0). |
 | `--service` |  | Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0. |
 | `--no-auto-update` |  | Keep the daemon, the terminal app and the Agent from updating themselves, from their first launch (also GOODVIBES_AUTO_UPDATE=0). Update later by running this installer. |
-| `--version` | `VERSION` | Install this release, such as v3.4.4, for every program (default: latest; also GOODVIBES_VERSION). |
+| `--version` | `VERSION` | Install this release, such as v3.4.5, for every program (default: latest; also GOODVIBES_VERSION). |
 | `--bin-dir`, `--install-dir` | `DIR` | Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR). |
 | `--decision-policy` | `POLICY` | Save the decision model policy (the judgment.policy setting; the daemon refuses a value it does not accept and names the allowed ones; see the current one with goodvibes-daemon config get judgment.policy). |
 | `--from-dir` | `DIR` | Install from DIR, a directory holding the release files and their SHA256SUMS.txt, with no request to GitHub; every file is checked against that list (also GOODVIBES_RELEASE_DIR). The release is read from the file names unless --version names it. |
@@ -749,7 +749,7 @@ Full list: "Installer options" in the part "Reference".
 
 | Option | Values and default | Effect |
 | --- | --- | --- |
-| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.4.4` or `3.4.4`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
+| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.4.5` or `3.4.5`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
 | `GOODVIBES_INSTALL_DIR` or `--bin-dir DIR` (alias `--install-dir DIR`) | `$HOME/.local/bin` | The directory that receives the programs and their support files. It is created when missing. A relative path or a symbolic link is resolved to its physical directory once at the start. The web UI goes to `<dir>/webui`, the browser driver to `<dir>/playwright-core`, native libraries to `<dir>/lib`. |
 | `GOODVIBES_DAEMON_SERVICE=0` or `--no-service` | `1` (default) | Skips first-run service registration and, when no daemon service is installed, records the choice with `goodvibes-daemon config set service.enabled false`. `service.enabled` is a daemon setting, read by the daemon before it would install itself as a service at its first idle moment and by `goodvibes doctor`, so a daemon started by hand stays without a service and doctor does not ask for one. The installer then prints `Daemon service setup skipped (--no-service); ...` followed by the daemon's path. `--service` (or `GOODVIBES_DAEMON_SERVICE=1`) turns it back on. Any value other than `1` means skip. An already installed service is left installed, recorded as it is, and refreshed and restarted on upgrade. The installer starts no daemon. When neither the flag nor the variable is given and `service.enabled` is already `false` (for example after `goodvibes-daemon uninstall-service`), no service is set up: the installer prints `Daemon service: off by your choice (service.enabled is false), so none was set up.` and `goodvibes-daemon install-service` as the way to turn it on. |
 | `GOODVIBES_AUTO_UPDATE=0` or `--no-auto-update` | `1` (default) | Runs `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` before any program starts. Both are daemon settings, kept in `~/.goodvibes/daemon/settings.json` and read by the daemon, the terminal app and the Agent, so none of the three updates itself, from its first launch. The closing lines say `Automatic updates: off for goodvibes, goodvibes-daemon and goodvibes-agent.` If the daemon refuses a write, the install still finishes and says how to turn them off. Update later by running the installer again. Any value other than `0` leaves updates on. |
@@ -780,7 +780,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 Install one exact release:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.4 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.5 sh
 ```
 
 Install into a different directory, for example `~/bin`:
@@ -803,10 +803,10 @@ Install with automatic updates off from the first launch:
 curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --no-auto-update
 ```
 
-Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.4.4 -R mgd34msu/goodvibes -D goodvibes-v3.4.4`), then run the installer from that copy:
+Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.4.5 -R mgd34msu/goodvibes -D goodvibes-v3.4.5`), then run the installer from that copy:
 
 ```sh
-sh install.sh --from-dir ./goodvibes-v3.4.4 --no-auto-update
+sh install.sh --from-dir ./goodvibes-v3.4.5 --no-auto-update
 ```
 
 With no service, no daemon runs until one is started by hand (`cd ~ && nohup goodvibes-daemon >/dev/null 2>&1 &`). The terminal app and the Agent never start a daemon that has no service: at start they only start an installed service that is stopped, and otherwise say that no daemon answers.
@@ -826,7 +826,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --decision-policy 'No Deci
 Install unattended (CI, a provisioning script, no terminal). Older copies on `PATH` are then removed only when `GOODVIBES_SHADOW_REMOVE=1`; with the default, an unanswerable question leaves them in place and the install still succeeds:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.4 GOODVIBES_SHADOW_REMOVE=1 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.5 GOODVIBES_SHADOW_REMOVE=1 sh
 ```
 
 Upgrade an existing installation to the newest release: run the same install command again. See "Updating".
@@ -867,7 +867,7 @@ Paths below use the default install directory `~/.local/bin` and the `linux-x64`
 | `~/.local/bin/lib/sqlite-vec-linux-x64/vec0.so` | The vector-search extension (`vec0.dylib` under `sqlite-vec-darwin-<arch>` on macOS). All three programs load it from here. |
 | `~/.local/bin/lib/sqlite-darwin-<arch>/libsqlite3.dylib` and `libsqlite3.dylib.json` | macOS only. The SQLite library the daemon uses, and its record. |
 | `~/.local/bin/playwright-core/` | The browser driver used by browser tools. Browsers themselves are downloaded later into a separate cache when first needed (`goodvibes-agent browser provision`). Holds `.goodvibes-release.json` naming its release. |
-| `~/.local/bin/webui/<version>/` | The web UI bundle for that release, for example `webui/3.4.4/`. Every release the installer installs gets its own directory; older ones are never deleted by the installer. Holds `.goodvibes-release.json`. |
+| `~/.local/bin/webui/<version>/` | The web UI bundle for that release, for example `webui/3.4.5/`. Every release the installer installs gets its own directory; older ones are never deleted by the installer. Holds `.goodvibes-release.json`. |
 | `~/.local/bin/.goodvibes-reader-requirements.json` | Written by the programs when saved data needs a minimum reader. The installer only reads it. Never delete it to force a downgrade. |
 | `~/.local/bin/<program>.previous` and other `*.previous` files | Rollback copies kept by an automatic update or `/update apply`. See "Rolling back". |
 | `~/.config/systemd/user/goodvibes.service` | Linux. The daemon's service, written by `goodvibes-daemon install-service`. |
@@ -930,7 +930,7 @@ When a directory earlier on `PATH` holds another `goodvibes`, it prints which co
 ```text
 PROBLEM: typing "goodvibes" does not run the copy this installer maintains.
          wins on PATH: /home/alex/.bun/bin/goodvibes (version 1.18.1)
-         installed here: /home/alex/.local/bin/goodvibes (version 3.4.4)
+         installed here: /home/alex/.local/bin/goodvibes (version 3.4.5)
 ```
 
 Then, for each earlier copy:
@@ -975,7 +975,7 @@ Once replacement has begun, every replaced file is kept as `<file>.goodvibes-pre
 
 ```text
 install.sh: installation did not finish. The previous programs were restored and the installation claims were released; running services were not touched.
-install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.4 sh
+install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.5 sh
 ```
 
 If the previous files cannot all be put back, the installer keeps the claims, the backups and the journal, and prints one command per file instead:
@@ -1384,7 +1384,7 @@ Only a release ("binary") installation updates itself. A program run from source
 2. A check asks the release feed named by `update.releasesUrl` for the latest tag. When it is newer than the running daemon, the daemon downloads and checksum-verifies the release.
 3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback. From that last idle check until it restarts, the daemon takes no new work: a request that would start or change something (any method other than `GET` or `HEAD`, and over the WebSocket any call whose method is not a read) is answered `503` with code `DAEMON_ADMISSION_CLOSED` and `Retry-After: 5`, and reads and status still answer. A channel message that arrives meanwhile (Telegram, Slack, Discord, Mattermost, ntfy including its remote-chat topic, Home Assistant chat, the generic webhook and the other chat channels) is accepted and saved but neither read nor started, and no notice is sent: it is answered once, after the restart (a Home Assistant reply arrives as its event). A message in a delegated Telegram review chat is not taken: it stays with Telegram and is read after the restart. A GitHub webhook event is answered `202` with `outcome: waiting-for-restart`, saved, and its agent started once after the restart. A "yes" to a work proposal is kept the same way, with any direction added to it, and its work starts after the restart. Scheduled automation jobs and check-ins, watcher runs, knowledge schedules, trigger actions, memory consolidation, the daily store snapshot and the timed retention sweeps start nothing either. What fell due runs after the restart: an automation occurrence once (within `automation.catchUpWindowMinutes`), a trigger's owed action once (a condition still true fires again), consolidation at its next idle or scheduled pass, and the store snapshot at the first hourly check. When the files are not replaced after all, or the service manager refuses the handover before the daemon stops, it takes work again at once and starts what it held.
 4. The daemon stops in order, then the service manager starts the new version. Under systemd it asks for a service restart. When it was started by hand on Linux, it installs the systemd user unit and hands over to it. On macOS a one-time launchd helper restarts it after the old process exits; a daemon on macOS that launchd does not supervise is not updated this way, so update it with the installer or `/update apply`.
-5. The daemon logs and records a receipt that begins `updated from 3.4.3 to 3.4.4 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
+5. The daemon logs and records a receipt that begins `updated from 3.4.4 to 3.4.5 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
 
 No clock ends an update. The download runs until it finishes, the release server or the connection fails (the transport gives up on a transfer that receives nothing for 300 seconds), the daemon stops, or the loop is stopped; a slow connection only makes it take longer. Release files are written to a private directory beside the installation (`.update-fetch-<pid>-<random>`) as they arrive and copied into place from there, so the daemon holds one piece of a file in memory at a time; the directory is removed when the update ends, and one left by a daemon that was killed mid-download is removed by the next update.
 
@@ -1400,10 +1400,10 @@ On a machine whose daemon runs, it prints (receipt lines vary):
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.4.4
+  version:  3.4.5
   updates:  on, checking every 1h 0m
   receipts:
-    2026-11-20T09:12:44.120Z  updated from 3.4.3 to 3.4.4 at 2026-11-20 10:12; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
+    2026-11-20T09:12:44.120Z  updated from 3.4.4 to 3.4.5 at 2026-11-20 10:12; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
 ```
 
 The first line names `this machine`, or the daemon's address when `--host` points elsewhere. `version:` prints two lines, `<build> (the daemon build)` and `<platform version> (the platform package it reports on /status)`, when the two differ. `receipts:` reads `none written` when there are none, and `could not be read (<reason>)` when the receipts file is there but cannot be read or parsed; likewise `uptime:` reads `the lifecycle marker could not be read (<reason>)` when the marker file is there but cannot be read.
@@ -1412,7 +1412,7 @@ Inside `goodvibes` or `goodvibes-agent`, `/update daemon` shows the connected da
 
 ```text
 Daemon updates
-  running:  3.4.4
+  running:  3.4.5
   updates:  on, checking every 1h 0m
   next: /update daemon --check runs one check now
 ```
@@ -1464,7 +1464,7 @@ The lines each outcome prints (`<new>` and `<current>` are versions such as `v3.
 
 After `requires recovery`, run the install command again: it recovers a transaction whose process is gone, or stops with `INSTALL_E120` and names the files to put back (see "Installer errors and their fixes").
 
-A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.4.4, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
+A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.4.5, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
 
 A launch or Agent update replaces the daemon program on disk too, but the running daemon keeps its version until it restarts. Restart it with `goodvibes-daemon restart-service`.
 
@@ -1587,7 +1587,7 @@ What does not carry over: the `*.previous` rollback copies (so `/update rollback
 To stay on one release and stop every automatic update:
 
 1. Turn off every automatic update: `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` (one setting file read by all three programs).
-2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.4 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
+2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.5 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
 3. Check: `goodvibes-daemon update` shows `updates:  off: update.auto is not true, so this daemon will not update itself`.
 
 To resume updates, set the same keys back to `true` (or run `goodvibes-daemon config unset update.auto`) and restart the programs.
@@ -1599,7 +1599,7 @@ Installing an older release over a newer one works only when the older programs 
 Install with `--no-auto-update` (or `GOODVIBES_AUTO_UPDATE=0`):
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.4 --no-auto-update
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.5 --no-auto-update
 ```
 
 Before any program starts, the installer writes `update.auto` and `update.autoUpdateAtLaunch` as `false` in the daemon's settings file, which the daemon, the terminal app and the Agent all read, so none of them updates itself from its first launch. Combine it with the other options, for example `--no-service`, `--bin-dir` or `--from-dir`. Behind a proxy, add the variables shown in "Network access, proxies and machines without internet".
@@ -2060,7 +2060,7 @@ Many ids guard against something changing the install directory, a claim file or
 | `INSTALL_E006` | could not resolve the latest release tag for mgd34msu/goodvibes | `curl` could not reach GitHub. | Check the network and proxy, or set `GOODVIBES_VERSION=vX.Y.Z`. |
 | `INSTALL_E007` | could not resolve the latest release tag | GitHub gave no tag (with `wget`, or an empty redirect). | As `INSTALL_E006`. |
 | `INSTALL_E008` | All products use GOODVIBES_VERSION; remove conflicting per-product version overrides. | `GOODVIBES_DAEMON_VERSION`, `GOODVIBES_AGENT_VERSION` or `GOODVIBES_WEBUI_VERSION` differs from `GOODVIBES_VERSION`. | `unset GOODVIBES_DAEMON_VERSION GOODVIBES_AGENT_VERSION GOODVIBES_WEBUI_VERSION`. |
-| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.4.4`. |
+| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.4.5`. |
 | `INSTALL_E010` | Missing or ambiguous checksum: `<file>`. Release `<v>` is incomplete; no source build will be attempted. | The release's checksum list has no line (or more than one line) for a file this platform needs. | Choose another release with `GOODVIBES_VERSION`. |
 | `INSTALL_E011` | Checksum mismatch: `<file>` | The download was corrupted or altered (often a proxy). | Retry; if it persists, check the network path. |
 | `INSTALL_E012` | Could not extract the verified browser driver. | `tar` failed (disk full, `$TMPDIR` problem). | Free space or set `TMPDIR`; retry. |
@@ -2282,7 +2282,7 @@ The terminal app starts that scan of this computer (never the network) when firs
 **Step 3 is the conversation.** The splash (the logo, its lines, the hint and the version) is drawn exactly as on every start, at the same place; under it, on the first run only and only in the rows left free above the composer, GoodVibes adds:
 
 1. `You're set.  Answering with <model> · signed in` (`no sign-in needed` for a model on this computer) and `3 of 3`.
-2. What GoodVibes asks before, for the permission mode in force (for example `GoodVibes asks before it runs commands or changes things outside this folder.`), that Shift+Tab changes how often it asks, and the command that opens the remaining setup, wrapped to the screen's width so it takes as few rows as its words need.
+2. What GoodVibes asks before, for the permission mode in force (for example `GoodVibes asks before it runs commands or changes things outside this folder.`), that Shift+Tab changes when GoodVibes asks, and the command that opens the remaining setup, wrapped to the screen's width so it takes as few rows as its words need.
 
 The two parts follow each other with no blank row between them; rows left over become blank rows (first one under the splash, then one above the composer). At 120x36 both show in both programs. When the free rows are too few for both, the sentence is left out first, whole (the logo always keeps its place); on an 80x24 terminal the terminal app has no free rows under its splash, so nothing is added there. Notices are never drawn over these screens: they are counted on the status bar (`ctrl+n` opens them). Nothing of first run is written into the conversation.
 
@@ -2418,7 +2418,7 @@ Each starts with **Auto-start this surface**: **Yes** saves `surfaces.<surface>.
 | --- | --- | --- |
 | Human-in-the-Loop (HITL) mode | Quiet (only important attention requests), Balanced (default), Operator (keep operational activity visible) | `behavior.hitlMode` |
 | Guidance verbosity | Minimal (default), Guided, Off | `behavior.guidanceMode` |
-| Execution mode | Ask me, Jev decides (default), Just vibes, YOLO | `permissions.mode` (`ask-me`, `jev-decides`, `just-vibes`, `yolo`) |
+| When GoodVibes asks | Ask me, Jev decides (default), Just vibes, YOLO | `permissions.mode` (`ask-me`, `jev-decides`, `just-vibes`, `yolo`) |
 
 The permission modes are explained in the permissions part of this file. YOLO is reported as a risk by `goodvibes doctor`.
 
@@ -2452,7 +2452,7 @@ The setup pages appear as they become relevant, and a status line names the next
 | --- | --- |
 | Models | The main chat model and reasoning effort, plus optional helper, tool, spoken-turn and embedding routes, a custom system prompt file, a local model benchmark and prompt cache settings. |
 | Behavior | Interaction mode, verbosity per area, reasoning effort, guidance mode, auto-compact threshold, context warnings, notifications, resume summaries, visible thinking. |
-| Tools & Permissions | Execution mode (`permissions.mode`), allow/prompt/deny for file reads, writes, edits, shell commands and network fetches, adding an MCP server, linking and testing secret references, and tool limits. |
+| Tools & Permissions | When GoodVibes asks (`permissions.mode`), allow/prompt/deny for file reads, writes, edits, shell commands and network fetches, adding an MCP server, linking and testing secret references, and tool limits. |
 | Interface | Streaming, theme, theme mode, line numbers, collapse threshold, token speed, tool previews, where operational and system messages appear. |
 | Messaging | Turning on and filling in ntfy, Slack, Discord, webhooks, Telegram, Google Chat, home automation, Signal, WhatsApp and iMessage, plus checking, diagnosing, guided setup and test sends. Nothing is sent without an explicit send. |
 | Voice & Media | Spoken replies, text-to-speech provider and voice, telephony, image input, media generation, and voice readiness. |
@@ -2603,8 +2603,8 @@ How each option behaves:
 | `-y, --yes` | Confirms a command that would otherwise only preview (for example `plugin bundles install`, `support-bundle import`). |
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. |
-| `-h, --help` | Prints help. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.4.4`. |
+| `-h, --help` | Prints help: first `Most used:` (start the app, `run "<prompt>"`, `pair`, `status`, `goodvibes-daemon update --check`; the Agent adds `setup`), then every command, the options and examples. `goodvibes help <command>` prints one command's help. |
+| `-v, --version` | Prints `goodvibes 3.4.5`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -3009,6 +3009,18 @@ Host pairing is described under "Host pairing: giving the terminal app its own c
 goodvibes pair --name "my phone"
 ```
 
+Before minting, `pair` asks the daemon (`pairing.posture.get`, which mints nothing) whether another device could open the code; the daemon decides from its settings, with no request on the network: a loopback address cannot; `web.publicBaseUrl` is your statement that it can; otherwise `controlPlane.enabled` decides. When none could, no token is minted and `pair` exits `1`, printing:
+
+```text
+No pairing code was made: a phone could not open it yet.
+  1. done  The daemon serves the web UI at http://127.0.0.1:3421.
+  2. next  goodvibes-daemon webui enable --lan
+           (the daemon serves only this machine: http://127.0.0.1:3421 is this machine's own address, which another device cannot open)
+  3. then  goodvibes pair, then scan the code it prints with the phone.
+```
+
+When one can, the output leads with the same list (`1. done  The daemon serves the web UI at <origin>, open to other devices.`, `2. next  Scan the code below with the phone's camera; it opens the web app already signed in.`, `3. then  In the web app, accept or decline each offer: ...`), then the QR code, the link, the token name and the details. A daemon serving no web UI gets `No pairing code was made: the daemon serves no web UI, so a code would open nothing.` with `goodvibes-daemon webui enable --lan` as the next step. `goodvibes-agent pair` and the Agent's `/devices pair device` do the same against the connected host.
+
 Device pairing is described under "Pairing a phone or another browser" in the daemon part.
 
 ### `goodvibes web`, `surfaces`, `listener`, `control-plane`, `service`, `remote`
@@ -3135,7 +3147,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.4.4`.
+`goodvibes version` prints `goodvibes 3.4.5`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface
@@ -3147,7 +3159,7 @@ The screen has four regions, top to bottom.
 1. The header names the program, its version and the session. While a helper agent or background process is open full screen, the header reads `main › <agent>` in the agent's color. While a failover is in force it also names the model answering, with `failover from <selected model>`.
 2. The transcript shows the conversation: owner prompts, model answers, tool calls with their results, notices in square brackets (`[Permissions]`, `[Context]`, `[Failover]`), and the work tree of helper agents and background processes started in the turn.
 3. The composer is the text box where the owner types. Its label shows what Enter will do (prompt, command, shell, note, memory pin).
-4. The status bar, the row under the composer. Left: `Asks:` and the permission mode chosen (`Asks: Jev decides`); when the mode in force differs, ` · asking you for now · <why>` (`decision model unreachable`, `decision model failing`, `no decision model set`, `decision models switched off`, `not measured yet`); then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. A click on a segment opens its view: the mode opens the permission mode setting, the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; a reason that only states a choice (`no decision model set`, `decision models switched off`) goes (a click on the mode shows it); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a reason that reports a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure reason goes last. `Asks:` with the mode and `asking you for now` always stay. At 120 columns with a choice reason and a few unread notices, context, branch and model all show; with the decision model unreachable the reason stays whole and the context and branch give way.
+4. The status bar, the row under the composer. Left: `Asks:` and the mode in force. When it is the mode chosen, its name (`Asks: Jev decides`); when it is not, what is in force first and the choice second, with when it takes effect: `Asks: you, for now · Jev decides once a decision model is set` (no decision model set), `· Jev decides once decision models are on` (decision models switched off), `· Jev decides once you choose it` (Jev decides is only the shipped default and was not measured on this decision model), `· Jev decides once the decision model answers again · decision model unreachable` (or `· decision model failing`), and `Asks: YOLO, for now · <mode> once the old auto-approve setting is off`; then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. A click on a segment opens its view: the mode opens the permission mode setting, the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; the choice shortens (`Jev decides once a decision model is set` to `you chose Jev decides`, or `default: Jev decides` while Jev decides is only the shipped default; a click on the mode shows the rest); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure goes last. `Asks:` with the mode in force (`you, for now`) and the choice always stay. At 120 columns with no decision model set, `Asks: you, for now · you chose Jev decides` shows with context, branch and model (and `1 notice` when there is one); with Jev decides only the shipped default and not measured, the whole of `Asks: you, for now · Jev decides once you choose it` shows when there is no notice; with the decision model unreachable, `Asks: you, for now · you chose Jev decides · decision model unreachable` shows with `branch main` and the model. At 80 columns: `Asks: you, for now · you chose Jev decides` with the model, or `Asks: you, for now · you chose Jev decides · unreachable`.
 
 While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Tab` and `Shift+Tab` switch between sessions when the composer is empty.
 
@@ -3243,7 +3255,7 @@ The default table of the terminal app:
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
 The change lasts for the session only. The saved default is changed in `/settings` (or `/settings set permissions.mode <mode>`); `/permissions` shows it but does not change it.
 Plan mode is outside the cycle; `/plan` turns it on and off for this session, also without changing the saved default.
-Nothing is written into the conversation: the status bar's `Asks:` segment shows the new mode and flashes (drawn inverse) for 1.5 seconds. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the segment says so and why: `Asks: Jev decides · asking you for now · decision models switched off`.
+Nothing is written into the conversation: the status bar's `Asks:` segment shows the new mode and flashes (drawn inverse) for 1.5 seconds. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the segment leads with what is in force and says when the choice takes effect: `Asks: you, for now · Jev decides once decision models are on`.
 A managed lock on `permissions.mode` stops the change, and a notice says so: `The mode stays <mode>: <reason>`.
 
 ### Changing a key
@@ -3343,7 +3355,7 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 
 ### Help, navigation and display
 
-`?` on an empty composer, `/help` and `Ctrl+P` (or `Ctrl+K`) all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command) and `Finds:` with the words that find it; on an 80-column terminal there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines, and `/help keys` prints every key with the file that changes them (`~/.goodvibes/tui/keybindings.json`). The list's last shortcut row names that file too. Without an interface `/help` prints every command with its usage.
+`?` on an empty composer, `/help` and `Ctrl+P` (or `Ctrl+K`) all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. Beside the search, `<n> commands and keys` counts every row of the list (`<shown> of <n>` while searching), the same rows the `<n> more ↓` count under the list counts. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command with more than one; a command that does one thing shows only its summary) and `Finds:` with the words that find it; on an 80-column terminal there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines, and `/help keys` prints every key with the file that changes them (`~/.goodvibes/tui/keybindings.json`). The list's last shortcut row names that file too. Without an interface `/help` prints every command with its usage.
 Looking through the conversation is under `/session` (its group "Look through this conversation"): `/session find [--kind <kind>] [<words>]` lists the entries that hold the words (with none, it searches in place, the same as `Ctrl+F`); `/web-search` searches the web instead.
 `/session expand [all|thinking|tool|code]` and `/session collapse [all|thinking|tool|code]` open or fold every block of that type (all of them when none is given).
 `/session bookmarks` lists the blocks bookmarked with `Ctrl+B` and jumps to one.
@@ -3544,7 +3556,7 @@ When a file was changed after that call (by you, another tool or another program
 When the provider is not signed in, the terminal app asks for its API key on a hidden line before the switch lands.
 An unknown id is refused with the provider registry's reason. `/model use` alone asks which model, from the models you can switch to.
 `/model refresh` asks every provider you have set up for its models again (past any list kept on disk), then refreshes the catalog, the benchmarks and the token limits, and prints one line per provider: how many models it has, or why its list could not be read (`could not be read, its server is not running`, `could not be read (<error>); 12 models from its last list`, `0 models: it answered with an empty list`); a provider that does not list its own models says it uses the built-in catalog. A part that failed makes the refresh a refusal naming it, after the rest was printed.
-The model picker (its key, or a failed turn's `alt+o`) is unchanged; its left rail selects the route the choice is for: Main Chat, Helper Model, Tool LLM, TTS LLM or Embeddings (see "Routing roles" below).
+The model picker (its key, or a failed turn's `alt+o`) has a tab for each thing a model is chosen for: Main chat, Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `kind unknown`; pinned and recent models still come first.
 
 `/effort` is described once for both programs: `show` ("See how hard the model thinks", the report) and `set <level>` ("Choose how hard the model thinks"; bare `/effort set` lists the levels the current model offers).
 `/effort set high` saves `provider.reasoningEffort` and prints the level in effect.
@@ -3949,15 +3961,16 @@ Files in that directory are read again when they change; no restart is needed.
 
 ### Routing roles
 
-`/model` chooses a model for one of five roles. Each role writes its own settings, so a choice for one never changes another.
+The model picker chooses a model for one of six roles. Each role writes its own settings, so a choice for one never changes another.
 
 | Role | Picker label | Settings | Behavior |
 | --- | --- | --- | --- |
-| Main chat | Main Chat | `provider.provider`, `provider.model` | Normal turns. |
-| Helper | Helper Model | `helper.globalProvider`, `helper.globalModel`, `helper.enabled` (default off) | Supporting work such as summaries; empty values use the main model. |
-| Tool model | Tool LLM | `tools.llmProvider`, `tools.llmModel`, `tools.llmEnabled` | Model calls made inside tools; selecting a model turns it on. |
-| TTS model | TTS LLM | `tts.llmProvider`, `tts.llmModel` | The model that answers `/voice speak` messages; empty uses the main model. |
-| Embeddings | Embeddings | `provider.embeddingProvider` | The embedding provider for memory search and the code index. It has no model choice. |
+| Main chat | Main chat | `provider.provider`, `provider.model` | Normal turns. |
+| Helper | Side work | `helper.globalProvider`, `helper.globalModel`, `helper.enabled` (default off) | Supporting work such as summaries and session titles; empty values use the tool-work model when it is on, else the main model. |
+| Tool model | Tool work | `tools.llmProvider`, `tools.llmModel`, `tools.llmEnabled` | GoodVibes's own background model calls (commit messages, repairing a failed edit, summarizing changes); selecting a model turns it on. |
+| TTS model | Spoken replies | `tts.llmProvider`, `tts.llmModel` | The model that answers `/voice speak` messages; empty uses the main model. |
+| Decision model | Decision model | `judgment.endpoint`, `judgment.model`, `judgment.keySource`, `judgment.keyName`, `judgment.backend` | The model that decides which actions are safe to run under Jev decides. The tab lists "No decision model" and the decision models Settings offers; choosing one asks for its address and where its key comes from, the same steps as the Decision model row of `/settings open`, which write the same settings. Both programs. |
+| Embeddings | Search index | `provider.embeddingProvider` | The embedding provider for memory search and the code index. It has no model choice. The terminal app only. |
 
 `goodvibes doctor routing` prints which provider and model serve each role.
 
@@ -6025,7 +6038,7 @@ Both need the connected host; without it they print the reason and exit `1`.
 ```text
 $ goodvibes-agent compat
 GoodVibes Agent compatibility
-  package 3.4.4
+  package 3.4.5
   connected host http://127.0.0.1:3421 (unreachable)
   host compatible no
   operator token missing (/home/me/.goodvibes/daemon/operator-tokens.json)
@@ -6044,41 +6057,44 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 
 ## The Agent workspace
 
-The Agent workspace is a full-screen view of categories, each a list of rows grouped by what a person does. It has no forms of its own: a row that does something names a slash command's action (shown in its Command column, such as `/memory add`), and `Enter` closes the workspace and opens that action's guided form, the same one the slash command opens (a row may fill some blanks in, such as the account of `/calendar use-app google`); a row's name is the action's own label. The pane beside the rows says in one sentence what the area is for, then what the selected row will do (the action's sentence, or a setting's own description with its value and default as `/settings get` shows them) and, where the row's command has a report, that report's first lines, read by running it exactly as the command does. Only a report that reads nothing past this machine runs when its row is selected (once per opening); one that reaches a mailbox, a daemon or remote host, or a provider shows "Press ctrl+r to check now", and `Ctrl+R` runs it for the selected row. Work & Approvals also shows the work view `/work open` shows. Nothing else is shown there. A setting row cycles a yes/no or a choice in place and opens the settings screen at that setting for a typed value or a `permissions.*` change; an area whose rows are all settings shows Setting, Default and Current columns, and a setting among action rows shows `now <value>`. The other rows open a picker, another category, or say what to ask in the conversation.
+The Agent workspace is a full-screen view of categories, each a list of rows grouped by what a person does. It has no forms of its own: a row that does something names a slash command's action (shown in its Command column, such as `/memory add`), and `Enter` closes the workspace and opens that action's guided form, the same one the slash command opens (a row may fill some blanks in, such as the account of `/calendar use-app google`); a row's name is the action's own label. The pane beside the rows says in one sentence what the area is for, then what the selected row will do (the action's sentence, or a setting's own description with its value and default as `/settings get` shows them) and, where the row's command has a report, that report's first lines, read by running it exactly as the command does. Only a report that reads nothing past this machine runs when its row is selected (once per opening); one that reaches a mailbox, a daemon or remote host, or a provider is "not read yet", and `Ctrl+R` runs it for the selected row. The report is in one of four states, each said in its own words: `<command>: not read yet` (press ctrl+r), `<command>: reading…`, `As <command> showed it, read at 14:05:` with its lines (or "Nothing to show."), and `<command>: could not read (read at 14:05)` with the reason. Work & Approvals also shows the work view `/work open` shows. Nothing else is shown there. A setting row cycles a yes/no or a choice in place and opens the settings screen at that setting for a typed value or a `permissions.*` change; an area whose rows are all settings shows Setting, Default and Current columns, and a setting among action rows shows `now <value>`. A row that opens another area shows `/agent <area>` in its Command column, the command that opens that area; the other rows open a picker or say what to ask in the conversation.
+The title row names the Agent home the session runs in and the account its chat model uses (`home default · account anthropic`, with `(subscription)` for a stored sign-in). In a home other than the default one, the status bar shows `home <name>` too.
 It opens with `/agent [section]` or `Ctrl+G`. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it.
 Typing a letter on Home closes the workspace and puts the letter in the composer.
 
-The workspace has these 26 categories, in this order, in eight groups; there are no others.
+The workspace has these 26 categories, in this order, in eight groups; there are no others. The everyday work comes first and setting up after; each group is shown by the title in the second column (the first column is the group's id, which `goodvibes-agent setup` and the harness use).
 
-| Group | Category id | Label | Actions | Holds |
-| --- | --- | --- | --- | --- |
-| START | `home` | Home | 10 | Lanes into Start, Personal Ops, Research, Documents, Automation, Messaging, Memory and Work; the interaction mode (quiet, balanced, operator). |
-| SETUP | `setup` | Setup | 11 | Not listed: `/setup` opens it with only one topic's rows. `Choose a model`: local model, main model, reasoning effort. `Sign in or out of a provider`: sign-in start and finish, sign-out, see a sign-in. `Store a password or key`: credentials, secret policy. `History and privacy`: save history. `Bring over settings from the terminal app`: settings import. |
-| ONBOARDING | `account-model` | Models | 19 | Provider and model choice, reasoning, pins, and the advanced routes (helper, tool, TTS, embeddings, system prompt, cache). |
-| ONBOARDING | `assistant-behavior` | Behavior | 11 | How chat behaves during normal work and long-running tasks. |
-| ONBOARDING | `tools-permissions` | Tools & Permissions | 13 | The permission mode and tool settings. |
-| ONBOARDING | `onboarding-display` | Interface | 9 | Display settings. |
-| ONBOARDING | `onboarding-channels` | Messaging | 74 | Chat channels (Slack, Discord, Telegram and others): enable each and fill in its credentials. Its description ends with the channels' readiness. |
-| ONBOARDING | `onboarding-voice-media` | Voice & Media | 21 | Voice, TTS, image input, media generation and telephony. |
-| ONBOARDING | `onboarding-context` | Local Context | 16 | Personas, starter memories, skills, routines, notes and knowledge, and importing their files; VIBE.md. |
-| DAY-TO-DAY | `personal-ops` | Personal Ops | 25 | The daily operations hub: inbox, calendar, reminders, briefing, Google connection. |
-| DAY-TO-DAY | `research` | Research | 21 | `/research` (a question or a page into the conversation, research runs, sources, sourced reports), what goes into Agent Knowledge. |
-| DAY-TO-DAY | `documents` | Documents & Files | 42 | `/documents` (drafts, review comments and suggestions, review packets), `/artifacts`, `/compare` (blind model comparison), uploads, exports, media. |
-| DAY-TO-DAY | `conversation` | Conversation | 16 | Context review, compaction, prompt helpers, transcript navigation, session continuity, title, export, undo, redo, retry. |
-| CAPABILITIES | `tools` | Tools & MCP | 10 | Task tools and MCP servers; changes need typed confirmation. |
-| CAPABILITIES | `knowledge` | Knowledge | 16 | Agent Knowledge status, ask, search and ingest. |
-| LOCAL BEHAVIOR | `profiles` | Profiles | 10 | Named Agent profiles and starter templates. |
-| LOCAL BEHAVIOR | `owner-profile` | Your Profile | 9 | The owner profile kept by the daemon. |
-| LOCAL BEHAVIOR | `memory` | Memory | 23 | Memory records, the prompt plan and the learning curator. |
-| LOCAL BEHAVIOR | `notes` | Notes | 12 | Scratchpad notes (not memory, not Agent Knowledge): `/notes`. |
-| LOCAL BEHAVIOR | `personas` | Personas | 9 | Personas and VIBE.md. |
-| LOCAL BEHAVIOR | `skills` | Skills | 20 | Agent skills and bundles with their requirements. |
-| LOCAL BEHAVIOR | `routines` | Routines | 13 | Routines and their promotion to schedules. |
-| OPERATIONS | `work` | Work & Approvals | 15 | Active operator state, pending approvals, background processes, the work plan. |
-| OPERATIONS | `host` | Connected Host | 17 | Read-only views of the connected host: health, remote routes, host tasks and their output, sessions and the session graph, channels, schedules, knowledge, media, MCP, provider detail, routes and repair, provider auth, support bundles. |
-| OPERATIONS | `automation` | Automation | 20 | Confirmed reminders, routine promotion, and run, pause and resume of schedules and automation jobs on the connected host. |
-| FINISH | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
+| Group | Shown as | Category id | Label | Actions | Holds |
+| --- | --- | --- | --- | --- | --- |
+| START | start | `home` | Home | 10 | Lanes into Setup, Inbox & calendar, Research, Documents, Schedules, Messaging, Memory and Work; the interaction mode (quiet, balanced, operator). |
+| DAY-TO-DAY | get things done | `personal-ops` | Inbox & calendar | 25 | The daily operations hub: inbox, calendar, reminders, briefing, Google connection. |
+| DAY-TO-DAY | get things done | `research` | Research | 21 | `/research` (a question or a page into the conversation, research runs, sources, sourced reports), what goes into Agent Knowledge. |
+| DAY-TO-DAY | get things done | `documents` | Documents & Files | 42 | `/documents` (drafts, review comments and suggestions, review packets), `/artifacts`, `/compare` (blind model comparison), uploads, exports, media. |
+| DAY-TO-DAY | get things done | `conversation` | Conversation | 16 | Context review, compaction, prompt helpers, transcript navigation, session continuity, title, export, undo, redo, retry. |
+| DAY-TO-DAY | get things done | `work` | Work & Approvals | 15 | Active operator state, pending approvals, background processes, the work plan. |
+| DAY-TO-DAY | get things done | `automation` | Schedules | 20 | Confirmed reminders, routine promotion, and run, pause and resume of schedules and automation jobs on the connected host. |
+| LOCAL BEHAVIOR | remember & teach | `owner-profile` | Your Profile | 9 | The owner profile kept by the daemon. |
+| LOCAL BEHAVIOR | remember & teach | `memory` | Memory | 23 | Memory records, the prompt plan and the learning curator. |
+| LOCAL BEHAVIOR | remember & teach | `notes` | Notes | 12 | Scratchpad notes (not memory, not Agent Knowledge): `/notes`. |
+| LOCAL BEHAVIOR | remember & teach | `personas` | How it talks | 9 | Personas and VIBE.md: `/personas`. |
+| LOCAL BEHAVIOR | remember & teach | `skills` | Procedures | 20 | Agent skills and bundles with their requirements: `/my-skills`. |
+| LOCAL BEHAVIOR | remember & teach | `routines` | Saved workflows | 13 | Routines and their promotion to schedules: `/routines`. |
+| CAPABILITIES | tools & knowledge | `tools` | Tools & MCP | 10 | Task tools and MCP servers; changes need typed confirmation. |
+| CAPABILITIES | tools & knowledge | `knowledge` | Knowledge | 16 | Agent Knowledge status, ask, search and ingest. |
+| OPERATIONS | homes & host | `profiles` | Agent homes | 10 | Named Agent homes and starter templates: `/agent-home`. |
+| OPERATIONS | homes & host | `host` | Connected Host | 17 | Read-only views of the connected host: health, remote routes, host tasks and their output, sessions and the session graph, channels, schedules, knowledge, media, MCP, provider detail, routes and repair, provider auth, support bundles. |
+| SETUP | set up | `setup` | Setup | 11 | Not listed: `/setup` opens it with only one topic's rows. `Choose a model`: local model, main model, reasoning effort. `Sign in or out of a provider`: sign-in start and finish, sign-out, see a sign-in. `Store a password or key`: credentials, secret policy. `History and privacy`: save history. `Bring over settings from the terminal app`: settings import. |
+| ONBOARDING | set up | `account-model` | Models | 19 | Provider and model choice, reasoning, pins, and the advanced routes (helper, tool, TTS, embeddings, system prompt, cache). |
+| ONBOARDING | set up | `assistant-behavior` | Behavior | 11 | How chat behaves during normal work and long-running tasks. |
+| ONBOARDING | set up | `tools-permissions` | Tools & Permissions | 13 | The permission mode and tool settings. |
+| ONBOARDING | set up | `onboarding-display` | Interface | 9 | Display settings. |
+| ONBOARDING | set up | `onboarding-channels` | Messaging | 74 | Chat channels (Slack, Discord, Telegram and others): enable each and fill in its credentials. Its description ends with the channels' readiness. |
+| ONBOARDING | set up | `onboarding-voice-media` | Voice & Media | 21 | Voice, TTS, image input, media generation and telephony. |
+| ONBOARDING | set up | `onboarding-context` | Local Context | 16 | Personas, starter memories, skills, routines, notes and knowledge, and importing their files; VIBE.md. |
+| FINISH | finish setup | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
+
+On the Agent's first launch, when the terminal app on the same computer has settings the Agent would take, the lines under the splash say so once: "The terminal app on this computer has settings. `/setup import-settings` brings them over, showing what would change first." Later launches do not say it.
 
 Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`) shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` shows all 26. A start whose model is not ready opens first run, not the workspace (see the install part of this file).
 `/agent <section>` opens a section (category) by its id; the guided form lists them by label.
@@ -6493,7 +6509,7 @@ One extra rule applies to `jev-decides` while it is only the shipped default (th
 
 What the reports show: every report shows the mode in force, read by the same rule the gate reads, and, when it is not the saved or chosen mode, which mode that is and why.
 
-- `goodvibes status` and `goodvibes-agent status`: `permissions: Ask me (ask-me) in force; set: jev-decides` (the saved mode, or the one `-c` sets for this launch), then `not jev-decides, because <reason>`. The reasons: `no decision model is set, so every call Jev would decide asks you (to use one, choose a Decision model in /settings open)`; `you turned decision models off, so Jev cannot decide and every call it would decide asks you`; `Jev decides is only the shipped default here and its decisions were not measured on this decision model; choose Jev decides yourself (shift+tab, or /settings open) to use it`; `"Approve every tool request without asking" is on in your settings, which means YOLO; choosing how often it asks in /settings clears it`. With `--json` the same is under `auth.permissionModeInForce` (`chosen`, `mode`, `reason`). `status` runs without the app, so a model that is failing in a running app is reported by that app, not by `status`.
+- `goodvibes status` and `goodvibes-agent status`: `permissions: Ask me (ask-me) in force; set: jev-decides` (the saved mode, or the one `-c` sets for this launch), then `not jev-decides, because <reason>`. The reasons: `no decision model is set, so every call Jev would decide asks you (to use one, choose a Decision model in /settings open)`; `you turned decision models off, so Jev cannot decide and every call it would decide asks you`; `Jev decides is only the shipped default here and its decisions were not measured on this decision model; choose Jev decides yourself (shift+tab, or /settings open) to use it`; `"Approve every tool request without asking" is on in your settings, which means YOLO; choosing your setting for when GoodVibes asks in /settings clears it`. With `--json` the same is under `auth.permissionModeInForce` (`chosen`, `mode`, `reason`). `status` runs without the app, so a model that is failing in a running app is reported by that app, not by `status`.
 - `/permissions`: `mode in force: <mode> (<label>)`, then `not <mode>, because <reason>` when it differs, then `saved mode: <mode>`, or `chosen for this session: <mode>; saved default: <mode> (set in /settings)` after Shift+Tab. A running app also gives the reason `the decision model <model> is not answering (<what failed>, since <time>); calls Jev would decide ask you until it answers again`. In the Agent bound to a hosted session, the session's mode and reason come from the daemon.
 - The mode chip in either app shows the mode in force.
 - The web UI and the operator method `sessions.permissionMode.get`: `mode` is the mode in force; `chosenMode` is the session's chosen (or saved) mode and `reason` says why they differ. The session page shows `(in force; <chosen> chosen, but <reason>)`.
@@ -6654,14 +6670,14 @@ The tiers are offered in the order of this table, each only for the calls it app
 | Tier | Offered for | Label shown |
 | --- | --- | --- |
 | `exact` | `exec` | This exact command |
+| `session` | every tool | Any git command, this session only |
 | `command-class` | `exec` | Any git command in this project |
 | `path` | `edit`, `write` | Edits under src in this project |
 | `tool` | every tool | Any command in this project |
-| `session` | every tool | Any git command, this session only |
 
 Full list: "Remember tiers" in the part "Reference".
 
-The `command-class` tier is a command's first word. After three remembered exact answers for one class, that tier is offered first.
+The card lists the choices narrowest first: the exact command, then the same scope for this session only, then the command's class or the folder, and last the broadest, `Any <call> in this project` (`tool`), which says what it covers on a line of its own under its name (`Broadest: whatever it names, until you remove the rule`). The `command-class` tier is a command's first word. After three remembered exact answers for one class, that tier is offered first.
 
 Every tier except `session` writes a durable rule. A durable rule is scoped to the project it was made in and matches only there. A remembered answer to an owner-only item is kept as an answer to that kind, so only it settles that item again.
 
@@ -7019,7 +7035,7 @@ A decision waits for the decision model: its request ends when the server answer
 - With none set or `No Decision Model` chosen the conversation says nothing; the status lines below show it. A set model that starts failing is said once per outage, and that notice is withdrawn when it answers again. A failure is not repeated every turn.
 - `goodvibes status` and `goodvibes-agent status` print the policy and a `Decision model` line.
 - A headless run prints the line on stderr and adds `diagnostics.decisionModel` to its JSON result without changing the exit code.
-- The web UI's header chip names the permission mode in force: `Jev decides · asking you for now` while `jev-decides` is chosen and no decision model works (on a phone `Asking you for now`), otherwise the chosen mode (`Ask me`, `Just vibes`, `YOLO`). Opening it shows why in one sentence (for example `You chose Jev decides, but decision models are switched off, so GoodVibes asks you instead for now.`) and `Change`, which opens Settings, Permissions.
+- The web UI's header chip ("When GoodVibes asks") shows the mode in force in the status bar's words, from the daemon's `words`: `Asks: Jev decides` (or `Ask me`, `Just vibes`, `YOLO`) when the chosen mode is in force; otherwise what is in force first and the choice second, a failure last (`Asks: you, for now · <chosenWhen>`; on a phone `Asks: you, for now`, with the whole line at the top of the sheet it opens). Opening it shows why in one sentence (for example `GoodVibes asks you for now: you chose Jev decides, but decision models are switched off.`) and `Change`, which opens Settings, Permissions.
 - Results that no decision model checked say so instead of claiming model verification.
 
 Without a decision model, conversation, tools, editing, commands, tests and session recovery work as usual. Work that needs one says so when none is in use: autonomous contract execution, independent semantic knowledge verification, merchant and checkout interpretation, and semantic recommendations or grading.
@@ -7120,7 +7136,7 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 | --- | --- |
 | `trusted` | All tools may run, subject to the permission mode and rules. |
 | `restricted` | Only reads run. Every write, command and delegation is refused, in every mode including `yolo`. |
-| undecided | Reads run. Calls settled without asking run. The first call that would ask you raises the trust question instead: "New workspace: choose a trust level", with "Trust this workspace" and "Keep restricted (read-only)". Choosing trust forwards the original ask to you. Dismissing the question (Esc) records nothing: that call is refused, the workspace stays undecided, and the next call that would ask raises the question again. |
+| undecided | Reads run. Calls settled without asking run. The first call that would ask you raises the trust question instead: "New workspace: choose a trust level", with "Trust this workspace" ("Trusting this folder lets its own hooks and MCP servers run and lets GoodVibes change files in it. It approves nothing: each action still follows your setting for when GoodVibes asks.") and "Keep restricted (read-only)" ("GoodVibes can read this folder but cannot change files or run commands in it, and the folder's own hooks and MCP servers stay off, until you trust it."). Choosing trust forwards the original ask to you. Dismissing the question (Esc) records nothing: that call is refused, the workspace stays undecided, and the next call that would ask raises the question again. |
 
 ```text
 /security folder                     show the level, whether it is decided, and the registration
@@ -7965,7 +7981,11 @@ Connecting a calendar account over OAuth needs your own OAuth client id: no clie
 3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--with device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --with code` within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
 4. The answer lists the account, the transport and the scopes. `/calendar upcoming` then merges that account's events.
 
-`disconnect` revokes the access at the provider when it offers revocation, and clears local tokens.
+A Google account has one connection on a machine. `/calendar connect google`, `/google connect` and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and the Agent's `/calendar` all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (a `/calendar connect google` from 3.4.4 or before has no Gmail scope; one from `/google` has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account connected with `/calendar connect outlook` is read by the Agent's `/calendar` only: the daemon's calendar reads a CalDAV server or the Google connection, and when it has neither its answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read.
+
+Up to 3.4.4, `/calendar connect google` kept a second Google connection (`GOODVIBES_CALENDAR_GOOGLE_TOKENS`) that the daemon never read. The daemon's first start of 3.4.5 moves it into the one connection, once, and says "Carried forward from the earlier version: 1 Google connection." When a different Google connection was already there, that one stays (the daemon's mail and calendar were using it), the earlier one is kept unused, and the notice names both accounts and how to choose the other: `/calendar connect google` signed in as it. Going back to 3.4.4 after the move: the daemon, the web Calendar and mail keep the connection, and the Agent's `/calendar accounts` lists no Google account until `/calendar connect google` is run there.
+
+`disconnect` revokes the access at the provider when it offers revocation, and clears local tokens. `/calendar disconnect google` ends the one Google connection, so the daemon's calendar and its Gmail access stop too.
 
 Daemon operator methods for calendars: `calendar.calendars.list`, `calendar.events.list`, `calendar.events.get`, `calendar.events.create`, `calendar.events.update`, `calendar.events.delete`, `calendar.ics.import`, `calendar.ics.export`.
 
@@ -7992,7 +8012,7 @@ The Agent's `/google` connects one Google account for both mail and calendar. Sa
 /google drop <n>                drop a refused send
 ```
 
-The Agent workspace's Personal Ops rows open these same `/google` actions. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
+The Agent workspace's Inbox & calendar rows open these same `/google` actions. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
 
 ### Choosing a path
 
@@ -8032,7 +8052,7 @@ Prerequisites: a Google Cloud account; the `gcloud` CLI (the flow checks `gcloud
 6. Open the consent link the flow prints. Check the account shown at the top. Expect "Google hasn't verified this app": click Advanced, then "Go to goodvibes agent (unsafe)". Leave every permission ticked; Continue. The browser lands on a local page confirming the connection.
 7. The flow reads your mailbox and calendar with the new credential and reports the account, both answers and the publishing status.
 
-Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.events`. Stored: the client secret as `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF`, the refresh token as `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`; settings `calendar.google.clientId`, `calendar.google.clientSecretRef`, `google.oauth.projectId`, `google.oauth.publishingStatus`. No secret is written to settings files, logs, transcripts or status output.
+Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. Stored: the client secret as `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF` (none is needed for a Desktop-app client signed in with PKCE), the refresh token as `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, the same one connection `/calendar connect google` stores; settings `calendar.google.clientId`, `calendar.google.clientSecretRef`, `google.oauth.projectId`, `google.oauth.publishingStatus`. No secret is written to settings files, logs, transcripts or status output.
 
 ### Google failures
 
@@ -9230,9 +9250,9 @@ goodvibes-daemon
 What it prints on a normal start (the exact host and port follow your settings):
 
 ```text
-goodvibes-daemon 3.4.4 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
-goodvibes-daemon 3.4.4 bound: host="127.0.0.1" port=3421
-goodvibes-daemon 3.4.4 host started (ready)
+goodvibes-daemon 3.4.5 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
+goodvibes-daemon 3.4.5 bound: host="127.0.0.1" port=3421
+goodvibes-daemon 3.4.5 host started (ready)
 ```
 
 When standard output is an interactive terminal, the daemon also prints the device pairing block once, after `bound`. When standard output is not a terminal (a service, a redirect to a file), it never prints the pairing block, because the block contains a credential. Run `goodvibes-daemon pair` to see it at any time.
@@ -9245,7 +9265,9 @@ The pairing block is only a link when the daemon serves the web UI (`controlPlan
 | `Device pairing link unavailable: the configured WebUI bundle has no readable app shell.` | The web UI is switched on, but the bundle directory has no readable `index.html`. | Point it at a built bundle: `goodvibes-daemon webui enable --bundle-dir <dir>`. |
 | `Device pairing link unavailable: the configured WebUI URL is not a usable HTTP(S) origin.` | The address the link would use is not an `http://` or `https://` origin (it carries a user name, a query or fragment, or names `0.0.0.0`). | Correct `web.publicBaseUrl` (`goodvibes-daemon config set web.publicBaseUrl https://<name>`), or unset it. |
 
-After the block it prints `(print this again: goodvibes-daemon pair)`, or `goodvibes-daemon pair --port <n>` when the daemon was started on a port other than the one in its settings.
+After the block it prints `(print this again: goodvibes-daemon pair)`, or `goodvibes-daemon pair --port <n>` when the daemon was started on a port other than the one in its settings. When no other device could open the link (the address is this machine's loopback, or `controlPlane.enabled` is off and `web.publicBaseUrl` does not name the address), it then says `note: this link opens only on this machine: <why>.` and `To pair a phone: goodvibes-daemon webui enable --lan, then goodvibes-daemon pair`.
+
+`goodvibes-daemon pair` (local form) decides the same from the daemon's settings and the address it reports it is bound to, with no request on the network. When no other device could open the link, it prints no QR code and exits `1`: `No pairing code was made: a phone could not open it yet.`, the numbered steps (`1. done` the web UI address, `2. next` the one command that fixes it with why, `3. then` `goodvibes-daemon pair` again), and then `A browser on this machine can still open the web app signed in with:` and the link. With `--json` that case is `{"ok":false,"error":"no pairing code was made: a phone could not open it yet (<why>)","fix":"goodvibes-daemon webui enable --lan, then goodvibes-daemon pair"}`. When one could, the block is led by the numbered steps `Pair a phone` prints (`1. done  The daemon serves the web UI at <origin>, open to other devices.`, `2. next  Scan the code below ...`, `3. then  In the web app, accept or decline each offer: ...`).
 
 To have the daemon start at boot and restart after a crash, install it as a service: `goodvibes-daemon install-service`. That is described in "Installing, running as a service, updating and removing GoodVibes".
 
@@ -9384,7 +9406,7 @@ goodvibes-daemon status
 
 ```text
 goodvibes daemon on this machine
-  version:  3.4.4
+  version:  3.4.5
   state:    running
   health:   healthy
   bound:    http://127.0.0.1:3421
@@ -9437,7 +9459,7 @@ It reprints the existing operator token in the link; it does not mint a new one.
 Example output for a daemon served over plain HTTP on the local network (QR code shortened):
 
 ```text
-GoodVibes daemon 3.4.4: scan to pair a device (opens the web app signed in):
+GoodVibes daemon 3.4.5: scan to pair a device (opens the web app signed in):
 
   http://desktop.local:3421
 
@@ -9510,7 +9532,7 @@ goodvibes-daemon mcp serve --categories all --allow-write --allow-destructive
 | `--allow-destructive` | Also serve the methods the contract marks dangerous. |
 | `--host`, `--port`, `--token` | As for `status`. |
 
-With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.4.4 that is 25 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 25 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`. At start it reads the target daemon's method list (`control.methods.list`) once and offers only methods that daemon serves; a daemon on another release that lacks some of them adds `; <n> left out because that daemon does not serve them` to that line. A daemon that does not answer the list is refused at start: `goodvibes-daemon mcp serve: the daemon at <url> did not list its methods (<reason>); check that it is running this release or a recent one: goodvibes-daemon status`.
+With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.4.5 that is 25 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 25 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`. At start it reads the target daemon's method list (`control.methods.list`) once and offers only methods that daemon serves; a daemon on another release that lacks some of them adds `; <n> left out because that daemon does not serve them` to that line. A daemon that does not answer the list is refused at start: `goodvibes-daemon mcp serve: the daemon at <url> did not list its methods (<reason>); check that it is running this release or a recent one: goodvibes-daemon status`.
 
 Standard output carries only protocol frames; every message for a person goes to standard error. When the daemon is not running, or the token is missing or refused, it prints one line on standard error and exits `1` before writing any frame. It exits `0` when the client closes standard input. A client cancellation (`notifications/cancelled`) stops the request to the daemon.
 
@@ -9570,7 +9592,7 @@ goodvibes-daemon update --check
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.4.4
+  version:  3.4.5
   updates:  off: update.auto is not true, so this daemon will not update itself
   receipts: none written
 ```
@@ -9641,7 +9663,7 @@ goodvibes-daemon completion fish > ~/.config/fish/completions/goodvibes-daemon.f
 
 `check-install-reader <installed-executable>` is run by the release installer: it checks whether this release can read an installation's saved data without loading settings or changing files. `--describe` lists the readers compiled in. A person does not need to run it.
 
-`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.4.4`.
+`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.4.5`.
 
 ## Network exposure
 
@@ -9721,7 +9743,7 @@ lsof -nP -iTCP:3421 -sTCP:LISTEN         # macOS, also Linux
 
 Binding decides who can connect; `controlPlane.enabled` decides whether a connection from another machine is served. A request from another machine to a daemon with `controlPlane.enabled` `false` gets `403` with code `CONTROL_PLANE_LOCAL_ONLY` and the body `{"error":"This daemon serves only its own machine","code":"CONTROL_PLANE_LOCAL_ONLY","state":"controlPlane.enabled is off, so a request from <address> is not served","next":[...],"status":403}`. Either answer proves the bind; no answer within a few seconds means the address is not bound or a firewall drops it.
 
-`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.4.4 bound: host="0.0.0.0" port=3421`, is right for that start.
+`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.4.5 bound: host="0.0.0.0" port=3421`, is right for that start.
 
 ### How a running daemon moves to a new address
 
@@ -9948,7 +9970,7 @@ The web UI has five destinations, chosen in the sidebar and reflected in the add
 
 | View | `?view=` | Tabs (`&tab=`) | What it shows |
 | --- | --- | --- | --- |
-| Chat | `chat` | none; `&session=<id>` opens one session | Conversations with the model: messages, tool activity (kept with each reply, so it shows after a reload), artifacts, queued messages (listed once, above the composer, until they are sent), search, a composer with attachments and voice. An approval the chat's own turn is waiting on is shown above the composer with Approve and Deny (one that needs an answer or a choice of edits opens in Work). The model menu lists the providers that are set up. |
+| Chat | `chat` | none; `&session=<id>` opens one session | Conversations with the model: messages, tool activity (kept with each reply, so it shows after a reload), artifacts, queued messages (listed once, above the composer, until they are sent), search, a composer with attachments and voice. An approval the chat's own turn is waiting on is shown above the composer with Approve and Deny (one that needs an answer or a choice of edits opens in Work). The model menu lists the providers that are set up; a model or effort picked there is for that chat only (a new chat is created with it), and the model new chats start with is changed in Settings. While a reply runs, Send reads Queue and a Send now button interrupts. A message whose first word is `/` and a command name is held in the composer with "not a command here" (only `/new` runs there; a path such as `/etc/hosts` is sent). |
 | Work | `work` | `all`, `sessions`, `agents`, `processes`, `checkpoints`, `plan` | Everything running or finished: hosted and shared sessions, agents, contracts and their units, approvals, owner questions, tasks, CI watches, background processes, checkpoints and rewind, the work plan, and steering of a running session. A hunk marked Reviewed in a session's changes keeps the mark only while its lines are exactly what was reviewed: after a refresh, changed content reads unreviewed. Messages saved in this browser under another pairing are shown only as a count (`Sign in as that pairing to recover them`); their text is not shown. |
 | Library | `library` | `memory`, `knowledge`, `review` | Memory records; what the knowledge base knows, by subject (each fact with `From <source> · <when>`; the sources it read; the graph's nodes, issues and wiki projections under Details), its map, packet and activity; items waiting for review. |
 | Personal | `personal` | `calendar`, `mail`, `occasions` | Calendar, mail and dates the owner cares about. In Mail, Mark read, Archive and Delete send the message's mailbox generation with its UID; a draft opened from Drafts and saved again replaces that draft (the folder keeps one copy); opening a reply or a draft while the composer holds unsaved writing asks first. |
@@ -9970,7 +9992,7 @@ The settings dialog opens from the account menu, or with `?settings=<section>` i
 | Voice | `voice` | Dictation, spoken replies, wake word. |
 | Notifications | `notifications`, `checkins` Check-ins | Push notifications, installing the app, occasion reminders; check-in settings. |
 | Memory | `memory` | Memory provenance and diagnostics. |
-| Permissions | `permissions` | The four modes (Ask me, Jev decides, Just vibes, YOLO) as cards, each with what it does; picking one sets `permissions.mode`. Under the chosen card, when it is not the mode in force, why (`Asking you for now: decision models switched off`, the same words as the header chip's `because`). Under Advanced: approval rules, the MCP servers and tools screen, the permission evaluator and its simulation, the sandbox, tool policy. |
+| Permissions | `permissions` | The four modes (Ask me, Jev decides, Just vibes, YOLO) as cards, each with what it does; picking one sets `permissions.mode`. Under the chosen card, when it is not the mode in force, the header chip's own words (`Asks: you, for now · <the choice and when it takes effect>`). Under Advanced: approval rules, the MCP servers and tools screen, the permission evaluator and its simulation, the sandbox, tool policy. |
 
 Every setting the daemon knows appears in exactly one section; a namespace no section lists appears under Advanced.
 
@@ -10012,6 +10034,7 @@ Preconditions: the daemon is running, it serves the web UI (`goodvibes-daemon we
    - `goodvibes pair --name "my phone"` (terminal app; mints a named device token on the connected daemon and prints its link and QR code);
    - `/devices pair device` inside either terminal app;
    - `goodvibes-daemon pair` (prints a link carrying the shared operator token).
+   Every one of them (`goodvibes pair`, the pairing screen `/devices pair device` opens in either terminal app, `goodvibes-agent pair`, `goodvibes-daemon pair` with or without `--host ... -y`, and the web UI's `Pair a new device`) first asks the daemon whether another device can open the code; the daemon decides from its settings (a loopback address cannot; `web.publicBaseUrl` is your statement that it can; otherwise `controlPlane.enabled` decides). When none could, no code is minted or shown, and the answer gives numbered steps ending in step 1's command, with why. The web UI says that command is run in a terminal on the daemon's machine: someone using the web UI on that same machine over `http://127.0.0.1` is exactly who meets this. The daemon enforces it too: `pairing.handoff.create` refuses with `409` `PAIRING_CODE_UNREACHABLE`.
 3. Scan the QR code with the phone's camera, or open the link on the phone.
 4. The web UI opens signed in and lists the offers: notifications, relay, passkey. Each can be accepted or declined; declining one does not stop the pairing.
 5. Check the result. A code from `goodvibes pair` or `/devices pair device` gives the phone its own device token, and the phone appears in the web UI under Settings, Account, Devices and pairing. A link from `goodvibes-daemon pair` (local form) carries the shared operator token instead, so the phone is not listed as a device of its own and stops working when the shared token is revoked; prefer `goodvibes pair`.
@@ -10038,8 +10061,8 @@ Paired devices are listed, renamed and revoked in the web UI (Settings, Account,
 | `pairing.tokens.delete` | Input `id`. Revocation is immediate: the next request with that token gets `401`. Every token that device minted is revoked with it (`alsoRevoked`). A token the caller neither holds nor minted is the owner's to revoke: an admin that is not the owner gets `202` `OWNER_APPROVAL_PENDING`, anyone else `403` `OWNER_ONLY`. |
 | `pairing.tokens.migrate` | A client using the shared token mints its own device token. |
 | `pairing.tokens.revokeShared` | Revoke the shared operator token. The owner's own act: any other credential is refused `403` `OWNER_ONLY`. |
-| `pairing.handoff.create` | Mint a token together with the offer set and the `#pair=` deep link. |
-| `pairing.posture.get` | Which browser features an origin gets over its scheme. |
+| `pairing.handoff.create` | Mint a token together with the offer set and the `#pair=` deep link. Refused with `409` `PAIRING_CODE_UNREACHABLE` when no other device could open the code (`No pairing code was made: a phone could not open it yet (<why>). Run in a terminal on the daemon's machine: goodvibes-daemon webui enable --lan, then pair again.`), except with `fromSharedToken: true` or `forThisMachine: true` (a code for a browser on the daemon's own machine). |
+| `pairing.posture.get` | Which browser features an origin gets over its scheme. With no `origin` it answers for the address a pairing code carries and adds `reach`: `otherDevices`, and when `false`, `reason`, `fix` (a command run in a terminal on the daemon's machine) and `steps` (`state` `done`/`next`/`then`, `text`, `detail`, `command`). Every pairing surface asks this before minting. |
 
 A device minted with a scope list holds only those scopes; it is not admin. A caller can only grant scopes it holds.
 
@@ -10177,7 +10200,7 @@ Three ways reach the daemon from outside the local network. None is on by defaul
 
 ### Tailscale
 
-Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup in 3.4.4:
+Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup in 3.4.5:
 
 1. Install Tailscale on the daemon's machine and the phone, and log both in (`tailscale up`).
 2. Serve the daemon's control-plane port over HTTPS on the tailnet:
@@ -10464,7 +10487,7 @@ Join failures:
 ```text
 $ goodvibes-daemon cluster groups
 GROUP       ID                  MACHINES  VERSION  SEEN
-home        gG9JJ1P6CHMSME4AK   1         3.4.4    8s ago
+home        gG9JJ1P6CHMSME4AK   1         3.4.5    8s ago
 ```
 
 With nothing heard it prints `no goodvibes groups are advertising themselves on this network`, with advice to check multicast or join by id, and exits `0`.
@@ -10492,7 +10515,7 @@ goodvibes-daemon cluster status --json
 ```text
 this machine is not in a group
 machine: machine 9b16a341 (9b16a341-3555-4d53-b094-4d32f8937dc8)
-version: 3.4.4
+version: 3.4.5
 
 sharing inbound work with your other machines is switched off here, turn it on with `config set cluster.enabled true`
 ```
@@ -10503,7 +10526,7 @@ A member's `status`:
 group:    home  [gG9JJ1P6CHMSME4AK]
 machine:  bravo (86462aea-850a-4eea-a537-0b0e1e549cf9)
 members:  3
-version:  3.4.4
+version:  3.4.5
 surfaces: none held by this machine right now
 
 group key: generation 0, rotates every 24h
@@ -10571,7 +10594,7 @@ The removed machine is told. A running one takes the removal with the change its
 ```text
 this machine is not in a group: another member told it the group removed it 2m ago
 machine: charlie (79584424-1e8b-48d1-b084-fb381beb3016)
-version: 3.4.4
+version: 3.4.5
 
 this machine was removed from the group "home" [gVSTYHAVRJB7QSPEN] by another member; to put it back, run `cluster key` on a machine in that group, then `cluster join --group gVSTYHAVRJB7QSPEN` here and give it that key
 ```
@@ -10933,7 +10956,7 @@ Every GoodVibes client (the terminal app, Agent, the web UI, `goodvibes-daemon` 
 
 | Term | Meaning |
 | --- | --- |
-| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.4. |
+| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.5. |
 | REST route | The HTTP method and path a method is bound to, such as `POST /api/sessions`. |
 | invoke-only method | A method with no REST route. It is called through `POST /api/control-plane/methods/<id>/invoke` or a WebSocket `call` frame. |
 | access | Each method is `public` (no credential), `authenticated` (any valid credential holding its scopes) or `admin` (an admin credential). |
@@ -11515,7 +11538,7 @@ Refusals, observed on a 3.3.1 daemon:
 | `429` | `{"error":"This daemon already hosts 1 sessions, the configured maximum (hostedSessions.maxSessions). Kill one, or raise the setting.","code":"HOSTED_SESSION_LIMIT_REACHED","category":"rate_limit","status":429}` | `hostedSessions.maxSessions` live sessions already exist. No `Retry-After` is sent. | Waiting does not help unless a session ends: kill or detach one (`sessions.hosted.list`, then `sessions.hosted.kill`), or raise the setting. |
 | `400` | `{"error":"Model 'nope:nope' is not in this daemon's model registry; name a model it holds, or none for its current model.","code":"MODEL_NOT_FOUND",...}` (`MODEL_AMBIGUOUS` for a bare id several providers serve, `MODEL_NOT_SELECTABLE` for one that cannot be chosen) | `modelId` names no model this daemon can run. | Do not retry; pick a model from the registry or leave `modelId` out. |
 
-The session starts in the permission mode shown in `permissionMode`. Change it with `POST /api/sessions/{sessionId}/permission-mode` and body `{"mode":"ask-me"}` (`ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`; admin, owner-only). `GET /api/sessions/{sessionId}/permission-mode` answers `{"sessionId","mode","chosenMode","reason","words"}`: `mode` is the mode in force (the one that decides the session's calls), `chosenMode` the mode the session chose or the saved one, and `reason`, present only when they differ, why (for example `jev-decides` runs as `ask-me` while no decision model is set or the set one is not answering). `words` says the same for a person: `chosen` (`Jev decides`), `inForce` (`asking you for now`) and `because` (`no decision model set`, `decision models switched off`, `not measured yet`, `decision model unreachable` or `decision model failing`) when the two differ, `sentence` (what the mode in force does) and `asksBefore` (what GoodVibes asks you before). The web UI reads `words` for session `runtime`, the daemon-wide mode its chats run under. Permission modes are explained in "Permissions, decisions and safety".
+The session starts in the permission mode shown in `permissionMode`. Change it with `POST /api/sessions/{sessionId}/permission-mode` and body `{"mode":"ask-me"}` (`ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`; admin, owner-only). `GET /api/sessions/{sessionId}/permission-mode` answers `{"sessionId","mode","chosenMode","reason","words"}`: `mode` is the mode in force (the one that decides the session's calls), `chosenMode` the mode the session chose or the saved one, and `reason`, present only when they differ, why (for example `jev-decides` runs as `ask-me` while no decision model is set or the set one is not answering). `words` says the same for a person: `chosen` (`Jev decides`); when the two differ, `inForce` (what is in force, written to lead: `you, for now`, or `YOLO, for now` while an old auto-approve setting is on), `chosenWhen` (the chosen mode and the condition it waits on: `Jev decides once a decision model is set`, `Jev decides once decision models are on`, `Jev decides once you choose it`, `Jev decides once the decision model answers again`, `<mode> once the old auto-approve setting is off`), `chosenShort` (the choice in a few words, for where `chosenWhen` does not fit: `you chose Jev decides`, or `default: Jev decides` while it is only the shipped default), `because` (`no decision model set`, `decision models switched off`, `not measured yet`, `decision model unreachable` or `decision model failing`) and `failure` (`true` when `because` reports the decision model failing or out of reach). A surface shows `inForce · chosenWhen`, then `because` when `failure` is `true`, the order the terminal status bar uses (`Asks: you, for now · Jev decides once a decision model is set`). Then `sentence` (what the mode in force does) and `asksBefore` (what GoodVibes asks you before). The web UI reads `words` for session `runtime`, the daemon-wide mode its chats run under. Permission modes are explained in "Permissions, decisions and safety".
 
 ### 4. Open the event stream before sending
 
@@ -11714,7 +11737,7 @@ All `config.*` and `credentials.*` methods are admin methods: a non-admin, whate
 
 | Method | Route | Scope | Does |
 | --- | --- | --- | --- |
-| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.4: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
+| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.5: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
 | `credentials.get` | `GET /config/credentials[?key=<config key>]` | `read:config` | `{"available":true,"credentials":[...]}`: whether each credential is configured and usable, never the secret. `503` `CREDENTIAL_STORE_UNAVAILABLE` when no secret store is wired. |
 | `config.set` | `POST /config` `{"key":"<config key>","value":<JSON>}` | `write:config` | Write one value. |
 | `config.setMany` | `POST /config/many` `{"entries":[{"key":"...","value":...},...]}` | `write:config` | Write several values as one update: every entry is checked before anything is written. |
@@ -11899,7 +11922,7 @@ Event names:
 
 The catalog name, SSE name, domain and access of each event are in "Event streams a client subscribes to" in the reference. Runtime events carry `sessionId` at the top level; `session-update` frames carry it as `payload.sessionId` (or `payload.id` for `session-created`), and `hosted-session-update` frames as `session.id`. A client that keeps one session's events must check all three places.
 
-The domains (28 in 3.4.4) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
+The domains (28 in 3.4.5) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
 
 How the daemon decides what a stream carries:
 
@@ -12048,7 +12071,7 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes/engine` (version 3.4.4) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version 3.4.5) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
 How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
@@ -12059,8 +12082,8 @@ npm view @goodvibes/engine versions --json
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes/engine@3.4.4
-npm install @goodvibes/engine@3.4.4
+bun add @goodvibes/engine@3.4.5
+npm install @goodvibes/engine@3.4.5
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -12068,7 +12091,7 @@ When it is not, use it from a source checkout of the same version, inside that c
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes
-git checkout v3.4.4
+git checkout v3.4.5
 bun install
 bun run build                 # produces the dist/ directories the package's exports name
 mkdir -p products/my-client
@@ -12142,7 +12165,7 @@ Every operator method (id, REST route or invoke-only, scopes) is listed in "Oper
 
 # Reference
 
-This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.4.4 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
+This appendix holds every complete list GoodVibes keeps in its code. Each list below is built from the program itself each time this file is generated, so it matches release 3.4.5 exactly. The other parts of this file explain how to use these things; this part is where to look up an exact name, flag, default or value.
 
 ## Settings
 
@@ -15678,6 +15701,13 @@ The terminal app's top-level help, then the help page of every command, exactly 
 Usage: goodvibes [OPTIONS] [PROMPT]
        goodvibes [OPTIONS] <COMMAND> [ARGS]
 
+Most used:
+  goodvibes                        Start the terminal app in this folder
+  goodvibes run "<prompt>"         Run one prompt and print the answer
+  goodvibes pair                   Pair a phone: print a link and a QR code to scan
+  goodvibes status                 Check what is set up and working
+  goodvibes-daemon update --check  Look for an update now
+
 Commands:
   tui                        Start the interactive TUI (default)
   open                       Start the app on the view a goodvibes://open link names
@@ -16286,9 +16316,13 @@ Agent's top-level help, then the help page of every command, exactly as `goodvib
 Usage: goodvibes-agent [OPTIONS] [PROMPT]
        goodvibes-agent [OPTIONS] <COMMAND> [ARGS]
 
-Primary use:
-  goodvibes-agent                 Launch the interactive Agent TUI
-  goodvibes-agent setup           Open the Agent workspace
+Most used:
+  goodvibes-agent                  Start the Agent in this folder
+  goodvibes-agent setup            Open the Agent workspace
+  goodvibes-agent run "<prompt>"   Run one prompt and print the answer
+  goodvibes-agent pair             Pair a phone: print a link and a QR code to scan
+  goodvibes-agent status           Check what is set up and working
+  goodvibes-daemon update --check  Look for an update now
 
 Inside the TUI:
   /agent                    Open the operator workspace
@@ -21949,8 +21983,8 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `GOODVIBES_AUTH_PASSWORD` | goodvibes | The password `goodvibes auth add-user` and `goodvibes auth rotate-password` use when neither `--password` nor `--password-stdin` is given. |
 | `GOODVIBES_AUTO_UPDATE` | installer | `0` writes `update.auto` and `update.autoUpdateAtLaunch` false in the daemon's settings before any program starts, so the daemon, the terminal app and the Agent never update themselves. `--no-auto-update` does the same. |
 | `GOODVIBES_BATCH_QUEUE` | Cloudflare Worker | The Cloudflare Queue binding batch jobs go on. GoodVibes binds it when it deploys the Worker with a queue. |
-| `GOODVIBES_CALENDAR_GOOGLE_STATUS` | every program | A credential, read before a stored secret of the same name. The connection health the daemon reports and refreshes from. |
-| `GOODVIBES_CALENDAR_GOOGLE_TOKENS` | every program | A credential, read before a stored secret of the same name. The daemon reads and writes the Google calendar with this refresh token. |
+| `GOODVIBES_CALENDAR_GOOGLE_STATUS` | every program | A credential, read before a stored secret of the same name. The reconnect marker of that earlier Google connection; removed when the connection is carried forward. |
+| `GOODVIBES_CALENDAR_GOOGLE_TOKENS` | every program | A credential, read before a stored secret of the same name. A Google connection made with /calendar connect up to 3.4.4; the daemon carries it into the one Google connection at start. |
 | `GOODVIBES_CALENDAR_MICROSOFT_STATUS` | every program | A credential, read before a stored secret of the same name. The connection health the daemon reports and refreshes from. |
 | `GOODVIBES_CALENDAR_MICROSOFT_TOKENS` | every program | A credential, read before a stored secret of the same name. The daemon reads and writes the Microsoft calendar with this refresh token. |
 | `GOODVIBES_CHAT_LIMITER_THRESHOLD` | goodvibes-daemon | Companion chat messages allowed per session per minute, read once at daemon start; 10 when unset. Setting: `runtime.companionChatLimiter.perSessionLimit` (a positive setting wins over the variable). |
@@ -21999,7 +22033,7 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `GOODVIBES_SUPPRESS_NOTIFY` | every program | `1` or `true` stops desktop notifications and notification webhooks from being sent. |
 | `GOODVIBES_TAILNET_ADDRESSES` | every program | Addresses in the 100.64.0.0/10 range (comma or space separated, or the whole range `100.64.0.0/10`) to treat as Tailscale addresses, so plain `http://` to them is allowed like any private-network address. |
 | `GOODVIBES_UNINSTALL` | installer | `1` makes `install.sh` remove the installed programs and services instead of installing; user data is kept. `--uninstall` does the same. |
-| `GOODVIBES_VERSION` | installer | The release `install.sh` installs, such as `v3.4.4`; `latest` when unset. The uninstaller without a receipt fetches that release's script. |
+| `GOODVIBES_VERSION` | installer | The release `install.sh` installs, such as `v3.4.5`; `latest` when unset. The uninstaller without a receipt fetches that release's script. |
 | `GOODVIBES_WAKE_MODEL` | installer | `0` skips downloading the wake-word model. |
 | `GOODVIBES_WEBUI` | installer | `0` skips installing the web UI. |
 | `GOODVIBES_WEBUI_VERSION` | installer | The web UI release to install, when it should differ from `GOODVIBES_VERSION`. |
@@ -22175,7 +22209,7 @@ Every option each install and uninstall script accepts. "Value" names what follo
 | `--no-service` |  | Do not install the daemon as a service, and record that choice so a daemon started by hand never installs one (also GOODVIBES_DAEMON_SERVICE=0). |
 | `--service` |  | Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0. |
 | `--no-auto-update` |  | Keep the daemon, the terminal app and the Agent from updating themselves, from their first launch (also GOODVIBES_AUTO_UPDATE=0). Update later by running this installer. |
-| `--version` | `VERSION` | Install this release, such as v3.4.4, for every program (default: latest; also GOODVIBES_VERSION). |
+| `--version` | `VERSION` | Install this release, such as v3.4.5, for every program (default: latest; also GOODVIBES_VERSION). |
 | `--bin-dir`, `--install-dir` | `DIR` | Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR). |
 | `--decision-policy` | `POLICY` | Save the decision model policy (the judgment.policy setting; the daemon refuses a value it does not accept and names the allowed ones; see the current one with goodvibes-daemon config get judgment.policy). |
 | `--from-dir` | `DIR` | Install from DIR, a directory holding the release files and their SHA256SUMS.txt, with no request to GitHub; every file is checked against that list (also GOODVIBES_RELEASE_DIR). The release is read from the file names unless --version names it. |
@@ -22498,10 +22532,10 @@ The tiers are offered in the order of this table, each only for the calls it app
 | Tier | Offered for | Label shown | What the remembered rule matches |
 | --- | --- | --- | --- |
 | `exact` | `exec` | This exact command | git status |
+| `session` | every tool | Any git command, this session only | forgotten when this session ends |
 | `command-class` | `exec` | Any git command in this project | git … |
 | `path` | `edit`, `write` | Edits under src in this project | everything under src/ |
 | `tool` | every tool | Any command in this project | whatever it names, until you remove the rule |
-| `session` | every tool | Any git command, this session only | forgotten when this session ends |
 
 ## Secret providers
 
@@ -23045,7 +23079,7 @@ These actions can be rebound in `~/.goodvibes/tui/keybindings.json`: a JSON obje
 | `toggle-memory-provenance` | `Alt+M` | List/hide the memories a turn used (provenance chip drill-in) |
 | `voice-input` | `Alt+V` | Voice input: press to start recording, press again to stop and transcribe into the composer. |
 | `focus-work-tree` | `Alt+up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
-| `cycle-permission-mode` | `Shift+tab` | Change how often it asks, for this session (asks before YOLO; the saved default is set in /settings) |
+| `cycle-permission-mode` | `Shift+tab` | Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings) |
 | `open-notifications` | `Ctrl+N` | Open the notices (the status bar counts the unread ones) |
 | `failure-other-model` | `Alt+O` | After a failed turn: choose another model and send the prompt again. |
 | `failure-details` | `Alt+I` | After a failed turn: show what the provider said. |
@@ -23083,7 +23117,7 @@ These actions can be rebound in `~/.goodvibes/agent/keybindings.json`: a JSON ob
 | `redo` | `Ctrl+Shift+Z` | Redo last undone edit. |
 | `paste` | `Ctrl+V` | Paste from clipboard (image priority) |
 | `focus-work-tree` | `Alt+up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
-| `cycle-permission-mode` | `Shift+tab` | Change how often it asks, for this session (asks before YOLO; the saved default is set in /settings) |
+| `cycle-permission-mode` | `Shift+tab` | Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings) |
 | `open-notifications` | `Ctrl+N` | Open the notices (the status bar counts the unread ones) |
 | `failure-other-model` | `Alt+O` | After a failed turn: choose another model and send the prompt again. |
 | `failure-details` | `Alt+I` | After a failed turn: show what the provider said. |
@@ -23790,8 +23824,8 @@ A method with no HTTP route is called with `POST /api/control-plane/methods/{met
 | Method | HTTP route | Access | Scopes | Effect | Retry | What it does |
 | --- | --- | --- | --- | --- | --- | --- |
 | `pairing.handoff.complete` | invoke only | admin | `write:control-plane`, `write:relay` | write | safe to repeat | Apply the surface's per-offer decisions in ONE pass: an accepted notifications offer registers the browser push subscription (endpoint + keys, optional deviceId), an accepted passkey offer registers the WebAuthn credential, an accepted relay offer is acknowledged. Each offer returns an honest per-offer result (completed / declined / unavailable / failed); an omitted or false offer is reported as declined, never silently half-applied. Because it can register a step-up passkey it needs what stepup.credentials.register needs (admin, write:relay, never the Agent's credential), and a passkey is accepted only when pairing.handoff.create offered one to this very pairing (the caller is the device that paired with that hand-off's token), once, within 30 minutes; otherwise the passkey offer fails and nothing is registered. A pairing minted narrower than full authority cannot complete a hand-off, so pairing.handoff.create offers it nothing to complete. |
-| `pairing.handoff.create` | invoke only | authenticated | `write:control-plane` | write | not safe | The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). |
-| `pairing.posture.get` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https, available via tailscale" so surfaces render labels instead of dead buttons. Localhost keeps all three. The daemon never mints certificates. |
+| `pairing.handoff.create` | invoke only | authenticated | `write:control-plane` | write | not safe | The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that. |
+| `pairing.posture.get` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https, available via tailscale" so surfaces render labels instead of dead buttons. Localhost keeps all three. With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done\|next\|then, text, detail, command). Every pairing surface asks this before minting. The daemon never mints certificates. |
 | `pairing.tokens.create` | invoke only | authenticated | `write:control-plane` | write | safe with the body `attemptId`: Sending the same attemptId again while the token that attempt produced is still unused returns that token (same id) under a new secret, and the secret of the lost reply stops working; once the token has been used, the same attemptId mints a new token. | Mint a new named per-device operator token and return its plaintext secret EXACTLY ONCE (for a QR / pairing hand-off). Only a hash is persisted; the secret is never listed or returned again. The name is user-visible and editable. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. client "agent" mints the GoodVibes Agent's credential for the calls it makes on the owner's behalf: the daemon reports it as credential "agent" and judges every call made with it; it is listed with client "agent" and does not count toward device.nodes.maxPaired. Send an attemptId and send the same one again when a reply is lost: while the token that attempt produced is unused, the repeat returns that token (same id) under a new secret. scopes limits the device to that list of operator scopes (for example read:sessions, read:transcripts and write:sessions for a phone that only chats); left out, the device holds full operator authority. A caller grants only scopes it holds: a narrowed caller's token inherits its list when scopes is left out, and naming a scope the caller does not hold is 403 MISSING_SCOPE. A token minted here is automation (origin automation): it does not make the owner's own acts, such as loosening a security, permission, judgment or payment setting. A device the owner pairs himself is paired with pairing.handoff.create. |
 | `pairing.tokens.delete` | invoke only | authenticated | `write:control-plane` | write | safe to repeat | Revoke (permanently delete) one paired device token. Revocation is immediate: the token fails the very next request with a 401, and every token this device minted is revoked with it (listed in alsoRevoked); every other paired device keeps working. An unknown id is a 404 PAIRING_TOKEN_NOT_FOUND, never a 200-noop. A token the caller minted, or the caller's own token, is revoked at once; any other token (a device the owner paired, another principal's) is the owner's own act: from an admin who is not the owner it is put to the owner (202 OWNER_APPROVAL_PENDING) and revoked when he approves it, and any other credential is refused 403 OWNER_ONLY. |
 | `pairing.tokens.list` | invoke only | authenticated | `read:pairing` | read | safe to repeat | List the per-pairing operator tokens (paired devices/browsers) as redacted views: id, user-visible name, created timestamp, last-seen timestamp, mintedBy (the paired device that minted it, when one did), scopes (the operator scopes it holds, when it was paired with a narrower list; absent means full operator authority) and origin: `owner-pairing` for a device the owner paired himself through the pairing flow (pairing.handoff.create or the pairing screen, from the operator token, an admin sign-in, an app on his machine or another owner device, with full authority), which makes the owner's own acts (loosening a security, permission, judgment or payment setting; answering a change put to him), or `automation` for every other token (pairing.tokens.create, pairing.tokens.migrate, a narrowed list, the Agent's credential, and every token minted before origin was recorded), which does not. Origin is recorded at the mint and never changes; to make a device an owner device, pair it again from the pairing screen and revoke the old token. The token secret is never stored in listable form and is never returned. |
@@ -24015,7 +24049,7 @@ A method with no HTTP route is called with `POST /api/control-plane/methods/{met
 | `sessions.list` | `GET /api/sessions` | authenticated | `read:transcripts` | read | safe to repeat | Return shared-session integration state. `unreadable`, present only when there are any, names each stored session, message or input this build could not read at start (kind, id, why); they stay in the store untouched and load again under a build that knows them. Session titles come from what was said and participants name the people in each conversation, so it needs read:transcripts. |
 | `sessions.messages.create` | `POST /api/sessions/{sessionId}/messages` | admin | `write:sessions` | outward | safe with the body `messageId`: Sending the same messageId again to the same session (1 to 255 letters, digits, ".", "_", ":" or "-", chosen by the caller) returns the input already recorded (the same input id, with its current state, and mode continued-live; the reply carries no duplicate flag) instead of recording a second one; an input that failed is run again in that session. The id is scoped to the session and surface: the same id sent to another session is a new message there. Use it to resend after a lost response. | Append a user message to a shared session. Omitted `kind` defaults to `message` conversation routing; send `kind: "task"` to request agent or contract task continuation. |
 | `sessions.messages.list` | `GET /api/sessions/{sessionId}/messages` | authenticated | `read:transcripts` | read | safe to repeat | Return a page of retained session messages. Offset counts backward from the newest message; nextOffset reads the preceding page. History is retained until explicitly deleted. |
-| `sessions.permissionMode.get` | `GET /api/sessions/{sessionId}/permission-mode` | authenticated | `read:sessions` | read | safe to repeat | Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, "Jev decides"), `inForce` ("asking you for now") and `because` ("decision model unreachable") when the mode in force differs, `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL. |
+| `sessions.permissionMode.get` | `GET /api/sessions/{sessionId}/permission-mode` | authenticated | `read:sessions` | read | safe to repeat | Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, "Jev decides"); when the mode in force differs, `inForce` (what is in force, written to lead: "you, for now"), `chosenWhen` (the chosen mode and the condition it waits on: "Jev decides once a decision model is set"), `chosenShort` (the choice in a few words, for where `chosenWhen` does not fit: "you chose Jev decides", or "default: Jev decides" while it is only the shipped default), `because` ("no decision model set", "decision model unreachable") and `failure` (true when `because` reports the decision model failing or out of reach, not a choice); a surface shows `inForce · chosenWhen`, then `because` when `failure` is true. Then `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL. |
 | `sessions.permissionMode.set` | `POST /api/sessions/{sessionId}/permission-mode` | admin | `write:sessions` | write | safe with the header `Idempotency-Key` | Set ask-me, jev-decides, just-vibes, or yolo execution, or enter the read-only plan posture. Admin only, because it can loosen security: yolo runs every action without safety denials, and for the local runtime session (no hosted or channel mode of its own) it rewrites the daemon-wide permissions.mode. A hosted session and a channel session with its own mode change only that session; a web chat (companion-chat) has no mode of its own, so setting it rewrites the daemon-wide permissions.mode. Emits runtime.gate (PRESET_CHANGED) so every surface stays in sync. Other session ids answer 404 SESSION_NOT_LOCAL. A looser mode asked with a token minted for automation is not set (a device the owner paired himself sets it at once): it is put to the owner as an approval only his own credential answers, the answer is 202 with code OWNER_APPROVAL_PENDING, the unchanged `mode` and the `approvalId`, and the mode changes when he approves it. |
 | `sessions.queuedMessages.delete` | `DELETE /api/sessions/{sessionId}/queued-messages/{messageId}` | authenticated | `write:sessions` | write | safe to repeat | Remove a message still waiting in the mid-turn queue so it is never delivered. A message already delivered to the model cannot be removed, deleting it is a 404 MESSAGE_NOT_QUEUED. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may delete (403 NOT_YOURS otherwise). |
 | `sessions.queuedMessages.edit` | `POST /api/sessions/{sessionId}/queued-messages/{messageId}` | authenticated | `write:sessions` | write | safe to repeat | Replace the text of a message still waiting in the mid-turn queue. A message already delivered to the model is immutable, editing it is a 404 MESSAGE_NOT_QUEUED. Editing replaces any multimodal content with the new plain text. Any session with a live runtime on this daemon (the local runtime, addressable as `runtime`, and every session the daemon hosts) is controllable; other session ids answer 404 SESSION_NOT_LOCAL. Below admin, only an owner of the session may edit (403 NOT_YOURS otherwise). |
@@ -24812,6 +24846,7 @@ Codes the shared request layer and the daemon's routes put in `code` beyond thos
 | `OWNER_APPROVAL_PENDING` | 202 | none | nothing was changed yet; the change waits for the owner's answer and is applied when he approves it. | no: change the request |
 | `OWNER_APPROVAL_REQUIRED` | 403 | `authorization` | The act needs the owner's approval first and nothing was done: a purchase begun with payments.confirmEveryPurchase on and no matching owner approval (the message says whether the approval is missing, expired or for a different purchase), or a settings change that would loosen a security, permission, judgment or payment setting (send it through config.set or config.setMany, which puts it to the owner) | no: change the request |
 | `OWNER_DECISION_REQUIRED` | set where it is relayed | none | Only the paired-owner decision on the device that raised it can approve it; it can be denied from here. | as the answer says |
+| `PAIRING_CODE_UNREACHABLE` | 409 | `bad_request` | No pairing code was made: a phone could not open it yet (<value>). | after the state changes |
 | `PAIRING_OFFER_EXPIRED` | 401 | `authentication` | The pairing code expired unused. | no: change the request |
 | `PAIRING_TOKEN_NOT_FOUND` | 403, 404 | `authorization`, `not_found` | Unknown pairing token. | no: change the request |
 | `PAIRING_TOKEN_ROTATION_DUE` | 401 | `authentication` | This device token is past its rotation age and no longer authenticates. | only with a new token: pair the device again |

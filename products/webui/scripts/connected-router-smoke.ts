@@ -201,7 +201,11 @@ async function select(page: Page, provider: string, model: string) {
       return [body.session.provider, body.session.model];
     }).toEqual([provider, model]);
     assert.equal(host!.services.providerRegistry.getCurrentModel().registryKey, originalDefault, 'A session selection must not overwrite global defaults');
-  } else await expect.poll(() => host!.services.providerRegistry.getCurrentModel().id).toBe(model);
+  } else {
+    // A new chat's pick belongs to that chat (it is created with it on its first send); the default for new chats stays.
+    await expect(page.getByRole('button', { name: /^Model: / })).toContainText(selected.displayName || selected.id);
+    assert.equal(host!.services.providerRegistry.getCurrentModel().registryKey, originalDefault, 'A new chat selection must not overwrite global defaults');
+  }
 }
 async function effort(page: Page, value: 'xhigh' | 'max') {
   const sessionId = new URL(page.url()).searchParams.get('session');
@@ -214,7 +218,10 @@ async function effort(page: Page, value: 'xhigh' | 'max') {
       return body.session.reasoningEffort;
     }).toBe(value);
     assert.equal(host!.services.configManager.get('provider.reasoningEffort'), originalDefault);
-  } else await expect.poll(() => host!.services.configManager.get('provider.reasoningEffort')).toBe(value);
+  } else {
+    await expect(page.getByRole('button', { name: /^Model: / })).toContainText(value === 'xhigh' ? 'X-high' : 'Max');
+    assert.equal(host!.services.configManager.get('provider.reasoningEffort'), originalDefault, 'A new chat effort must not overwrite the global default');
+  }
 }
 async function send(page: Page, prompt: string, answerNumber: number) {
   const composer = page.getByRole('textbox', { name: 'Message GoodVibes', exact: true });
@@ -289,6 +296,8 @@ try {
       const history = `QUAL_FULL_HISTORY_${viewport.name}_BEGIN ` + 'owned synthetic context '.repeat(600) + ` QUAL_FULL_HISTORY_${viewport.name}_END`;
       await effort(page, 'xhigh');
       await send(page, history, startAnswers + 1);
+      // The new chat was created with the model and effort picked in its composer.
+      assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
       assert.equal(answers.at(-1)?.reasoning_effort, 'xhigh');
       await effort(page, 'max');
       await send(page, `QUAL_ORDINARY_MAX_${viewport.name}: Keep the same selected model and history.`, startAnswers + 2);

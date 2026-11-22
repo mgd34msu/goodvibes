@@ -80,7 +80,7 @@ starts failing and once when it answers again, and never repeats a failure every
 turn. `goodvibes status` and `goodvibes-agent status` show the policy and a
 "Decision model" line; a headless run prints the line on stderr and adds
 `diagnostics.decisionModel` to its JSON result without changing the exit code;
-WebUI shows it in the mode chip in its header (for example "Jev decides · asking you for now"), and the terminal programs' status bar shows it after `Asks:`.
+WebUI shows it in the mode chip in its header, and the terminal programs' status bar shows it after `Asks:`, in the same words: what is in force first, then the choice and when it takes effect (for example "you, for now · Jev decides once a decision model is set").
 
 Without a decision model, conversation, tools, editing, command and test
 execution, final responses and saved-session recovery work as usual; ordinary
@@ -133,7 +133,7 @@ valid values, and the product runs on Hybrid.
   the rebindable `cycle-permission-mode`.
 - **For one launch:** `--just-vibes` or `--yolo` on `goodvibes` or
   `goodvibes-agent` picks a mode without changing settings.
-- **For good:** `/settings` (Permission Mode) saves the default; a channel
+- **For good:** `/settings` (When GoodVibes asks) saves the default; a channel
   profile can set one per channel.
 - **`/decisions`** lists what Jev decided for you, and for each one lets you
   undo it, turn it into a standing rule (never, always, or always ask me), or

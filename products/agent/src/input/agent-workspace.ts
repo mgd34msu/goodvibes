@@ -16,6 +16,7 @@ import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, shouldShowOnboardingFinishFooter 
 import { completeOnboardingAction, onSubscriptionLoginSuccessAction } from './agent-workspace-onboarding-actions.ts';
 import { computeOnboardingStateFromSnapshot, deriveOnboardingEntry, updateRevealedOnboardingCategories } from './agent-workspace-onboarding-state.ts';
 import type { OnboardingState } from '../runtime/onboarding/onboarding-state.ts';
+import { agentRuntimeProfileName } from '../agent/runtime-profile.ts';
 
 export type { AgentWorkspaceChannelRisk, AgentWorkspaceChannelStatus } from './agent-workspace-channels.ts';
 export type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryId, AgentWorkspaceCommandDispatcher, AgentWorkspaceFocusPane, AgentWorkspaceLocalLibraryItem, AgentWorkspaceRuntimeSnapshot } from './agent-workspace-types.ts';
@@ -33,6 +34,27 @@ export interface CommandReportReading {
   readonly lines: readonly string[] | null;
   /** The report reaches past this machine (a mailbox, a host, a provider): not run until Ctrl+R asks for it. */
   readonly waiting?: true;
+  /** When the read finished (ms since the epoch); absent while it is not read yet or still reading. */
+  readonly readAt?: number;
+  /** Why the read failed: the command's refusal or error, in its own words. */
+  readonly failed?: string;
+}
+
+/**
+ * "home default · account anthropic": the Agent home (profile) of this session
+ * and the provider its chat model signs in to, "(subscription)" when that is a
+ * stored sign-in rather than a key. One read of the sign-in store per opening.
+ */
+function describeAgentWorkspaceIdentity(context: CommandContext): string {
+  const home = agentRuntimeProfileName(context.workspace?.shellPaths?.homeDirectory ?? '') ?? 'default';
+  const provider = context.session?.runtime?.provider ?? '';
+  let signedIn = false;
+  try {
+    signedIn = provider !== '' && context.platform?.subscriptionManager?.hasSignIn?.(provider) === true;
+  } catch {
+    // An unreadable sign-in store leaves the account named without how it signs in.
+  }
+  return [`home ${home}`, provider ? `account ${provider}${signedIn ? ' (subscription)' : ''}` : ''].filter(Boolean).join(' · ');
 }
 
 export class AgentWorkspace {
@@ -43,6 +65,8 @@ export class AgentWorkspace {
   public status = 'Ready. Choose an operator flow; ordinary assistant work stays in the main conversation.';
   /** Only the setup part: the workspace reads its setup steps and onboarding route, nothing else of the snapshot. */
   public runtimeSnapshot: AgentWorkspaceSetupPart | null = null;
+  /** The Agent home this session runs in and the account its chat model uses, read when the workspace opens (its header). */
+  public identity = '';
   public lastActionResult: AgentWorkspaceActionResult | null = null;
   public actionSearchActive = false;
   public actionSearchQuery = '';
@@ -80,6 +104,7 @@ export class AgentWorkspace {
     this._onlyActionIds = null;
     this._awaitingRecapDismiss = false;
     this.runtimeSnapshot = buildAgentWorkspaceSetupPart(context);
+    this.identity = describeAgentWorkspaceIdentity(context);
     const shellPaths = context.workspace?.shellPaths;
     this._onboardingState = computeOnboardingStateFromSnapshot(this.runtimeSnapshot, shellPaths);
     if (this._onboardingState) updateRevealedOnboardingCategories(this._onboardingState, this._revealedOnboardingCategoryIds);
@@ -364,11 +389,17 @@ export class AgentWorkspace {
     const run = action.run as unknown as (values: Readonly<Record<string, string>>, ctx: CommandContext) => ReturnType<ActionDescription<never>['run']>;
     void captureCommandPrint(context, () => run({}, context)).then((outcome) => {
       if (this.context !== context || this.reports.get(command) !== reading) return;
-      const returned = outcome.ok ? outcome.value : undefined;
-      const text = outcome.ok
-        ? [...outcome.lines, typeof returned === 'string' ? returned : isCommandReport(returned) ? renderCommandReport(returned) : ''].join('\n')
-        : (() => { const refused = readRefusal(outcome.error); return refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error); })();
-      this.reports.set(command, { ...reading, lines: text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim().length > 0) });
+      const readAt = Date.now();
+      if (!outcome.ok) {
+        const refused = readRefusal(outcome.error);
+        const why = refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+        this.reports.set(command, { ...reading, lines: [], readAt, failed: why.replace(/\s+/g, ' ').trim() || 'no reason was given' });
+        this.requestRender?.();
+        return;
+      }
+      const returned = outcome.value;
+      const text = [...outcome.lines, typeof returned === 'string' ? returned : isCommandReport(returned) ? renderCommandReport(returned) : ''].join('\n');
+      this.reports.set(command, { ...reading, readAt, lines: text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim().length > 0) });
       this.requestRender?.();
     });
     return reading;

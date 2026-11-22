@@ -14,7 +14,7 @@
  */
 import type { ConfigManager } from '../config/manager.js';
 import { resolveHostBinding, resolveWebPort } from '../daemon/host-resolver.js';
-import { isLoopbackHost } from './origin-posture.js';
+import { describePairingReach, isLoopbackHost, type PairingReach } from './origin-posture.js';
 import { isWildcardBindHost, probeStableHostInputs, stableUrlHostForBindHost, type ResolvedStableHost, type StableHostInputs } from './stable-host.js';
 
 export interface PairingWebOrigin {
@@ -137,6 +137,23 @@ type BoundListener = { readonly host: string; readonly port: number; readonly sc
 export function explicitPublicBaseUrl(configManager: Pick<ConfigManager, 'get'>): string {
   const publicBaseUrl = trimTrailingSlash(String(configManager.get('web.publicBaseUrl') ?? '').trim());
   return publicBaseUrl === SHIPPED_PUBLIC_BASE_URL ? '' : publicBaseUrl;
+}
+
+/**
+ * Whether another device can open the pairing address `origin`, from the
+ * daemon's settings: the one decision every pairing surface uses. The daemon
+ * answers it in `pairing.posture.get` and enforces it in
+ * `pairing.handoff.create`; `goodvibes-daemon pair`, its start-up block and
+ * the terminal app's in-process pairing screen read the same settings.
+ */
+export function pairingReachFromSettings(
+  configManager: Pick<ConfigManager, 'get'>,
+  origin: string,
+): PairingReach {
+  return describePairingReach(origin, {
+    servesOtherMachines: configManager.get('controlPlane.enabled') === true,
+    publicBaseUrl: explicitPublicBaseUrl(configManager),
+  });
 }
 
 /** The web endpoint's bind host and port, for a web surface the control plane does not serve. */

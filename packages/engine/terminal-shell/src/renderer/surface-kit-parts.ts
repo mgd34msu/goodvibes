@@ -147,7 +147,12 @@ export function paintKeycapHints(line: Line, x: number, endX: number, hints: rea
 export function tabs(canvas: SurfaceCanvas, x: number, y: number, labels: readonly string[], active: number, maxX: number, onSelect?: ((index: number) => void) | undefined): number {
   const t = activeTokens();
   let cx = x;
+  // When the row is too narrow for every tab, the first tabs give way so the active one is always drawn.
+  const span = (from: number): number => labels.slice(from, active + 1).reduce((sum, label) => sum + getDisplayWidth(label) + 4, -4);
+  let first = 0;
+  while (first < active && x + span(first) > maxX) first++;
   labels.forEach((label, k) => {
+    if (k < first) return;
     const w = getDisplayWidth(label);
     if (cx + w > maxX) return;
     if (onSelect) canvas.hitTargets.push({ id: `tab:${k}:${label}`, x: cx - 1, y, width: w + 2, height: 1, onClick: () => onSelect(k) });

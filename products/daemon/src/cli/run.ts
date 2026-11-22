@@ -10,7 +10,7 @@ import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { parseDaemonCli } from './parser.js';
 import { applyDaemonHomeEnvironment } from './daemon-home-environment.js';
 import { answersHelpFlag, renderGoodVibesDaemonHelp, renderDaemonCommandHelp, renderGoodVibesVersion, renderDaemonCliCatalog } from './help.js';
-import { daemonCommandFailureLines } from './command-failure.js';
+import { DAEMON_COMMAND_FAILURE_NEXT_STEP, daemonCommandFailureLines, daemonCommandWords } from './command-failure.js';
 import { runCompletionCommand } from './completion.js';
 import { daemonCommandSpec, isRawInterceptCommand } from './command-catalog.js';
 import { isActivatingServiceSubcommand, isDaemonServiceSubcommand } from '../daemon/service-subcommands.js';
@@ -67,8 +67,11 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     : result({ exitCode, lines: prose }));
   const refuse = (line: string): number => failure(2, 'COMMAND_REFUSED', line, 'see goodvibes-daemon --help', [line]);
   const env = options.env ?? process.env;
+  // What a failure's first line names: the command as typed, once it is known.
+  let commandWords: string | undefined;
   try {
     const cli = parseDaemonCli(argv);
+    commandWords = daemonCommandWords(cli.rawCommand ?? cli.command, cli.commandArgs);
     if (cli.errors.length) {
       // The unit carries no endpoint flags, so the parser refuses these before dispatch; name the supported route.
       const endpointFlag = cli.command === 'install-service'
@@ -315,8 +318,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
     }
   } catch (error) {
     // Do not render arbitrary config, transport, plugin or credential exceptions.
-    const lines = daemonCommandFailureLines(error);
-    const reason = lines.slice(1).join(' ').replace(/^Reason: /, '');
-    return failure(1, 'COMMAND_FAILED', reason, 'run goodvibes-daemon status, or see the daemon log', lines);
+    const lines = daemonCommandFailureLines(error, commandWords);
+    const reason = (lines[1] ?? '').replace(/^Reason: /, '');
+    return failure(1, 'COMMAND_FAILED', reason, DAEMON_COMMAND_FAILURE_NEXT_STEP, lines);
   }
 }

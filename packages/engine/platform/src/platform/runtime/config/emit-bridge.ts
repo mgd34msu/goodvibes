@@ -84,6 +84,7 @@ export interface AdditionalConfigKey {
 const NON_SCHEMA_PATH_SECRET: Readonly<Record<DaemonOwnedNonSchemaConfigPath, boolean>> = {
   'cluster.groupMaterial': true,
   'google.oauth.refreshToken': true,
+  'google.oauth.account': true,
   'email.passwordRef': true,
   'email.smtpPasswordRef': true,
 };

@@ -1,6 +1,6 @@
 /**
- * The new-chat screen's words: the time-of-day greeting and the four starting
- * points. Framework-free so the rules are unit tested (new-chat.test.ts).
+ * The new-chat screen's words: the time-of-day greeting and the starting
+ * points. Framework-free: ChatView decides which starters are shown.
  */
 
 /** "Good morning" before noon (from 5), "Good afternoon" until 6 pm, else "Good evening". */
@@ -37,15 +37,25 @@ export interface ChatSuggestion {
   label: string;
   /** What lands in the composer (not sent: the person reviews and sends). */
   prompt: string;
+  /** The account the starter reads; it is shown only once that account answers. */
+  needs?: StarterNeed;
 }
 
+export type StarterNeed = 'calendar' | 'mail';
+
 /**
- * Four starting points tied to what GoodVibes actually does: the calendar and
- * mail it reads for you, the sessions and agents it runs, and what it remembers.
+ * Starting points tied to what GoodVibes actually does: the calendar and mail
+ * it reads for you (each shown only when that account is connected), the
+ * sessions and agents it runs, and what it remembers.
  */
 export const CHAT_SUGGESTIONS: readonly ChatSuggestion[] = [
-  { id: 'calendar', icon: 'calendar', label: "What's on my calendar", prompt: "What's on my calendar today?" },
-  { id: 'mail', icon: 'mail', label: 'Check my mail', prompt: 'Check my mail and tell me what needs a reply.' },
+  { id: 'calendar', icon: 'calendar', label: "What's on my calendar", prompt: "What's on my calendar today?", needs: 'calendar' },
+  { id: 'mail', icon: 'mail', label: 'Check my mail', prompt: 'Check my mail and tell me what needs a reply.', needs: 'mail' },
   { id: 'running', icon: 'running', label: "What's running", prompt: "What's running right now? Include anything waiting on me." },
   { id: 'memory', icon: 'memory', label: 'What do you remember about…', prompt: 'What do you remember about ' },
 ];
+
+/** The starters whose account is connected (a starter that needs none is always shown). */
+export function availableSuggestions(connected: Readonly<Record<StarterNeed, boolean>>): readonly ChatSuggestion[] {
+  return CHAT_SUGGESTIONS.filter((suggestion) => !suggestion.needs || connected[suggestion.needs]);
+}

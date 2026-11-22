@@ -77,6 +77,44 @@ export function ChatAsksChip({ sessionId, onOpenSettings }: { sessionId: string;
   );
 }
 
+/**
+ * On a phone, where Work and the other chats are behind the drawer: a banner at
+ * the top of the chat when something outside this chat waits for the person,
+ * naming the oldest and opening it with one tap (its chat, where the card is, or
+ * its detail in Work). Reads the asks the app already holds; nothing on desktop,
+ * where the sidebar's Work count is in view.
+ */
+export function ElsewhereAsksBanner({ sessionId, chatSessionIds, onOpenChat, onOpenAsk }: {
+  sessionId: string;
+  chatSessionIds: ReadonlySet<string>;
+  onOpenChat: (sessionId: string) => void;
+  onOpenAsk?: ((key: string) => void) | undefined;
+}) {
+  const phone = useOptionalShell()?.mode === 'drawer';
+  const { asks } = useOpenAsks(phone);
+  const elsewhere = useMemo(
+    () => asks.filter((ask) => !sessionId || ask.sessionId !== sessionId).sort((a, b) => a.askedAt - b.askedAt),
+    [asks, sessionId],
+  );
+  const first = elsewhere[0];
+  if (!phone || !first) return null;
+  const inChat = first.sessionId !== undefined && chatSessionIds.has(first.sessionId);
+  if (!inChat && !onOpenAsk) return null;
+  const open = () => (inChat && first.sessionId ? onOpenChat(first.sessionId) : onOpenAsk?.(first.key));
+  const lead = elsewhere.length === 1 ? 'Waiting for you elsewhere' : `${String(elsewhere.length)} things wait for you elsewhere`;
+  return (
+    <div className="chat-elsewhere" role="status">
+      <span className="chat-elsewhere__text">
+        <span className="chat-elsewhere__lead">{lead}: </span>
+        {first.presentation.title}
+      </span>
+      <button type="button" className="chat-elsewhere__open" onClick={open}>
+        {inChat ? 'Open its chat' : 'Open it'}
+      </button>
+    </div>
+  );
+}
+
 /** What an approval that left the open list without a choice made here says now. */
 function decidedElsewhere(record: ApprovalRecord | undefined): DecidedWords | undefined {
   if (!record) return undefined;

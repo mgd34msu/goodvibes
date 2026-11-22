@@ -6,6 +6,7 @@ import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/r
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher, readUiFrame } from '@goodvibes/engine/terminal-shell/shell-frame-facts';
 import { readInitialExecutionMode } from './permissions/execution-mode.ts';
+import { agentRuntimeProfileName } from './agent/runtime-profile.ts';
 import { isConversationUsageAvailable, isConversationContextAvailable } from './core/conversation-usage.ts';
 import { publishToSharedFeed } from './core/notices.ts';
 import type { NativeConversationIntakeState } from './runtime/native-conversation-intake.ts';
@@ -182,6 +183,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   );
   const workingDir = ctx.services.workingDirectory;
   const homeDirectory = ctx.services.homeDirectory;
+  // The Agent home (profile) this session runs in; the status bar names it when it is not the default one.
+  const runtimeHomeName = agentRuntimeProfileName(ctx.services.shellPaths.homeDirectory);
   const { approvalBroker, agentManager, modeManager, processManager, providerRegistry, secretsManager, subscriptionManager } = ctx.services;
   conversation.setSessionMemoryStore(ctx.services.sessionMemoryStore);
   conversation.setSessionLineageTracker(ctx.services.sessionLineageTracker);
@@ -1110,6 +1113,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       dangerMode: readApprovalPostureFromConfig(configManager).automaticApprovals,
       executionMode: readApprovalPostureFromConfig(configManager).mode,
       powerNote: currentPowerChip(), // the daemon's state while one is adopted (runtime/power-note-source.ts)
+      homeName: runtimeHomeName,
       lastInputTokens: orchestrator.lastInputTokens,
       contextUsageAvailable: isConversationContextAvailable(orchestrator),
       commandArgsHint,

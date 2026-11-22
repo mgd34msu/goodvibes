@@ -1,6 +1,6 @@
 import { productVersionFromModule } from '@goodvibes/engine/terminal-shell/cli-help';
 import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal-shell/cli-help';
-import { renderDetailedCommandHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
+import { renderDetailedCommandHelp, renderMostUsedHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
 import { join } from 'node:path';
 import { GOODVIBES_CLI_CATALOG } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
 import { VERSION } from '../version.ts';
@@ -59,6 +59,8 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
   return [
     `Usage: ${binary} [OPTIONS] [PROMPT]`,
     `       ${binary} [OPTIONS] <COMMAND> [ARGS]`,
+    '',
+    ...renderMostUsedHelp(binary, 'Start the terminal app in this folder'),
     '',
     'Commands:',
     ...renderCommandList(),

@@ -488,8 +488,13 @@
   height: 16px;
 }
 
+/* The count and chevron open the row; a fix button beside them takes its own clicks. */
 .settings-provider-row .gv-row__trailing {
   pointer-events: none;
+}
+
+.settings-provider-row .gv-row__trailing button {
+  pointer-events: auto;
 }
 
 .settings-model-row__facts {

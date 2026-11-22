@@ -39,8 +39,10 @@
   --line-strong: rgb(255 255 255 / 0.12);
 
   --text:   #ececf1;
-  --text-2: #a3a4af;
-  --text-3: #6f707b;
+  /* Every text level reaches 4.5:1 on canvas, sidebar, surface, surface-2,
+     code, glass and the soft status fills laid over them. */
+  --text-2: #c3c4cc;
+  --text-3: #9a9ba3;
 
   --primary-bg: #ececf1;
   --primary-fg: #15161b;
@@ -87,22 +89,22 @@
   --line-strong: rgb(0 0 0 / 0.12);
 
   --text:   #1c1d22;
-  --text-2: #5f606b;
-  --text-3: #888994;
+  --text-2: #45464f;
+  --text-3: #65656e;
 
   --primary-bg: #1c1d22;
   --primary-fg: #ffffff;
 
-  --accent:      #007a83;
+  --accent:      #00717a;
   --accent-2:    #9a32c4;
   --accent-soft: rgb(0 122 131 / 0.1);
   --on-accent:   #ffffff;
   --brand:       linear-gradient(135deg, #5ee0e6, #d18cf5);
 
-  --ok:   #22814c;
-  --warn: #9a6400;
-  --bad:  #c8323c;
-  --info: #2e62c8;
+  --ok:   #1f7444;
+  --warn: #8c5b00;
+  --bad:  #be3039;
+  --info: #2e61c6;
   --ok-soft:   rgb(34 129 76 / 0.1);
   --warn-soft: rgb(154 100 0 / 0.1);
   --bad-soft:  rgb(200 50 60 / 0.1);
@@ -130,21 +132,21 @@
     --line-strong: rgb(0 0 0 / 0.12);
 
     --text:   #1c1d22;
-    --text-2: #5f606b;
-    --text-3: #888994;
+    --text-2: #45464f;
+    --text-3: #65656e;
 
     --primary-bg: #1c1d22;
     --primary-fg: #ffffff;
 
-    --accent:      #007a83;
+    --accent:      #00717a;
     --accent-2:    #9a32c4;
     --accent-soft: rgb(0 122 131 / 0.1);
     --on-accent:   #ffffff;
 
-    --ok:   #22814c;
-    --warn: #9a6400;
-    --bad:  #c8323c;
-    --info: #2e62c8;
+    --ok:   #1f7444;
+    --warn: #8c5b00;
+    --bad:  #be3039;
+    --info: #2e61c6;
     --ok-soft:   rgb(34 129 76 / 0.1);
     --warn-soft: rgb(154 100 0 / 0.1);
     --bad-soft:  rgb(200 50 60 / 0.1);

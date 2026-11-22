@@ -115,8 +115,8 @@ export function createWorkspaceTrustDecisionAsk(
         summary: `Trust the workspace ${deps.workingDirectory}?`,
         reasons: [
           `A run hosted by this daemon wants to write, execute, or delegate in "${deps.workingDirectory}", which has no trust decision recorded.`,
-          'Approving marks the workspace trusted and stops this question being asked for it again.',
-          'Denying marks it restricted: reads keep working, and writes, commands and delegation are refused there.',
+          'Approving trusts the folder, and this question is not asked for it again. Trusting it lets its own hooks and MCP servers run and lets GoodVibes change files in it. It approves nothing: each action still follows your setting for when GoodVibes asks.',
+          'Denying restricts the folder: GoodVibes can still read it, but writes, commands and delegation there are refused, and the folder\'s own hooks and MCP servers stay off.',
         ],
         target: deps.workingDirectory,
         targetKind: 'path',

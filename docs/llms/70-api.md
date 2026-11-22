@@ -6,7 +6,7 @@ Every GoodVibes client (the terminal app, Agent, the web UI, `goodvibes-daemon` 
 
 | Term | Meaning |
 | --- | --- |
-| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.4. |
+| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.5. |
 | REST route | The HTTP method and path a method is bound to, such as `POST /api/sessions`. |
 | invoke-only method | A method with no REST route. It is called through `POST /api/control-plane/methods/<id>/invoke` or a WebSocket `call` frame. |
 | access | Each method is `public` (no credential), `authenticated` (any valid credential holding its scopes) or `admin` (an admin credential). |
@@ -588,7 +588,7 @@ Refusals, observed on a 3.3.1 daemon:
 | `429` | `{"error":"This daemon already hosts 1 sessions, the configured maximum (hostedSessions.maxSessions). Kill one, or raise the setting.","code":"HOSTED_SESSION_LIMIT_REACHED","category":"rate_limit","status":429}` | `hostedSessions.maxSessions` live sessions already exist. No `Retry-After` is sent. | Waiting does not help unless a session ends: kill or detach one (`sessions.hosted.list`, then `sessions.hosted.kill`), or raise the setting. |
 | `400` | `{"error":"Model 'nope:nope' is not in this daemon's model registry; name a model it holds, or none for its current model.","code":"MODEL_NOT_FOUND",...}` (`MODEL_AMBIGUOUS` for a bare id several providers serve, `MODEL_NOT_SELECTABLE` for one that cannot be chosen) | `modelId` names no model this daemon can run. | Do not retry; pick a model from the registry or leave `modelId` out. |
 
-The session starts in the permission mode shown in `permissionMode`. Change it with `POST /api/sessions/{sessionId}/permission-mode` and body `{"mode":"ask-me"}` (`ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`; admin, owner-only). `GET /api/sessions/{sessionId}/permission-mode` answers `{"sessionId","mode","chosenMode","reason","words"}`: `mode` is the mode in force (the one that decides the session's calls), `chosenMode` the mode the session chose or the saved one, and `reason`, present only when they differ, why (for example `jev-decides` runs as `ask-me` while no decision model is set or the set one is not answering). `words` says the same for a person: `chosen` (`Jev decides`), `inForce` (`asking you for now`) and `because` (`no decision model set`, `decision models switched off`, `not measured yet`, `decision model unreachable` or `decision model failing`) when the two differ, `sentence` (what the mode in force does) and `asksBefore` (what GoodVibes asks you before). The web UI reads `words` for session `runtime`, the daemon-wide mode its chats run under. Permission modes are explained in "Permissions, decisions and safety".
+The session starts in the permission mode shown in `permissionMode`. Change it with `POST /api/sessions/{sessionId}/permission-mode` and body `{"mode":"ask-me"}` (`ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`; admin, owner-only). `GET /api/sessions/{sessionId}/permission-mode` answers `{"sessionId","mode","chosenMode","reason","words"}`: `mode` is the mode in force (the one that decides the session's calls), `chosenMode` the mode the session chose or the saved one, and `reason`, present only when they differ, why (for example `jev-decides` runs as `ask-me` while no decision model is set or the set one is not answering). `words` says the same for a person: `chosen` (`Jev decides`); when the two differ, `inForce` (what is in force, written to lead: `you, for now`, or `YOLO, for now` while an old auto-approve setting is on), `chosenWhen` (the chosen mode and the condition it waits on: `Jev decides once a decision model is set`, `Jev decides once decision models are on`, `Jev decides once you choose it`, `Jev decides once the decision model answers again`, `<mode> once the old auto-approve setting is off`), `chosenShort` (the choice in a few words, for where `chosenWhen` does not fit: `you chose Jev decides`, or `default: Jev decides` while it is only the shipped default), `because` (`no decision model set`, `decision models switched off`, `not measured yet`, `decision model unreachable` or `decision model failing`) and `failure` (`true` when `because` reports the decision model failing or out of reach). A surface shows `inForce · chosenWhen`, then `because` when `failure` is `true`, the order the terminal status bar uses (`Asks: you, for now · Jev decides once a decision model is set`). Then `sentence` (what the mode in force does) and `asksBefore` (what GoodVibes asks you before). The web UI reads `words` for session `runtime`, the daemon-wide mode its chats run under. Permission modes are explained in "Permissions, decisions and safety".
 
 ### 4. Open the event stream before sending
 
@@ -787,7 +787,7 @@ All `config.*` and `credentials.*` methods are admin methods: a non-admin, whate
 
 | Method | Route | Scope | Does |
 | --- | --- | --- | --- |
-| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.4: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
+| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.5: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
 | `credentials.get` | `GET /config/credentials[?key=<config key>]` | `read:config` | `{"available":true,"credentials":[...]}`: whether each credential is configured and usable, never the secret. `503` `CREDENTIAL_STORE_UNAVAILABLE` when no secret store is wired. |
 | `config.set` | `POST /config` `{"key":"<config key>","value":<JSON>}` | `write:config` | Write one value. |
 | `config.setMany` | `POST /config/many` `{"entries":[{"key":"...","value":...},...]}` | `write:config` | Write several values as one update: every entry is checked before anything is written. |
@@ -972,7 +972,7 @@ Event names:
 
 The catalog name, SSE name, domain and access of each event are in "Event streams a client subscribes to" in the reference. Runtime events carry `sessionId` at the top level; `session-update` frames carry it as `payload.sessionId` (or `payload.id` for `session-created`), and `hosted-session-update` frames as `session.id`. A client that keeps one session's events must check all three places.
 
-The domains (28 in 3.4.4) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
+The domains (28 in 3.4.5) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
 
 How the daemon decides what a stream carries:
 
@@ -1121,7 +1121,7 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes/engine` (version 3.4.4) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version 3.4.5) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
 How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
@@ -1132,8 +1132,8 @@ npm view @goodvibes/engine versions --json
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes/engine@3.4.4
-npm install @goodvibes/engine@3.4.4
+bun add @goodvibes/engine@3.4.5
+npm install @goodvibes/engine@3.4.5
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -1141,7 +1141,7 @@ When it is not, use it from a source checkout of the same version, inside that c
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes
-git checkout v3.4.4
+git checkout v3.4.5
 bun install
 bun run build                 # produces the dist/ directories the package's exports name
 mkdir -p products/my-client

@@ -394,7 +394,7 @@ function buildRoutingRoles(config: ConfigManager): RoutingRole[] {
 
   return [
     {
-      role: 'Conversation (main model)',
+      role: 'Main chat',
       enabled: null,
       provider: mainProvider,
       model: mainModel || '(unset)',
@@ -407,14 +407,14 @@ function buildRoutingRoles(config: ConfigManager): RoutingRole[] {
         + ` -> ${describeConfiguredEffort(mainModel, String(config.get('provider.reasoningEffort') ?? ''))}`,
     },
     {
-      role: 'Embeddings',
+      role: 'Search index (embeddings)',
       enabled: null,
       provider: String(config.get('provider.embeddingProvider') ?? '') || `(inherits main: ${mainProvider})`,
       model: '(provider default)',
       keys: ['provider.embeddingProvider'],
     },
     {
-      role: 'Tool LLM (grunt tool work)',
+      role: 'Tool work',
       enabled: config.get('tools.llmEnabled') === true,
       provider: emptyProvider(toolProvider),
       model: toolModel || '(unset)',
@@ -422,7 +422,7 @@ function buildRoutingRoles(config: ConfigManager): RoutingRole[] {
       ...(config.get('tools.llmEnabled') === true ? {} : { note: 'disabled: no tool-LLM route active' }),
     },
     {
-      role: 'Helper (supporting work: resume summaries)',
+      role: 'Side work (summaries and titles)',
       enabled: config.get('helper.enabled') === true,
       provider: emptyProvider(helperProvider),
       model: helperModel || `(inherits main: ${mainModel || 'unset'})`,
@@ -430,7 +430,7 @@ function buildRoutingRoles(config: ConfigManager): RoutingRole[] {
       ...(config.get('helper.enabled') === true ? {} : { note: 'disabled: supporting work stays on the main model' }),
     },
     {
-      role: 'Narration LLM (TTS phrasing)',
+      role: 'Spoken replies',
       enabled: null,
       provider: emptyProvider(ttsProvider),
       model: ttsModel || '(unset)',

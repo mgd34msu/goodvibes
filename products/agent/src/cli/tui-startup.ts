@@ -5,7 +5,7 @@ import type { InputHandler } from '../input/handler.ts';
 // they pull in feature-enablement's eager metadata lookups before boot begins.
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { writeOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
-import { FirstRunModal, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
+import { FirstRunModal, installSplashAdditions, setSplashImportCommand, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/lan-scan-consent.ts';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
@@ -165,6 +165,8 @@ export function applyInitialTuiCliState(options: {
     splashShowing: () => input.conversationManager?.isSplashShowing() ?? false,
     renderRequest: render,
   });
+  // The first launch only: when the terminal app has settings this Agent does not, say once which command brings them over.
+  if (!onboardingDone) void offerTerminalSettingsImport(commandContext);
   // First run: when the model this session will use is not ready, choose a
   // provider, sign in, and land in the conversation (first-run-flow.ts). The
   // workspace's setup screens stay one key away (and /setup).
@@ -223,6 +225,22 @@ export function applyInitialTuiCliState(options: {
   }
 
   applySeededCliPrompt(cli, input);
+}
+
+/**
+ * Under the first launch's splash, the command that brings over the terminal
+ * app's settings, when its settings files hold something the Agent would take
+ * (the import's own plan, read once). Loaded here rather than at the top: this
+ * module is read before boot, when the workspace modules must not load yet.
+ */
+async function offerTerminalSettingsImport(commandContext: CommandContext): Promise<void> {
+  try {
+    const { agentWorkspaceTuiSettingsImportHasChanges, planAgentWorkspaceTuiSettingsImport } = await import('../input/agent-workspace-settings.ts');
+    const plan = planAgentWorkspaceTuiSettingsImport(commandContext);
+    if (plan !== null && agentWorkspaceTuiSettingsImportHasChanges(plan)) setSplashImportCommand('/setup import-settings');
+  } catch (error) {
+    logger.warn('The terminal app settings could not be read for the first-launch import line', { error: summarizeError(error) });
+  }
 }
 
 /** What first run needs from the Agent. */

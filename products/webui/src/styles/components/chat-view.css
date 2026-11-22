@@ -265,8 +265,9 @@
   margin-left: 0;
 }
 
-/* On a phone the chat's title shares the row with the asks chip: it takes two
- * lines before it is cut, so a title of a few words reads whole (ux A2.4). */
+/* On a phone the chat's title gives way to the chips beside it: one line, cut
+ * with an ellipsis. Beside the asks chip (the mode chip steps aside then) it
+ * takes two lines before it is cut, so a title of a few words reads whole. */
 .shell-header--phone .chat-title-button {
   height: auto;
   min-height: 32px;
@@ -274,6 +275,16 @@
 }
 
 .shell-header--phone .chat-title-button__text {
+  font-size: var(--text-sm);
+  line-height: 1.25;
+}
+
+/* Touch has no hover to reveal the pencil, so on a phone it takes no room from the title. */
+.shell-header--phone .chat-title-button__icon {
+  display: none;
+}
+
+.shell-header--phone:has(.chat-asks-chip) .chat-title-button__text {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;

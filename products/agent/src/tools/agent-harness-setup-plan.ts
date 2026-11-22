@@ -251,7 +251,7 @@ export async function buildSetupPlan(
         blocksAutonomy: false,
         reason: automationReview.detail,
         nextAction: 'Review schedules, approvals, routine promotion, and visible autonomy queue controls before ongoing background work.',
-        userRoute: 'Agent Workspace -> Personal Ops -> Autonomy queue',
+        userRoute: 'Agent Workspace -> Inbox & calendar -> Autonomy queue',
         modelRoute: 'autonomy action:"queue"',
         relatedSetupItemId: automationReview.id,
       };

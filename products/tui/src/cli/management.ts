@@ -329,9 +329,11 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         console.log(formatControlPlaneStatus(runtime, result));
         return { handled: true, exitCode: result.issues.length > 0 ? 1 : 0 };
       }
-      case 'pair':
-        console.log(await renderPairing(runtime));
-        return { handled: true, exitCode: 0 };
+      case 'pair': {
+        const result = await renderPairing(runtime);
+        console.log(result.output);
+        return { handled: true, exitCode: result.exitCode };
+      }
       case 'support-bundle': {
         const result = await handleBundleCommand(runtime);
         console.log(result.output);

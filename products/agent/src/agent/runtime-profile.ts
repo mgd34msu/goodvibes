@@ -179,6 +179,11 @@ export function agentRuntimeProfileBaseHome(homeDirectory: string): string {
   return dirname(home) === join(base, '.goodvibes', 'agent', 'profile-homes') && PROFILE_ID_PATTERN.test(basename(home)) ? base : homeDirectory;
 }
 
+/** The Agent home (profile) a session runs in, by name; null in the default home. */
+export function agentRuntimeProfileName(homeDirectory: string): string | null {
+  return homeDirectory && agentRuntimeProfileBaseHome(homeDirectory) !== homeDirectory ? basename(homeDirectory) : null;
+}
+
 export function getAgentRuntimeProfilesRoot(baseHomeDirectory: string): string {
   return join(agentRuntimeProfileBaseHome(baseHomeDirectory), '.goodvibes', 'agent', 'profile-homes');
 }

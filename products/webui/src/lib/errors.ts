@@ -211,13 +211,12 @@ export function isAuthExpiredError(error: unknown): boolean {
 }
 
 /**
- * True for the daemon's honest 412 refusals on the calendar surface,
- * CALENDAR_NOT_CONFIGURED (no CalDAV URL/user set: `surfaces.calendar.caldavUrl` /
- * `surfaces.calendar.caldavUser`) or CALENDAR_CREDENTIALS_MISSING (the CalDAV
- * password is not in the credential store). Both mean the operator has not yet
- * brought their own CalDAV endpoint, a self-hosted-calendar analogue of an
- * unconfigured provider, not a fault. Distinguished from a genuine error so the
- * calendar view can point at setup instead of rendering a scary failure.
+ * True for the daemon's 400 refusals on the calendar surface that mean no
+ * calendar is set up: CALENDAR_NOT_CONFIGURED (no usable CalDAV server or Google
+ * account; its message names every account the daemon found and why none can be
+ * read) or CALENDAR_CREDENTIALS_MISSING (the CalDAV password is not in the
+ * credential store). Not a fault: distinguished from a genuine error so the
+ * calendar view can show the daemon's words and point at setup.
  */
 export function isCalendarUnconfiguredError(error: unknown): boolean {
   const code = errorCode(error);

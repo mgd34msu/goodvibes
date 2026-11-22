@@ -121,7 +121,9 @@ function printConnectResult(ctx: CommandContext, label: string, result: ConnectR
   }
   const via = result.transport === 'device-code' ? 'device code' : result.transport === 'pasted-code' ? 'pasted sign-in' : 'browser sign-in';
   ctx.print([
-    `Connected ${label}.`,
+    result.account?.provider === 'google'
+      ? `Connected ${label}. This is the one Google connection: the daemon's calendar (the web Calendar) and its Gmail access use it too.`
+      : `Connected ${label}.`,
     `  account ${result.account?.label ?? label}`,
     `  via     ${via}`,
     `  scopes  ${(result.account?.scopes ?? []).join(', ') || '(none reported)'}`,
@@ -169,7 +171,9 @@ export async function disconnectCalendar(
   const service = factory(ctx);
   const { revokedRemotely } = await service.disconnect(provider);
   return [
-    `Disconnected ${label}.`,
+    provider === 'google'
+      ? 'Disconnected Google. It was the one Google connection, so the daemon\'s calendar (the web Calendar) and its Gmail access stop too.'
+      : `Disconnected ${label}.`,
     revokedRemotely
       ? '  The access was revoked at the provider and local tokens were cleared.'
       : '  Local tokens were cleared. This provider offers no token-revocation endpoint, so revoke access in your account settings if desired.',

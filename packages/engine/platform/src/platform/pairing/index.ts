@@ -51,15 +51,19 @@ export type {
 
 export {
   describeOriginPosture,
+  describePairingReach,
   isLoopbackHost,
   BROWSER_GATED_CAPABILITIES,
   LAN_PLAIN_HTTP_NOTICE,
+  PAIRING_REACH_FIX,
   TAILNET_PLAIN_HTTP_NOTICE,
 } from './origin-posture.js';
 export type {
   OriginPosture,
   OriginCapability,
   BrowserGatedCapability,
+  PairingReach,
+  PairingReachAnswer,
 } from './origin-posture.js';
 
 export {
@@ -106,12 +110,18 @@ export {
 
 export {
   formatPairingOffers,
+  formatPairingSteps,
   formatPostureCapabilities,
   PAIRING_OFFER_COPY,
+  PAIRING_PAIR_AGAIN,
+  pairingNoWebUiLines,
   pairingPostureNotice,
+  pairingReadySteps,
+  pairingUnreachableLines,
+  pairingUnreachableSteps,
   POSTURE_CAPABILITY_LABEL,
 } from './offer-copy.js';
-export type { PairingOfferCopy } from './offer-copy.js';
+export type { PairingOfferCopy, PairingStep } from './offer-copy.js';
 
-export { controlPlaneOriginUsesStableHost, controlPlaneScheme, explicitPublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, resolvePairingWebOrigin, resolveWebUiListener, resolveWebUiOrigin } from './web-origin.js';
+export { controlPlaneOriginUsesStableHost, controlPlaneScheme, explicitPublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, pairingReachFromSettings, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, resolvePairingWebOrigin, resolveWebUiListener, resolveWebUiOrigin } from './web-origin.js';
 export type { ControlPlaneOrigin, PairingWebOrigin } from './web-origin.js';

@@ -15,6 +15,7 @@ import { Loader, Square, Volume2, VolumeX } from 'lucide-react';
 import { useTts } from '../../lib/voice/useVoice';
 import { TTS_UNAVAILABLE_MESSAGE } from '../../lib/voice/voice-config';
 import { IconButton } from '../ui/IconButton';
+import { MenuItem } from '../ui/Menu';
 import '../../styles/components/voice.css';
 
 interface SpeakButtonProps {
@@ -77,4 +78,25 @@ export function SpeakButton({ messageId, sessionId, contentRevision, text }: Spe
       onClick={() => speak(messageId, text)}
     />
   );
+}
+
+/**
+ * The same control as a menu item, for a message's "More" menu on a phone:
+ * the same states in words ("Read aloud", "Stop reading aloud", or why it is
+ * unavailable).
+ */
+export function SpeakMenuItem({ messageId, sessionId, contentRevision, text }: SpeakButtonProps) {
+  const { availability, canPlay, state, isActive, speak, stop } = useTts(sessionId && contentRevision ? { sessionId, messageId, contentRevision, content: text } : undefined);
+  if (!text.trim()) return null;
+  const active = isActive(messageId);
+  if (!availability.ttsAvailable || !canPlay || !sessionId || !contentRevision) {
+    const reason = !canPlay
+      ? 'This browser cannot play synthesised audio.'
+      : !availability.ttsAvailable ? TTS_UNAVAILABLE_MESSAGE : 'The saved reply is still loading.';
+    return <MenuItem icon={<VolumeX aria-hidden />} disabled wrap>{`Read aloud unavailable. ${reason}`}</MenuItem>;
+  }
+  if (active && (state.phase === 'loading' || state.phase === 'playing')) {
+    return <MenuItem icon={<Square aria-hidden />} onSelect={stop}>Stop reading aloud</MenuItem>;
+  }
+  return <MenuItem icon={<Volume2 aria-hidden />} onSelect={() => speak(messageId, text)}>Read aloud</MenuItem>;
 }

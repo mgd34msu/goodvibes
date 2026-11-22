@@ -10,9 +10,12 @@
  *   Restore ........ when the last right panel closes the sidebar returns to the
  *                    person's own state; if they had collapsed it themselves it
  *                    stays collapsed (the auto state is derived, never stored).
- *   Pinned ......... a pinned sidebar never auto-collapses (the panel narrows).
- *   Narrow windows . under 1280 a right panel always collapses it, pinned or
- *                    not; under 900 the sidebar is the phone drawer.
+ *   Pinned ......... a pinned sidebar stays open beside a right panel wherever
+ *                    both fit: the window holds the sidebar's own width plus
+ *                    RIGHT_PANEL_ROOM (a 400 list beside a 480 detail, or a 440
+ *                    panel beside 440 of content). Where they do not, it folds to
+ *                    the rail while the panel is open, and the pin says so.
+ *   Narrow windows . under 900 the sidebar is the phone drawer.
  *   Hover peek ..... hovering the rail for 300 ms, or Ctrl B while a panel holds
  *                    the rail, slides the full sidebar over the content as glass.
  *   Motion ......... the sidebar's width animates over 200 ms; the layout column
@@ -44,7 +47,8 @@ export const SIDEBAR_MAX_WIDTH = 360;
 export const SIDEBAR_DEFAULT_WIDTH = 260;
 export const RAIL_WIDTH = 56;
 export const RIGHT_PANEL_TRIGGER_WIDTH = 400;
-export const NARROW_QUERY = '(max-width: 1279px)';
+/** The width a right panel and the content beside it need, besides the sidebar. */
+export const RIGHT_PANEL_ROOM = 880;
 export const RAIL_MOTION_MS = 200;
 export const HOVER_PEEK_DELAY_MS = 300;
 
@@ -88,13 +92,14 @@ function writeStoredSidebar(next: StoredSidebar): void {
 /** Pure derivation of the sidebar's form, exported for unit tests. */
 export function deriveSidebar(input: {
   isPhone: boolean;
-  isNarrow: boolean;
+  /** The window holds the open sidebar beside a right panel (RIGHT_PANEL_ROOM). */
+  bothFit: boolean;
   rightPanelOpen: boolean;
   userCollapsed: boolean;
   pinned: boolean;
 }): { mode: SidebarMode; autoCollapsed: boolean } {
   if (input.isPhone) return { mode: 'drawer', autoCollapsed: false };
-  const autoCollapsed = input.rightPanelOpen && (!input.pinned || input.isNarrow);
+  const autoCollapsed = input.rightPanelOpen && (!input.pinned || !input.bothFit);
   const collapsed = autoCollapsed || input.userCollapsed;
   return { mode: collapsed ? 'rail' : 'expanded', autoCollapsed };
 }
@@ -106,6 +111,8 @@ export interface ShellApi {
   /** The person's own collapsed choice (what the sidebar restores to). */
   userCollapsed: boolean;
   pinned: boolean;
+  /** False when this window is too narrow for the open sidebar beside a right panel: a pin cannot hold it open then. */
+  pinFits: boolean;
   rightPanelOpen: boolean;
   /** The rail is showing the full sidebar over the content (hover or Ctrl B). */
   peek: boolean;
@@ -160,11 +167,11 @@ export function useRightPanel(open: boolean, options?: { width?: number; force?:
 
 export function ShellProvider({ children }: { children: ReactNode }) {
   const isPhone = useMediaQuery(PHONE_QUERY);
-  const isNarrow = useMediaQuery(NARROW_QUERY);
   const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
   const [stored, setStored] = useState<StoredSidebar>(() =>
     typeof window === 'undefined' ? { collapsed: false, pinned: false, width: SIDEBAR_DEFAULT_WIDTH } : readStoredSidebar(),
   );
+  const bothFit = useMediaQuery(`(min-width: ${String(stored.width + RIGHT_PANEL_ROOM)}px)`);
   const [panels, setPanels] = useState<ReadonlySet<string>>(() => new Set());
   const [peek, setPeekState] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -185,7 +192,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
   const rightPanelOpen = panels.size > 0;
   const { mode, autoCollapsed } = deriveSidebar({
     isPhone,
-    isNarrow,
+    bothFit,
     rightPanelOpen,
     userCollapsed: stored.collapsed,
     pinned: stored.pinned,
@@ -275,6 +282,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     autoCollapsed,
     userCollapsed: stored.collapsed,
     pinned: stored.pinned,
+    pinFits: bothFit,
     rightPanelOpen,
     peek: mode === 'rail' && peek,
     drawerOpen: mode === 'drawer' && drawerOpen,
@@ -287,7 +295,7 @@ export function ShellProvider({ children }: { children: ReactNode }) {
     closeDrawer: () => setDrawerOpen(false),
     setWidth: (width) => update({ width: clampSidebarWidth(width) }),
     registerRightPanel,
-  }), [mode, autoCollapsed, stored, rightPanelOpen, peek, drawerOpen, layoutWidth, toggleSidebar, update, registerRightPanel]);
+  }), [mode, autoCollapsed, stored, bothFit, rightPanelOpen, peek, drawerOpen, layoutWidth, toggleSidebar, update, registerRightPanel]);
 
   return <ShellContext.Provider value={api}>{children}</ShellContext.Provider>;
 }

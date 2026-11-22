@@ -42,7 +42,7 @@ export function PermissionRules() {
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({ queryKey: queryKeys.permissionRules });
       toast(result.deleted
-        ? { title: 'Rule deleted', description: 'Matching calls are decided by your permission mode now.', tone: 'info' }
+        ? { title: 'Rule deleted', description: 'Matching calls follow your setting for when GoodVibes asks now.', tone: 'info' }
         : { title: 'Rule already gone', description: 'The daemon reported no such rule.', tone: 'info' });
     },
     onError: (error: unknown) => toast({ title: 'Delete failed', description: formatError(error), tone: 'danger' }),
@@ -53,7 +53,7 @@ export function PermissionRules() {
     if (rule.effect === 'deny') {
       const ok = await confirm.ask({
         title: 'Delete this deny rule?',
-        description: 'Calls this rule refuses will no longer be refused by it; your permission mode decides them, which may allow them without asking.',
+        description: 'Calls this rule refuses will no longer be refused by it; your setting for when GoodVibes asks decides them, which may allow them without asking.',
         tone: 'danger',
         confirmLabel: 'Delete rule',
       });
@@ -65,7 +65,7 @@ export function PermissionRules() {
   return (
     <SettingsBlock
       title="Approval rules"
-      description="Approving with a Remember scope (exact command, command class, path or tool) records a rule here. Delete one and your permission mode decides matching calls again: an allow rule's calls may prompt again, a deny rule's calls are no longer refused by it."
+      description="Approving with a Remember scope (exact command, command class, path or tool) records a rule here. Delete one and your setting for when GoodVibes asks decides matching calls again: an allow rule's calls may prompt again, a deny rule's calls are no longer refused by it."
       actions={<IconButton label="Refresh rules" icon={<RefreshCw />} onClick={() => void rules.refetch()} />}
       testId="permission-rules"
     >
@@ -94,7 +94,7 @@ export function PermissionRules() {
                   icon={<Trash2 aria-hidden="true" />}
                   disabled={remove.isPending && remove.variables === rule.id}
                   aria-label={`Delete rule: ${ruleSummary(rule)}`}
-                  title="Delete this rule: your permission mode decides matching calls again"
+                  title="Delete this rule: your setting for when GoodVibes asks decides matching calls again"
                   onClick={() => void deleteRule(rule)}
                 >
                   {remove.isPending && remove.variables === rule.id ? 'Deleting…' : 'Delete'}

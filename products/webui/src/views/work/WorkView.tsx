@@ -93,6 +93,8 @@ export interface WorkViewProps {
   streamPaused?: boolean;
   /** Open a session in the Chat view. */
   onOpenSession?: (sessionId: string) => void;
+  /** The item to open when the view opens (an ask's `approval:<id>` or `inbox:<id>` key from the chat's banner). */
+  focusKey?: string;
 }
 
 /** A hosted session is a session: its one row and pane live under `session:<id>`, so an older `hosted:<id>` key opens the same. */
@@ -165,7 +167,7 @@ export function WorkView(props: WorkViewProps) {
   return <WorkViewContent key={contractScope.revision} {...props} contractScope={contractScope} />;
 }
 
-function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessionSubscriptionActive = false, streamPaused = false, onOpenSession }: WorkViewProps & { contractScope: ClientLifetime }) {
+function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessionSubscriptionActive = false, streamPaused = false, onOpenSession, focusKey = '' }: WorkViewProps & { contractScope: ClientLifetime }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const phone = useMediaQuery(PHONE_QUERY);
@@ -181,9 +183,9 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
     if (initialFocus) stripFleetFocusFragment();
   }, [initialFocus]);
 
-  const [selectedKey, setSelectedKey] = useState<string>(() => (initialFocus ? `fleet:${initialFocus.nodeId}` : tab === 'plan' ? WORK_PLAN_KEY : ''));
+  const [selectedKey, setSelectedKey] = useState<string>(() => (initialFocus ? `fleet:${initialFocus.nodeId}` : focusKey ? workKey(focusKey) : tab === 'plan' ? WORK_PLAN_KEY : ''));
   // After the person closes a detail, the first waiting row does not reopen by itself.
-  const dismissedRef = useRef(Boolean(initialFocus) || tab === 'plan');
+  const dismissedRef = useRef(Boolean(initialFocus) || Boolean(focusKey) || tab === 'plan');
   const [sessionTab, setSessionTab] = useState<SessionTab>(tab === 'checkpoints' ? 'checkpoints' : 'transcript');
 
   const archived = scope === 'archived';

@@ -145,9 +145,16 @@ export function SidebarContent({
             {variant === 'expanded' && (
               <span className="shell-brand__tools">
                 <IconButton
-                  label={shell.pinned ? 'Unpin sidebar' : 'Pin sidebar open'}
+                  label={shell.pinned
+                    ? shell.pinFits
+                      ? 'Unpin sidebar'
+                      : 'Unpin sidebar. This window is too narrow to keep it open beside a side panel, so it folds to icons while one is open'
+                    : shell.pinFits
+                      ? 'Pin sidebar open'
+                      : 'Pin sidebar open. This window is too narrow to keep it open beside a side panel; widen it to keep it open then'}
                   aria-pressed={shell.pinned}
                   icon={shell.pinned ? <PinOff /> : <Pin />}
+                  className={shell.pinFits ? undefined : 'shell-pin--narrow'}
                   onClick={() => shell.setPinned(!shell.pinned)}
                 />
                 <IconButton

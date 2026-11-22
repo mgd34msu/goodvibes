@@ -34,6 +34,8 @@ import {
   createCalDavSecretPort,
 } from '../../calendar/caldav-gateway-config.js';
 import { createCalDavCalendarGatewayService } from '../../calendar/caldav-gateway-service.js';
+import { readCalendarAccountsOnRecord } from '../../calendar/oauth-token-store.js';
+import { GOOGLE_CONFIG_KEYS } from '../../google/setup-plan.js';
 import type { CalendarUntrustedIngestRecorder } from '../../calendar/untrusted-events.js';
 import {
   getProcessUntrustedContentLedger,
@@ -71,6 +73,41 @@ function configString(deps: CalendarCompositionDeps, key: string): string {
     return '';
   }
   return typeof value === 'string' ? value.trim() : '';
+}
+
+/**
+ * The answer when no calendar can be read: which calendar accounts exist on
+ * this machine and why none of them is usable here, then the one step that
+ * fixes it. Read from the stores, never with a request to a provider, and with
+ * no token in it.
+ */
+async function noUsableCalendar(deps: CalendarCompositionDeps): Promise<string> {
+  const get = async (key: string): Promise<string | null> => revealOrNull(await deps.secretsManager.get(key), 'owner-screen');
+  let accounts: Awaited<ReturnType<typeof readCalendarAccountsOnRecord>> = [];
+  try {
+    accounts = await readCalendarAccountsOnRecord(get);
+  } catch {
+    accounts = [];
+  }
+  const google = accounts.find((account) => account.provider === 'google');
+  const microsoft = accounts.find((account) => account.provider === 'microsoft');
+  const noHome = deps.homeDirectory === undefined;
+  const noClientId = configString(deps, GOOGLE_CONFIG_KEYS.oauthClientId).length === 0;
+  const sentences = ['No calendar this daemon can read.'];
+  if (google === undefined) sentences.push('Google: no account is connected.');
+  else if (noHome) sentences.push(`Google: ${google.label} is connected, but this daemon runs without a home folder and reads only a CalDAV server.`);
+  else if (noClientId) sentences.push(`Google: ${google.label} is connected, but the client id of the OAuth app it signed in with is not set (calendar.google.clientId), so it cannot be used.`);
+  else sentences.push(`Google: ${google.label} is connected.`);
+  if (microsoft !== undefined) {
+    sentences.push(`Microsoft Outlook: ${microsoft.label} is connected for the Agent's /calendar commands; this daemon's calendar reads a CalDAV server or a Google account, not Microsoft.`);
+  }
+  sentences.push('CalDAV: not set (surfaces.calendar.caldavUrl and surfaces.calendar.caldavUser).');
+  sentences.push(noHome
+    ? 'Set the two CalDAV settings.'
+    : google === undefined
+      ? 'Connect Google with /calendar connect google in the Agent, or set the two CalDAV settings.'
+      : 'Set calendar.google.clientId to the client id of your Google OAuth app, or set the two CalDAV settings.');
+  return sentences.join(' ');
 }
 
 /** The backend chosen for this call does not have the operation; the verb answers 501 with what to do. */
@@ -159,28 +196,41 @@ export function createDaemonCalendarGatewayService(
     }
     return (google ??= createGoogle(homeDirectory));
   };
+  // Every verb runs through this, so a caller with no usable calendar (the web
+  // Calendar, a tool) is told which accounts exist and why none can be read,
+  // not only that nothing is configured. A CalDAV server's own refusals stand.
+  const explained = async <T>(run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (error) {
+      if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_CONFIGURED' && !caldavConfigured()) {
+        throw new GatewayVerbError(await noUsableCalendar(deps), 'CALENDAR_NOT_CONFIGURED', error.status);
+      }
+      throw error;
+    }
+  };
   return {
     // async, so a refusal from `select` reaches the caller as a rejection like
     // every other failure of these verbs rather than as a synchronous throw.
-    listEvents: async (input) => select().listEvents(input),
-    getEvent: async (eventId, calendarId) => select().getEvent(eventId, calendarId),
-    createEvent: async (input) => select().createEvent(input),
-    updateEvent: async (eventId, changes, calendarId) => {
+    listEvents: (input) => explained(async () => select().listEvents(input)),
+    getEvent: (eventId, calendarId) => explained(async () => select().getEvent(eventId, calendarId)),
+    createEvent: (input) => explained(async () => select().createEvent(input)),
+    updateEvent: (eventId, changes, calendarId) => explained(async () => {
       const backend = select();
       if (!backend.updateEvent) throw unsupported('update events');
       return backend.updateEvent(eventId, changes, calendarId);
-    },
-    deleteEvent: async (eventId, calendarId) => {
+    }),
+    deleteEvent: (eventId, calendarId) => explained(async () => {
       const backend = select();
       if (!backend.deleteEvent) throw unsupported('delete events');
       return backend.deleteEvent(eventId, calendarId);
-    },
-    listCalendars: async () => {
+    }),
+    listCalendars: () => explained(async () => {
       const backend = select();
       if (!backend.listCalendars) throw unsupported('list its calendars; set surfaces.calendar.defaultCalendarId to the calendar to use');
       return backend.listCalendars();
-    },
-    exportIcs: async (input) => select().exportIcs(input),
-    importIcs: async (icsContent, calendarId, options) => select().importIcs(icsContent, calendarId, options),
+    }),
+    exportIcs: (input) => explained(async () => select().exportIcs(input)),
+    importIcs: (icsContent, calendarId, options) => explained(async () => select().importIcs(icsContent, calendarId, options)),
   };
 }

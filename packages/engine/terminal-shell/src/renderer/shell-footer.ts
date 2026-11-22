@@ -35,10 +35,10 @@ export interface SharedShellFooterOptions {
   /** The working tree differs from HEAD: `branch main, changed`. */
   readonly branchChanged?: boolean | undefined;
   /**
-   * The mode in force in words (ModeInForceWords' chosen, inForce, because):
-   * the status bar's `Asks:` segment. Absent: no mode segment.
+   * The mode in force in words (ModeInForceWords' chosen, inForce, chosenWhen,
+   * because, failure): the status bar's `Asks:` segment. Absent: no mode segment.
    */
-  readonly modeWords?: ({ readonly chosen: string; readonly inForce?: string | undefined; readonly because?: string | undefined } | null) | undefined;
+  readonly modeWords?: ({ readonly chosen: string; readonly inForce?: string | undefined; readonly chosenWhen?: string | undefined; readonly chosenShort?: string | undefined; readonly because?: string | undefined; readonly failure?: boolean | undefined } | null) | undefined;
   /** The key that changes the mode, as bound ("shift+tab"). */
   readonly modeKey?: string | undefined;
   /** The mode just changed: the `Asks:` segment flashes (session-permission-mode.ts). */
@@ -198,7 +198,7 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
     // width; the composer flags are dropped first.
     const words = options.modeWords ?? null;
     const asks: StatusAsks | null = words
-      ? { chosen: words.chosen, inForce: words.inForce, because: words.because, key: options.modeKey, flash: options.modeFlash, flashMessage: getSharedModeFlash().message() ?? undefined }
+      ? { chosen: words.chosen, inForce: words.inForce, chosenWhen: words.chosenWhen, chosenShort: words.chosenShort, because: words.because, failure: words.failure, key: options.modeKey, flash: options.modeFlash, flashMessage: getSharedModeFlash().message() ?? undefined }
       : null;
     const saysYolo = words !== null && [words.chosen, words.inForce ?? ''].some((text) => text.includes('YOLO'));
     const chips = [...safetyChips(options, !saysYolo), ...ports.flags(options)];

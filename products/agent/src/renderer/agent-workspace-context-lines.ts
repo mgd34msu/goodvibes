@@ -11,6 +11,7 @@ import type { AgentWorkspace, AgentWorkspaceAction, AgentWorkspaceCategory } fro
 import { nativeWorkLedgerLines } from './native-work-ledger.ts';
 import { WORKSPACE_PALETTE as PALETTE } from './fullscreen-workspace.ts';
 import type { AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';
+import { formatDigestTime } from '../core/away-digest.ts';
 
 /** Report lines shown in the pane; the rest is one command away. */
 const REPORT_LINES = 8;
@@ -41,10 +42,14 @@ function reportLines(workspace: AgentWorkspace, action: AgentWorkspaceAction): C
   const command = workspace.reportCommandFor(action);
   const report = command ? workspace.commandReport(command) : undefined;
   if (!report) return [];
-  const lines: ContextLine[] = [{ text: '', fg: PALETTE.muted }, { text: `Now, as ${report.line} shows it:`, fg: PALETTE.title, bold: true }];
-  if (report.waiting) return [...lines, { text: 'Press ctrl+r to check now.', fg: PALETTE.dim, dim: true }];
-  if (report.lines === null) return [...lines, { text: 'Reading…', fg: PALETTE.dim, dim: true }];
-  if (report.lines.length === 0) return [...lines, { text: 'Nothing to show.', fg: PALETTE.muted }];
+  // Four states, each in its own words: not read yet, reading, read (with when), could not read.
+  const heading = (text: string): ContextLine[] => [{ text: '', fg: PALETTE.muted }, { text, fg: PALETTE.title, bold: true }];
+  if (report.waiting) return [...heading(`${report.line}: not read yet`), { text: 'It reaches past this computer, so it is read only when you ask: press ctrl+r.', fg: PALETTE.dim, dim: true }];
+  if (report.lines === null || report.readAt === undefined) return [...heading(`${report.line}: reading…`)];
+  const when = `read at ${formatDigestTime(report.readAt)}`;
+  if (report.failed !== undefined) return [...heading(`${report.line}: could not read (${when})`), { text: report.failed, fg: PALETTE.warn }, { text: 'Press ctrl+r to try again.', fg: PALETTE.dim, dim: true }];
+  if (report.lines.length === 0) return [...heading(`As ${report.line} showed it, ${when}:`), { text: 'Nothing to show.', fg: PALETTE.muted }];
+  const lines = heading(`As ${report.line} showed it, ${when}:`);
   lines.push(...report.lines.slice(0, REPORT_LINES).map((text): ContextLine => ({ text, fg: PALETTE.info })));
   if (report.lines.length > REPORT_LINES) lines.push({ text: `… the rest: ${report.line}`, fg: PALETTE.dim, dim: true });
   return lines;

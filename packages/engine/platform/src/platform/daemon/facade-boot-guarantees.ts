@@ -12,6 +12,7 @@ import { describePlaintextSweep, sweepPlaintextCredentials } from '../config/pla
 import { raiseReaderFloorInFile } from '../config/shared-config-tier.js';
 import { takeDecisionPolicyNameOf3_2Read } from '../config/settings-ingestion.js';
 import { noteCarriedForward, sayCarriedForwardThrough } from '../state/carried-forward.js';
+import { carryGoogleCalendarConnectionForward } from '../calendar/oauth-token-store.js';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from './receipts.js';
 import type { ConfigManager } from '../config/manager.js';
 import { ensureActivityLoggerConfigured, logger } from '../utils/logger.js';
@@ -80,6 +81,7 @@ export async function runDaemonBootGuarantees(
   // What the upgrade steps carried forward from 3.3.1 is said once, as one receipt the next terminal or web UI shows.
   sayCarriedForwardThrough((text) => { daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(text); });
   await sweepPlaintextCredentialsOnBoot(configManager, services);
+  await carryGoogleCalendarConnectionOnBoot(configManager, services);
   writeCurrentDecisionPolicyName(configManager);
   // The live watch was armed during graph acquisition, before the sweep's
   // owned writes. Consume their disk generations before readiness. This uses
@@ -103,6 +105,39 @@ function writeCurrentDecisionPolicyName(configManager: ConfigManager): void {
     logger.info('DaemonServer: the decision-model policy saved under its 3.2.0 name was written under its current name', { policy });
   } catch (error) {
     logger.warn('DaemonServer: the decision-model policy could not be written under its current name; it is still read under it', { policy, error: summarizeError(error) });
+  }
+}
+
+/**
+ * A Google connection made with `/calendar connect google` up to 3.4.4 moves
+ * into the one Google connection the daemon's calendar and mail read
+ * (calendar/oauth-token-store.ts). Costs one secret read on a start with
+ * nothing to carry. A failure leaves the earlier record where it was, says so
+ * in the log, and the next start tries again.
+ */
+async function carryGoogleCalendarConnectionOnBoot(
+  configManager: ConfigManager,
+  services: DaemonBootServices,
+): Promise<void> {
+  const secrets = services.secretsManager;
+  let mailbox: string | null = null;
+  try {
+    const value = (configManager as unknown as { get(key: string): unknown }).get('surfaces.email.user');
+    mailbox = typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+  } catch {
+    mailbox = null;
+  }
+  try {
+    const outcome = await carryGoogleCalendarConnectionForward({
+      get: async (key) => (await secrets.getStored(key))?.reveal('store-write') ?? null,
+      set: (key, value) => secrets.set(key, value),
+      delete: (key) => secrets.delete(key),
+    }, { daemonAccountHint: mailbox });
+    if (outcome !== 'nothing') logger.info('DaemonServer: the Google connection made with /calendar connect was carried into the one Google connection', { outcome });
+  } catch (error) {
+    logger.warn('DaemonServer: the Google connection made with /calendar connect could not be carried forward; it is kept where it was', {
+      error: summarizeError(error),
+    });
   }
 }
 
@@ -152,6 +187,6 @@ async function sweepPlaintextCredentialsOnBoot(
  * through, and two directory paths. Nothing else.
  */
 export interface DaemonBootServices {
-  readonly secretsManager: SweepableSecrets;
+  readonly secretsManager: SweepableSecrets & { delete(key: string): Promise<void> };
   readonly shellPaths: { readonly workingDirectory: string; readonly homeDirectory: string };
 }

@@ -104,7 +104,7 @@ function PermissionModeFact({ sessionId, daemonWide = false }: { sessionId: stri
 
   if (notLocal) {
     return (
-      <span title="Permission mode is only readable and settable for the daemon's own live local session; this session runs elsewhere">
+      <span title="When GoodVibes asks is only readable and settable for the daemon's own live local session; this session runs elsewhere">
         Unavailable here
       </span>
     );
@@ -116,7 +116,7 @@ function PermissionModeFact({ sessionId, daemonWide = false }: { sessionId: stri
       {mode && chosenMode && chosenMode !== mode && reason
         ? <span className="text-muted-foreground" role="note">{` (in force; ${gatePresetLabel(chosenMode)} chosen, but ${reason})`}</span>
         : null}
-      <Button size="sm" variant="ghost" onClick={() => setSheetOpen(true)} disabled={!mode} aria-label="Change permission mode">
+      <Button size="sm" variant="ghost" onClick={() => setSheetOpen(true)} disabled={!mode} aria-label="Change when GoodVibes asks">
         Change
       </Button>
       <PermissionModeSheet
@@ -351,7 +351,7 @@ export function SessionDetail({ record, agents, tab, onTabChange, streamPaused, 
               { label: 'Waiting inputs', value: record.pendingInputCount > 0 ? String(record.pendingInputCount) : '' },
               { label: 'Surfaces', value: record.surfaceKinds.join(', ') },
               { label: 'Attributed to', value: attributionLabel(record) ?? '' },
-              { label: 'Permission mode', value: <PermissionModeFact sessionId={record.id} daemonWide={companionChat} /> },
+              { label: 'When GoodVibes asks', value: <PermissionModeFact sessionId={record.id} daemonWide={companionChat} /> },
               { label: 'Context', value: contextUsage },
               { label: 'Cost, last 24 hours', value: cost },
             ]}

@@ -37,8 +37,10 @@ to the new form, and a notification's `#...` fragment is kept.
 The sidebar collapses to a 56-wide icon rail with its panel button or Ctrl B,
 and folds to that rail on its own while something large is open on the right
 (a peek or a detail), returning when it closes. A sidebar you collapsed
-yourself stays collapsed. Pin it to keep it open (under 1280 wide a detail
-still folds it). Hover the rail, or press Ctrl B while a detail holds it, to
+yourself stays collapsed. Pin it to keep it open beside a detail; that holds
+wherever the window has room for the sidebar plus 880 for the detail and the
+page beside it, and where it has not, the pin's label says the sidebar folds
+while a detail is open. Hover the rail, or press Ctrl B while a detail holds it, to
 see the full sidebar over the page. Drag its edge to resize it (220 to 360).
 
 At phone width there is no rail: the sidebar is a drawer behind the header's
@@ -110,14 +112,23 @@ Supported chat behavior:
 - delete chats from the sidebar; the delete closes first, hard-deletes, then
   verifies against a fresh list rather than trusting the call's success
   response
-- send plain text with Enter (the daemon queues it behind an active turn)
-- steer with Ctrl+Enter or Cmd+Enter (press and hold Send on touch), which
-  sends immediately and interrupts the in-flight turn
+- send plain text with Enter; while a reply is running, Send reads "Queue"
+  (its name is "Queue message after this reply") and the daemon queues the
+  message behind the reply
+- interrupt the running reply with the "Send now" button beside Queue, Ctrl+Enter
+  or Cmd+Enter, or by holding Queue; each sends at once and interrupts the
+  in-flight turn
 - insert a newline with Shift+Enter
 - stop generation with a server-side cancel; the stopped partial reply stays
   in the transcript with an honest stopped marker
 - attach files through daemon artifact upload
-- copy whole messages and individual code blocks
+- copy whole messages and individual code blocks; on a phone each message shows
+  Copy and a More menu holding Edit and resend, Resend or Regenerate, Read aloud
+  and the reply's code and files, each by name
+- wrap long lines in code blocks with the wrap button on any block; the choice
+  holds for every code block on this device
+- open every file attached to or made in the chat, newest first, from the Files
+  button in the chat header; each one jumps to the message that brought it
 - resend user messages
 - regenerate assistant replies; the superseded reply is retained, not erased
 - edit a user message and branch; the old branch stays viewable inline as
@@ -131,16 +142,31 @@ Supported chat behavior:
   unwritable is retried by the daemon on its own, and the chat accepts changes
   again once that works
 
-Provider/model controls in the composer update daemon model selection. Message
-sends themselves do not include provider/model routing.
+The model and effort control in the composer sets them for this chat only, an
+open chat at once and a new chat when its first message creates it. The model
+new chats start with is changed in Settings, Models and providers.
+
+A new chat offers starters. "What's on my calendar" and "Check my mail" show only
+when that account answers a one-item read (the same reads Settings, Account shows
+the account status from); "What's running" and "What do you remember about..."
+always show.
+
+A message whose first word is a slash and a command name (`/word`, alone or with
+words after it) is not sent: the composer says it is not a command here, names
+`/new` and Ctrl K, keeps the text, and offers "Send as a message". A slash that
+starts a path (`/etc/hosts is broken`, `/var/log/app.log`) is sent as written.
+
+On a phone, when something outside this chat waits for you, a banner at the top
+of the chat names the oldest one and opens it with one tap: its chat, where the
+card is, or its detail in Work.
 
 An approval or question a chat is waiting on appears in that chat, as a card
 below the last message with its choices and the links "Why am I asked?" and
 "Details" (the tool, the folder, the decision and the arguments, read when you
 open it), and the chat header shows a chip ("asking you · 1") that lists them.
-On a phone the header keeps the chat's title and that chip; the permission mode
-chip steps aside while it shows, and the chip's sheet ends with the mode in
-force and Change. Work lists the same asks. Once one is decided, here or
+On a phone the header keeps the chat's title and that chip; the "When GoodVibes
+asks" chip steps aside while it shows, and the chip's sheet ends with the mode
+in force and Change. Work lists the same asks. Once one is decided, here or
 anywhere else, the card folds to one dim line saying what was decided.
 
 A turn's tool calls read as one collapsed line ("Read 2 files, edited 1 · 4 s")
@@ -162,7 +188,7 @@ will be kept before you save it. An action only a terminal can do is listed
 with the reason. The palette also opens four screens built the same way:
 Schedules, MCP servers and tools, Repeat purchases, and Triggers. Typing `/`
 in the chat composer offers only `/new`; other commands are run from the
-palette.
+palette, and a `/command` sent from the composer is held there with that said.
 
 ## Attachments
 
@@ -409,7 +435,17 @@ see the same records). Use it to:
   actually ran, why the semantic index could not be consulted, exclusion
   counts) render verbatim from the daemon. A literal-match fallback says it
   is one
-- add records
+- filter by the questions the filter row asks: "Applies where?" (scope),
+  "What kind?", "Tagged with?", "Match how?" (by meaning, not exact words) and
+  "Show which?" (only what the agent would recall)
+- add records; each scope says where it applies (one conversation's work, this
+  project, or how you work across projects) and that every app and device
+  signed in to this daemon sees it. Scope does not hide a record or keep it out
+  of answers
+- read and set how sure each record is said to be ("Rated 82% sure"): a rating
+  given when it was saved or reviewed, not a measurement. The record says who
+  set it, and a record rated below the recall floor is marked as not brought
+  into answers
 - delete records: deletion is real and verified (the page proves the record
   is gone rather than just dropping it from the list)
 - read the read-only personas for constraint records
@@ -450,11 +486,19 @@ Personal has three sections: Calendar, Mail and Occasions.
 
 ### Calendar
 
-Calendar renders events from the daemon's CalDAV-backed calendar module, with
-ICS import and export. Three refusal shapes render distinctly: an unconfigured
-daemon points at the bring-your-own-CalDAV config keys, a daemon build with no
+Calendar renders events from the daemon's calendar (a CalDAV server or the one
+Google connection), with ICS import and export. Three refusal shapes render
+distinctly: with no usable calendar the page reads "No calendar this daemon can
+read" with the daemon's own words (which accounts exist, why none can be read,
+and what connects one) and an Open settings button, a daemon build with no
 calendar handler says the capability is missing, and a genuine error offers a
 retry. None of the three is ever shown as a fake-empty calendar.
+
+The agenda shows each event from its start to its end ("9:00 – 10:30 AM"; an
+all-day event says so, with its number of days when it spans several), and the
+header says once which time zone every time is in. The dates shown are picked
+by name (Today, This week, Next two weeks, This month), with "Choose dates" for
+two date fields; the calendar is picked by its name from the daemon's list.
 
 ### Mail
 
@@ -484,6 +528,12 @@ Credentials and Usage.
 
 Provider status derives from the daemon's own per-route freshness rather than a
 generic status guess. Open a provider for its models and sign-in routes.
+A provider whose subscription sign-in expired (or is about to) says "Sign in
+again in the terminal app: /provider sign-in <provider>" on its row, with a
+"Sign in again" button that copies that command; a subscription sign-in is made
+by a terminal app on the daemon's machine. "Status unavailable" says why and
+what to do: the daemon did not say how the provider signs in (open it, or update
+the daemon), or it reported a state this page does not read (reload the page).
 Model selection is provider-first, so the model list is scoped to the selected
 provider.
 

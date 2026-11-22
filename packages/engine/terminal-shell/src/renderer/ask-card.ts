@@ -405,7 +405,10 @@ export function renderAskCard(
   const submenuIndex = Math.max(0, Math.min(state.submenuIndex ?? 0, tiers.length - 1));
   const tierX0 = MODAL_PAD_X + BODY_INDENT + 2;
   const tierX1 = width - MODAL_PAD_X - 1;
-  const tierRows = tiers.map((tier, i): KitRow => ({ label: `${i + 1}  ${tier.label}`, desc: tier.detail, selected: i === submenuIndex }));
+  // The broadest tier (every call of the tool in this project) says so on a line of its own, seen without selecting it.
+  const tierRows = tiers.map((tier, i): KitRow => tier.tier === 'tool'
+    ? { label: `${i + 1}  ${tier.label}`, sub: `Broadest: ${tier.detail}`, selected: i === submenuIndex }
+    : { label: `${i + 1}  ${tier.label}`, desc: tier.detail, selected: i === submenuIndex });
   const tierHeight = tierRows.reduce((sum, row) => sum + measureRow(row, tierX0, tierX1), 0);
   // The reason being typed with a refusal, under the buttons ("Why not:").
   const reason = state.replyMode === 'deny-reason' && !isCommandPromptAsk(request)

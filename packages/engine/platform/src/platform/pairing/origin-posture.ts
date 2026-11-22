@@ -15,6 +15,7 @@
  */
 import { isPrivateNetworkHost, isTailnetHost } from '@goodvibes/engine/transport-http/paths';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
+import type { PairingStep } from './offer-copy.js';
 
 /** The browser-gated capabilities a surface renders availability for. */
 export type BrowserGatedCapability = 'service-worker' | 'push' | 'microphone';
@@ -47,6 +48,73 @@ export interface OriginPosture {
    */
   readonly notice?: string | undefined;
   readonly capabilities: readonly OriginCapability[];
+  /**
+   * On the address a pairing code carries (`pairing.posture.get` with no
+   * origin, `pairing.handoff.create`): whether a phone can open it, decided by
+   * the daemon from its settings, and when not, the numbered steps that fix it.
+   */
+  readonly reach?: PairingReachAnswer | undefined;
+}
+
+/** The daemon's answer about a pairing address: the decision, and when a phone could not open it, the steps. */
+export interface PairingReachAnswer extends PairingReach {
+  readonly steps?: readonly PairingStep[] | undefined;
+}
+
+/** Whether a device other than this machine can open an origin, and when not, why and the one command that fixes it. */
+export interface PairingReach {
+  readonly otherDevices: boolean;
+  /** Why another device cannot open it, one sentence; absent when it can. */
+  readonly reason?: string | undefined;
+  /** The one command that makes it reachable; absent when it is. */
+  readonly fix?: string | undefined;
+}
+
+/** The command that binds the daemon's listener to the network and serves other devices. */
+export const PAIRING_REACH_FIX = 'goodvibes-daemon webui enable --lan';
+
+/**
+ * Whether another device can open `origin` (the address the daemon answers a
+ * pairing code would carry), decided from the daemon's settings with no
+ * request on the network: an address on this machine's loopback is not
+ * reachable from anywhere else; an address the owner set (`web.publicBaseUrl`,
+ * a proxy or tunnel he runs) is his statement that it is; otherwise the
+ * listener serves other machines only with `controlPlane.enabled`. A caller
+ * reaching a daemon on another machine already proves that daemon serves other
+ * machines, and says so with `servesOtherMachines`.
+ */
+export function describePairingReach(
+  origin: string,
+  settings: { readonly servesOtherMachines: boolean; readonly publicBaseUrl: string },
+): PairingReach {
+  let parsed: URL;
+  try {
+    parsed = new URL(origin);
+  } catch {
+    return {
+      otherDevices: false,
+      reason: `the web address the daemon has (${origin}) is not a valid URL, so a phone has nothing to open`,
+      fix: 'goodvibes-daemon config set web.publicBaseUrl <the address a phone opens>',
+    };
+  }
+  if (isLoopbackHost(parsed.hostname)) {
+    return {
+      otherDevices: false,
+      reason: `the daemon serves only this machine: ${parsed.origin} is this machine's own address, which another device cannot open`,
+      fix: PAIRING_REACH_FIX,
+    };
+  }
+  let declared = '';
+  try { declared = settings.publicBaseUrl ? new URL(settings.publicBaseUrl).origin : ''; } catch { declared = ''; }
+  if (declared !== '' && declared === parsed.origin) return { otherDevices: true };
+  if (!settings.servesOtherMachines) {
+    return {
+      otherDevices: false,
+      reason: `the daemon listens at ${parsed.origin}, but controlPlane.enabled is off, so it refuses every device but this machine`,
+      fix: PAIRING_REACH_FIX,
+    };
+  }
+  return { otherDevices: true };
 }
 
 /** The single honest plain-http-on-LAN line every surface renders verbatim. */

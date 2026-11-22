@@ -1150,13 +1150,13 @@ export class SettingsModal extends TerminalSettingsModalState<
       }
     }
     if (key === 'permissions.mode') {
-      this.lastSettingEffectMessage = 'Saving execution mode…';
+      this.lastSettingEffectMessage = 'Saving your setting for when GoodVibes asks…';
       const owner = this.configManager;
       const opened = this.secretWriteSession;
       void setExecutionMode(owner, value).then(
         () => {
           if (!this.active || this.configManager !== owner || opened !== this.secretWriteSession) return;
-          this.lastSettingEffectMessage = 'Execution mode updated.';
+          this.lastSettingEffectMessage = 'Your setting for when GoodVibes asks is updated.';
           this._refreshAllEntries();
           this.requestHostSettingRender?.();
         },

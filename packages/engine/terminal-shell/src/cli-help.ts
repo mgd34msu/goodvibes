@@ -81,6 +81,24 @@ export const COMMON_COMMAND_HELP = {
   },
 } as const satisfies Readonly<Record<string, TerminalCommandHelp>>;
 
+/**
+ * The first block of a terminal program's `--help`: the handful of things most
+ * people run, before the full command list. `start` says what the bare
+ * program opens; `also` adds a program's own rows after it.
+ */
+export function renderMostUsedHelp(binary: string, start: string, also: ReadonlyArray<readonly [string, string]> = []): string[] {
+  const rows: ReadonlyArray<readonly [string, string]> = [
+    [binary, start],
+    ...also,
+    [`${binary} run "<prompt>"`, 'Run one prompt and print the answer'],
+    [`${binary} pair`, 'Pair a phone: print a link and a QR code to scan'],
+    [`${binary} status`, 'Check what is set up and working'],
+    ['goodvibes-daemon update --check', 'Look for an update now'],
+  ];
+  const width = Math.max(...rows.map(([command]) => command.length)) + 2;
+  return ['Most used:', ...rows.map(([command, what]) => `  ${command.padEnd(width)}${what}`)];
+}
+
 export function normalizeHelpTopic(topic: string, aliases: Readonly<Partial<Record<string, string>>>): string {
   const normalized = topic.trim().toLowerCase();
   return (Object.hasOwn(aliases, normalized) ? aliases[normalized] : undefined) ?? normalized;

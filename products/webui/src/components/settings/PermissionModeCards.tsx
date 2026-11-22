@@ -2,8 +2,9 @@
  * The four permission modes as radio cards, first on Settings > Permissions
  * (ux A7.5): Ask me, Jev decides, Just vibes, YOLO, each with its one plain
  * description (GATE_PRESETS[...].summary). Under the chosen card, when the mode
- * in force differs, the daemon's words for it (`Asking you for now: decision
- * model unreachable`, lib/mode-in-force.ts). Picking a card sets the
+ * in force differs, the daemon's words for it as the terminal's status bar
+ * shows them (`Asks: you, for now · Jev decides with a decision model`,
+ * lib/mode-in-force.ts). Picking a card sets the
  * daemon-wide mode with sessions.permissionMode.set (a looser mode set from a
  * token minted for automation waits for the owner; OwnerApprovalNotices says so).
  *
@@ -14,15 +15,11 @@ import { useId } from 'react';
 import { GATE_PRESETS, type SettableGatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
 import { formatError } from '../../lib/errors';
 import { OwnerApprovalPendingError } from '../../lib/owner-approval';
-import { useDaemonModeInForce, useSetDaemonMode } from '../../lib/mode-in-force';
+import { modeInForceLine, useDaemonModeInForce, useSetDaemonMode } from '../../lib/mode-in-force';
 import { SkeletonBlock } from '../feedback/SkeletonBlock';
 import '../../styles/components/permission-modes.css';
 
 const CARD_MODES = ['ask-me', 'jev-decides', 'just-vibes', 'yolo'] as const satisfies readonly SettableGatePresetName[];
-
-function capitalized(text: string): string {
-  return `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
-}
 
 export function PermissionModeCards() {
   const name = useId();
@@ -30,15 +27,14 @@ export function PermissionModeCards() {
   const setMode = useSetDaemonMode();
   const chosen = reading.data?.chosenMode ?? '';
   const words = reading.data?.words;
-  const inForceLine = words?.inForce
-    ? `${capitalized(words.inForce)}${words.because ? `: ${words.because}` : ''}`
-    : null;
+  // The terminal's status-bar words: what is in force first, the choice second, a failure last.
+  const inForceLine = words?.inForce ? `Asks: ${modeInForceLine(words)}` : null;
 
   if (reading.isPending) return <SkeletonBlock variant="text" lines={4} />;
 
   return (
     <div className="permission-modes">
-      <div className="permission-modes__grid" role="radiogroup" aria-label="Permission mode">
+      <div className="permission-modes__grid" role="radiogroup" aria-label="When GoodVibes asks">
         {CARD_MODES.map((mode) => {
           const preset = GATE_PRESETS[mode];
           const checked = mode === chosen;

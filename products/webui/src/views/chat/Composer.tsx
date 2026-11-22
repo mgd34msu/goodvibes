@@ -62,6 +62,19 @@ export interface ComposerProps {
    * hold the send button. Omitted = the hold affordance is off.
    */
   onSteer?: () => void;
+  /**
+   * A reply is running in this chat: Send queues the message behind it, and a
+   * second control sends now, interrupting it.
+   */
+  replyRunning?: boolean;
+  /**
+   * The draft was a `/command` this composer does not run: it was not sent, the
+   * text stays in place, and the composer says so. `known` marks `/new` typed
+   * with words after it.
+   */
+  heldCommand?: { word: string; known: boolean } | null;
+  /** Send the held draft to the model as an ordinary message after all. */
+  onSendHeldAsText?: () => void;
   onFileSelection: (event: ChangeEvent<HTMLInputElement>) => void;
   onRemoveAttachedFile: (index: number) => void;
   onProviderChange: (providerId: string) => void;
@@ -226,6 +239,7 @@ function ModelMenu({
         </button>
       )}
     >
+      <MenuMeta>For this chat only. The default for new chats is set in Settings.</MenuMeta>
       <MenuMeta>{selectedProvider?.label ?? 'Models'}</MenuMeta>
       {providerModelOptions.length === 0 && <MenuMeta>No models from this provider.</MenuMeta>}
       {providerModelOptions.map((model) => (
@@ -342,6 +356,9 @@ export function Composer({
   onComposerKeyDown,
   onSubmit,
   onSteer,
+  replyRunning = false,
+  heldCommand = null,
+  onSendHeldAsText,
   onFileSelection,
   onRemoveAttachedFile,
   onProviderChange,
@@ -547,6 +564,11 @@ export function Composer({
       : undefined;
 
   const canSend = Boolean(draft.trim()) || attachedFiles.length > 0;
+  // While a reply runs, Send queues the message behind it and the second control
+  // interrupts. Ctrl/Cmd+Enter and holding Send stay as shortcuts for interrupting.
+  const queueing = replyRunning && Boolean(onSteer);
+  const paletteKey = typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform ?? '') ? '⌘K' : 'Ctrl+K';
+  const steerKey = paletteKey === '⌘K' ? '⌘+Enter' : 'Ctrl+Enter';
 
   return (
     <form
@@ -560,6 +582,20 @@ export function Composer({
       {turnError && <div className="composer-error" role="alert">{turnError}</div>}
       {Boolean(renameSessionError) && <div className="composer-error" role="alert">{formatError(renameSessionError)}</div>}
       {Boolean(selectModelError) && <div className="composer-error" role="alert">{formatError(selectModelError)}</div>}
+      {heldCommand && (
+        <div className="composer-error composer-command-note" role="alert">
+          <span>
+            {heldCommand.known
+              ? `Not sent: ${heldCommand.word} takes nothing after it here. Send ${heldCommand.word} alone to start a new chat; ${paletteKey} opens every other command.`
+              : `Not sent: ${heldCommand.word} is not a command here. Type /new to start a new chat; ${paletteKey} opens every other command.`}
+          </span>
+          {onSendHeldAsText && (
+            <button type="button" className="composer-command-note__send" onClick={onSendHeldAsText}>
+              Send as a message
+            </button>
+          )}
+        </div>
+      )}
 
       <div className="composer-box" data-drag-over={isDragOver ? 'true' : undefined}>
         {showSlashMenu && filteredSlashCommands.length > 0 && (
@@ -630,13 +666,26 @@ export function Composer({
             />
             <MicButton onTranscript={handleTranscript} disabled={isSendPending} />
             <VoiceSettings />
+            {queueing && (
+              <button
+                type="button"
+                className="composer-interrupt"
+                title={`Send now, interrupting the reply (${steerKey}, or hold Send)`}
+                aria-label="Send now, interrupting the reply"
+                disabled={isSendPending || !canSend}
+                onClick={() => onSteer?.()}
+              >
+                Send now
+              </button>
+            )}
             <button
               type="submit"
               className="send-button"
-              title={onSteer
-                ? 'Send message (Enter: queues behind an active reply). Steer: Ctrl+Enter or press and hold, sends now, interrupting the current reply.'
-                : 'Send message'}
-              aria-label="Send message"
+              title={queueing
+                ? `Queue after this reply (Enter). To interrupt: Send now, ${steerKey}, or hold this button.`
+                : 'Send message (Enter)'}
+              aria-label={queueing ? 'Queue message after this reply' : 'Send message'}
+              data-queueing={queueing ? 'true' : undefined}
               data-ready={canSend && !isSendPending ? 'true' : undefined}
               data-pending={isSendPending ? 'true' : undefined}
               disabled={isSendPending || !canSend}
@@ -647,6 +696,7 @@ export function Composer({
               onClick={onSteer ? suppressClickAfterSteerHold : undefined}
             >
               <ArrowUp size={18} aria-hidden />
+              {queueing && <span className="send-button__word" aria-hidden>Queue</span>}
             </button>
           </div>
         </div>

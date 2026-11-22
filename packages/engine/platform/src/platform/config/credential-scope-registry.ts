@@ -170,8 +170,16 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
   // refresh token were already daemon-owned by config derivation; the OAuth
   // TOKEN STORE that the `/calendar connect` flow writes was not, so the two
   // halves of the same connection lived in different tiers.
-  { key: daemonSecretKeyFor('calendar.google.tokens'), match: 'exact', scope: 'daemon-needed', why: 'The daemon reads and writes the Google calendar with this refresh token.' },
-  { key: daemonSecretKeyFor('calendar.google.status'), match: 'exact', scope: 'daemon-needed', why: 'The connection health the daemon reports and refreshes from.' },
+  //
+  // Google has one connection now: the refresh token under
+  // `google.oauth.refreshToken` and the account it belongs to under
+  // `google.oauth.account`, both daemon-owned by config derivation
+  // (config-ownership.ts), so neither needs a row here. The two Google rows
+  // below are what `/calendar connect google` wrote up to 3.4.4; the daemon
+  // reads them once at start to carry that connection into the one place, then
+  // removes them (calendar/oauth-token-store.ts).
+  { key: daemonSecretKeyFor('calendar.google.tokens'), match: 'exact', scope: 'daemon-needed', why: 'A Google connection made with /calendar connect up to 3.4.4; the daemon carries it into the one Google connection at start.' },
+  { key: daemonSecretKeyFor('calendar.google.status'), match: 'exact', scope: 'daemon-needed', why: 'The reconnect marker of that earlier Google connection; removed when the connection is carried forward.' },
   { key: daemonSecretKeyFor('calendar.microsoft.tokens'), match: 'exact', scope: 'daemon-needed', why: 'The daemon reads and writes the Microsoft calendar with this refresh token.' },
   { key: daemonSecretKeyFor('calendar.microsoft.status'), match: 'exact', scope: 'daemon-needed', why: 'The connection health the daemon reports and refreshes from.' },
   {

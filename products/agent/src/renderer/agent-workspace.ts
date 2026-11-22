@@ -46,6 +46,7 @@ function resultPalette(): { text: string; good: string; muted: string; dim: stri
 import { actionResultColor, type AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';
 import { workspacePaneLines } from './agent-workspace-context-lines.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION } from '../input/agent-workspace-onboarding-finish.ts';
+import { AGENT_WORKSPACE_GROUP_TITLES } from '../input/agent-workspace-types.ts';
 
 function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[] {
   const rows: WorkspaceRow[] = [];
@@ -53,7 +54,7 @@ function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[
   let lastGroup = '';
   workspace.categories.forEach((category, index) => {
     if (category.group !== lastGroup) {
-      rows.push({ text: category.group, kind: 'group', bold: true });
+      rows.push({ text: AGENT_WORKSPACE_GROUP_TITLES[category.group], kind: 'group', bold: true });
       lastGroup = category.group;
     }
     const selected = index === workspace.selectedCategoryIndex;
@@ -84,9 +85,10 @@ function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[
 /** The right-hand column of an action row: the line it runs, or what kind of row it is. */
 function actionCommand(action: AgentWorkspaceAction): string {
   if (action.kind === 'act' && action.act) return workspaceActionLine(action.act);
-  if (action.kind === 'workspace') return 'open area';
+  // `/agent <area>` opens any area of this workspace, so it is the line an area row runs.
+  if (action.kind === 'workspace') return action.targetCategoryId ? `/agent ${action.targetCategoryId}` : 'opens another area';
   if (action.kind === 'setting') return action.settingKey ? `setting ${action.settingKey}` : 'setting';
-  if (action.kind === 'settings-import') return 'import GoodVibes settings';
+  if (action.kind === 'settings-import') return '/setup import-settings';
   if (action.kind === 'model-picker') return action.modelPickerFlow === 'model' ? 'model picker' : 'provider/model picker';
   if (action.kind === 'settings-modal') return action.settingsTarget ? `settings ${action.settingsTarget}` : 'settings';
   if (action.kind === 'onboarding-complete') return 'apply and close';
@@ -364,7 +366,8 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
     width,
     height,
     title: 'Agent workspace',
-    stateLabel: workspace.actionSearchActive ? 'Search' : workspace.focusPane === 'categories' ? 'Categories' : 'Actions',
+    // The Agent home and account this session works in; the selected pane shows by its highlight.
+    stateLabel: workspace.identity || undefined,
     leftHeader: 'Operator Areas',
     mainHeader: workspace.actionSearchActive
       ? `Search actions · ${workspace.actions.length} result${workspace.actions.length === 1 ? '' : 's'}`

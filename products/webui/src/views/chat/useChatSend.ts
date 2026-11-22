@@ -27,8 +27,17 @@ import type { ChatMessage } from './types';
 // Hook options
 // ---------------------------------------------------------------------------
 
+/**
+ * The model and effort picked in the composer of a chat that does not exist
+ * yet: the chat is created with them. The saved default for new chats is not
+ * touched (that is changed in Settings).
+ */
+export type NewChatRoute = Pick<NonNullable<Parameters<typeof platformClient.chat.sessions.create>[0]>, 'provider' | 'model' | 'reasoningEffort'>;
+
 interface UseChatSendOptions {
   activeSessionId: string;
+  /** What a send that creates the chat creates it with; null uses the saved default. */
+  newChatRoute: NewChatRoute | null;
   chatSelection: ChatSelectionTracker;
   onActiveSessionChange: (sessionId: string) => void;
   onDraftSessionRequestedChange: (requested: boolean) => void;
@@ -74,7 +83,12 @@ interface SelectionLease {
   readonly owner: ChatSelectionTracker;
   readonly client: ClientLifetime;
 }
-interface OwnedSendInput extends SendInput { readonly lease: SelectionLease; readonly controller: AbortController }
+interface OwnedSendInput extends SendInput {
+  readonly lease: SelectionLease;
+  readonly controller: AbortController;
+  /** The new chat's model and effort as they were when Send was pressed. */
+  readonly route: NewChatRoute | null;
+}
 
 /** A send given up before the daemon had the message; nothing was posted. */
 export class SendAbandonedError extends Error {
@@ -209,6 +223,7 @@ async function withReopen<T>(sessionId: string, run: () => Promise<T>): Promise<
 
 export function useChatSend({
   activeSessionId,
+  newChatRoute,
   chatSelection,
   onActiveSessionChange,
   onDraftSessionRequestedChange,
@@ -288,7 +303,7 @@ export function useChatSend({
   // Core send mutation (unchanged API, still used by Composer)
   // -------------------------------------------------------------------------
   const ownedSendMutation = useMutation<undefined, Error, OwnedSendInput>({
-    mutationFn: async ({ body, files, steer: steerAsked, localMessageId: retriedMessageId, lease, controller }) => {
+    mutationFn: async ({ body, files, steer: steerAsked, localMessageId: retriedMessageId, lease, controller, route }) => {
       if (!body && !files.length && !heldIdOf(retriedMessageId)) throw new Error('There is nothing to send: write a message or attach a file.');
       const { signal } = controller;
       inFlightRef.current = { lease, controller };
@@ -326,7 +341,7 @@ export function useChatSend({
         // gets the chat the first one made instead of a second, empty one.
         const newChat = newChatKeyRef.current;
         try {
-          created = await untilAborted(platformClient.chat.sessions.create({ title }, signal, newChat.keyFor(title)), signal);
+          created = await untilAborted(platformClient.chat.sessions.create({ ...route, title }, signal, newChat.keyFor(title)), signal);
           newChat.settle();
         } catch (error) {
           if (signal.aborted) throw error;
@@ -606,7 +621,7 @@ export function useChatSend({
         if (mounted.current) onSendAbandoned?.({ body: input.body, files: input.files });
         return;
       }
-      ownedSendMutation.mutate({ ...input, lease, controller: new AbortController() }, callbackOptions(input, lease, options));
+      ownedSendMutation.mutate({ ...input, lease, controller: new AbortController(), route: newChatRoute }, callbackOptions(input, lease, options));
     },
     mutateAsync(input, options) {
       const lease = captureLease();
@@ -614,7 +629,7 @@ export function useChatSend({
         if (mounted.current) onSendAbandoned?.({ body: input.body, files: input.files });
         return Promise.reject(new SendAbandonedError());
       }
-      return ownedSendMutation.mutateAsync({ ...input, lease, controller: new AbortController() }, callbackOptions(input, lease, options));
+      return ownedSendMutation.mutateAsync({ ...input, lease, controller: new AbortController(), route: newChatRoute }, callbackOptions(input, lease, options));
     },
     reset() {
       if (isCurrent(captureLease())) ownedSendMutation.reset();

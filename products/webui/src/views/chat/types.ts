@@ -92,4 +92,6 @@ export interface ChatViewProps {
   userName?: string;
   /** Open Settings at a section: the `asking you` chip's sheet offers `Change` for the mode on a phone. */
   onOpenSettings?: (section: string) => void;
+  /** Open an ask from another session in Work (the phone banner's one action), by its Work key. */
+  onOpenAsk?: (key: string) => void;
 }

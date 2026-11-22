@@ -1,6 +1,6 @@
 import { ChangeEvent, Dispatch, FormEvent, KeyboardEvent, SetStateAction, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, CalendarDays, LayoutGrid, Mail } from 'lucide-react';
+import { BookOpen, CalendarDays, Files, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
 import { client as platformClient } from '../lib/goodvibes';
@@ -19,17 +19,19 @@ import {
   LocalCompanionMessage,
 } from '../lib/companion-chat';
 import { ChatFindButton, ChatTitle, ChatTurnNotice } from './chat/ChatHeader';
-import { CHAT_SUGGESTIONS, greeting, greetingName, type SuggestionIcon } from './chat/new-chat';
+import { availableSuggestions, greeting, greetingName, type SuggestionIcon } from './chat/new-chat';
 import { Spark } from '../components/shell/Spark';
 import { Button } from '../components/ui/Button';
+import { IconButton } from '../components/ui/IconButton';
+import { sessionFiles, useSessionFilesPanel } from './chat/ArtifactsPanel';
 import { useHeaderSlots } from '../components/shell/HeaderSlots';
 import { useHotkeys } from '../hooks/useHotkeys';
 import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
 import { ChatSearch } from './chat/ChatSearch';
 import { QueuedMessagesPanel } from './chat/QueuedMessagesPanel';
-import { ChatAsksChip, InlineAsks } from './chat/InlineAsk';
-import { useChatSend } from './chat/useChatSend';
+import { ChatAsksChip, ElsewhereAsksBanner, InlineAsks } from './chat/InlineAsk';
+import { useChatSend, type NewChatRoute } from './chat/useChatSend';
 import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
 import { useToast } from '../lib/toast';
 import { useWakeTranscriptSink } from '../lib/voice/useWake';
@@ -87,6 +89,7 @@ export function ChatView({
   onSessionMissing,
   userName,
   onOpenSettings,
+  onOpenAsk,
 }: ChatViewProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -101,6 +104,8 @@ export function ChatView({
   const autoTitledSessionsRef = useRef<Set<string>>(new Set());
   const manuallyTitledSessionsRef = useRef<Set<string>>(new Set());
   const [draft, setDraft] = useState('');
+  // A /command the composer does not run, held instead of sent (cleared when the draft changes).
+  const [heldCommand, setHeldCommand] = useState<{ word: string; known: boolean; steer: boolean } | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
   // The streamed reply lives in a store, not in this view's state: a token
   // re-renders only the live bubble. This view re-renders when it gains or loses text.
@@ -134,6 +139,13 @@ export function ChatView({
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
   const [selectedProviderId, setSelectedProviderId] = useState('');
+  // A new chat's own model and effort, picked in its composer before the first send.
+  // The chat is created with them; the saved default for new chats stays as it is.
+  // Held for the chat selection it was picked in, so another new chat starts from the default.
+  const [newChatPick, setNewChatPick] = useState<{
+    selection: ReturnType<typeof chatSelection.capture>;
+    route: NewChatRoute & { registryKey?: string };
+  } | null>(null);
   const [isRenamingTitle, setIsRenamingTitle] = useState(false);
   const [sessionTitleDraft, setSessionTitleDraft] = useState('');
   const [showSearch, setShowSearch] = useState(false);
@@ -167,6 +179,7 @@ export function ChatView({
     () => sessionItems.find((session) => bestId(session) === activeSessionId),
     [activeSessionId, sessionItems],
   );
+  const chatSessionIds = useMemo(() => new Set(sessionItems.map((session) => bestId(session)).filter(Boolean)), [sessionItems]);
   const sessionProvider = activeSessionId ? firstString(activeSession, ['provider']) : '';
   const sessionModel = activeSessionId ? firstString(activeSession, ['model']) : '';
   const currentModelRecord = asRecord(asRecord(currentModel.data).model);
@@ -174,7 +187,10 @@ export function ChatView({
   const defaultRegistryKey = firstString(currentModelData, ['registryKey'])
     || firstString(asRecord(asRecord(modelCatalog.data).currentModel), ['registryKey'])
     || '';
-  const currentProviderId = sessionProvider || firstString(currentModelData, ['provider', 'providerId', 'runtimeProviderId'])
+  const newChatRoute = newChatPick && newChatPick.selection === selectedChat ? newChatPick.route : null;
+  const draftRoute = activeSessionId ? null : newChatRoute;
+  const currentProviderId = sessionProvider || (draftRoute?.provider ?? '')
+    || firstString(currentModelData, ['provider', 'providerId', 'runtimeProviderId'])
     || firstString(asRecord(asRecord(modelCatalog.data).currentModel), ['provider', 'providerId', 'runtimeProviderId'])
     || '';
   // The model menu offers the providers that are set up, and the one this chat (or the
@@ -193,7 +209,7 @@ export function ChatView({
   const currentRegistryKey = sessionProvider && sessionModel
     ? (providerModelOptions.find(model => model.providerId === sessionProvider && model.rawModelId === sessionModel)
       ?? providerModelOptions.find(model => model.providerId === sessionProvider && model.registryKey === sessionModel))?.registryKey ?? ''
-    : defaultRegistryKey;
+    : draftRoute?.registryKey || defaultRegistryKey;
   const selectedModelRegistryKey = providerModelOptions.some((model) => model.registryKey === currentRegistryKey) ? currentRegistryKey : '';
   // The effort ladder for the CURRENT model, from its own models.list entry.
   // Null on daemons predating the field, no control renders.
@@ -202,6 +218,7 @@ export function ChatView({
     [catalogProviderOptions, currentRegistryKey],
   );
   const requestedEffort = activeSessionId ? firstString(activeSession, ['reasoningEffort'])
+    : draftRoute && draftRoute.reasoningEffort !== undefined ? draftRoute.reasoningEffort ?? ''
     : firstString(currentModelData, ['effort']) || firstString(asRecord(currentModel.data), ['effort']) || '';
 
   // The native model projection uses the same resolver as the answering adapter.
@@ -262,36 +279,32 @@ export function ChatView({
       const model = providerModelOptions.find(option => option.registryKey === registryKey);
       if (!model) throw new Error('The selected model is unavailable.');
       if (activeSessionId) return applySessionRoute({ provider: model.providerId, model: model.rawModelId });
-      const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
-      const result = await platformClient.operator.models.current.set(registryKey);
-      routeSelectionCurrent(selectedChat, lifetime); return result;
+      // A new chat: the pick is this chat's, sent when the chat is created by its first message.
+      // The default for new chats (models.current) is changed only in Settings.
+      routeSelectionCurrent(selectedChat, getClientLifetime());
+      // Effort levels differ by model, so a new model starts on its provider default.
+      setNewChatPick({ selection: selectedChat, route: { provider: model.providerId, model: model.rawModelId, registryKey } });
+      return undefined;
     },
     onError: () => { retryAfterModelRef.current = ''; setSelectedProviderId(currentProviderId); },
-    onSuccess: async () => {
+    onSuccess: () => {
       const retry = retryAfterModelRef.current;
       retryAfterModelRef.current = '';
       if (retry) regenerateFrom(retry);
-      if (activeSessionId) return;
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['models'] }),
-        queryClient.invalidateQueries({ queryKey: ['models', 'current'] }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.providers }),
-      ]);
     },
   });
 
   const selectEffort = useMutation({
     mutationFn: async (effort: string) => {
-      if (sessionProvider === 'decision-router') throw new Error('Decision Router effort is configured by category.');
-      if (activeSessionId) {
-        if (effort !== '' && !isSessionEffort(effort)) throw new Error('This reasoning effort is not supported by chat sessions. Choose a supported level or the provider default.');
-        return applySessionRoute({ reasoningEffort: effort === '' ? null : effort });
-      }
-      const lifetime = getClientLifetime(); routeSelectionCurrent(selectedChat, lifetime);
-      const result = await platformClient.operator.models.current.set(currentRegistryKey, effort === '' ? null : effort);
-      routeSelectionCurrent(selectedChat, lifetime); return result;
+      if (currentProviderId === 'decision-router') throw new Error('Decision Router effort is configured by category.');
+      if (effort !== '' && !isSessionEffort(effort)) throw new Error('This reasoning effort is not supported by chat sessions. Choose a supported level or the provider default.');
+      const reasoningEffort = effort === '' ? null : effort;
+      if (activeSessionId) return applySessionRoute({ reasoningEffort });
+      // A new chat: held with its model pick (if any) and sent when the chat is created.
+      routeSelectionCurrent(selectedChat, getClientLifetime());
+      setNewChatPick({ selection: selectedChat, route: { ...draftRoute, reasoningEffort } });
+      return undefined;
     },
-    onSuccess: async () => { if (!activeSessionId) await queryClient.invalidateQueries({ queryKey: ['models', 'current'] }); },
   });
 
   const invalidateChatState = useCallback(async (sessionId: string) => {
@@ -416,6 +429,10 @@ export function ChatView({
 
   const send = useChatSend({
     activeSessionId,
+    newChatRoute: draftRoute ? {
+      ...(draftRoute.provider && draftRoute.model ? { provider: draftRoute.provider, model: draftRoute.model } : {}),
+      ...(draftRoute.reasoningEffort !== undefined ? { reasoningEffort: draftRoute.reasoningEffort } : {}),
+    } : null,
     chatSelection,
     onActiveSessionChange: handleSendSessionSwitch,
     onDraftSessionRequestedChange,
@@ -456,6 +473,15 @@ export function ChatView({
   // (retained) history attached to the node that heads its fork. Derived purely from
   // the server-authoritative list, so it survives reloads and never drops history.
   const lineageNodes = useMemo(() => buildLineage(renderedMessageItems), [renderedMessageItems]);
+  // Every file attached to or made in this chat, newest first, for the header's Files list.
+  const chatFiles = useMemo(() => sessionFiles(renderedMessageItems), [renderedMessageItems]);
+  const { openSessionFiles } = useSessionFilesPanel();
+  const jumpToMessage = useCallback((messageId: string) => {
+    const element = findMessageElement(scrollRef.current, messageId);
+    if (!element) return;
+    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    setHighlightedMessageId(messageId);
+  }, []);
   // A message still waiting behind the running reply is shown once, in the queue
   // above the composer where it can be edited or dropped; it joins the transcript,
   // after the reply it waited for, when it is sent.
@@ -615,16 +641,26 @@ export function ChatView({
     sendText(draft, attachedFiles, { steer: true });
   }
 
-  function sendText(text: string, files: File[] = [], options: { steer?: boolean; localMessageId?: string } = {}) {
+  function sendText(text: string, files: File[] = [], options: { steer?: boolean; localMessageId?: string; asText?: boolean } = {}) {
     const body = text.trim();
     if (send.isPending || (!body && !files.length)) return;
-    if (!files.length && parseSlashCommand(body) === 'new') {
+    const slash = options.asText ? { kind: 'text' as const } : parseSlashCommand(body);
+    if (slash.kind === 'command' && !files.length) {
       setDraft('');
+      setHeldCommand(null);
       onActiveSessionChange('');
       onDraftSessionRequestedChange(true);
       composerRef.current?.focus();
       return;
     }
+    // A /command this composer does not run is not sent to the model: the text
+    // stays in place and the composer says what to do instead.
+    if (slash.kind === 'unknown') {
+      setHeldCommand({ word: slash.word, known: slash.known, steer: options.steer === true });
+      composerRef.current?.focus();
+      return;
+    }
+    setHeldCommand(null);
     const filesToSend = [...files];
     setDraft('');
     setAttachedFiles([]);
@@ -694,7 +730,8 @@ export function ChatView({
       send.mutate({ body: text.trim(), files: hasFiles ? send.takeHeldFiles(failedId) : [], localMessageId: retryId });
       return;
     }
-    sendText(text, hasFiles ? send.takeHeldFiles(failedId) : []);
+    // A message already in the chat is sent again as it was, a leading /word included.
+    sendText(text, hasFiles ? send.takeHeldFiles(failedId) : [], { asText: true });
   }
 
   function addAttachedFiles(files: File[]) {
@@ -785,6 +822,24 @@ export function ChatView({
   // A new chat: no session yet and nothing sent. The greeting and the centered
   // composer show only here; the first send turns it into a conversation.
   const isNewChat = !activeSessionId && lineageNodes.length === 0 && !hasLiveText && !isStreaming && !send.isPending;
+  // The calendar and mail starters show only when that account answers a one-item
+  // read (the same reads Settings shows the account status from, sharing their cache).
+  // Read once per page while a new chat is open; nothing is read in a conversation.
+  const calendarProbe = useQuery({
+    queryKey: queryKeys.calendarProbe,
+    queryFn: () => platformClient.operator.calendar.events.list({ limit: 1 }),
+    enabled: isNewChat,
+    retry: false,
+    staleTime: Infinity,
+  });
+  const mailProbe = useQuery({
+    queryKey: queryKeys.emailInbox(1, false, ''),
+    queryFn: () => platformClient.operator.email.inbox.list({ limit: 1 }),
+    enabled: isNewChat,
+    retry: false,
+    staleTime: Infinity,
+  });
+  const suggestions = availableSuggestions({ calendar: calendarProbe.isSuccess, mail: mailProbe.isSuccess });
   const workingLabel = workingStatusLabel(
     turnState,
     activeToolCalls.filter((call) => !call.cancelled),
@@ -835,6 +890,14 @@ export function ChatView({
       {headerSlots?.actionsSlot && createPortal(
         <>
           {activeSessionId && <ChatAsksChip sessionId={activeSessionId} onOpenSettings={onOpenSettings} />}
+          {activeSessionId && chatFiles.length > 0 && (
+            <IconButton
+              label={`Files in this chat (${String(chatFiles.length)})`}
+              icon={<Files />}
+              className="chat-files-toggle"
+              onClick={() => openSessionFiles(chatFiles, jumpToMessage)}
+            />
+          )}
           <ChatFindButton open={showSearch} onToggle={() => setShowSearch((v) => !v)} />
         </>,
         headerSlots.actionsSlot,
@@ -851,6 +914,12 @@ export function ChatView({
           />
         </div>
       )}
+      <ElsewhereAsksBanner
+        sessionId={activeSessionId}
+        chatSessionIds={chatSessionIds}
+        onOpenChat={onActiveSessionChange}
+        onOpenAsk={onOpenAsk}
+      />
       <MessageList
         nodes={transcriptNodes}
         lead={greetingBlock}
@@ -893,6 +962,13 @@ export function ChatView({
           attachedFiles={attachedFiles}
           isSendPending={send.isPending}
           onSteer={steerDraft}
+          replyRunning={isStreaming || isActiveTurnState(turnState)}
+          heldCommand={heldCommand}
+          onSendHeldAsText={() => {
+            const steer = heldCommand?.steer === true;
+            setHeldCommand(null);
+            sendText(draft, attachedFiles, { asText: true, ...(steer ? { steer: true } : {}) });
+          }}
           sendError={send.error}
           turnError={turnError}
           renameSessionError={renameSession.error}
@@ -906,7 +982,7 @@ export function ChatView({
           composerRef={composerRef}
           fileInputRef={fileInputRef}
           slashCommands={SLASH_COMMANDS}
-          onDraftChange={setDraft}
+          onDraftChange={(value) => { setDraft(value); setHeldCommand(null); }}
           onComposerKeyDown={handleComposerKeyDown}
           onSubmit={submit}
           onFileSelection={handleFileSelection}
@@ -924,7 +1000,7 @@ export function ChatView({
             among them, whose menu opens where they sit) they step aside. */}
         {isNewChat && !draft.trim() && (
           <div className="chat-suggestions" role="group" aria-label="Start with">
-            {CHAT_SUGGESTIONS.map((suggestion) => {
+            {suggestions.map((suggestion) => {
               const Icon = SUGGESTION_ICONS[suggestion.icon];
               return (
                 <Button

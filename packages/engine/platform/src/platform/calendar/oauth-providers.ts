@@ -21,6 +21,7 @@
  * an operator who registers a confidential client supplies a secret as well.
  */
 
+import { OAUTH_SCOPES } from '../google/setup-plan.js';
 import type {
   CalendarProviderId,
   OAuthClientOverrides,
@@ -28,12 +29,13 @@ import type {
   ResolvedClientConfig,
 } from './oauth-types.js';
 
-/** Google Calendar read scope and read/write events scope. Read-write is the default
- *  so event creation works; a user may narrow to read-only via overrides. */
-export const GOOGLE_SCOPES_DEFAULT = [
-  'https://www.googleapis.com/auth/calendar.readonly',
-  'https://www.googleapis.com/auth/calendar.events',
-] as const;
+/**
+ * The scopes `/calendar connect google` asks for: the one list every Google
+ * consent uses (`OAUTH_SCOPES`, google/setup-plan.ts). A Google sign-in is the
+ * one Google connection the daemon's calendar and mail read too, so it asks
+ * once for everything they need rather than for the calendar alone.
+ */
+export const GOOGLE_SCOPES_DEFAULT: readonly string[] = OAUTH_SCOPES;
 
 /** Microsoft Graph read/write calendar scope (+ offline_access for a refresh token). */
 export const MICROSOFT_SCOPES_DEFAULT = [
@@ -138,7 +140,7 @@ export function resolveClientConfig(
 export const PROVIDER_SETUP_STEPS: Readonly<Record<CalendarProviderId, readonly string[]>> = {
   google: [
     'Open the Google Cloud Console (console.cloud.google.com) and select or create a project.',
-    'APIs & Services -> Library -> enable "Google Calendar API".',
+    'APIs & Services -> Library -> enable "Google Calendar API" and "Gmail API": the one Google connection serves calendar and mail.',
     'APIs & Services -> OAuth consent screen -> configure (External is fine for personal use); add your Google account under Test users while the app is unverified.',
     'APIs & Services -> Credentials -> Create Credentials -> OAuth client ID -> Application type "Desktop app".',
     'Copy the generated Client ID. A Desktop-app client needs NO client secret with PKCE; leave the secret field blank unless you deliberately use a Web-app client.',

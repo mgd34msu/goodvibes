@@ -4,12 +4,13 @@ import {
   modelWorkspaceProviderRows,
   modelWorkspaceSignIn,
 } from '@goodvibes/engine/terminal-shell/model-workspace-facts';
+import { modelPickerTargetLabel } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 /**
  * renderModelWorkspace, the model picker drawn with the surface kit.
  *
  *   ✦ Models                                                      esc
  *
- *    Main Chat     Helper     Tool LLM     TTS     Embeddings
+ *    Main chat   Side work   Tool work   Spoken replies   Search index   Decision model
  *
  *   ▏opus                                                  6 of 5,582
  *
@@ -20,9 +21,12 @@ import {
  *   ✦ lm studio                              Quality  ▰▰▰▰▰▰▱▱▱▱ 0.61
  *     qwen3-coder       lmstudio    128K     Cost     $15 / $75 per 1M
  *
- *   ⏎ use for Main Chat   tab next target   ctrl+f pin   ctrl+r refresh
+ *   ⏎ use for Main chat   tab next target   ctrl+f pin   ctrl+r refresh
  *
- * The five model targets are tabs. The list is grouped Pinned, Recent, then by
+ * The targets are tabs. A model target lists only models the catalog says read
+ * and write text; models it does not describe come last, marked. The search
+ * index and the decision model list their own entries. The list is grouped
+ * Pinned, Recent, then by
  * the group-by mode (provider by default, which includes LAN servers). The
  * detail inset shows the selected model with meters for context, benchmark
  * quality and price where that data exists, its capabilities, which targets it
@@ -66,13 +70,10 @@ function formatContext(value: number | undefined): string {
 
 const targetSummary = (info: ModelPickerTargetInfo): string => modelWorkspaceTargetSummary(info, true);
 
-function targetLabelFor(target: string): string {
-  if (target === 'helper') return 'Helper';
-  if (target === 'tool') return 'Tool LLM';
-  if (target === 'tts') return 'TTS';
-  if (target === 'embeddings') return 'Embeddings';
-  return 'Main Chat';
-}
+const targetLabelFor = modelPickerTargetLabel;
+
+/** Said on a model the catalog does not describe, beside its provider and in its detail. */
+const UNKNOWN_KIND_NOTE = 'kind unknown';
 
 function isTargetModel(info: ModelPickerTargetInfo | null, model: ModelDefinition): boolean {
   if (!info || !info.enabled) return false;
@@ -112,9 +113,10 @@ function modelRows(picker: ModelPickerModal, compact = false): KitRow[] {
     }
     const current = isTargetModel(target, model);
     const selected = index === picker.selectedIndex;
+    const where = compact && selected ? modelKey(model) : model.provider;
     rows.push({
       label: model.displayName || model.id,
-      desc: compact && selected ? modelKey(model) : model.provider,
+      desc: picker.textWork(model) === 'unknown' ? `${where} · ${UNKNOWN_KIND_NOTE}` : where,
       right: formatContext(model.contextWindow),
       mark: current ? '●' : undefined,
       markFg: t.brand,
@@ -130,17 +132,34 @@ function modelRows(picker: ModelPickerModal, compact = false): KitRow[] {
 const providerRows = (picker: ModelPickerModal): KitRow[] =>
   modelWorkspaceProviderRows(picker, { unconfiguredColor: activeTokens().warning, groupedItems: picker.getItems() });
 
-function embeddingRows(picker: ModelPickerModal): KitRow[] {
+/**
+ * A row's `detail` makes the list reserve a help area above its rows, as tall as the longest detail, for the
+ * selected row's detail; beside the detail inset (sideBySide) the inset already shows it, so the rows carry none.
+ */
+function embeddingRows(picker: ModelPickerModal, sideBySide: boolean): KitRow[] {
   const t = activeTokens();
   if (picker.embeddingProviders.length === 0)
     return picker.catalogLoading ? [] : [{ label: 'No embedding providers are registered.', muted: true }];
   return picker.embeddingProviders.map((provider, index) => ({
     label: provider.label,
-    detail: provider.detail,
+    detail: sideBySide ? undefined : provider.detail,
     right: `${provider.dimensions}d · ${provider.configured ? 'configured' : 'unconfigured'}`,
     rightFg: provider.configured ? undefined : t.warning,
     mark: provider.configured ? '●' : '○',
     markFg: provider.configured ? t.success : t.warning,
+    selected: index === picker.selectedIndex,
+  }));
+}
+
+/** A target's own entries (the decision model): the one in force is marked. */
+function choiceRows(picker: ModelPickerModal): KitRow[] {
+  const t = activeTokens();
+  return picker.getChoices().map((choice, index) => ({
+    label: choice.label,
+    desc: choice.id === '__none__' ? undefined : choice.detail,
+    mark: choice.current ? '●' : undefined,
+    markFg: t.brand,
+    current: choice.current,
     selected: index === picker.selectedIndex,
   }));
 }
@@ -204,6 +223,8 @@ function drawModelDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): 
     const serves = picker.targetInfos.filter((info) => isTargetModel(info, model)).map((info) => targetLabelFor(info.target));
     const configured = picker.configuredProviders.has(model.provider);
     y = kv(c, p, y, 'Provider', model.provider);
+    if (picker.textWork(model) === 'unknown')
+      y = kv(c, p, y, 'Kind', `${UNKNOWN_KIND_NOTE}: the model catalog does not say what it reads and writes`, t.warning);
     if (model.tier) y = kv(c, p, y, 'Tier', model.tier);
     if (serves.length > 0) y = kv(c, p, y, 'Serves', serves.join(' · '));
     const target = picker.getSelectedTargetInfo();
@@ -295,7 +316,7 @@ function drawStepDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): v
     }
   } else if (picker.mode === 'embeddingProvider') {
     const selected = picker.embeddingProviders[picker.selectedIndex];
-    y = insetWrap(c, p, p.l, y, 'Embedding provider', { fg: t.text, bold: true });
+    y = insetWrap(c, p, p.l, y, 'Search index service', { fg: t.text, bold: true });
     y = insetWrap(c, p, p.l, y + 1, 'The provider memory search and the code index use to embed content.', { fg: t.textMuted });
     if (selected) {
       y = kv(c, p, y + 1, 'Provider', selected.id);
@@ -303,6 +324,12 @@ function drawStepDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): v
       y = kv(c, p, y, 'Status', selected.configured ? 'configured' : 'unconfigured', selected.configured ? t.success : t.warning);
       if (selected.detail) y = insetWrap(c, p, p.l, y + 1, selected.detail, { fg: t.textMuted });
     }
+  } else if (picker.mode === 'choice') {
+    const choice = picker.getSelectedChoice();
+    y = insetWrap(c, p, p.l, y, choice?.label ?? 'Nothing is selected.', { fg: t.text, bold: true });
+    if (choice?.detail) y = insetWrap(c, p, p.l, y + 1, choice.detail, { fg: t.textMuted });
+    if (choice && choice.id !== '__none__')
+      y = insetWrap(c, p, p.l, y + 1, 'Enter asks for its address and where its key comes from, then saves it.', { fg: t.textFaint });
   } else if (picker.mode === 'effort') {
     const model = picker.pendingModel;
     y = insetWrap(c, p, p.l, y, model ? model.displayName || model.id : 'Reasoning effort', { fg: t.text, bold: true });
@@ -367,9 +394,10 @@ function pickerHints(picker: ModelPickerModal, withFilters: boolean): KitHint[] 
         ['esc', 'back to models'],
       ];
     case 'embeddingProvider':
+    case 'choice':
       return [
         ['↑↓', 'move'],
-        ['⏎', 'use'],
+        ['⏎', `use for ${target}`],
         ['tab', 'next target'],
       ];
     case 'provider':
@@ -413,10 +441,11 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   const sideBySide = inner >= 60;
   const f = beginModal(screenWidth, screenHeight, { title: 'Models', crumbs, hints: pickerHints(picker, !sideBySide) });
 
-  // Targets as tabs; the active tab carries the gradient.
+  // Targets as tabs; the active tab carries the gradient. A target that is off says so in the detail beside the list
+  // ("Now  Side work: disabled"), so all six names fit on one row at 120 columns.
   const labels =
     picker.targetInfos.length > 0
-      ? picker.targetInfos.map((info) => `${targetLabelFor(info.target)}${info.enabled ? '' : ' (off)'}`)
+      ? picker.targetInfos.map((info) => info.label)
       : [targetLabelFor(picker.target)];
   tabs(f.canvas, f.l, f.top, labels, picker.targetInfos.length > 0 ? picker.targetIndex : 0, f.r, (index) => {
     const target = picker.targetInfos[index];
@@ -426,7 +455,8 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   const searchable = picker.mode === 'model' || picker.mode === 'provider';
   let body = f.top + 2;
   if (searchable) {
-    const total = picker.mode === 'model' ? picker.models.length : picker.providers.length;
+    // Out of the models this target can use: an image, video or speech model is not counted.
+    const total = picker.mode === 'model' ? picker.models.filter((model) => picker.textWork(model) !== 'other').length : picker.providers.length;
     const shown = picker.getItemCount();
     const counted =
       picker.query.length > 0 || shown !== total
@@ -450,8 +480,10 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
         : picker.mode === 'provider'
           ? providerRows(picker)
           : picker.mode === 'embeddingProvider'
-            ? embeddingRows(picker)
-            : effortRows(picker);
+            ? embeddingRows(picker, sideBySide)
+            : picker.mode === 'choice'
+              ? choiceRows(picker)
+              : effortRows(picker);
     // The picker opens on its cached catalog; the rest fills in while this row shows.
     const rows = picker.catalogLoading && picker.mode !== 'effort' ? [LOADING_ROW, ...listed] : listed;
     result = drawList(f.canvas, { mouseNavigation: true, rows, top: body, bottom: f.bottom, x0: f.l, x1, scrollKey });
@@ -516,6 +548,8 @@ function getRenderCacheKey(picker: ModelPickerModal, width: number, height: numb
     base.push(picker.contextCapQuery, picker.contextCapPendingModel?.registryKey ?? picker.contextCapPendingModel?.id ?? '');
   } else if (picker.mode === 'embeddingProvider') {
     base.push(objectId(picker.embeddingProviders), picker.embeddingProviders.length);
+  } else if (picker.mode === 'choice') {
+    base.push(picker.getChoices().map((choice) => `${choice.id}\u001d${choice.current ? 1 : 0}`).join('\u001f'));
   }
   return base.join('\u001e');
 }

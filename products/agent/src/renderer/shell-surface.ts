@@ -75,7 +75,7 @@ export interface ShellFooterBuildOptions {
   /** The working tree differs from HEAD: `branch main, changed`. */
   readonly branchChanged?: boolean;
   /** The mode in force in words (ModeInForceWords): the status bar's `Asks:` segment. */
-  readonly modeWords?: { readonly chosen: string; readonly inForce?: string; readonly because?: string } | null;
+  readonly modeWords?: { readonly chosen: string; readonly inForce?: string; readonly chosenWhen?: string; readonly chosenShort?: string; readonly because?: string; readonly failure?: boolean } | null;
   /** The key that changes the mode, as bound ("shift+tab"). */
   readonly modeKey?: string;
   /** The mode just changed: the `Asks:` segment flashes. */
@@ -114,6 +114,8 @@ export interface ShellFooterBuildOptions {
    * safety-relevant and both stay visible at once.
    */
   readonly powerNote?: string;
+  /** The Agent home (profile) the session runs in when it is not the default one: a `home <name>` chip. */
+  readonly homeName?: string | null;
   /** A contract's open question the next typed message answers (contract-question-composer.ts), a row above the composer. */
   readonly contractQuestionHint?: string | null;
   /** Live microphone state; a visible state renders the microphone chip. */
@@ -198,6 +200,7 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
   powerNote: (options) => options.powerNote,
   compactFraction,
   flags: (options) => [
+    ...(options.homeName ? [{ text: `home ${options.homeName}`, fg: activeTokens().textMuted }] : []),
     ...intentChips(options),
     ...((options.composerFlags ?? []).includes('attachments') ? [{ text: 'image attached', fg: activeTokens().info }] : []),
   ],

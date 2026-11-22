@@ -27,6 +27,12 @@ interface SplashAdditionsInstall {
 }
 
 interface SplashAdditionsState extends SplashAdditionsInstall {
+  /**
+   * The one command that brings over settings another GoodVibes app on this
+   * computer already has, said under the splash on the first launch only (the
+   * Agent, when the terminal app has settings to bring over); absent otherwise.
+   */
+  importCommand: string | undefined;
   firstRun: FirstRunScreen | undefined;
   words: ModeWordsSource | null;
   /** "You're set" was said on the status bar because its line did not fit. */
@@ -37,7 +43,14 @@ let state: SplashAdditionsState | null = null;
 
 export function installSplashAdditions(install: SplashAdditionsInstall): void {
   state?.words?.stop();
-  state = { ...install, firstRun: state?.firstRun, words: null, setFlashed: false };
+  state = { ...install, importCommand: state?.importCommand, firstRun: state?.firstRun, words: null, setFlashed: false };
+}
+
+/** Say under the splash which command brings over another app's settings (first launch only; see importCommand). */
+export function setSplashImportCommand(command: string | undefined): void {
+  if (!state) return;
+  state.importCommand = command;
+  if (state.splashShowing()) requestSplashRender();
 }
 
 export function setFirstRunScreen(screen: FirstRunScreen | undefined): void {
@@ -53,6 +66,7 @@ export interface SplashAdditionsView {
   readonly firstRun: FirstRunScreen | undefined;
   readonly asksBefore: string | undefined;
   readonly setupCommand: string;
+  readonly importCommand: string | undefined;
 }
 
 /** What to draw under the splash now; null when nothing is installed. */
@@ -63,6 +77,7 @@ export function readSplashAdditions(): SplashAdditionsView | null {
     firstRun,
     asksBefore: firstRun?.kind === 'set' ? state.words?.current().asksBefore : undefined,
     setupCommand: state.setupCommand,
+    importCommand: state.importCommand,
   };
 }
 

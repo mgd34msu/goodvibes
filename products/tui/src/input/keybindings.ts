@@ -59,7 +59,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   // state, there is no release event to watch, so this is two discrete presses,
   // and the description says so instead of implying a hold that cannot exist.
   'voice-input':           'Voice input: press to start recording, press again to stop and transcribe into the composer',
-  'cycle-permission-mode': 'Change how often it asks, for this session (asks before YOLO; the saved default is set in /settings)',
+  'cycle-permission-mode': 'Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings)',
   'open-notifications':    'Open the notices (the status bar counts the unread ones)',
   'failure-other-model':   'After a failed turn: choose another model and send the prompt again',
   'failure-details':       'After a failed turn: show what the provider said',

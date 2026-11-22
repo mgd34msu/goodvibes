@@ -50,6 +50,7 @@ import {
   MenuSeparator,
   Row,
   Segmented,
+  Select,
   Sheet,
   Textarea,
   useConfirm,
@@ -61,7 +62,18 @@ import { PersonalNotice, PersonalPage } from '../personal/PersonalPage';
 import { openSettingsSection } from '../personal/openSettings';
 import { CalendarEventBody, useCalendarEventDetail, type CalendarEventDetailData } from './CalendarEventPeek';
 import { CalendarMonth } from './CalendarMonth';
-import { allDayFlagOf, eventDayKey, eventTimeLabel, localDateOffset, localDayEndIso, localDayStartIso } from './calendar-time';
+import {
+  allDayFlagOf,
+  eventDayKey,
+  eventTimeLabel,
+  localDayEndIso,
+  localDayStartIso,
+  presetOfRange,
+  rangeOfPreset,
+  RANGE_PRESETS,
+  viewerTimeZoneLabel,
+  type RangePreset,
+} from './calendar-time';
 import '../../styles/components/calendar.css';
 
 type CalendarLayout = 'agenda' | 'month';
@@ -100,9 +112,16 @@ function localDateTimeValue(iso: string): string {
 
 function unconfiguredNote(error: unknown): CalendarNote | null {
   if (isCalendarUnconfiguredError(error)) {
+    // The daemon's answer names every account it found and why none can be read, and what connects one.
+    const title = 'No calendar this daemon can read';
+    // The daemon's sentence, without the transport's "(HTTP 400 · bad_request)" tail.
+    const said = formatError(error).replace(/\s*\(HTTP \d+[^)]*\)\s*$/, '').trim();
+    const description = said.toLowerCase().startsWith(title.toLowerCase())
+      ? said.slice(title.length).replace(/^[.:\s]+/, '')
+      : said;
     return {
-      title: 'Calendar isn’t configured',
-      description: 'Add your calendar in Settings and your events show up here.',
+      title,
+      description: description || 'Connect Google with /calendar connect google in the Agent, or set the CalDAV settings.',
       settings: 'all',
     };
   }
@@ -172,14 +191,25 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const [rangeOpen, setRangeOpen] = useState(false);
 
   const [layout, setLayout] = useState<CalendarLayout>('agenda');
-  const [from, setFrom] = useState(() => localDateOffset(0));
-  const [to, setTo] = useState(() => localDateOffset(14));
+  const [from, setFrom] = useState(() => rangeOfPreset('next-two-weeks').from);
+  const [to, setTo] = useState(() => rangeOfPreset('next-two-weeks').to);
+  // "Choose dates" picked: the two date fields show even while the dates match a named range.
+  const [choosingDates, setChoosingDates] = useState(false);
+  const rangePreset: RangePreset = choosingDates ? 'custom' : presetOfRange(from, to);
+  const pickRangePreset = (preset: RangePreset) => {
+    if (preset === 'custom') { setChoosingDates(true); return; }
+    const range = rangeOfPreset(preset);
+    setChoosingDates(false);
+    setFrom(range.from);
+    setTo(range.to);
+  };
   const [month, setMonth] = useState(() => startOfMonth(new Date()));
-  // The typed calendar id is a draft; the calendar the view reads (one CalDAV
-  // REPORT per change) is committed on Enter or when the field loses focus.
-  const [calendarDraft, setCalendarDraft] = useState('');
+  // The calendar the view reads, by the id the daemon lists it under ('' is the default calendar).
   const [calendarId, setCalendarId] = useState('');
+  // Only when the daemon could not list its calendars: an id typed by hand, read on Enter or leaving the field.
+  const [calendarDraft, setCalendarDraft] = useState('');
   const commitCalendar = () => setCalendarId(calendarDraft.trim());
+  const zoneLabel = viewerTimeZoneLabel();
   const [selectedId, setSelectedId] = useState('');
 
   const [newOpen, setNewOpen] = useState(false);
@@ -224,8 +254,8 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
 
   const detail = useCalendarEventDetail(selectedId, calendarFilter || undefined);
 
-  // The calendars the account can reach, offered as choices for the calendar
-  // field: one request per page open, in place of guessing an id.
+  // The calendars the account can reach, chosen by name: one request per page
+  // open, in place of guessing an id.
   const calendars = useQuery({
     queryKey: ['calendar', 'calendars'],
     retry: false,
@@ -242,7 +272,37 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         : [];
     });
   }, [calendars.data]);
-  const calendarListId = 'calendar-choices';
+  const calendarName = calendarChoices.find((choice) => choice.calendarId === calendarFilter)?.displayName
+    ?? (calendarFilter || 'Default calendar');
+  // By name from the daemon's list; an id typed by hand only when the list could not be read.
+  const calendarControl = calendarChoices.length > 0 ? (
+    <Select<string>
+      className="calendar-filter-calendar"
+      value={calendarId}
+      aria-label="Calendar"
+      onChange={setCalendarId}
+      options={[{ value: '', label: 'Default calendar' }, ...calendarChoices.map((choice) => ({ value: choice.calendarId, label: choice.displayName }))]}
+    />
+  ) : calendars.isError && !isCalendarUnconfiguredError(calendars.error) ? (
+    <Input
+      className="calendar-filter-calendar"
+      value={calendarDraft}
+      onChange={(event) => setCalendarDraft(event.target.value)}
+      onBlur={commitCalendar}
+      onKeyDown={(event) => { if (event.key === 'Enter') commitCalendar(); }}
+      placeholder="Default calendar"
+      aria-label="Calendar id"
+    />
+  ) : null;
+  const rangePresetControl = (
+    <Select<RangePreset>
+      className="calendar-range-preset"
+      value={rangePreset}
+      aria-label="Dates shown"
+      onChange={pickRangePreset}
+      options={RANGE_PRESETS}
+    />
+  );
 
   const create = useMutation({
     mutationFn: async () => {
@@ -493,8 +553,12 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
     </div>
   );
 
-  const rangeLabel = formatRangeLabel(from, to);
-  const calendarLabel = calendarFilter || 'Default calendar';
+  const rangeLabel = rangePreset === 'custom'
+    ? formatRangeLabel(from, to)
+    : RANGE_PRESETS.find((preset) => preset.value === rangePreset)?.label ?? formatRangeLabel(from, to);
+  const calendarLabel = calendarName;
+  // Every time on the page is in the viewer's zone, said once.
+  const zoneNote = <span className="calendar-zone">Times in {zoneLabel}</span>;
 
   // Phone: one compact row (layout toggle, one date-range button, the more menu),
   // so the agenda starts near the top of the screen. The range and the calendar
@@ -521,21 +585,18 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
       {layoutToggle}
       {layout === 'agenda' ? (
         <>
-          <DateField value={from} onChange={setFrom} aria-label="Range start" />
-          <DateField value={to} onChange={setTo} aria-label="Range end" />
+          {rangePresetControl}
+          {rangePreset === 'custom' && (
+            <>
+              <DateField value={from} onChange={setFrom} aria-label="First day shown" />
+              <DateField value={to} onChange={setTo} aria-label="Last day shown" />
+            </>
+          )}
         </>
       ) : monthNav}
-      <Input
-        className="calendar-filter-calendar"
-        value={calendarDraft}
-        onChange={(event) => setCalendarDraft(event.target.value)}
-        onBlur={commitCalendar}
-        onKeyDown={(event) => { if (event.key === 'Enter') commitCalendar(); }}
-        placeholder="Default calendar"
-        aria-label="Logical calendar id"
-        list={calendarChoices.length ? calendarListId : undefined}
-      />
+      {calendarControl}
       <div className="dv-filters__end">
+        {zoneNote}
         <IconButton label="Refresh events" icon={<RefreshCw />} onClick={() => void events.refetch()} />
         {moreMenu}
       </div>
@@ -549,6 +610,8 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
   const truncated = (events.data?.events.length ?? 0) >= eventLimit;
   const noticeNode = (
     <>
+      {/* The phone's filter row has no room for the zone: it heads the events instead. */}
+      {phone ? <p className="calendar-zone calendar-zone--phone">Times in {zoneLabel}</p> : null}
       {notice ? <PersonalNotice tone={notice.tone}>{notice.body}</PersonalNotice> : null}
       {truncated ? (
         <PersonalNotice tone="warn">
@@ -676,38 +739,29 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
       <Sheet open={phone && rangeOpen} onClose={() => setRangeOpen(false)} label="Date range">
         <div className="calendar-range-sheet">
           <h2 className="calendar-range-sheet__title">Date range</h2>
-          <div className="personal-form__split">
-            <Field label="From">
-              <DateField value={from} onChange={setFrom} aria-label="Range start" />
-            </Field>
-            <Field label="To">
-              <DateField value={to} onChange={setTo} aria-label="Range end" />
-            </Field>
-          </div>
-          <Field label="Calendar" help="Leave empty for the default calendar.">
-            <Input
-              value={calendarDraft}
-              onChange={(event) => setCalendarDraft(event.target.value)}
-              onBlur={commitCalendar}
-              onKeyDown={(event) => { if (event.key === 'Enter') commitCalendar(); }}
-              placeholder="Default calendar"
-              aria-label="Logical calendar id"
-              list={calendarChoices.length ? calendarListId : undefined}
-            />
-          </Field>
-          <Button variant="primary" className="calendar-range-sheet__done" onClick={() => { commitCalendar(); setRangeOpen(false); }}>Done</Button>
+          <Field label="Dates shown">{rangePresetControl}</Field>
+          {rangePreset === 'custom' && (
+            <div className="personal-form__split">
+              <Field label="From">
+                <DateField value={from} onChange={setFrom} aria-label="First day shown" />
+              </Field>
+              <Field label="To">
+                <DateField value={to} onChange={setTo} aria-label="Last day shown" />
+              </Field>
+            </div>
+          )}
+          {calendarControl && <Field label="Calendar">{calendarControl}</Field>}
+          <Button
+            variant="primary"
+            className="calendar-range-sheet__done"
+            onClick={() => { if (calendarChoices.length === 0) commitCalendar(); setRangeOpen(false); }}
+          >
+            Done
+          </Button>
         </div>
       </Sheet>
 
       {confirm.element}
-      {/* One list of the daemon's calendars, read by the desktop filter and the phone sheet alike. */}
-      {calendarChoices.length > 0 && (
-        <datalist id={calendarListId}>
-          {calendarChoices.map((choice) => (
-            <option key={choice.calendarId} value={choice.calendarId}>{choice.displayName}</option>
-          ))}
-        </datalist>
-      )}
       <Dialog
         open={newOpen}
         onClose={closeEventForm}

@@ -229,7 +229,7 @@ Parser limits to know about:
 
 ### `--help`, `-h`
 
-Print usage information and exit.
+Print usage information and exit. It opens with `Most used:` (start the app, `run "<prompt>"`, `pair`, `status`, `goodvibes-daemon update --check`), then every command, the options and examples.
 
 ### `--version`, `-v`
 

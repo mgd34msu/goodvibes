@@ -178,30 +178,44 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
       fallback={(err, reset) => <ErrorState error={err} onRetry={reset} title="Memory view failed" />}
     >
       <div className="lib-tab">
-        <div className="lib-toolbar" role="group" aria-label="Memory filters">
-          <Select<MemoryScope | ''>
-            value={scopeFilter}
-            aria-label="Filter by scope"
-            onChange={setScopeFilter}
-            options={[{ value: '', label: 'Any scope' }, ...MEMORY_SCOPES.map((s) => ({ value: s, label: sentence(s) }))]}
-          />
-          <Select<MemoryClass | ''>
-            value={clsFilter}
-            aria-label="Filter by type"
-            onChange={setClsFilter}
-            options={[{ value: '', label: 'Any type' }, ...MEMORY_CLASSES.map((c) => ({ value: c, label: sentence(c) }))]}
-          />
-          <Input
-            className="lib-toolbar__tags"
-            value={tagsInput}
-            onChange={(event) => setTagsInput(event.target.value)}
-            placeholder="Tags, comma separated"
-            aria-label="Filter by tags"
-          />
-          <Checkbox checked={semantic} onChange={setSemantic}>Semantic</Checkbox>
-          <span title="Apply the recall-injection contract server-side: exclude flagged records outright and drop records below the confidence floor, so this shows what the agent would actually recall.">
-            <Checkbox checked={recall} onChange={setRecall}>What the agent would recall</Checkbox>
-          </span>
+        <div className="lib-toolbar memory-filters" role="group" aria-label="Memory filters">
+          {/* Each control under the question it answers. */}
+          <div className="memory-filter">
+            <span className="memory-filter__question" aria-hidden="true">Applies where?</span>
+            <Select<MemoryScope | ''>
+              value={scopeFilter}
+              aria-label="Applies where?"
+              onChange={setScopeFilter}
+              options={[{ value: '', label: 'Any scope' }, ...MEMORY_SCOPES.map((s) => ({ value: s, label: sentence(s) }))]}
+            />
+          </div>
+          <div className="memory-filter">
+            <span className="memory-filter__question" aria-hidden="true">What kind?</span>
+            <Select<MemoryClass | ''>
+              value={clsFilter}
+              aria-label="What kind?"
+              onChange={setClsFilter}
+              options={[{ value: '', label: 'Any type' }, ...MEMORY_CLASSES.map((c) => ({ value: c, label: sentence(c) }))]}
+            />
+          </div>
+          <div className="memory-filter">
+            <span className="memory-filter__question" aria-hidden="true">Tagged with?</span>
+            <Input
+              className="lib-toolbar__tags"
+              value={tagsInput}
+              onChange={(event) => setTagsInput(event.target.value)}
+              placeholder="Tags, comma separated"
+              aria-label="Tagged with?"
+            />
+          </div>
+          <div className="memory-filter">
+            <span className="memory-filter__question" aria-hidden="true">Match how?</span>
+            <Checkbox checked={semantic} onChange={setSemantic}>By meaning, not exact words</Checkbox>
+          </div>
+          <div className="memory-filter" title="Leaves out flagged records and records rated below the recall floor, so the list is what the agent would actually be given.">
+            <span className="memory-filter__question" aria-hidden="true">Show which?</span>
+            <Checkbox checked={recall} onChange={setRecall}>Only what the agent would recall</Checkbox>
+          </div>
           {filtersActive && <Button variant="ghost" size="sm" onClick={resetFilters}>Reset filters</Button>}
           <Button variant="ghost" size="sm" aria-expanded={showCopies} onClick={() => setShowCopies((open) => !open)}>
             {showCopies ? 'Hide copies' : 'Copies and restore'}
@@ -229,6 +243,7 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
               saving={saveReview.isPending && saveReview.variables.id === selected.id}
               onSaveEdit={(id, input) => saveEdit.mutate({ id, input })}
               savingEdit={saveEdit.isPending && saveEdit.variables.id === selected.id}
+              recallFloor={list.data?.recallFloor}
             />
           )}
           detailOpen={selected !== undefined}

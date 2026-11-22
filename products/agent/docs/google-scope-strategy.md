@@ -51,15 +51,16 @@ For a personal app the tier does not create a fee. It still shapes the request, 
 
 ## What this integration requests
 
-**Three scopes, asked for together, in one consent.**
+**Four scopes, asked for together, in one consent.** `/google connect`, the model's `google` tool and `/calendar connect google` all ask for this same list, because they store the same one Google connection that the daemon's calendar and mail read.
 
 | Scope | Tier | What needs it |
 | --- | --- | --- |
 | `https://www.googleapis.com/auth/gmail.readonly` | restricted | Reading messages (`api-client.ts`), and the inbound-mail history delta (`history-delta.ts`) |
 | `https://www.googleapis.com/auth/gmail.send` | sensitive | Sending through the Gmail API (`messages/send`) |
+| `https://www.googleapis.com/auth/calendar.readonly` | sensitive | Listing the account's calendars (`calendarList`), which `calendar.calendars.list` and `/calendar` read |
 | `https://www.googleapis.com/auth/calendar.events` | sensitive | Reading and writing events |
 
-### Why all three at once, and not one at a time
+### Why all of them at once, and not one at a time
 
 Because splitting them produced a real failure. A token was minted carrying
 Gmail scopes only; the first Calendar call afterwards returned
@@ -71,7 +72,9 @@ moment somebody uses it, long after the setup that would explain it.
 Asking once for everything the product can do costs the person nothing extra:
 it is the same consent screen with a longer permissions list. Splitting it
 costs them a second consent and a confusing failure in between. `OAUTH_SCOPES`
-in the platform runtime is therefore the complete set, and a test pins it.
+in the platform runtime is therefore the complete set. A connection made earlier
+with fewer scopes keeps working for what it was granted and names the missing
+scope when a feature needs it; connecting once more grants them all.
 
 ### On `gmail.readonly` being restricted
 

@@ -334,9 +334,9 @@ function ChannelProfileForm({
       <Field label="Provider (optional)">
         <Input type="text" value={provider} onChange={(e) => setProvider(e.target.value)} disabled={submitting} />
       </Field>
-      <Field label="Permission mode (optional)">
+      <Field label="When GoodVibes asks (optional)">
         <Select<PermissionMode | ''>
-          aria-label="Permission mode (optional)"
+          aria-label="When GoodVibes asks (optional)"
           value={permissionMode}
           onChange={setPermissionMode}
           disabled={submitting}

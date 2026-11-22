@@ -82,11 +82,18 @@ export const APP_PASSWORD_LABEL = 'goodvibes-agent';
  *    mail on `GMAIL_HISTORY_SCOPES`. Without it inbound mail reports
  *    `no-gmail-scope` and reads nothing.
  *  - `gmail.send`: `api-client.ts` posts to `gmail/v1/users/me/messages/send`.
+ *  - `calendar.readonly`: the list of the account's calendars
+ *    (`calendarList`), which `calendar.calendars.list` and the Agent's
+ *    `/calendar` commands read; `calendar.events` does not cover it.
  *  - `calendar.events`: event read AND write, which is the one thing an app
  *    password genuinely cannot do. Narrower than full `calendar`, which would
  *    also grant calendar-list management the product never uses.
  *
- * On Google's scope tiers: `gmail.readonly` is *restricted* and the other two
+ * This is the one list for the one Google connection: the setup flow, the
+ * `google` tool and `/calendar connect google` all ask for it, so a
+ * connection made from any of them serves calendar and mail alike.
+ *
+ * On Google's scope tiers: `gmail.readonly` is *restricted* and the others
  * are *sensitive*. The restricted tier matters when an app is published for
  * OTHER people's users; that is what triggers the third-party security
  * assessment. It does not apply here, because the model this connector is
@@ -103,6 +110,7 @@ export const APP_PASSWORD_LABEL = 'goodvibes-agent';
 export const OAUTH_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/calendar.readonly',
   'https://www.googleapis.com/auth/calendar.events',
 ];
 
@@ -194,6 +202,7 @@ export const GOOGLE_CONFIG_KEYS = {
   oauthProjectId: 'google.oauth.projectId',
   oauthPublishingStatus: 'google.oauth.publishingStatus',
   oauthRefreshToken: 'google.oauth.refreshToken',
+  oauthAccount: 'google.oauth.account',
   calendarIcsUrl: 'calendar.google.icsUrl',
 } as const;
 
@@ -216,6 +225,12 @@ export const GOOGLE_SECRET_KEYS = {
   appPassword: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.emailPassword),
   oauthClientSecret: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.oauthClientSecretRef),
   oauthRefreshToken: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.oauthRefreshToken),
+  /**
+   * Which account the refresh token above belongs to (its label, the scopes
+   * granted at connect, when), with a digest of the token it describes so a
+   * grant stored by another route is never paired with this label. No token.
+   */
+  oauthAccount: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.oauthAccount),
   calendarIcsUrl: daemonSecretKeyFor(GOOGLE_CONFIG_KEYS.calendarIcsUrl),
 } as const;
 

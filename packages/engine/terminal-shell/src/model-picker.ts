@@ -1,5 +1,5 @@
-import type { ModelDefinition, FavoritesStore, BenchmarkStore, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
-import { compositeScore, EFFORT_DESCRIPTIONS } from '@goodvibes/engine/platform/platform/providers';
+import type { ModelDefinition, FavoritesStore, BenchmarkStore, ProviderRegistry, CatalogTextWork } from '@goodvibes/engine/platform/platform/providers';
+import { catalogTextWork, compositeScore, EFFORT_DESCRIPTIONS } from '@goodvibes/engine/platform/platform/providers';
 import {
   effortPresentationForModel,
   toEffortModel,
@@ -20,6 +20,7 @@ import type {
   FilteredProvidersCache,
   GroupByMode,
   ModelItemsCache,
+  ModelPickerChoice,
   ModelPickerFocusRegion,
   ModelPickerTarget,
   ModelPickerTargetInfo,
@@ -31,6 +32,8 @@ import { groupProviders } from './model-picker-provider-filter.js';
 import { buildFilteredModels, buildFilteredProviders } from './model-picker-filter.js';
 import { buildModelItems, buildProviderItems, buildEffortItems, getModelGroupKey } from './model-picker-items.js';
 export type ModelPickerCatalogFill = PlatformCatalogFill<ModelPickerTargetInfo>;
+/** The group, listed last, of models the catalog does not describe: they are offered, not hidden, and marked. */
+export const UNKNOWN_KIND_GROUP = 'Not described by the catalog';
 export interface ModelPickerPresentation {
   readonly searchFocusedOnOpen: boolean;
   readonly resetAvailabilityOnOpen: boolean;
@@ -210,19 +213,28 @@ export class ModelPickerModal {
     this.setTarget(this.targetInfos[nextIndex]!.target);
   }
 
+  /** The list mode a target has of its own (it is not chosen from the model catalog), or null. */
+  private ownListMode(target: ModelPickerTarget): PickerMode | null {
+    if (target === 'embeddings') return 'embeddingProvider';
+    return this.targetInfos.find((entry) => entry.target === target)?.choices ? 'choice' : null;
+  }
+
   setTarget(target: ModelPickerTarget): void {
-    const previousTarget = this.target;
     this.target = target;
     const idx = this.targetInfos.findIndex((entry) => entry.target === target);
     this.targetIndex = idx >= 0 ? idx : this.targetIndex;
-    // The 'embeddings' target routes through its own tiny item-list mode
-    // (embedding providers are not ModelDefinition-shaped) rather than
-    // whatever LLM mode the picker session was already in. Remember the
-    // mode we came from so tabbing back to another target restores it.
-    if (target === 'embeddings' && this.mode !== 'embeddingProvider') {
-      this.nonEmbeddingMode = this.mode;
-      this.mode = 'embeddingProvider';
-    } else if (previousTarget === 'embeddings' && target !== 'embeddings' && this.mode === 'embeddingProvider') {
+    // The 'embeddings' and 'decision' targets route through their own small
+    // item lists (embedding providers and decision models are not
+    // ModelDefinition-shaped) rather than whatever model mode the picker
+    // session was already in. Remember the mode we came from so tabbing back
+    // to a model target restores it.
+    const own = this.ownListMode(target);
+    const inOwnList = this.mode === 'embeddingProvider' || this.mode === 'choice';
+    if (own !== null) {
+      if (!inOwnList) this.nonEmbeddingMode = this.mode;
+      if (this.mode !== own) this.selectedIndex = 0;
+      this.mode = own;
+    } else if (inOwnList) {
       this.mode = this.nonEmbeddingMode;
     }
     this.alignSelectionToTarget();
@@ -252,7 +264,25 @@ export class ModelPickerModal {
       this.selectedIndex = providerIdx >= 0 ? providerIdx : 0;
       this.scrollOffset = 0;
       this._scrollToSelection(20);
+      return;
     }
+    if (this.mode === 'choice') {
+      const choiceIdx = info.choices?.findIndex((choice) => choice.current) ?? -1;
+      this.selectedIndex = choiceIdx >= 0 ? choiceIdx : 0;
+      this.scrollOffset = 0;
+      this._scrollToSelection(20);
+    }
+  }
+
+  /** The entries of the selected target's own list (PickerMode 'choice'). */
+  getChoices(): readonly ModelPickerChoice[] {
+    return this.getSelectedTargetInfo()?.choices ?? [];
+  }
+
+  /** The highlighted entry of the selected target's own list, or null outside 'choice' mode. */
+  getSelectedChoice(): ModelPickerChoice | null {
+    if (this.mode !== 'choice') return null;
+    return this.getChoices()[this.selectedIndex] ?? null;
   }
 
   // ── Category filter cycling ───────────────────────────────────────────────────
@@ -355,6 +385,8 @@ export class ModelPickerModal {
     if (idx < 0 && !currentModelId.includes(':')) idx = filtered.findIndex((m) => m.id === currentModelId);
     this.selectedIndex = idx >= 0 ? idx : 0;
     this.scrollOffset = 0;
+    // Opened on a target with a list of its own (the decision model): show that list.
+    if (this.ownListMode(this.target) !== null) this.setTarget(this.target);
   }
 
   /** Open showing providers first, entry point for /provider. Search starts focused, see openAllModels(). */
@@ -375,6 +407,7 @@ export class ModelPickerModal {
     const currentIndex = filtered.findIndex((provider) => provider === currentProvider);
     this.selectedIndex = currentIndex >= 0 ? currentIndex : 0;
     this.scrollOffset = 0;
+    if (this.ownListMode(this.target) !== null) this.setTarget(this.target);
   }
 
   /**
@@ -599,6 +632,7 @@ export class ModelPickerModal {
         groupBy: this.groupBy,
         benchmarkStore: this.benchmarkStore,
         providerRegistry: this.providerRegistry,
+        textWork: (model) => this.textWork(model),
       },
       this.filteredModelsCache,
     );
@@ -640,7 +674,31 @@ export class ModelPickerModal {
    * - 'All Synthetic', remaining synthetic models
    */
   getModelGroupKey(model: ModelDefinition): string {
+    if (this.textWork(model) === 'unknown') return UNKNOWN_KIND_GROUP;
     return getModelGroupKey(model, this.groupBy, this.providerRegistry, this.benchmarkStore);
+  }
+
+  private readonly textWorkCache = new WeakMap<ModelDefinition, CatalogTextWork>();
+
+  /**
+   * Whether the catalog says this model reads and writes text, the work every
+   * model target here gives it (CatalogTextWork). A synthetic model answers for
+   * the backends it fails over between. Read once per model object: a catalog
+   * refresh builds new model objects.
+   */
+  textWork(model: ModelDefinition): CatalogTextWork {
+    const cached = this.textWorkCache.get(model);
+    if (cached !== undefined) return cached;
+    let work: CatalogTextWork;
+    if (model.provider === 'synthetic') {
+      const answers = new Set((this.getSyntheticChain(model.id) ?? []).map((backend) => catalogTextWork(backend.provider, backend.model)));
+      answers.delete('unknown');
+      work = answers.size === 1 ? [...answers][0]! : 'unknown';
+    } else {
+      work = catalogTextWork(model.provider, model.id);
+    }
+    this.textWorkCache.set(model, work);
+    return work;
   }
 
   /** Get the items for the current mode as a unified list. */
@@ -679,6 +737,9 @@ export class ModelPickerModal {
         isConfigured: provider.configured,
       }));
     }
+    if (this.mode === 'choice') {
+      return this.getChoices().map((choice) => ({ id: choice.id, label: choice.label, detail: choice.detail }));
+    }
     // effort mode
     if (this.presentation.effortStyle === 'descriptions')
       return this.effortLevels.map((level) => ({
@@ -694,6 +755,7 @@ export class ModelPickerModal {
     if (this.mode === 'model') return this.getFilteredModels().length;
     if (this.mode === 'provider') return this.getFilteredProviders().length;
     if (this.mode === 'embeddingProvider') return this.embeddingProviders.length;
+    if (this.mode === 'choice') return this.getChoices().length;
     return this.effortLevels.length;
   }
 

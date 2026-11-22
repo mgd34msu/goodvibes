@@ -43,11 +43,16 @@ export function buildFirstOpenItems(): { readonly title: string; readonly items:
   return {
     title: 'New workspace: choose a trust level',
     items: [
-      { id: 'trusted', label: 'Trust this workspace', detail: 'Full capability: all tools may run', primaryAction: 'select' },
+      {
+        id: 'trusted',
+        label: 'Trust this workspace',
+        detail: 'Trusting this folder lets its own hooks and MCP servers run and lets GoodVibes change files in it. It approves nothing: each action still follows your setting for when GoodVibes asks.',
+        primaryAction: 'select',
+      },
       {
         id: 'restricted',
         label: 'Keep restricted (read-only)',
-        detail: 'Explore safely; writes and commands are denied until trusted',
+        detail: 'GoodVibes can read this folder but cannot change files or run commands in it, and the folder\'s own hooks and MCP servers stay off, until you trust it.',
         primaryAction: 'select',
       },
     ],

@@ -490,9 +490,10 @@
   justify-content: center;
 }
 
+/* The chips are never cut on a phone: the title beside them gives way instead. */
 .shell-header--phone .shell-header__indicators {
   flex: none;
-  max-width: 40%;
+  overflow: visible;
 }
 
 /* A chat waiting on an answer: its title and its `asking you` chip take the

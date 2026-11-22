@@ -225,6 +225,47 @@
   margin: var(--space-2) 0 var(--space-4);
 }
 
+/* Phone: something outside this chat waits for the person (ElsewhereAsksBanner). */
+.chat-elsewhere {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  padding: 8px 8px 8px 12px;
+  color: var(--text);
+  background: var(--warn-soft);
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-md);
+  font-size: var(--text-sm);
+  line-height: var(--leading-meta);
+}
+
+.chat-elsewhere__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.chat-elsewhere__lead {
+  font-weight: var(--weight-medium);
+}
+
+.chat-elsewhere__open {
+  flex: none;
+  min-height: 36px;
+  padding: 0 12px;
+  color: var(--primary-fg);
+  background: var(--primary-bg);
+  border: 0;
+  border-radius: var(--radius-full);
+  font: var(--weight-medium) var(--text-sm) / 1 var(--font-ui);
+  cursor: pointer;
+}
+
 .chat-asks-chip {
   display: inline-flex;
   align-items: center;

@@ -425,7 +425,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "permissions.mode",
-    "label": "Who decides when GoodVibes should ask",
+    "label": "When GoodVibes asks",
     "appliesWhen": "now",
     "type": "enum",
     "default": "jev-decides",

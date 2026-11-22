@@ -3,9 +3,59 @@
  * almost everything lives in library.css; this file holds the one memory-only rule.
  */
 
-/* The confidence figure ("82% confident") stays on one line beside the row. */
+/* The rating ("Rated 82% sure") stays on one line beside the row. */
 .memory-record-row .dv-value {
   white-space: nowrap;
+}
+
+/* Scope as radios, each with the line saying where it applies and who sees it. */
+.memory-scope-choice {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.memory-scope-choice__legend {
+  margin-bottom: 6px;
+  padding: 0;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+
+.memory-scope-choice__line {
+  display: block;
+  margin: 2px 0 0 26px;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  line-height: var(--leading-meta);
+}
+
+/* The filter row's controls, each under the question it answers. */
+.lib-toolbar.memory-filters {
+  align-items: flex-start;
+}
+
+.memory-filter {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+/* A checkbox stands as tall as the selects beside it, so the questions line up. */
+.memory-filter > .gv-checkbox {
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+}
+
+.memory-filter__question {
+  color: var(--text-2);
+  font-size: var(--text-xs);
 }
 
 /* Memory copies: one row per copy, the restore button at the end. */

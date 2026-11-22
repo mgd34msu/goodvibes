@@ -13,6 +13,23 @@ export const AGENT_WORKSPACE_MODAL_NAME = 'agentWorkspace';
 
 export type AgentWorkspaceCategoryGroup = 'START' | 'SETUP' | 'ONBOARDING' | 'DAY-TO-DAY' | 'CAPABILITIES' | 'LOCAL BEHAVIOR' | 'OPERATIONS' | 'FINISH';
 
+/** The order the groups are listed in: what a person does on an ordinary day first, setting up after. */
+export const AGENT_WORKSPACE_GROUP_ORDER: readonly AgentWorkspaceCategoryGroup[] = [
+  'START', 'DAY-TO-DAY', 'LOCAL BEHAVIOR', 'CAPABILITIES', 'OPERATIONS', 'SETUP', 'ONBOARDING', 'FINISH',
+];
+
+/** What each group is called on screen, for the job its areas do; the group key stays the name the workspace filters by. */
+export const AGENT_WORKSPACE_GROUP_TITLES: Readonly<Record<AgentWorkspaceCategoryGroup, string>> = {
+  START: 'START',
+  'DAY-TO-DAY': 'GET THINGS DONE',
+  'LOCAL BEHAVIOR': 'REMEMBER & TEACH',
+  CAPABILITIES: 'TOOLS & KNOWLEDGE',
+  OPERATIONS: 'HOMES & HOST',
+  SETUP: 'SET UP',
+  ONBOARDING: 'SET UP',
+  FINISH: 'FINISH SETUP',
+};
+
 export type AgentWorkspaceFocusPane = 'categories' | 'actions';
 
 export const AGENT_WORKSPACE_CATEGORY_IDS = [

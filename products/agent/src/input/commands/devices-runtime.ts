@@ -65,7 +65,7 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
     },
     devices: (ctx) => ctx.platform.devices,
     async pairDevice(ctx, name) {
-      const outcome = await mintAgentDevicePairing(hostVerbs(ctx), name ? { name } : {});
+      const outcome = await mintAgentDevicePairing(hostVerbs(ctx), { ...(name ? { name } : {}), pairCommand: '/devices pair device' });
       if (!outcome.ok) throw commandRefusal(outcome.error, outcome.next);
       return outcome.text;
     },

@@ -3,9 +3,11 @@ import type { MemoryAddInput, MemoryClass, MemoryScope } from '../../lib/goodvib
 import { Button } from '../../components/ui/Button';
 import { Dialog } from '../../components/ui/Dialog';
 import { Field, Input, Textarea } from '../../components/ui/Field';
+import { Radio } from '../../components/ui/Radio';
 import { Select } from '../../components/ui/Select';
 import { sentence } from '../library/library-data';
-import { MEMORY_CLASSES, MEMORY_SCOPES, splitTags } from './memory-helpers';
+import { MEMORY_CLASSES, MEMORY_SCOPE_LINES, MEMORY_SCOPES, splitTags } from './memory-helpers';
+import '../../styles/components/memory.css';
 
 interface AddMemoryDialogProps {
   open: boolean;
@@ -52,7 +54,7 @@ export function AddMemoryDialog({ open, onClose, isPending, error, onSubmit }: A
       open={open}
       onClose={onClose}
       title="Add memory"
-      description="A fact, decision or constraint GoodVibes should remember."
+      description="A fact, decision or constraint GoodVibes should remember. It starts rated just sure enough to be brought into answers; change how sure it is in its Review once added."
       footer={(
         <>
           <Button variant="secondary" onClick={onClose}>Cancel</Button>
@@ -63,24 +65,30 @@ export function AddMemoryDialog({ open, onClose, isPending, error, onSubmit }: A
       )}
     >
       <form id="library-add-memory" className="lib-form" onSubmit={submit}>
-        <div className="lib-form__split">
-          <Field label="Type">
-            <Select<MemoryClass>
-              value={cls}
-              aria-label="Memory type"
-              onChange={setCls}
-              options={MEMORY_CLASSES.map((option) => ({ value: option, label: sentence(option) }))}
-            />
-          </Field>
-          <Field label="Scope">
-            <Select<MemoryScope>
-              value={scope}
-              aria-label="Memory scope"
-              onChange={setScope}
-              options={MEMORY_SCOPES.map((option) => ({ value: option, label: sentence(option) }))}
-            />
-          </Field>
-        </div>
+        <Field label="Type">
+          <Select<MemoryClass>
+            value={cls}
+            aria-label="Memory type"
+            onChange={setCls}
+            options={MEMORY_CLASSES.map((option) => ({ value: option, label: sentence(option) }))}
+          />
+        </Field>
+        <fieldset className="memory-scope-choice">
+          <legend className="memory-scope-choice__legend">Scope</legend>
+          {MEMORY_SCOPES.map((option) => (
+            <div key={option}>
+              <Radio
+                name="library-add-memory-scope"
+                checked={scope === option}
+                onChange={() => setScope(option)}
+                aria-describedby={`library-add-memory-scope-${option}`}
+              >
+                {sentence(option)}
+              </Radio>
+              <span id={`library-add-memory-scope-${option}`} className="memory-scope-choice__line">{MEMORY_SCOPE_LINES[option]}</span>
+            </div>
+          ))}
+        </fieldset>
         <Field label="Summary">
           <Input
             value={summary}

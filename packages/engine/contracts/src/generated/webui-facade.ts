@@ -9,7 +9,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * webui keeps its ergonomic wrappers (route interpolation, per-family typed
  * call sites) hand-written on top of these generated primitives.
  *
- * Contract product version: 3.4.4
+ * Contract product version: 3.4.5
  * Methods: 650 total, 535 REST-routed, 115 ws-only invoke.
  */
 
@@ -26940,7 +26940,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "offers": [
         "sample"
       ],
-      "fromSharedToken": false
+      "fromSharedToken": false,
+      "forThisMachine": false
     },
     "output": {
       "token": {
@@ -26970,7 +26971,20 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "available": false,
             "reason": "sample"
           }
-        ]
+        ],
+        "reach": {
+          "otherDevices": false,
+          "reason": "sample",
+          "fix": "sample",
+          "steps": [
+            {
+              "state": "done",
+              "text": "sample",
+              "detail": "sample",
+              "command": false
+            }
+          ]
+        }
       }
     }
   },
@@ -26991,7 +27005,20 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "available": false,
             "reason": "sample"
           }
-        ]
+        ],
+        "reach": {
+          "otherDevices": false,
+          "reason": "sample",
+          "fix": "sample",
+          "steps": [
+            {
+              "state": "done",
+              "text": "sample",
+              "detail": "sample",
+              "command": false
+            }
+          ]
+        }
       }
     }
   },
@@ -31777,7 +31804,10 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "words": {
         "chosen": "sample",
         "inForce": "sample",
+        "chosenWhen": "sample",
+        "chosenShort": "sample",
         "because": "sample",
+        "failure": false,
         "sentence": "sample",
         "asksBefore": "sample"
       }

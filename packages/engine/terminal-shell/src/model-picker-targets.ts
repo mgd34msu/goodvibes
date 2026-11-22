@@ -1,11 +1,31 @@
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers';
-import type { ModelPickerTargetInfo } from './model-picker-types.js';
+import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
+import type { ModelPickerTarget, ModelPickerTargetInfo } from './model-picker-types.js';
+import { decisionModelChoices } from './settings-choice-actions.js';
+
+/** Each target's name, for what it does: the picker's tabs, its hints and the line a choice writes all use these. */
+const TARGET_LABELS: Readonly<Record<ModelPickerTarget, string>> = {
+  main: 'Main chat',
+  helper: 'Side work',
+  tool: 'Tool work',
+  tts: 'Spoken replies',
+  embeddings: 'Search index',
+  decision: 'Decision model',
+};
+
+export function modelPickerTargetLabel(target: ModelPickerTarget): string {
+  return TARGET_LABELS[target];
+}
+
+/** What the search-index target is for, in one line (the terminal app lists it; it is not a chat model). */
+export const SEARCH_INDEX_TARGET_DESCRIPTION = 'Turns memories and code into a form GoodVibes can search. A service, not a chat model.';
+
 export function buildConversationModelPickerTargets(
   configManager: Pick<ConfigManager, 'get'>,
   runtime: { readonly model: string; readonly provider: string },
   resolveProvider: (model: unknown) => string = getProviderIdFromModel,
-): ModelPickerTargetInfo<'main' | 'helper' | 'tool' | 'tts'>[] {
+): ModelPickerTargetInfo<'main' | 'helper' | 'tool' | 'tts' | 'decision'>[] {
   const mainProvider = resolveProvider(configManager.get('provider.model') || runtime.provider).trim();
   const mainModel = String(configManager.get('provider.model') || runtime.model || '').trim();
   const helperProvider = String(configManager.get('helper.globalProvider') ?? '').trim();
@@ -14,12 +34,16 @@ export function buildConversationModelPickerTargets(
   const toolModel = String(configManager.get('tools.llmModel') ?? '').trim();
   const ttsProvider = String(configManager.get('tts.llmProvider') ?? '').trim();
   const ttsModel = String(configManager.get('tts.llmModel') ?? '').trim();
+  const decisionChoices = decisionModelChoices(configManager);
+  const decisionCurrent = decisionChoices.find((choice) => choice.current);
+  const decisionModel = String(configManager.get('judgment.model') ?? '').trim();
+  const decisionEndpoint = String(configManager.get('judgment.endpoint') ?? '').trim();
 
   return [
     {
       target: 'main',
-      label: 'Main Chat',
-      description: 'Default provider and model for normal chat turns in this TUI session.',
+      label: TARGET_LABELS.main,
+      description: 'Answers you in conversations and does the work you ask for.',
       provider: mainProvider,
       model: mainModel,
       enabled: true,
@@ -27,8 +51,8 @@ export function buildConversationModelPickerTargets(
     },
     {
       target: 'helper',
-      label: 'Helper Model',
-      description: 'Optional helper route used for supporting work. Empty provider/model values inherit Main Chat.',
+      label: TARGET_LABELS.helper,
+      description: 'Writes the summaries that keep long sessions going and the session titles; none chosen, the tool-work model or the main chat model does it.',
       provider: helperProvider || mainProvider,
       model: helperModel || mainModel,
       enabled: Boolean(configManager.get('helper.enabled')),
@@ -36,8 +60,8 @@ export function buildConversationModelPickerTargets(
     },
     {
       target: 'tool',
-      label: 'Tool LLM',
-      description: 'Optional LLM route for tool-specific reasoning. Selecting a model enables the tool LLM route.',
+      label: TARGET_LABELS.tool,
+      description: 'Does GoodVibes\'s own background work: commit messages, repairing a failed edit, summarizing changes. Choosing a model turns it on.',
       provider: toolProvider || mainProvider,
       model: toolModel || mainModel,
       enabled: Boolean(configManager.get('tools.llmEnabled')),
@@ -45,14 +69,33 @@ export function buildConversationModelPickerTargets(
     },
     {
       target: 'tts',
-      label: 'TTS LLM',
-      description: 'Optional LLM override for /voice speak response generation. Empty values use the current chat model.',
+      label: TARGET_LABELS.tts,
+      description: 'Writes the answers that are read aloud (/voice speak); none chosen, the main chat model writes them.',
       provider: ttsProvider || mainProvider,
       model: ttsModel || mainModel,
       enabled: true,
       inherited: ttsProvider.length === 0 && ttsModel.length === 0,
     },
+    {
+      target: 'decision',
+      label: TARGET_LABELS.decision,
+      description: `Decides which actions are safe to run when the mode is ${gatePresetLabel('jev-decides')}; with none set, GoodVibes asks you instead.`,
+      provider: decisionEndpoint,
+      model: decisionModel,
+      enabled: true,
+      inherited: false,
+      configuredNote: decisionCurrent === undefined || decisionCurrent.id === '__none__'
+        ? decisionModelSetNote(decisionCurrent, decisionModel)
+        : [decisionCurrent.label, decisionModel, decisionEndpoint].filter(Boolean).join(' · '),
+      choices: decisionChoices,
+    },
   ];
+}
+
+/** The decision target's current line when no listed profile is in force: none, or one set by a custom model id, a key or a fallback. */
+function decisionModelSetNote(current: { readonly id: string } | undefined, model: string): string {
+  if (current?.id === '__none__') return 'not set';
+  return model ? `custom: ${model}` : 'set by a key, an address or a backup model';
 }
 export function selectedModelPickerRoute(
   configManager: Pick<ConfigManager, 'get'>,

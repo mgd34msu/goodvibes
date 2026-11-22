@@ -1,11 +1,10 @@
 import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
-import { basename } from 'node:path';
 import type { CommandContext } from './command-registry.ts';
 import { AgentRoutineRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
 import { memoryRecordTemporalStatus } from '@goodvibes/engine/platform/platform/state';
 import { describeMemoryPromptEligibility, isPromptActiveMemory } from '@goodvibes/engine/terminal-shell/agent-turn/memory-prompt';
 import { summarizeAgentBehaviorDiscovery } from '../agent/behavior-discovery-summary.ts';
-import { agentRuntimeProfileBaseHome } from '../agent/runtime-profile.ts';
+import { agentRuntimeProfileName } from '../agent/runtime-profile.ts';
 import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceSetupChecklist } from './agent-workspace-setup.ts';
 import { buildAgentWorkspaceVoiceMediaReadiness } from './agent-workspace-voice-media.ts';
@@ -77,7 +76,7 @@ function describeReadFailures(failures: AgentWorkspaceReadFailures): string[] {
 
 /** The profile this session runs in: a profile home is one the profile module's own path rule recognises. */
 function activeRuntimeProfileName(homeDirectory: string): string {
-  return homeDirectory && agentRuntimeProfileBaseHome(homeDirectory) !== homeDirectory ? basename(homeDirectory) : '(default home)';
+  return agentRuntimeProfileName(homeDirectory) ?? '(default home)';
 }
 
 export interface AgentWorkspaceLiveMemoryCounters {

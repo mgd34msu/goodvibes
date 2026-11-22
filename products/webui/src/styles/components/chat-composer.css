@@ -301,6 +301,63 @@
   opacity: 0.6;
 }
 
+/* While a reply runs, Send says it queues, and "Send now" beside it interrupts. */
+.send-button[data-queueing="true"] {
+  display: inline-flex;
+  width: auto;
+  gap: 4px;
+  padding: 0 12px 0 9px;
+}
+
+.send-button__word {
+  font: var(--weight-medium) var(--text-sm) / 1 var(--font-ui);
+}
+
+.composer-interrupt {
+  flex: none;
+  height: 32px;
+  padding: 0 12px;
+  color: var(--text);
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-full);
+  font: var(--weight-medium) var(--text-sm) / 1 var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.composer-interrupt:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+.composer-interrupt:disabled {
+  color: var(--text-3);
+  cursor: default;
+}
+
+/* A /command this composer does not run: the note and a way to send it as text. */
+.composer-command-note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+}
+
+.composer-command-note span {
+  flex: 1 1 240px;
+}
+
+.composer-command-note__send {
+  flex: none;
+  padding: 4px 10px;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  font: inherit;
+  cursor: pointer;
+}
+
 /* Floating notes and popovers anchored to controls at the right end of the row
    open leftwards so they never push past the viewport edge. */
 .composer .voice-mic-note,
@@ -382,7 +439,8 @@
     height: 44px;
   }
 
-  .composer-model-btn {
+  .composer-model-btn,
+  .composer-interrupt {
     height: 44px;
   }
 }

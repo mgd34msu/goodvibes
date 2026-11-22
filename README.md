@@ -49,7 +49,7 @@ and adds `~/.local/bin` to your `PATH` when it is missing. It needs no Bun,
 Node, Git or compiler. When it finishes, it prints the command to start with
 and the web app's address.
 
-- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.4 sh`
+- **Pick a version:** `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.5 sh`
 - **Skip the service:** add `GOODVIBES_DAEMON_SERVICE=0` the same way.
 - **Updates** install themselves: the daemon checks hourly and waits until no
   work is running, and the terminal apps check when they start. Running the
@@ -86,8 +86,10 @@ goodvibes
    its tests?` and press Enter. It reads the files it needs and answers.
 3. **Ask for a change.** Type `Add a --verbose flag to the CLI and run the
    tests.` The first time it wants to write or run something in a folder, it
-   asks whether to trust the folder: **Trust this workspace** lets it work,
-   **Keep restricted** keeps it read-only. When it asks before running a
+   asks whether to trust the folder: **Trust this workspace** lets the folder's
+   own hooks and MCP servers run and lets GoodVibes change files in it, but
+   approves nothing: each action still follows your setting for when
+   GoodVibes asks. **Keep restricted** keeps it read-only. When it asks before running a
    command, you can allow it once, allow it and remember the rule, or deny it
    with a reason it reads.
 
@@ -193,14 +195,15 @@ around is **Jev**. The setting `permissions.mode` is a dial from "ask me" to
 
 In `goodvibes`, `Shift+Tab` changes the mode for the current session.
 `--just-vibes` or `--yolo` sets it for one launch of either terminal app, and
-`/settings` (Permission Mode) saves it. Plan mode, `/decisions` and the rest:
+`/settings` (When GoodVibes asks) saves it. Plan mode, `/decisions` and the rest:
 [permission modes](docs/decision-model-policy.md#permission-modes).
 
 ## The decision model
 
 The decision model makes routine calls so you are asked less. It is optional:
 coding, commands, tests, chat and the rest work without one, and you are asked
-instead. To set one up, choose it in `/settings` under Judgment; the
+instead. To set one up, choose it on the model picker's Decision model tab
+or in `/settings` under Judgment; the
 [decision model guide](docs/decision-model-policy.md) walks through the
 choices. By default, GoodVibes lets a decision model answer for you only when
 its accuracy has been checked, which today means the hosted Jev. To let a
@@ -251,7 +254,7 @@ By topic:
 - [Chat channels and the daemon's API](products/tui/docs/channels-remote-and-api.md)
 - [Headless runs](products/agent/docs/headless-run.md) and [exit codes](docs/exit-codes.md)
 - [Purchases](packages/engine/docs/payments.md)
-- [Release notes for 3.4.4](docs/releases/3.4.4.md)
+- [Release notes for 3.4.5](docs/releases/3.4.5.md)
 - [Building on the platform](packages/engine/README.md) and [the Jev decision layer](packages/judgment/README.md)
 - [Security policy](SECURITY.md)
 

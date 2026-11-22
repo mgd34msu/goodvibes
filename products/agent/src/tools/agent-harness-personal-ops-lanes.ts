@@ -53,8 +53,8 @@ function notesLane(snapshot: ReturnType<typeof buildAgentWorkspacePersonalOpsPar
     current: `Agent-local notes are available: ${snapshot.localNoteCount} note(s), ${snapshot.localNoteReviewQueueCount} needing review.`,
     next: snapshot.localNoteCount > 0
       ? 'Review or promote selected notes into memory, skills, routines, or Agent Knowledge when useful.'
-      : 'Create a note from the Personal Ops or Notes workspace when the next decision or source needs tracking.',
-    userRoute: 'Agent Workspace -> Personal Ops -> Create note',
+      : 'Create a note from the Inbox & calendar or Notes area of the workspace when the next decision or source needs tracking.',
+    userRoute: 'Agent Workspace -> Inbox & calendar -> Create note',
     modelRoute: NOTE_CAPTURE_ROUTE,
     signals: [
       `${snapshot.localNoteCount} local note(s)`,
@@ -77,7 +77,7 @@ function remindersLane(scheduleMethods: readonly string[],
     next: reminderEffectReceiptRecords.length > 0
       ? 'Review saved reminder provider-effect receipts, then repair or refresh the reminder provider before another provider update.'
       : 'Create one confirmed reminder or autonomous schedule with title, time, scope, delivery target, success criteria, and explicit user request.',
-    userRoute: 'Agent Workspace -> Personal Ops -> Create reminder',
+    userRoute: 'Agent Workspace -> Inbox & calendar -> Create reminder',
     modelRoute: 'schedule action:"remind"',
     signals: [
       `${cappedCount(reminderEffectReceiptRecords.length, 'record')} saved reminder provider-effect receipt(s)`,
@@ -133,7 +133,7 @@ function inboxLane({ snapshot, google, emailMethods, unavailableEmailMethods, em
           : inboxEffectReceiptRecords.length > 0
             ? 'Review saved inbox provider-effect receipts, then repair an email connector before reading fresh inbox data or sending another provider effect.'
       : googleSetupNext(google.state, 'inbox'),
-    userRoute: 'Agent Workspace -> Personal Ops -> Delivery channels',
+    userRoute: 'Agent Workspace -> Inbox & calendar -> Delivery channels',
     modelRoute: google.inbox ? google.inbox.modelRoute : emailConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"email"' : 'host action:"methods" query:"email"',
     signals: [
       googleSignal(google.state, google.inbox),
@@ -252,7 +252,7 @@ async function ownedBuildLanes(
             : calendarEffectReceiptRecords.length > 0
               ? 'Review saved calendar provider-effect receipts, then repair a calendar connector before reading fresh agenda data or editing events.'
         : googleSetupNext(google.state, 'calendar'),
-      userRoute: 'Agent Workspace -> Personal Ops -> Create reminder',
+      userRoute: 'Agent Workspace -> Inbox & calendar -> Create reminder',
       modelRoute: google.calendar ? google.calendar.modelRoute : calendarConnectors.length > 0 ? 'agent_harness mode:"mcp_servers" query:"calendar"' : 'host action:"methods" query:"calendar"',
       signals: [
         googleSignal(google.state, google.calendar),
@@ -303,7 +303,7 @@ async function ownedBuildLanes(
       next: scheduleReadyRoutines > 0
         ? 'Promote a reviewed routine to a connected schedule when the user asks for recurrence.'
         : 'Create or review a routine, resolve setup gaps, then promote only with explicit schedule confirmation.',
-      userRoute: 'Agent Workspace -> Personal Ops -> Routine library',
+      userRoute: 'Agent Workspace -> Inbox & calendar -> Routine library',
       modelRoute: 'workspace action:"actions" categoryId:"routines"',
       signals: [
         `${scheduleReadyRoutines} schedule-ready routine(s)`,
@@ -323,7 +323,7 @@ async function ownedBuildLanes(
       next: readyChannels > 0
         ? 'Use confirmed channel send or notification tools when the user asks for delivery.'
         : 'Enable and configure one delivery channel so personal-ops reminders and summaries can reach the user.',
-      userRoute: 'Agent Workspace -> Personal Ops -> Delivery channels',
+      userRoute: 'Agent Workspace -> Inbox & calendar -> Delivery channels',
       modelRoute: 'channels action:"status"',
       signals: [
         `${readyChannels} ready channel(s)`,

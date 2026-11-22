@@ -90,8 +90,8 @@ How each option behaves:
 | `-y, --yes` | Confirms a command that would otherwise only preview (for example `plugin bundles install`, `support-bundle import`). |
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. |
-| `-h, --help` | Prints help. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.4.4`. |
+| `-h, --help` | Prints help: first `Most used:` (start the app, `run "<prompt>"`, `pair`, `status`, `goodvibes-daemon update --check`; the Agent adds `setup`), then every command, the options and examples. `goodvibes help <command>` prints one command's help. |
+| `-v, --version` | Prints `goodvibes 3.4.5`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -496,6 +496,18 @@ Host pairing is described under "Host pairing: giving the terminal app its own c
 goodvibes pair --name "my phone"
 ```
 
+Before minting, `pair` asks the daemon (`pairing.posture.get`, which mints nothing) whether another device could open the code; the daemon decides from its settings, with no request on the network: a loopback address cannot; `web.publicBaseUrl` is your statement that it can; otherwise `controlPlane.enabled` decides. When none could, no token is minted and `pair` exits `1`, printing:
+
+```text
+No pairing code was made: a phone could not open it yet.
+  1. done  The daemon serves the web UI at http://127.0.0.1:3421.
+  2. next  goodvibes-daemon webui enable --lan
+           (the daemon serves only this machine: http://127.0.0.1:3421 is this machine's own address, which another device cannot open)
+  3. then  goodvibes pair, then scan the code it prints with the phone.
+```
+
+When one can, the output leads with the same list (`1. done  The daemon serves the web UI at <origin>, open to other devices.`, `2. next  Scan the code below with the phone's camera; it opens the web app already signed in.`, `3. then  In the web app, accept or decline each offer: ...`), then the QR code, the link, the token name and the details. A daemon serving no web UI gets `No pairing code was made: the daemon serves no web UI, so a code would open nothing.` with `goodvibes-daemon webui enable --lan` as the next step. `goodvibes-agent pair` and the Agent's `/devices pair device` do the same against the connected host.
+
 Device pairing is described under "Pairing a phone or another browser" in the daemon part.
 
 ### `goodvibes web`, `surfaces`, `listener`, `control-plane`, `service`, `remote`
@@ -622,7 +634,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.4.4`.
+`goodvibes version` prints `goodvibes 3.4.5`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface
@@ -634,7 +646,7 @@ The screen has four regions, top to bottom.
 1. The header names the program, its version and the session. While a helper agent or background process is open full screen, the header reads `main › <agent>` in the agent's color. While a failover is in force it also names the model answering, with `failover from <selected model>`.
 2. The transcript shows the conversation: owner prompts, model answers, tool calls with their results, notices in square brackets (`[Permissions]`, `[Context]`, `[Failover]`), and the work tree of helper agents and background processes started in the turn.
 3. The composer is the text box where the owner types. Its label shows what Enter will do (prompt, command, shell, note, memory pin).
-4. The status bar, the row under the composer. Left: `Asks:` and the permission mode chosen (`Asks: Jev decides`); when the mode in force differs, ` · asking you for now · <why>` (`decision model unreachable`, `decision model failing`, `no decision model set`, `decision models switched off`, `not measured yet`); then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. A click on a segment opens its view: the mode opens the permission mode setting, the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; a reason that only states a choice (`no decision model set`, `decision models switched off`) goes (a click on the mode shows it); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a reason that reports a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure reason goes last. `Asks:` with the mode and `asking you for now` always stay. At 120 columns with a choice reason and a few unread notices, context, branch and model all show; with the decision model unreachable the reason stays whole and the context and branch give way.
+4. The status bar, the row under the composer. Left: `Asks:` and the mode in force. When it is the mode chosen, its name (`Asks: Jev decides`); when it is not, what is in force first and the choice second, with when it takes effect: `Asks: you, for now · Jev decides once a decision model is set` (no decision model set), `· Jev decides once decision models are on` (decision models switched off), `· Jev decides once you choose it` (Jev decides is only the shipped default and was not measured on this decision model), `· Jev decides once the decision model answers again · decision model unreachable` (or `· decision model failing`), and `Asks: YOLO, for now · <mode> once the old auto-approve setting is off`; then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. A click on a segment opens its view: the mode opens the permission mode setting, the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; the choice shortens (`Jev decides once a decision model is set` to `you chose Jev decides`, or `default: Jev decides` while Jev decides is only the shipped default; a click on the mode shows the rest); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure goes last. `Asks:` with the mode in force (`you, for now`) and the choice always stay. At 120 columns with no decision model set, `Asks: you, for now · you chose Jev decides` shows with context, branch and model (and `1 notice` when there is one); with Jev decides only the shipped default and not measured, the whole of `Asks: you, for now · Jev decides once you choose it` shows when there is no notice; with the decision model unreachable, `Asks: you, for now · you chose Jev decides · decision model unreachable` shows with `branch main` and the model. At 80 columns: `Asks: you, for now · you chose Jev decides` with the model, or `Asks: you, for now · you chose Jev decides · unreachable`.
 
 While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Tab` and `Shift+Tab` switch between sessions when the composer is empty.
 
@@ -730,7 +742,7 @@ The default table of the terminal app:
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
 The change lasts for the session only. The saved default is changed in `/settings` (or `/settings set permissions.mode <mode>`); `/permissions` shows it but does not change it.
 Plan mode is outside the cycle; `/plan` turns it on and off for this session, also without changing the saved default.
-Nothing is written into the conversation: the status bar's `Asks:` segment shows the new mode and flashes (drawn inverse) for 1.5 seconds. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the segment says so and why: `Asks: Jev decides · asking you for now · decision models switched off`.
+Nothing is written into the conversation: the status bar's `Asks:` segment shows the new mode and flashes (drawn inverse) for 1.5 seconds. When the mode chosen is not the one in force (`jev-decides` with no working decision model runs as `ask-me`), the segment leads with what is in force and says when the choice takes effect: `Asks: you, for now · Jev decides once decision models are on`.
 A managed lock on `permissions.mode` stops the change, and a notice says so: `The mode stays <mode>: <reason>`.
 
 ### Changing a key
@@ -830,7 +842,7 @@ The sections below explain the commands grouped by task. Each entry gives the pu
 
 ### Help, navigation and display
 
-`?` on an empty composer, `/help` and `Ctrl+P` (or `Ctrl+K`) all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command) and `Finds:` with the words that find it; on an 80-column terminal there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines, and `/help keys` prints every key with the file that changes them (`~/.goodvibes/tui/keybindings.json`). The list's last shortcut row names that file too. Without an interface `/help` prints every command with its usage.
+`?` on an empty composer, `/help` and `Ctrl+P` (or `Ctrl+K`) all open the same list: every command as a plain title with its slash name on the right, grouped by task (Suggested, Session, Views, Settings, every other command), and the keyboard shortcuts as the last group, each with its key on the right. Typing searches titles, names, descriptions and search words; a search also lists the shortcuts it matches. Beside the search, `<n> commands and keys` counts every row of the list (`<shown> of <n>` while searching), the same rows the `<n> more ↓` count under the list counts. The detail pane shows the selected command's summary, what it can do (its actions, for a guided command with more than one; a command that does one thing shows only its summary) and `Finds:` with the words that find it; on an 80-column terminal there is no detail pane and the selected row's summary is one dim line under the list. Enter runs the command (a guided command opens its list of things to do); `tab` puts it in the composer to type arguments. A shortcut row is read, not run. `/help <command>` prints one command's actions and typed lines, and `/help keys` prints every key with the file that changes them (`~/.goodvibes/tui/keybindings.json`). The list's last shortcut row names that file too. Without an interface `/help` prints every command with its usage.
 Looking through the conversation is under `/session` (its group "Look through this conversation"): `/session find [--kind <kind>] [<words>]` lists the entries that hold the words (with none, it searches in place, the same as `Ctrl+F`); `/web-search` searches the web instead.
 `/session expand [all|thinking|tool|code]` and `/session collapse [all|thinking|tool|code]` open or fold every block of that type (all of them when none is given).
 `/session bookmarks` lists the blocks bookmarked with `Ctrl+B` and jumps to one.
@@ -1031,7 +1043,7 @@ When a file was changed after that call (by you, another tool or another program
 When the provider is not signed in, the terminal app asks for its API key on a hidden line before the switch lands.
 An unknown id is refused with the provider registry's reason. `/model use` alone asks which model, from the models you can switch to.
 `/model refresh` asks every provider you have set up for its models again (past any list kept on disk), then refreshes the catalog, the benchmarks and the token limits, and prints one line per provider: how many models it has, or why its list could not be read (`could not be read, its server is not running`, `could not be read (<error>); 12 models from its last list`, `0 models: it answered with an empty list`); a provider that does not list its own models says it uses the built-in catalog. A part that failed makes the refresh a refusal naming it, after the rest was printed.
-The model picker (its key, or a failed turn's `alt+o`) is unchanged; its left rail selects the route the choice is for: Main Chat, Helper Model, Tool LLM, TTS LLM or Embeddings (see "Routing roles" below).
+The model picker (its key, or a failed turn's `alt+o`) has a tab for each thing a model is chosen for: Main chat, Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `kind unknown`; pinned and recent models still come first.
 
 `/effort` is described once for both programs: `show` ("See how hard the model thinks", the report) and `set <level>` ("Choose how hard the model thinks"; bare `/effort set` lists the levels the current model offers).
 `/effort set high` saves `provider.reasoningEffort` and prints the level in effect.
@@ -1436,15 +1448,16 @@ Files in that directory are read again when they change; no restart is needed.
 
 ### Routing roles
 
-`/model` chooses a model for one of five roles. Each role writes its own settings, so a choice for one never changes another.
+The model picker chooses a model for one of six roles. Each role writes its own settings, so a choice for one never changes another.
 
 | Role | Picker label | Settings | Behavior |
 | --- | --- | --- | --- |
-| Main chat | Main Chat | `provider.provider`, `provider.model` | Normal turns. |
-| Helper | Helper Model | `helper.globalProvider`, `helper.globalModel`, `helper.enabled` (default off) | Supporting work such as summaries; empty values use the main model. |
-| Tool model | Tool LLM | `tools.llmProvider`, `tools.llmModel`, `tools.llmEnabled` | Model calls made inside tools; selecting a model turns it on. |
-| TTS model | TTS LLM | `tts.llmProvider`, `tts.llmModel` | The model that answers `/voice speak` messages; empty uses the main model. |
-| Embeddings | Embeddings | `provider.embeddingProvider` | The embedding provider for memory search and the code index. It has no model choice. |
+| Main chat | Main chat | `provider.provider`, `provider.model` | Normal turns. |
+| Helper | Side work | `helper.globalProvider`, `helper.globalModel`, `helper.enabled` (default off) | Supporting work such as summaries and session titles; empty values use the tool-work model when it is on, else the main model. |
+| Tool model | Tool work | `tools.llmProvider`, `tools.llmModel`, `tools.llmEnabled` | GoodVibes's own background model calls (commit messages, repairing a failed edit, summarizing changes); selecting a model turns it on. |
+| TTS model | Spoken replies | `tts.llmProvider`, `tts.llmModel` | The model that answers `/voice speak` messages; empty uses the main model. |
+| Decision model | Decision model | `judgment.endpoint`, `judgment.model`, `judgment.keySource`, `judgment.keyName`, `judgment.backend` | The model that decides which actions are safe to run under Jev decides. The tab lists "No decision model" and the decision models Settings offers; choosing one asks for its address and where its key comes from, the same steps as the Decision model row of `/settings open`, which write the same settings. Both programs. |
+| Embeddings | Search index | `provider.embeddingProvider` | The embedding provider for memory search and the code index. It has no model choice. The terminal app only. |
 
 `goodvibes doctor routing` prints which provider and model serve each role.
 

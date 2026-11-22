@@ -1,4 +1,13 @@
 import { isGatePresetName, type GatePresetName } from '@goodvibes/engine/platform/platform/gate/presets';
+import { readModeInForceWords, type ModeInForceWords } from '@goodvibes/engine/platform/platform/permissions';
+
+/** The host's account of why its mode in force is not the session's chosen one. */
+export interface HostedModeDifference {
+  readonly chosen: GatePresetName;
+  readonly reason: string;
+  /** The host's words for it (sessions.permissionMode.get `words`), when it sent them. */
+  readonly words?: ModeInForceWords;
+}
 /**
  * remote-conversation.ts, observing this surface's own conversation turns
  * running inside the connected host.
@@ -132,8 +141,8 @@ export interface RemoteConversationRouter {
   /** The hosted session this conversation is bound to, if any. */
   hostedSessionId(): string | null;
   executionMode(): GatePresetName | undefined;
-  /** When the host reported its mode in force differs from the session's chosen mode: the chosen mode and why. */
-  executionModeDifference?(): { readonly chosen: GatePresetName; readonly reason: string } | undefined;
+  /** When the host reported its mode in force differs from the session's chosen mode: the chosen mode, why, and the host's words for it. */
+  executionModeDifference?(): HostedModeDifference | undefined;
   refreshExecutionMode(): Promise<void>;
   setExecutionMode(mode: GatePresetName): Promise<void>;
   /** Request Stop for the observed input only; true means the hosted path owns it. */
@@ -188,7 +197,7 @@ export function createRemoteConversationRouter(
   let hostedConnection: Extract<ConnectedHostResolution, { readonly baseUrl: string }> | undefined;
   let hostedMode: GatePresetName | undefined;
   /** The host's account of why its mode in force is not the chosen one, from the last sessions.permissionMode.get. */
-  let hostedModeDifference: { readonly chosen: GatePresetName; readonly reason: string } | undefined;
+  let hostedModeDifference: HostedModeDifference | undefined;
   let modeObservation = 0;
   let modeRequest = 0;
   let stopRenewal: (() => void) | null = null;
@@ -237,8 +246,9 @@ export function createRemoteConversationRouter(
       }
       hostedMode = reply.mode;
       const chosen = reply.chosenMode;
+      const words = readModeInForceWords((reply as { readonly words?: unknown }).words);
       hostedModeDifference = chosen !== undefined && isGatePresetName(chosen) && chosen !== reply.mode && typeof reply.reason === 'string'
-        ? { chosen, reason: reply.reason } : undefined;
+        ? { chosen, reason: reply.reason, ...(words ? { words } : {}) } : undefined;
       options.requestRender();
     } catch (error) {
       if (revision === modeObservation) { hostedMode = undefined; options.requestRender(); }

@@ -2,9 +2,9 @@ import { createContext, isValidElement, memo, ReactNode, useContext, useMemo, us
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, TextWrap } from 'lucide-react';
 import { highlightCode, normalizeLanguage } from '../lib/highlight';
-import { useWebUiPreferences } from '../lib/ui-preferences';
+import { useWebUiPreferences, writeWebUiPreference } from '../lib/ui-preferences';
 import { useOptionalToast } from '../lib/toast';
 import { IconButton } from './ui/IconButton';
 import '../styles/components/markdown.css';
@@ -42,10 +42,13 @@ const LineNumbersContext = createContext(false);
 // untagged block is not run through language detection (every grammar, every token)
 // until the finished reply renders.
 const LiveContext = createContext(false);
+// Whether code blocks wrap long lines: one choice for every block, remembered on this device.
+const WrapContext = createContext(false);
 
 function CodeBlock({ children }: { children: ReactNode }) {
   const lineNumbers = useContext(LineNumbersContext);
   const live = useContext(LiveContext);
+  const wrap = useContext(WrapContext);
   const [copied, setCopied] = useState(false);
   const toastCtx = useOptionalToast();
   const language = languageFromCodeChild(children);
@@ -72,9 +75,18 @@ function CodeBlock({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className={lineNumbers ? 'markdown-code-block numbered' : 'markdown-code-block'}>
+    <div className={['markdown-code-block', lineNumbers ? 'numbered' : '', wrap ? 'wrapped' : ''].filter(Boolean).join(' ')}>
       <div className="markdown-code-header">
         <div className="markdown-code-label">{displayLanguage || 'code'}</div>
+        <IconButton
+          className="markdown-code-wrap"
+          size="sm"
+          label={wrap ? 'Scroll long lines (code blocks on this device)' : 'Wrap long lines (code blocks on this device)'}
+          icon={<TextWrap />}
+          aria-pressed={wrap}
+          tooltipPlacement="top"
+          onClick={() => writeWebUiPreference('codeBlockWrap', !wrap)}
+        />
         <IconButton
           className="markdown-code-copy"
           size="sm"
@@ -167,9 +179,11 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content, lineNumb
     <div className="markdown-message">
       <LineNumbersContext.Provider value={showLineNumbers}>
         <LiveContext.Provider value={live}>
-          <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
-            {content}
-          </ReactMarkdown>
+          <WrapContext.Provider value={preferences.codeBlockWrap}>
+            <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
+              {content}
+            </ReactMarkdown>
+          </WrapContext.Provider>
         </LiveContext.Provider>
       </LineNumbersContext.Provider>
     </div>

@@ -235,7 +235,14 @@ asks the running daemon first whether it accepts that token and which address an
 it is bound to, so the QR carries what the daemon serves. A daemon that refuses the token
 gets no link (pass the right one with `--token`). When no daemon answers, the link is
 built from the settings and the token file, and the output says so; a daemon started on
-a port other than its settings is found with `--port`.
+a port other than its settings is found with `--port`. Before printing a QR code it
+decides, from that bound address and the settings (`controlPlane.enabled`,
+`web.publicBaseUrl`), whether another device could open the link, with no request on the
+network. When none could, it prints no QR code and exits `1`: `No pairing code was made:
+a phone could not open it yet.`, a numbered list (the web UI address; next
+`goodvibes-daemon webui enable --lan` with why; then `goodvibes-daemon pair` again), and
+the link for a browser on this machine. When one could, the block is led by the same
+numbered list of what is done and what is next.
 
 With `--host` naming a different machine, `pair` runs remotely: it asks that daemon to
 mint a brand-new per-device pairing token over `pairing.handoff.create` and prints the

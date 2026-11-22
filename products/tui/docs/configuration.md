@@ -75,7 +75,7 @@ for it to read when it starts.
 | `behavior.notifyOnComplete` | `true` | Emit terminal bell and desktop notification when a long turn completes or fails (not when you cancel it) |
 | `behavior.guidanceMode` | `minimal` | Operational guidance mode: `off`, `minimal`, `guided` |
 | `storage.secretPolicy` | `preferred_secure` | Secret storage policy: prefer secure backing store, fall back when allowed |
-| `permissions.mode` | `jev-decides` | Execution mode: `ask-me`, `jev-decides`, `just-vibes`, `yolo`, or `plan` |
+| `permissions.mode` | `jev-decides` | When GoodVibes asks: `ask-me`, `jev-decides`, `just-vibes`, `yolo`, or `plan` |
 | `ui.systemMessages` | `conversation` in this app | Where general system messages go: `conversation` or `both` shows them in the transcript (each is also kept in Notifications); `panel` sends them to Notifications only. Errors and warnings always show in the transcript |
 | `ui.operationalMessages` | `conversation` in this app | Where operational runtime notices (tools, agents, MCP, plugins) go: `conversation` or `both` shows them in the transcript (each is also kept in Notifications); `panel` sends them to Notifications only. Errors and warnings always show in the transcript |
 | `ui.contractMessages` | `both` | Routing target for contract lifecycle updates: status, checks, corrections, owner questions and the outcome `conversation` or `both` shows them in the transcript (each is also kept in Notifications); `panel` sends them to Notifications only |

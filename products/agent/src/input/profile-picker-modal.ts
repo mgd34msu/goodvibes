@@ -2,11 +2,11 @@ import { ProfilePickerModal as PlatformProfiles } from '@goodvibes/engine/termin
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { ProfileManager } from '@goodvibes/engine/platform/platform/profiles';
 function configProfileDeletionDisabledMessage(name: string): string {
-  return `Config-profile deletion is disabled in Agent for ${name}. Open Agent Workspace -> Profiles for isolated Agent profile homes.`;
+  return `Config-profile deletion is disabled in Agent for ${name}. Open Agent Workspace -> Agent homes for isolated Agent profile homes.`;
 }
 
 function configProfileSavingDisabledMessage(name: string): string {
-  return `Config-profile saving is disabled in Agent for ${name}. Open Agent Workspace -> Profiles to create isolated Agent homes.`;
+  return `Config-profile saving is disabled in Agent for ${name}. Open Agent Workspace -> Agent homes to create isolated Agent homes.`;
 }
 
 export function renderProfilePickerStatePackageText(): string {

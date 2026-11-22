@@ -2239,7 +2239,7 @@ export { forSession as forSessionRuntime }
 // @public (undocumented)
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
-    readonly productVersion: "3.4.4";
+    readonly productVersion: "3.4.5";
     readonly operatorMethodCount: 650;
     readonly operatorEventCount: 37;
     readonly peerEndpointCount: 6;
@@ -7479,6 +7479,7 @@ export interface OperatorMethodInputMap {
         name: string;
         offers?: readonly string[];
         fromSharedToken?: boolean;
+        forThisMachine?: boolean;
     };
     // (undocumented)
     "pairing.posture.get": {
@@ -30072,6 +30073,17 @@ export interface OperatorMethodOutputMap {
                 available: boolean;
                 reason?: string;
             })[];
+            reach?: {
+                otherDevices: boolean;
+                reason?: string;
+                fix?: string;
+                steps?: readonly ({
+                    state: "done" | "next" | "then";
+                    text: string;
+                    detail?: string;
+                    command?: boolean;
+                })[];
+            };
         };
     };
     // (undocumented)
@@ -30087,6 +30099,17 @@ export interface OperatorMethodOutputMap {
                 available: boolean;
                 reason?: string;
             })[];
+            reach?: {
+                otherDevices: boolean;
+                reason?: string;
+                fix?: string;
+                steps?: readonly ({
+                    state: "done" | "next" | "then";
+                    text: string;
+                    detail?: string;
+                    command?: boolean;
+                })[];
+            };
         };
     };
     // (undocumented)
@@ -35216,7 +35239,10 @@ export interface OperatorMethodOutputMap {
         words?: {
             chosen: string;
             inForce?: string;
+            chosenWhen?: string;
+            chosenShort?: string;
             because?: string;
+            failure?: boolean;
             sentence: string;
             asksBefore: string;
         };

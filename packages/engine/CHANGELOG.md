@@ -1,5 +1,41 @@
 # Changelog
 
+## [3.4.5] - 2026-11-22
+
+The full write-up is in
+[docs/releases/3.4.5.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.5/docs/releases/3.4.5.md).
+
+### Upgrading from 3.4.4
+
+- Pairing needs every program on 3.4.5: `pairing.posture.get` and
+  `pairing.handoff.create` answers carry `reach`, which a 3.4.4 client refuses.
+- A Google connection made with the Agent's `/calendar connect google`
+  (`GOODVIBES_CALENDAR_GOOGLE_TOKENS`) is moved once, at the daemon's first
+  start, into the one Google connection (`GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`,
+  with `GOODVIBES_GOOGLE_OAUTH_ACCOUNT` beside it), with one notice. After a
+  rollback to 3.4.4 the daemon keeps it; the Agent's `/calendar` needs
+  `/calendar connect google` again.
+
+### Changed
+
+- The status bar, the ask card and the web chip lead with the mode in force,
+  then the saved choice and when it takes effect, then a failure;
+  `sessions.permissionMode.get` words gain `chosenWhen`, `chosenShort` and
+  `failure`. The choice is named "When GoodVibes asks" everywhere.
+- Every pairing surface asks the daemon first; `pairing.handoff.create`
+  refuses an unreachable code with `409 PAIRING_CODE_UNREACHABLE` unless
+  `forThisMachine` is set. `goodvibes pair` exits 1 when no code is made.
+- The model picker's tabs are named for their job, list only text models, and
+  gain a Decision model tab wired to the `judgment.*` settings.
+- The workspace trust prompt, `--help`, the command palette, the remember
+  menu, the Agent workspace and the daemon's command failure lines are
+  reworded as in the release notes.
+- Web app: text contrast, per-chat model picks, Queue and Send now, unknown
+  `/commands` held, connected-only starting points, every-word settings
+  search, Sign in again on an expired provider, memory ratings and scopes,
+  Files in this chat, code wrap, phone message actions and asks banner,
+  calendar ranges and names, and a pin that holds where it fits.
+
 ## [3.4.4] - 2026-11-22
 
 The full write-up is in

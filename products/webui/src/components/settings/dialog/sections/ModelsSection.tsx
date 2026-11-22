@@ -26,7 +26,7 @@ import {
   sortProvidersConfiguredFirst,
   type ModelOption,
 } from '../../../../lib/provider-models';
-import { deriveProviderStatus, freshnessPhrase, freshnessTone, providerStatePhrase } from '../../../../lib/provider-status';
+import { deriveProviderStatus, freshnessPhrase, freshnessTone, providerRepair, providerStatePhrase } from '../../../../lib/provider-status';
 import { formatError } from '../../../../lib/errors';
 import { useToast } from '../../../../lib/toast';
 import { DataBlock } from '../../../DataBlock';
@@ -63,6 +63,29 @@ export function priceLabel(model: unknown): string {
   if (typeof input !== 'number' || typeof output !== 'number') return '';
   if (input === 0 && output === 0) return 'Free';
   return `${money(input)} in · ${money(output)} out per 1M`;
+}
+
+/**
+ * The fix for a provider that needs the person, on its row: a subscription
+ * sign-in is made by a terminal app on the daemon's machine, so the button
+ * copies the command that does it, and says so once copied.
+ */
+function CopyCommandButton({ label, command }: { label: string; command: string }) {
+  const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      title={`Copies ${command} to run in the terminal app`}
+      aria-label={`${label}: copy ${command} to run in the terminal app`}
+      onClick={() => {
+        if (!navigator.clipboard) { setCopied('failed'); return; }
+        navigator.clipboard.writeText(command).then(() => setCopied('yes'), () => setCopied('failed'));
+      }}
+    >
+      {copied === 'yes' ? 'Copied: run it in the terminal' : copied === 'failed' ? `Run ${command} in the terminal` : label}
+    </Button>
+  );
 }
 
 function useProviderData() {
@@ -167,20 +190,27 @@ export function ModelsSection() {
                   const status = deriveProviderStatus(provider.value);
                   const count = modelOptionsForProvider(provider.value, data.modelProviders).length;
                   const title = bestTitle(provider.value, provider.id);
+                  const repair = providerRepair(status);
+                  const meta = repair ? `${providerStatePhrase(status)} · ${repair.says}` : providerStatePhrase(status);
                   return (
                     <Row
                       key={provider.id}
                       className="settings-provider-row"
                       leading={<StatusDot tone={freshnessTone(status.freshness)} />}
                       title={title}
-                      meta={providerStatePhrase(status)}
-                      aria-label={`${title}: ${providerStatePhrase(status)}. ${count} model${count === 1 ? '' : 's'}`}
+                      meta={meta}
+                      aria-label={`${title}: ${meta}. ${count} model${count === 1 ? '' : 's'}`}
                       onSelect={() => setSelectedId(provider.id)}
                       trailing={(
-                        <span className="settings-row-count" aria-hidden="true">
-                          {count > 0 ? `${count} model${count === 1 ? '' : 's'}` : ''}
-                          <ChevronRight />
-                        </span>
+                        <>
+                          {repair?.command && repair.action && (
+                            <CopyCommandButton label={repair.action} command={repair.command} />
+                          )}
+                          <span className="settings-row-count" aria-hidden="true">
+                            {count > 0 ? `${count} model${count === 1 ? '' : 's'}` : ''}
+                            <ChevronRight />
+                          </span>
+                        </>
                       )}
                     />
                   );

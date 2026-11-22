@@ -1,5 +1,5 @@
 // Proves: Starting this release on the previous release's home loses or refuses the owner's approvals, remembered rules, budget, admin password, calendar connection or decision policy.
-// Red when: A store's one-time carry-forward stops running or runs again: answered approvals left in approvals.json, remembered rules left in the per-program files, a ledger with unmarked amounts refused, the generated password file deleted at another user's sign-in, the calendar account left under its own key, or a policy saved under an older name read as the default.
+// Red when: A store's one-time carry-forward stops running or runs again: answered approvals left in approvals.json, remembered rules left in the per-program files, a ledger with unmarked amounts refused, the generated password file deleted at another user's sign-in, the calendar connection left under its earlier keys or not readable from the one Google connection, or a policy saved under an older name read as the default.
 /**
  * Each row writes the previous release's form of one store into a scratch home
  * (the shapes 3.3.1 wrote), opens the real store as the daemon opens it, and
@@ -18,7 +18,7 @@ import { UserPermissionRuleStore, ownerPermissionRulesPath, previousOwnerPermiss
 import { DurableBudgetLedger } from '../platform/src/platform/payments/host/budget-store.ts';
 import { readPaymentsServiceConfig } from '../platform/src/platform/payments/payments-config.ts';
 import { UserAuthManager } from '../platform/src/platform/security/user-auth.ts';
-import { CalendarTokenStore } from '../platform/src/platform/calendar/oauth-token-store.ts';
+import { CalendarTokenStore, carryGoogleCalendarConnectionForward } from '../platform/src/platform/calendar/oauth-token-store.ts';
 import { runDaemonBootGuarantees, releaseDaemonActivityLog } from '../platform/src/platform/daemon/facade-boot-guarantees.ts';
 import { syntheticCredential } from '../platform/src/platform/utils/fixture-credentials.ts';
 import { daemonScopedSecrets } from '../terminal-shell/src/agent-turn/calendar-oauth-service.ts';
@@ -151,20 +151,26 @@ test('every kind of owner data a 3.3.1 home holds is read by this release, carri
     };
   }
 
-  // The calendar account: 3.3.1 kept it under its own secret key beside the token record.
+  // The calendar connection: 3.3.1 kept a Google connection made with /calendar connect under its own
+  // token record with the account under a key beside it; the daemon's start moves it into the one Google
+  // connection (its refresh token and account), where /calendar and the daemon's calendar read it.
   {
     const secrets = daemonScopedSecrets(new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: h.home, projectRoot: h.workspace }));
     const tokenKey = daemonSecretKeyFor('calendar.google.tokens'), accountKey = daemonSecretKeyFor('calendar.google.account');
+    const grantKey = daemonSecretKeyFor('google.oauth.refreshToken'), oneAccountKey = daemonSecretKeyFor('google.oauth.account');
+    const refreshToken = syntheticCredential('1//', 'upgrade-refresh', 40);
     const account = { provider: 'google', accountId: 'google:owner', label: 'owner@example.com', scopes: ['calendar.readonly'], connectedAt: NOW - 1000 };
-    await secrets.set(tokenKey, JSON.stringify({ accessToken: syntheticCredential('ya29.', 'upgrade-access', 40), refreshToken: syntheticCredential('1//', 'upgrade-refresh', 40), tokenType: 'Bearer', expiresAt: NOW + 3_600_000 }));
+    await secrets.set(tokenKey, JSON.stringify({ accessToken: syntheticCredential('ya29.', 'upgrade-access', 40), refreshToken, tokenType: 'Bearer', expiresAt: NOW + 3_600_000 }));
     await secrets.set(accountKey, JSON.stringify(account));
+    const carried = await carryGoogleCalendarConnectionForward(secrets);
     const first = await new CalendarTokenStore({ secrets, clock: () => NOW }).loadAccount('google');
-    const joined = await secrets.get(tokenKey);
+    const stored = { grant: await secrets.get(grantKey), account: await secrets.get(oneAccountKey) };
+    const carriedAgain = await carryGoogleCalendarConnectionForward(secrets);
     const second = await new CalendarTokenStore({ secrets, clock: () => NOW }).loadAccount('google');
     rows['calendar'] = {
-      kept: first?.accountId,
-      newFormHolds: (JSON.parse(joined ?? '{}') as { account?: { accountId?: string } }).account?.accountId, oldFormGone: (await secrets.get(accountKey)) === null,
-      secondOpen: { same: (await secrets.get(tokenKey)) === joined, kept: second?.accountId },
+      kept: first?.accountId, carried,
+      newFormHolds: stored.grant === refreshToken, oldFormGone: (await secrets.get(tokenKey)) === null && (await secrets.get(accountKey)) === null,
+      secondOpen: { carried: carriedAgain, same: (await secrets.get(grantKey)) === stored.grant && (await secrets.get(oneAccountKey)) === stored.account, kept: second?.accountId },
     };
   }
 
@@ -192,7 +198,7 @@ test('every kind of owner data a 3.3.1 home holds is read by this release, carri
     rules: { kept: ['rule-echo', 'rule-git'], newFormHolds: true, oldFormGone: true, secondOpen: { same: true, kept: 2 } },
     budget: { stopped: null, kept: ['purchase-1:500:EUR', 'purchase-2:300:EUR'], newFormHolds: 'EUR', secondOpen: { same: true, stopped: null } },
     'admin password': { firstSignIn: { signedIn: true, retired: false }, kept: true, newFormHolds: true, secondOpen: { same: true, retired: false } },
-    calendar: { kept: 'google:owner', newFormHolds: 'google:owner', oldFormGone: true, secondOpen: { same: true, kept: 'google:owner' } },
+    calendar: { kept: 'google:owner', carried: 'moved', newFormHolds: true, oldFormGone: true, secondOpen: { carried: 'nothing', same: true, kept: 'google:owner' } },
     'decision policy': { kept: 'No Decision Model', newFormHolds: true, oldFormGone: true, secondOpen: { same: true, kept: 'No Decision Model' } },
   });
 });

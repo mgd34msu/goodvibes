@@ -20,14 +20,14 @@
  * lists it, else "Advanced", which also holds namespaces the daemon reports
  * that this build has never heard of. So a schema key is never unreachable.
  *
- * Search matches a section on its name, its search words or the names of the
- * hand-built settings it shows (`items`), and separately counts the schema
- * settings inside it that match on their name, key or description
- * (settings-model.ts's filterSettingsModel).
+ * Search matches a section when every word of the query, in any order, is in
+ * its name, its search words or the names of the hand-built settings it shows
+ * (`items`), and separately counts the schema settings inside it whose name,
+ * key and description hold every word (settings-model.ts's filterSettingsModel).
  */
 import { SETTING_TOPICS, UNCLAIMED_SETTINGS_SECTION, type SettingTopicId } from '@goodvibes/engine/platform/platform/config/setting-topics';
 import type { SettingsGroupModel } from '../../../lib/settings-model';
-import { filterSettingsModel } from '../../../lib/settings-model';
+import { filterSettingsModel, matchesEveryWord, searchWords } from '../../../lib/settings-model';
 
 export type SettingsSectionId =
   | 'general'
@@ -125,8 +125,8 @@ const SECTION_SEARCH: Readonly<Record<SettingsSectionId, { keywords: readonly st
     items: ['Memory provenance chips', 'Memory diagnostics'],
   },
   permissions: {
-    keywords: ['approval', 'approve', 'allow', 'deny', 'ask', 'mode', 'jev', 'yolo', 'sandbox', 'policy', 'safety', 'mcp', 'server'],
-    items: ['Ask me', 'Jev decides', 'Just vibes', 'YOLO', 'Approval rules', 'MCP tool rules'],
+    keywords: ['approval', 'approve', 'allow', 'deny', 'ask', 'stop asking', 'ask less', 'how often', 'mode', 'jev', 'yolo', 'sandbox', 'policy', 'safety', 'mcp', 'server'],
+    items: ['When GoodVibes asks', 'Ask me', 'Jev decides', 'Just vibes', 'YOLO', 'Approval rules', 'MCP tool rules'],
   },
   network: {
     keywords: ['tailscale', 'cloudflare', 'tunnel', 'worker', 'https', 'serve', 'lan', 'relay', 'port', 'listener'],
@@ -247,13 +247,13 @@ function countSettings(groups: readonly SettingsGroupModel[]): number {
  * while config is loading or refused, then only labels and words match).
  */
 export function matchSettingsSections(query: string, groups: readonly SettingsGroupModel[]): SectionMatch[] {
-  const q = query.trim().toLowerCase();
-  if (!q) return SETTINGS_SECTIONS.map((s) => ({ id: s.id, whole: true, settingCount: 0 }));
+  const words = searchWords(query);
+  if (words.length === 0) return SETTINGS_SECTIONS.map((s) => ({ id: s.id, whole: true, settingCount: 0 }));
   const out: SectionMatch[] = [];
   for (const section of SETTINGS_SECTIONS) {
-    const words = [section.label, ...section.keywords, ...section.items].map((w) => w.toLowerCase());
-    const whole = words.some((w) => w.includes(q));
-    const filtered = filterSettingsModel(groupsForSection(section.id, groups), q);
+    // Every word of the query, in any order, among the section's name, search words and settings.
+    const whole = matchesEveryWord([section.label, ...section.keywords, ...section.items], words);
+    const filtered = filterSettingsModel(groupsForSection(section.id, groups), query);
     const settingCount = countSettings(filtered);
     if (whole || settingCount > 0) out.push({ id: section.id, whole, settingCount });
   }

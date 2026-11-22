@@ -8,6 +8,7 @@ import {
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { activeTokens } from './renderer/theme.js';
 import { firstRunOpen } from './first-run/splash-state.js';
+import { modelPickerTargetLabel } from './model-picker-targets.js';
 /** Keys a model selection writes that hold text. */
 type SelectionTextKey =
   | 'helper.globalProvider'
@@ -85,17 +86,17 @@ export function createModelSelectionAction(
         write('helper.globalProvider', def.provider);
         write('helper.globalModel', key);
         enableHelper();
-        conversation.log(`Helper model set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
+        conversation.log(`${modelPickerTargetLabel('helper')} now uses ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
       } else if (resolvedTarget === 'tool') {
         // Write to tool LLM config keys and enable the tool LLM
         write('tools.llmProvider', def.provider);
         write('tools.llmModel', key);
         policy.setToolEnabled();
-        conversation.log(`Tool LLM set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
+        conversation.log(`${modelPickerTargetLabel('tool')} now uses ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
       } else if (resolvedTarget === 'tts') {
         write('tts.llmProvider', def.provider);
         write('tts.llmModel', key);
-        conversation.log(`TTS LLM set to: ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
+        conversation.log(`${modelPickerTargetLabel('tts')} now use ${def.displayName} (${def.provider})`, { fg: activeTokens().secondary });
       } else {
         // Default: main provider/model
         if (contextCap != null && contextCap > 0) {

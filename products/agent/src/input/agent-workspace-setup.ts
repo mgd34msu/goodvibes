@@ -193,9 +193,9 @@ function buildChecklistItems(input: AgentWorkspaceSetupChecklistInput): readonly
       detail: input.runtimeProfileCount > 0
         ? `${input.runtimeProfileCount} isolated Agent profile(s) are available.`
         : discoveredBehaviorCount > 0
-          ? `${discoveredBehaviorCount} discovered behavior file(s) can seed an isolated Agent profile from the Profiles workspace.`
+          ? `${discoveredBehaviorCount} discovered behavior file(s) can seed an isolated Agent profile from Agent homes.`
         : `${input.runtimeStarterTemplateCount} starter template(s) are available if this machine needs separate operator identities.`,
-      breadcrumb: 'Profiles',
+      breadcrumb: 'Agent homes',
     },
     {
       id: 'persona',
@@ -206,7 +206,7 @@ function buildChecklistItems(input: AgentWorkspaceSetupChecklistInput): readonly
         : input.discoveredPersonas.count > 0
           ? `${input.discoveredPersonas.count} discovered persona file(s) can be imported into the Agent-local registry.${sampleNames(input.discoveredPersonas)}`
           : 'Create or choose a persona to make the assistant voice and policy explicit.',
-      breadcrumb: 'Personas',
+      breadcrumb: 'How it talks',
     },
     {
       id: 'skills',
@@ -223,7 +223,7 @@ function buildChecklistItems(input: AgentWorkspaceSetupChecklistInput): readonly
         : input.discoveredSkills.count > 0
           ? `${input.discoveredSkills.count} discovered skill file(s) can be imported as local reusable procedures.${sampleNames(input.discoveredSkills)}`
           : 'Create reusable local skills and bundles for repeated workflows.',
-      breadcrumb: 'Skills',
+      breadcrumb: 'Procedures',
     },
     {
       id: 'routines',
@@ -236,7 +236,7 @@ function buildChecklistItems(input: AgentWorkspaceSetupChecklistInput): readonly
         : input.discoveredRoutines.count > 0
           ? `${input.discoveredRoutines.count} discovered routine file(s) can be imported as main-conversation workflows.${sampleNames(input.discoveredRoutines)}`
           : 'Create local routines first; promote schedules only with explicit confirmation.',
-      breadcrumb: 'Routines',
+      breadcrumb: 'Saved workflows',
     },
     {
       id: 'memory',

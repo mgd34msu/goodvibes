@@ -4,7 +4,7 @@
  * All functions are stateless: they receive inputs and return results without
  * side-effects. The class in model-picker.ts uses these as delegates.
  */
-import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
+import type { CatalogTextWork, ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
 import { compositeScore, A_TIER_THRESHOLD } from '@goodvibes/engine/platform/platform/providers';
 import type { BenchmarkStore } from '@goodvibes/engine/platform/platform/providers';
 import type { ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
@@ -55,12 +55,18 @@ export interface FilterModelParams {
     readonly groupBy: GroupByMode;
     readonly benchmarkStore: Pick<BenchmarkStore, 'getBenchmarks'>;
     readonly providerRegistry: Pick<ProviderRegistry, 'getSyntheticModelInfoFromCatalog'>;
+    /**
+     * Whether the catalog says a model reads and writes text, the work every
+     * model target gives it: 'other' (an image, video or speech model) is not
+     * listed; 'unknown' is listed after the described models.
+     */
+    readonly textWork?: ((model: ModelDefinition) => CatalogTextWork) | undefined;
 }
 export function buildFilteredModels(params: FilterModelParams, cache: FilteredModelsCache | null): {
     result: ModelDefinition[];
     cache: FilteredModelsCache;
 } {
-    const { models, configuredProviders, pinnedIds, recentIds, query, categoryFilter, capabilityFilter, availableOnly, benchmarkSort, groupBy, benchmarkStore, providerRegistry, } = params;
+    const { models, configuredProviders, pinnedIds, recentIds, query, categoryFilter, capabilityFilter, availableOnly, benchmarkSort, groupBy, benchmarkStore, providerRegistry, textWork, } = params;
     const configuredProvidersKey = setKey(configuredProviders);
     const pinnedIdsKey = setKey(pinnedIds);
     const recentIdsKey = orderedListKey(recentIds);
@@ -78,6 +84,10 @@ export function buildFilteredModels(params: FilterModelParams, cache: FilteredMo
         return { result: cache.result, cache };
     }
     let result = models;
+    // Only models that can do the target's work: the catalog's own modality and type facts.
+    if (textWork) {
+        result = result.filter(m => textWork(m) !== 'other');
+    }
     // Available-only filter
     if (availableOnly && configuredProviders.size > 0) {
         result = result.filter(m => configuredProviders.has(m.provider));
@@ -178,6 +188,13 @@ export function buildFilteredModels(params: FilterModelParams, cache: FilteredMo
             // Sort remaining alphabetically by id
             allModels.sort((a, b) => a.id.localeCompare(b.id));
             result = [...nonSynthetic, ...topModels, ...allModels];
+        }
+    }
+    // Models the catalog does not describe follow the described ones, in their own order.
+    if (textWork) {
+        const described = result.filter(m => textWork(m) === 'text');
+        if (described.length > 0 && described.length < result.length) {
+            result = [...described, ...result.filter(m => textWork(m) !== 'text')];
         }
     }
     // Boost recent (non-pinned) models to the front

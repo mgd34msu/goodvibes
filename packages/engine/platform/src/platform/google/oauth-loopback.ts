@@ -334,10 +334,11 @@ export async function refreshAccessToken(
 ): Promise<TokenResponse> {
   const body = new URLSearchParams({
     client_id: options.clientId,
-    client_secret: options.clientSecret,
     refresh_token: options.refreshToken,
     grant_type: 'refresh_token',
   });
+  // A Desktop-app client signed in with PKCE alone has no secret to send.
+  if (options.clientSecret.length > 0) body.set('client_secret', options.clientSecret);
   return postToken(fetchPort, body, [options.clientSecret, options.refreshToken], options.signal);
 }
 

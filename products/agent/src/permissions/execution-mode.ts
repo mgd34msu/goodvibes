@@ -9,7 +9,7 @@ export interface ActiveExecutionMode {
   hasHostedOwner?(): boolean;
   executionMode(): GatePresetName | undefined;
   /** When the host's mode in force differs from the session's chosen mode: the chosen mode and why. */
-  executionModeDifference?(): { readonly chosen: GatePresetName; readonly reason: string } | undefined;
+  executionModeDifference?(): { readonly chosen: GatePresetName; readonly reason: string; readonly words?: ModeInForceWords } | undefined;
   refreshExecutionMode?(): Promise<void>;
   setExecutionMode(mode: GatePresetName): Promise<void>;
 }
@@ -50,19 +50,23 @@ export function readExecutionModeInForce(config: Pick<ConfigManager, 'get'>): Pe
 /**
  * The status bar's mode words: this process's ModeInForceWords (`local`,
  * kept current by session-permission-mode.ts), or, for a hosted session, the
- * host's mode in force and the mode chosen there. One memory read.
+ * host's words for its mode in force (the mode's label when the host sent
+ * none). One memory read.
  */
 export function describeExecutionModeWords(
   config: Pick<ConfigManager, 'get'>,
   local: () => ModeInForceWords,
-): Pick<ModeInForceWords, 'chosen' | 'inForce' | 'because'> {
+): Pick<ModeInForceWords, 'chosen' | 'inForce' | 'chosenWhen' | 'chosenShort' | 'because' | 'failure'> {
   if (!hasActiveExecutionMode(config)) return local();
   const inForce = readExecutionModeInForce(config);
   if (inForce === undefined) return { chosen: 'not reported yet' };
   if (inForce.mode === inForce.chosen) return { chosen: gatePresetLabel(inForce.mode) };
+  const hostWords = owners.get(config)?.executionModeDifference?.()?.words;
+  if (hostWords?.inForce !== undefined) return hostWords;
   return {
     chosen: gatePresetLabel(inForce.chosen),
-    inForce: inForce.mode === 'ask-me' ? 'asking you for now' : `${gatePresetLabel(inForce.mode)} for now`,
+    inForce: inForce.mode === 'ask-me' ? 'you, for now' : `${gatePresetLabel(inForce.mode)}, for now`,
+    chosenShort: `you chose ${gatePresetLabel(inForce.chosen)}`,
   };
 }
 

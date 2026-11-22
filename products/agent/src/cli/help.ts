@@ -1,6 +1,6 @@
 import { productVersionFromModule } from '@goodvibes/engine/terminal-shell/cli-help';
 import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal-shell/cli-help';
-import { renderDetailedCommandHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
+import { renderDetailedCommandHelp, renderMostUsedHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
 import { join } from 'node:path';
 import { VERSION } from '../version.ts';
 import { describeSelfUpdate, readLastSelfUpdate } from '../runtime/self-update-receipt.ts';
@@ -38,9 +38,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes-agent'): string {
     `Usage: ${binary} [OPTIONS] [PROMPT]`,
     `       ${binary} [OPTIONS] <COMMAND> [ARGS]`,
     '',
-    'Primary use:',
-    `  ${binary}                 Launch the interactive Agent TUI`,
-    `  ${binary} setup           Open the Agent workspace`,
+    ...renderMostUsedHelp(binary, 'Start the Agent in this folder', [[`${binary} setup`, 'Open the Agent workspace']]),
     '',
     'Inside the TUI:',
     '  /agent                    Open the operator workspace',

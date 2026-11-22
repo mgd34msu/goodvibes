@@ -1,11 +1,13 @@
-import { Check, Clock, Copy, Layers, Paperclip, Pencil, RotateCcw, X } from 'lucide-react';
+import { Check, Clock, Copy, Layers, MoreHorizontal, Paperclip, Pencil, RotateCcw, X } from 'lucide-react';
 import { memo, useCallback, useRef, useState } from 'react';
 import type { ChatMessage } from './types';
 import type { SupersededReason } from './lineage';
 import { MessageLineage, messageIsEdited } from './MessageLineage';
 import { useArtifactsPanel } from './ArtifactsPanel';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
-import { SpeakButton } from '../../components/voice/SpeakButton';
+import { SpeakButton, SpeakMenuItem } from '../../components/voice/SpeakButton';
+import { Menu, MenuItem } from '../../components/ui/Menu';
+import { PHONE_QUERY, useMediaQuery } from '../../components/ui/overlay';
 import { MemoryProvenanceChip } from './MemoryProvenanceChip';
 import { ToolActivityGroup } from './ToolActivityGroup';
 import { failureReadingOf, TurnFailureRow } from './TurnFailureRow';
@@ -145,6 +147,10 @@ export const MessageItem = memo(function MessageItem({
   // Quiet in the hover row; states that need attention (not sent, pending,
   // stopped, queued) stay visible without hovering.
   const persistentState = state !== '' && state !== 'sent' && !failedReply;
+  const phone = useMediaQuery(PHONE_QUERY);
+  const showEdit = tone === 'user' && canRetry && !isEditing && onEditMessage !== undefined;
+  const showRetry = (isAssistant ? canRetry : (canResend ?? canRetry)) && !isEditing;
+  const showArtifacts = isAssistant && (Boolean(text) || attachments.length > 0);
 
   const content = isEditing && tone === 'user' ? (
     <div className="message-edit-area">
@@ -246,6 +252,40 @@ export const MessageItem = memo(function MessageItem({
           </span>
         )}
 
+        {phone ? (
+          // On a phone: Copy with its word, and the rest by name under More.
+          <span className="message-actions__buttons message-actions__buttons--phone">
+            <Button
+              variant="ghost"
+              size="sm"
+              icon={copiedMessageId === id ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
+              onClick={() => onCopyMessage(message)}
+            >
+              {copiedMessageId === id ? 'Copied' : 'Copy'}
+            </Button>
+            {(showEdit || showRetry || (isAssistant && Boolean(text)) || showArtifacts) && (
+              <Menu
+                label="More for this message"
+                trigger={(props) => (
+                  <Button {...props} variant="ghost" size="sm" icon={<MoreHorizontal aria-hidden="true" />}>More</Button>
+                )}
+              >
+                {showEdit && <MenuItem icon={<Pencil aria-hidden="true" />} disabled={isSendPending} onSelect={handleEditStart}>Edit and resend</MenuItem>}
+                {showRetry && (
+                  <MenuItem
+                    icon={<RotateCcw aria-hidden="true" />}
+                    disabled={isSendPending}
+                    onSelect={() => (isAssistant ? onRegenerateFrom(id) : onResendMessage(message))}
+                  >
+                    {isAssistant ? 'Regenerate response' : 'Resend message'}
+                  </MenuItem>
+                )}
+                {isAssistant && text && <SpeakMenuItem messageId={message.id ?? id} sessionId={message.sessionId} contentRevision={message.contentRevision} text={text} />}
+                {showArtifacts && <MenuItem icon={<Layers aria-hidden="true" />} onSelect={() => openArtifacts(message)}>Code and files in this reply</MenuItem>}
+              </Menu>
+            )}
+          </span>
+        ) : (
         <span className="message-actions__buttons">
           <IconButton
             size="sm"
@@ -257,7 +297,7 @@ export const MessageItem = memo(function MessageItem({
 
           {/* Edit and branch (user messages only): the edited text becomes a new
               branch; the original stays as retained history. */}
-          {tone === 'user' && canRetry && !isEditing && onEditMessage !== undefined && (
+          {showEdit && (
             <IconButton
               size="sm"
               label="Edit and resend message"
@@ -269,7 +309,7 @@ export const MessageItem = memo(function MessageItem({
           )}
 
           {/* Resend / Regenerate */}
-          {(isAssistant ? canRetry : (canResend ?? canRetry)) && !isEditing && (
+          {showRetry && (
             <IconButton
               size="sm"
               label={isAssistant ? 'Regenerate response' : 'Resend message'}
@@ -284,7 +324,7 @@ export const MessageItem = memo(function MessageItem({
           {isAssistant && text && <SpeakButton messageId={message.id ?? id} sessionId={message.sessionId} contentRevision={message.contentRevision} text={text} />}
 
           {/* Artifacts: opens the side panel with this reply's code blocks and files */}
-          {isAssistant && (text || attachments.length > 0) && (
+          {showArtifacts && (
             <IconButton
               size="sm"
               label="View artifacts from this message"
@@ -295,9 +335,11 @@ export const MessageItem = memo(function MessageItem({
             />
           )}
         </span>
+        )}
 
-        {/* Copied label, announced */}
-        {copiedMessageId === id && <span className="message-action-label" role="status">Copied</span>}
+        {/* Copied label, announced (the phone's Copy button says it in its own word) */}
+        {copiedMessageId === id && !phone && <span className="message-action-label" role="status">Copied</span>}
+        {copiedMessageId === id && phone && <span className="gv-sr-only" role="status">Copied</span>}
       </div>
     </div>
   );

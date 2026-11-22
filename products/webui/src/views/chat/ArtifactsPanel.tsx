@@ -22,6 +22,7 @@ import { usePeek } from '../../components/peek/PeekPanel';
 import { IconButton } from '../../components/ui/IconButton';
 import { useRightPanel } from '../../components/shell/ShellContext';
 import { useToast } from '../../lib/toast';
+import { bestId, messageTimestamp, messageTone } from './message-utils';
 import type { ChatMessage } from './types';
 import '../../styles/components/chat-artifacts.css';
 
@@ -255,6 +256,79 @@ function ArtifactsPanelContent({
 // ---------------------------------------------------------------------------
 // Public hook, useArtifactsPanel
 // ---------------------------------------------------------------------------
+
+/** A file in a chat, with the message that brought it. */
+export interface SessionFile extends FileArtifact {
+  readonly messageId: string;
+  /** True for a file the person attached; false for one a reply produced. */
+  readonly fromYou: boolean;
+  /** When its message was written ('' when the message has no time). */
+  readonly when: string;
+}
+
+/** Every file in the chat's messages, newest message first (a message's own files in their order). */
+export function sessionFiles(messages: readonly ChatMessage[]): SessionFile[] {
+  const out: SessionFile[] = [];
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]!;
+    const messageId = bestId(message);
+    if (!messageId) continue;
+    const fromYou = messageTone(message) === 'user';
+    const when = messageTimestamp(message);
+    for (const file of extractFileArtifacts(message)) out.push({ ...file, messageId, fromYou, when });
+  }
+  return out;
+}
+
+function SessionFilesContent({ files, onJump }: { files: readonly SessionFile[]; onJump: (messageId: string) => void }) {
+  useRightPanel(true, { force: true });
+  if (files.length === 0) {
+    return (
+      <div className="artifacts-empty">
+        <p>No files in this chat yet. Files you attach and files a reply makes are listed here.</p>
+      </div>
+    );
+  }
+  return (
+    <div className="artifacts-panel-content">
+      <ul className="artifacts-file-list session-files" aria-label="Files in this chat, newest first">
+        {files.map((file, index) => (
+          <li key={`${file.messageId}-${file.id || file.label}-${String(index)}`}>
+            <button type="button" className="artifact-file-item session-files__item" onClick={() => onJump(file.messageId)}>
+              <FileText size={16} className="artifact-file-icon" aria-hidden="true" />
+              <span className="artifact-file-info">
+                <span className="artifact-file-label">{file.label}</span>
+                <span className="artifact-file-mime">
+                  {[file.fromYou ? 'You attached it' : 'A reply made it', file.when, 'Go to the message'].filter(Boolean).join(' · ')}
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * The chat's one list of files: every file attached to or produced in the
+ * session, newest first, each opening the message that brought it.
+ */
+export function useSessionFilesPanel(): {
+  openSessionFiles: (files: readonly SessionFile[], onJump: (messageId: string) => void) => void;
+} {
+  const { open, close } = usePeek();
+  const openSessionFiles = useCallback(
+    (files: readonly SessionFile[], onJump: (messageId: string) => void): void => {
+      open({
+        title: files.length === 1 ? '1 file in this chat' : `${String(files.length)} files in this chat`,
+        content: <SessionFilesContent files={files} onJump={(messageId) => { close(); onJump(messageId); }} />,
+      });
+    },
+    [open, close],
+  );
+  return { openSessionFiles };
+}
 
 /**
  * Hook that provides `openArtifacts(message)`, opens the PeekPanel

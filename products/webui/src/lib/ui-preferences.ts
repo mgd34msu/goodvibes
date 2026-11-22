@@ -12,11 +12,14 @@ export interface WebUiPreferences {
    * nothing renders until the owner opts in.
    */
   memoryProvenanceChipEnabled: boolean;
+  /** Code blocks wrap long lines instead of scrolling sideways (the toggle on every code block). */
+  codeBlockWrap: boolean;
 }
 
 export const DEFAULT_WEBUI_PREFERENCES: WebUiPreferences = {
   codeBlockLineNumbers: false,
   memoryProvenanceChipEnabled: false,
+  codeBlockWrap: false,
 };
 
 type PreferenceKey = keyof WebUiPreferences;
@@ -40,6 +43,7 @@ export function readWebUiPreferences(): WebUiPreferences {
       ...parsed,
       codeBlockLineNumbers: Boolean(parsed.codeBlockLineNumbers),
       memoryProvenanceChipEnabled: Boolean(parsed.memoryProvenanceChipEnabled),
+      codeBlockWrap: Boolean(parsed.codeBlockWrap),
     };
   } catch {
     return DEFAULT_WEBUI_PREFERENCES;

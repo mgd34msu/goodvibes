@@ -11,7 +11,7 @@ import {
   PAIRING_HANDOFF_OFFER_KINDS,
   type PairingHandoffOfferKind,
 } from '@goodvibes/engine/platform/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingNoWebUiLines, pairingPostureNotice, pairingReadySteps, pairingUnreachableLines, type OriginPosture } from '@goodvibes/engine/platform/platform/pairing';
 import { defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin, resolveWebUiOrigin, stableUrlHostForBindHost } from '@goodvibes/engine/platform/platform/pairing';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
@@ -130,10 +130,45 @@ interface PairingHandoffCreateResult {
   readonly posture?: import('@goodvibes/engine/platform/platform/pairing').OriginPosture | undefined;
 }
 
-export async function renderPairing(runtime: CliCommandRuntime): Promise<string> {
+/** The code a daemon refusal carries, when it carries one. */
+function refusalCode(error: unknown): string | undefined {
+  const record = error as { readonly code?: unknown; readonly body?: { readonly code?: unknown } } | null;
+  const code = record?.code ?? record?.body?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Before any token is minted: the daemon's own answer about the address a
+ * code would carry (`pairing.posture.get`, which reads and mints nothing)
+ * says whether a phone could open it. `ready` when it could (or the daemon
+ * gave no answer: the mint then reports that itself), otherwise the lines
+ * that say why and the one command that fixes it.
+ */
+async function pairingReadiness(
+  daemonVerbs: DaemonVerbCaller,
+  pairCommand: string,
+): Promise<{ readonly ready: true } | { readonly ready: false; readonly lines: readonly string[] }> {
+  let posture: OriginPosture;
+  try {
+    posture = (await daemonVerbs.invoke<{ readonly posture: OriginPosture }>('pairing.posture.get', {})).posture;
+  } catch (error) {
+    if (refusalCode(error) === 'ORIGIN_UNKNOWN') return { ready: false, lines: pairingNoWebUiLines(pairCommand) };
+    return { ready: true };
+  }
+  // The daemon decides from its own settings; a mint it would refuse is never asked for.
+  const reach = posture.reach;
+  if (reach !== undefined && !reach.otherDevices) return { ready: false, lines: pairingUnreachableLines(posture.origin, reach, pairCommand) };
+  return { ready: true };
+}
+
+export async function renderPairing(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
   // The daemon mints the token; this process only asks it and prints the answer,
   // so no runtime of the folder the command was typed in is built.
   const daemonVerbs = createDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
+  // A code a phone could not open is never made: the daemon says first whether
+  // another device can reach the address it would carry.
+  const readiness = await pairingReadiness(daemonVerbs, 'goodvibes pair');
+  if (!readiness.ready) return { output: readiness.lines.join('\n'), exitCode: 1 };
   const output = await (async (): Promise<string> => {
     // The web origin derived live from the settings (a user-set web.publicBaseUrl
     // wins), so the printed link and the daemon's own handoff origin agree. The
@@ -154,17 +189,27 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     });
     const link = result.deepLink ?? result.fragment;
     const qr = renderQrToString(generateQrMatrix(link));
+    const offerKinds = result.offers.map((o) => o.kind);
+    // What is done and what is next, as one list; the code and its details follow.
     const lines: string[] = [
-      'Scan to pair a device; the QR opens the web app already signed in:',
+      'Pair a phone',
+      ...pairingReadySteps(result.posture?.origin ?? webOrigin?.origin ?? link, offerKinds),
+      '',
+      qr,
       '',
       `  ${link}`,
       `  Token name: ${result.token.name}  (rename or revoke later with /devices in the terminal app, or in the web UI under Settings, Devices and pairing)`,
     ];
-    if (result.offers.length > 0) {
+    // A device that cannot resolve the name in the link (no mDNS, not on the
+    // tailnet) can still use the routable address with the same one-time token.
+    if (webOrigin?.alternateOrigin && link.startsWith(`${webOrigin.origin}/`)) {
+      lines.push('', 'If the link does not open on the device, use the address instead:', `  ${webOrigin.alternateOrigin}${link.slice(webOrigin.origin.length)}`);
+    }
+    if (offerKinds.length > 0) {
       lines.push(
         '',
         'Offers carried in this pairing (each declinable in the web app):',
-        ...formatPairingOffers(result.offers.map((o) => o.kind)),
+        ...formatPairingOffers(offerKinds),
       );
     }
     // The labeled browser-capability list and the one honest LAN line both render
@@ -177,12 +222,6 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
     // pairing modal); when detected with an https MagicDNS URL, name the encrypted
     // path. Absence stays quiet.
     lines.push(...(await renderPairingTailscaleLines(daemonVerbs)));
-    lines.push('', qr);
-    // A device that cannot resolve the name in the link (no mDNS, not on the
-    // tailnet) can still use the routable address with the same one-time token.
-    if (webOrigin?.alternateOrigin && link.startsWith(`${webOrigin.origin}/`)) {
-      lines.push('', 'If the link does not open on the device, use the address instead:', `  ${webOrigin.alternateOrigin}${link.slice(webOrigin.origin.length)}`);
-    }
     return lines.join('\n');
   })();
   // A stable web origin frozen above is a daemon setting: wait for the daemon's
@@ -190,7 +229,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<string>
   for (const refused of await runtime.configManager.settleDaemonWrites()) {
     process.stderr.write(`The daemon refused ${refused.key}; it was not changed: ${summarizeError(refused.error)}\n`);
   }
-  return output;
+  return { output, exitCode: 0 };
 }
 
 interface TailscaleGetResult {

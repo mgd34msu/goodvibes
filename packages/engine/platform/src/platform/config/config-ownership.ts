@@ -238,6 +238,9 @@ export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS = [
   // ruled replicated, which is what carries the token to a node that takes
   // over a handover.
   'google.oauth.refreshToken',
+  // Which account that refresh token belongs to (label, scopes granted at
+  // connect), kept beside it in the secret store under the name derived here.
+  'google.oauth.account',
   // Mailbox password references under `email.*` name a daemon-owned secret.
   'email.passwordRef',
   'email.smtpPasswordRef',

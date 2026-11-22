@@ -78,7 +78,7 @@ export interface ShellFooterBuildOptions {
   /** The working tree differs from HEAD: `branch main, changed`. */
   readonly branchChanged?: boolean;
   /** The mode in force in words (ModeInForceWords): the status bar's `Asks:` segment. */
-  readonly modeWords?: { readonly chosen: string; readonly inForce?: string; readonly because?: string } | null;
+  readonly modeWords?: { readonly chosen: string; readonly inForce?: string; readonly chosenWhen?: string; readonly chosenShort?: string; readonly because?: string; readonly failure?: boolean } | null;
   /** The key that changes the mode, as bound ("shift+tab"). */
   readonly modeKey?: string;
   /** The mode just changed: the `Asks:` segment flashes. */

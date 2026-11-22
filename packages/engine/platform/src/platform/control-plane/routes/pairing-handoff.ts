@@ -31,7 +31,8 @@ import {
   PAIRING_HANDOFF_OFFER_KINDS,
   type PairingHandoffOfferKind,
 } from '../../pairing/pairing-handoff.js';
-import { describeOriginPosture } from '../../pairing/origin-posture.js';
+import { describeOriginPosture, type OriginPosture, type PairingReach, type PairingReachAnswer } from '../../pairing/origin-posture.js';
+import { PAIRING_PAIR_AGAIN, pairingUnreachableSteps } from '../../pairing/offer-copy.js';
 import {
   describeAuthSecretProblem,
   describeEndpointProblem,
@@ -55,6 +56,22 @@ export interface PairingHandoffDeps {
   readonly relayAvailable: () => boolean;
   /** The configured web-app origin the QR points at; absent ⇒ only a fragment is returned. */
   readonly webOrigin?: (() => string | undefined) | undefined;
+  /** Whether a phone can open that origin, from the daemon's settings (`pairingReachFromSettings`); absent ⇒ not judged. */
+  readonly reach?: ((origin: string) => PairingReach) | undefined;
+}
+
+/** The daemon's answer about the address a pairing code carries: the decision, with the steps when a phone could not open it. */
+function reachAnswer(deps: PairingHandoffDeps, origin: string): PairingReachAnswer | undefined {
+  const reach = deps.reach?.(origin);
+  if (reach === undefined) return undefined;
+  return reach.otherDevices ? reach : { ...reach, steps: pairingUnreachableSteps(origin, reach, PAIRING_PAIR_AGAIN) };
+}
+
+/** The posture of the origin a pairing code carries, with whether a phone can open it. */
+function pairingPosture(deps: PairingHandoffDeps, origin: string): OriginPosture {
+  const posture = describeOriginPosture(origin);
+  const reach = reachAnswer(deps, origin);
+  return reach === undefined ? posture : { ...posture, reach };
 }
 
 function requirePrincipal(invocation: GatewayMethodInvocation): string {
@@ -110,6 +127,24 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     if (fromSharedToken && invocation.context.credentialKind !== 'shared-token' && invocation.context.credentialKind !== 'local') {
       throw new GatewayVerbError('fromSharedToken is for a client signed in with the shared operator token; this credential is not.', 'INVALID_ARGUMENT', 400, 'fromSharedToken');
     }
+    if (params.forThisMachine !== undefined && typeof params.forThisMachine !== 'boolean') {
+      throw new GatewayVerbError('forThisMachine must be true or false', 'INVALID_ARGUMENT', 400, 'forThisMachine');
+    }
+    // No code is made that a phone could not open. A client pairing itself
+    // (fromSharedToken) or a code asked for a browser on this machine
+    // (forThisMachine) is not for another device, so it is not judged.
+    const webOrigin = deps.webOrigin?.();
+    if (webOrigin && !fromSharedToken && params.forThisMachine !== true) {
+      const reach = reachAnswer(deps, webOrigin);
+      if (reach !== undefined && !reach.otherDevices) {
+        throw new GatewayVerbError(
+          `No pairing code was made: a phone could not open it yet (${reach.reason ?? 'the daemon serves only its own machine'}). `
+            + `Run in a terminal on the daemon's machine: ${reach.fix ?? 'goodvibes-daemon webui enable --lan'}, then pair again.`,
+          'PAIRING_CODE_UNREACHABLE',
+          409,
+        );
+      }
+    }
     const available = availableOffers(deps);
     const scopes = mintedPairingScopes(invocation.context, undefined);
     // The owner's pairing flow: a device paired by the owner himself (his actor, not a
@@ -161,7 +196,6 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     // registerCredential), and only with the authority a direct registration needs.
     if (offers.includes('passkey')) deps.stepUp?.offerRegistration(pairingPrincipalId(minted.id));
     const fragment = buildPairingHandoffFragment({ token: minted.token, offers });
-    const webOrigin = deps.webOrigin?.();
     const deepLink = webOrigin ? buildPairingHandoffLink({ webOrigin, token: minted.token, offers }) : undefined;
     return {
       token: minted,
@@ -171,7 +205,7 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
       // The honest TLS/capability posture of the origin the QR points at, so a
       // surface states the plain-http-LAN line ONCE at pairing (never a nag)
       // and labels browser-gated gaps instead of rendering dead buttons.
-      ...(webOrigin ? { posture: describeOriginPosture(webOrigin) } : {}),
+      ...(webOrigin ? { posture: pairingPosture(deps, webOrigin) } : {}),
     };
   };
 }
@@ -185,13 +219,13 @@ function createPostureGetHandler(deps: PairingHandoffDeps): GatewayMethodHandler
   return async (invocation) => {
     requirePrincipal(invocation);
     const params = readInvocationParams(invocation);
-    const origin = typeof params.origin === 'string' && params.origin.trim().length > 0
-      ? params.origin
-      : deps.webOrigin?.();
+    const supplied = typeof params.origin === 'string' && params.origin.trim().length > 0 ? params.origin : undefined;
+    const origin = supplied ?? deps.webOrigin?.();
     if (!origin) {
       throw new GatewayVerbError('No origin supplied and no web origin is configured', 'ORIGIN_UNKNOWN', 404);
     }
-    return { posture: describeOriginPosture(origin) };
+    // With no origin supplied the answer is about the address a pairing code carries, so it says whether a phone can open it.
+    return { posture: supplied === undefined ? pairingPosture(deps, origin) : describeOriginPosture(origin) };
   };
 }
 

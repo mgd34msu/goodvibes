@@ -163,7 +163,7 @@ export function localRecord(domain: 'note' | 'routine', item: ReturnType<typeof 
     label: item.name,
     status: item.reviewState,
     summary: item.description,
-    userRoute: domain === 'note' ? 'Agent Workspace -> Notes' : 'Agent Workspace -> Routines',
+    userRoute: domain === 'note' ? 'Agent Workspace -> Notes' : 'Agent Workspace -> Saved workflows',
     modelRoute: `agent_local_registry domain:"${domain}" action:"get" id:"${item.id}"`,
     tags: item.tags,
   };
@@ -176,7 +176,7 @@ export function routineReceiptRecord(receipt: ReturnType<typeof buildAgentWorksp
     label: receipt.scheduleName,
     status: receipt.status,
     summary: `${receipt.routineName} -> ${receipt.scheduleKind} ${receipt.scheduleValue}`,
-    userRoute: 'Agent Workspace -> Personal Ops -> Routine library',
+    userRoute: 'Agent Workspace -> Inbox & calendar -> Routine library',
     modelRoute: 'autonomy action:"item" queueItemId:"routine-schedule-promotions"',
   };
 }
@@ -435,7 +435,7 @@ export function savedProviderEffectReceiptRecords(saved: PersonalOpsSavedArtifac
         sourceTool ? `Source ${sourceTool}.` : '',
         createdAt ? `Recorded ${createdAt}.` : '',
       ].filter(Boolean).join(' '),
-      userRoute: 'Agent Workspace -> Personal Ops -> Review queue',
+      userRoute: 'Agent Workspace -> Inbox & calendar -> Review queue',
       modelRoute: artifactRoute,
       tags: ['provider-effect-receipt', 'artifact', `${laneId}-effect`, operation, status, providerId].filter(Boolean),
       effect: 'read-only',
@@ -552,7 +552,7 @@ export function savedReviewQueueRecords(
               ? 'Inspect the artifact before creating reminders or proposing calendar edits.'
               : 'Inspect the artifact before drafting; sending remains a separate confirmed connector action.',
           ].filter(Boolean).join(' '),
-          userRoute: 'Agent Workspace -> Personal Ops -> Review queue',
+          userRoute: 'Agent Workspace -> Inbox & calendar -> Review queue',
           modelRoute: artifactRoute,
           tags: [
             'saved-review',

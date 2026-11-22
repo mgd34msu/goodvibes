@@ -432,7 +432,7 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
   },
   {
     key: 'permissions.mode',
-    label: 'Who decides when GoodVibes should ask',
+    label: 'When GoodVibes asks',
     appliesWhen: 'now',
     type: 'enum',
     description: 'Who decides what ordinary work does not settle. Ask me: you are asked about dangerous actions and owner-only decisions. '

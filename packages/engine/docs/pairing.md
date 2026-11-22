@@ -545,6 +545,15 @@ pairings as it does to the daemon's: an unused offer does not count toward it.
 `goodvibes-daemon pair` (aliases `qr`, `qrcode`) prints the pairing block, made up of the web
 origin, the offer set, and a QR code encoding the deep link.
 
+Every pairing surface (this command, `goodvibes pair`, `goodvibes-agent pair`, the TUI modal above
+and the web UI's `Pair a new device`) first asks whether another device could open the address
+the code carries. A loopback address cannot; an address equal to `web.publicBaseUrl` can; any
+other address can only with `controlPlane.enabled`. The daemon answers it in
+`pairing.posture.get` (`reach`) and enforces it in `pairing.handoff.create`, which refuses with
+`409 PAIRING_CODE_UNREACHABLE` unless the code is for a browser on the daemon's own machine
+(`forThisMachine: true`). When no other device could open it, nothing is minted, no QR is shown
+and the answer is numbered steps whose next step is `goodvibes-daemon webui enable --lan`.
+
 ```bash
 # Local form: reprint the daemon's own pairing block.
 goodvibes-daemon pair

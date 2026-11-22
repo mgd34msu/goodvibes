@@ -4,7 +4,12 @@ import { createSettingsWorkspaceOpener } from '@goodvibes/engine/terminal-shell/
 import { modelPickerCatalogServices } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
-import { buildConversationModelPickerTargets, selectedModelPickerRoute } from '@goodvibes/engine/terminal-shell/model-picker-targets';
+import {
+  buildConversationModelPickerTargets,
+  modelPickerTargetLabel,
+  SEARCH_INDEX_TARGET_DESCRIPTION,
+  selectedModelPickerRoute,
+} from '@goodvibes/engine/terminal-shell/model-picker-targets';
 import {
   buildConfiguredViaMap,
   resolveSecretProviderIds as readSecretProviders,
@@ -215,8 +220,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       ...buildConversationModelPickerTargets(configManager, runtime),
       {
         target: 'embeddings',
-        label: 'Embeddings',
-        description: 'Embedding provider used for memory search and the code index. Not an LLM route: no model concept.',
+        label: modelPickerTargetLabel('embeddings'),
+        description: SEARCH_INDEX_TARGET_DESCRIPTION,
         provider: embeddingProviderId,
         model: '',
         enabled: true,

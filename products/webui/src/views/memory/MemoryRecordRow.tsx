@@ -2,7 +2,7 @@ import type { MemoryRecord } from '../../lib/goodvibes';
 import { Row } from '../../components/ui/Row';
 import { StatusDot } from '../../components/ui/StatusDot';
 import { sentence } from '../library/library-data';
-import { formatConfidence, isBelowRecallFloor, isFlaggedReviewState } from './memory-helpers';
+import { confidenceMeaning, confidenceRating, isBelowRecallFloor, isFlaggedReviewState } from './memory-helpers';
 
 interface MemoryRecordRowProps {
   record: MemoryRecord;
@@ -15,8 +15,9 @@ interface MemoryRecordRowProps {
   onOpen: (record: MemoryRecord) => void;
 }
 
-/** One record row: summary, then kind, scope and review state as meta, confidence on the
- * right. Never renders `detail` (the detail pane's job), so the list stays scannable. */
+/** One record row: summary, then kind, scope and review state as meta (and "not brought
+ * into answers" below the recall floor), the rating on the right ("Rated 82% sure", its
+ * meaning on hover). Never renders `detail` (the detail pane's job), so the list stays scannable. */
 export function MemoryRecordRow({ record, recallFloor, selected = false, highlighted = false, onOpen }: MemoryRecordRowProps) {
   const belowFloor = recallFloor !== undefined && isBelowRecallFloor(record, recallFloor);
   const flagged = isFlaggedReviewState(record.reviewState);
@@ -24,8 +25,9 @@ export function MemoryRecordRow({ record, recallFloor, selected = false, highlig
     sentence(record.cls),
     record.scope,
     record.reviewState !== 'fresh' ? record.reviewState : null,
-    belowFloor ? `below the ${recallFloor}% recall floor` : null,
+    belowFloor ? 'not brought into answers' : null,
   ].filter((part): part is string => Boolean(part)).join(' · ');
+  const rating = confidenceRating(record.confidence);
 
   return (
     <Row
@@ -33,7 +35,7 @@ export function MemoryRecordRow({ record, recallFloor, selected = false, highlig
       leading={flagged ? <StatusDot tone={record.reviewState === 'contradicted' ? 'bad' : 'warn'} srLabel={record.reviewState} /> : undefined}
       title={record.summary}
       meta={meta}
-      trailing={<span className="dv-value" title={belowFloor ? `Below the ${recallFloor}% recall floor: never injected into a prompt` : undefined}>{formatConfidence(record.confidence)} confident</span>}
+      trailing={<span className="dv-value" title={confidenceMeaning(recallFloor)}>{rating.charAt(0).toUpperCase()}{rating.slice(1)}</span>}
       selected={selected}
       onSelect={() => onOpen(record)}
     />

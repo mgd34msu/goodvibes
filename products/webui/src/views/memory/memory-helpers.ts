@@ -17,6 +17,30 @@ export const MEMORY_CLASSES: readonly MemoryClass[] = [
 
 export const MEMORY_SCOPES: readonly MemoryScope[] = ['session', 'project', 'team'];
 
+/**
+ * Where each scope applies and who sees it, one line each. Scope says what a
+ * record is about and is used to find and filter it; it does not hide a record
+ * or keep it out of answers: the store is the daemon's, read by every program
+ * and device signed in to it.
+ */
+export const MEMORY_SCOPE_LINES: Readonly<Record<MemoryScope, string>> = {
+  session: 'About one conversation’s work. Seen by every app and device signed in to this daemon.',
+  project: 'About this project, the usual choice. Seen by every app and device signed in to this daemon.',
+  team: 'About how you work across projects. Seen by every app and device signed in to this daemon.',
+};
+
+/**
+ * What a record's confidence is, in words: a rating someone gave (the person
+ * who saved or reviewed it, or the agent), not a measurement, and records rated
+ * below the recall floor are not brought into answers.
+ */
+export function confidenceMeaning(recallFloor: number | undefined): string {
+  const floor = recallFloor === undefined
+    ? 'Records rated too low are not brought into answers.'
+    : `Records rated below ${String(recallFloor)}% are not brought into answers.`;
+  return `How sure this record is said to be: a rating given when it was saved or reviewed, not a measurement. ${floor}`;
+}
+
 export const MEMORY_REVIEW_STATES: readonly MemoryReviewState[] = ['fresh', 'reviewed', 'stale', 'contradicted'];
 
 /** A consolidation proposal's id as memory.consolidation.decide names it: `<kind>:<sorted ids>`. */
@@ -87,6 +111,11 @@ export function isBelowRecallFloor(record: MemoryRecord, recallFloor: number): b
 
 export function formatConfidence(confidence: number): string {
   return `${Math.round(confidence)}%`;
+}
+
+/** The row's words for a confidence: "rated 82% sure". */
+export function confidenceRating(confidence: number): string {
+  return `rated ${formatConfidence(confidence)} sure`;
 }
 
 export function formatProvenanceLink(link: MemoryProvenanceLink): string {

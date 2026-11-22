@@ -554,7 +554,11 @@ Connecting a calendar account over OAuth needs your own OAuth client id: no clie
 3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--with device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --with code` within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
 4. The answer lists the account, the transport and the scopes. `/calendar upcoming` then merges that account's events.
 
-`disconnect` revokes the access at the provider when it offers revocation, and clears local tokens.
+A Google account has one connection on a machine. `/calendar connect google`, `/google connect` and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and the Agent's `/calendar` all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (a `/calendar connect google` from 3.4.4 or before has no Gmail scope; one from `/google` has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account connected with `/calendar connect outlook` is read by the Agent's `/calendar` only: the daemon's calendar reads a CalDAV server or the Google connection, and when it has neither its answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read.
+
+Up to 3.4.4, `/calendar connect google` kept a second Google connection (`GOODVIBES_CALENDAR_GOOGLE_TOKENS`) that the daemon never read. The daemon's first start of 3.4.5 moves it into the one connection, once, and says "Carried forward from the earlier version: 1 Google connection." When a different Google connection was already there, that one stays (the daemon's mail and calendar were using it), the earlier one is kept unused, and the notice names both accounts and how to choose the other: `/calendar connect google` signed in as it. Going back to 3.4.4 after the move: the daemon, the web Calendar and mail keep the connection, and the Agent's `/calendar accounts` lists no Google account until `/calendar connect google` is run there.
+
+`disconnect` revokes the access at the provider when it offers revocation, and clears local tokens. `/calendar disconnect google` ends the one Google connection, so the daemon's calendar and its Gmail access stop too.
 
 Daemon operator methods for calendars: `calendar.calendars.list`, `calendar.events.list`, `calendar.events.get`, `calendar.events.create`, `calendar.events.update`, `calendar.events.delete`, `calendar.ics.import`, `calendar.ics.export`.
 
@@ -581,7 +585,7 @@ The Agent's `/google` connects one Google account for both mail and calendar. Sa
 /google drop <n>                drop a refused send
 ```
 
-The Agent workspace's Personal Ops rows open these same `/google` actions. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
+The Agent workspace's Inbox & calendar rows open these same `/google` actions. The terminal app has no `/google`; it uses the mail and calendar the daemon already has.
 
 ### Choosing a path
 
@@ -621,7 +625,7 @@ Prerequisites: a Google Cloud account; the `gcloud` CLI (the flow checks `gcloud
 6. Open the consent link the flow prints. Check the account shown at the top. Expect "Google hasn't verified this app": click Advanced, then "Go to goodvibes agent (unsafe)". Leave every permission ticked; Continue. The browser lands on a local page confirming the connection.
 7. The flow reads your mailbox and calendar with the new credential and reports the account, both answers and the publishing status.
 
-Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.events`. Stored: the client secret as `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF`, the refresh token as `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`; settings `calendar.google.clientId`, `calendar.google.clientSecretRef`, `google.oauth.projectId`, `google.oauth.publishingStatus`. No secret is written to settings files, logs, transcripts or status output.
+Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. Stored: the client secret as `GOODVIBES_CALENDAR_GOOGLE_CLIENT_SECRET_REF` (none is needed for a Desktop-app client signed in with PKCE), the refresh token as `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, the same one connection `/calendar connect google` stores; settings `calendar.google.clientId`, `calendar.google.clientSecretRef`, `google.oauth.projectId`, `google.oauth.publishingStatus`. No secret is written to settings files, logs, transcripts or status output.
 
 ### Google failures
 

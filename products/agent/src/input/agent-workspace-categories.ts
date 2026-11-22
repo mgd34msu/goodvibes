@@ -1,10 +1,11 @@
-import type { AgentWorkspaceCategory } from './agent-workspace-types.ts';
+import { AGENT_WORKSPACE_GROUP_ORDER, type AgentWorkspaceCategory } from './agent-workspace-types.ts';
 import { actRow, settingAction } from './agent-workspace-category-actions.ts';
 import { AGENT_WORKSPACE_HOST_CATEGORY } from './agent-workspace-host-category.ts';
 import { AGENT_WORKSPACE_ONBOARDING_DETAIL_CATEGORIES } from './agent-workspace-onboarding-categories.ts';
 import { THEME_MODE_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 
-export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = freezeDeclaration([
+// Listed in AGENT_WORKSPACE_GROUP_ORDER: the everyday work first, setting up after.
+export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = freezeDeclaration(inGroupOrder([
   {
     id: 'home',
     group: 'START',
@@ -107,10 +108,10 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     group: 'ONBOARDING',
     label: 'Tools & Permissions',
     summary: 'What the assistant may do without asking: reading and changing files, running commands, and using the network.',
-    detail: 'Choose an execution mode to set who decides consequential actions. The rest stay at safe defaults unless you change them.',
+    detail: 'Choose when GoodVibes asks to set who decides consequential actions. The rest stay at safe defaults unless you change them.',
     actions: [
       // Top-level approval policy
-      settingAction({ id: 'permissions-mode', label: 'Execution mode', detail: 'Choose ask-me, jev-decides, just-vibes or yolo. plan is a separate read-only posture.', key: 'permissions.mode' }),
+      settingAction({ id: 'permissions-mode', label: 'When GoodVibes asks', detail: 'Choose Ask me, Jev decides, Just vibes or YOLO. Plan is a separate read-only posture.', key: 'permissions.mode' }),
       // Common per-tool overrides for file and shell work
       settingAction({ id: 'permissions-read', label: 'File reads', detail: 'deny refuses file reads; prompt leaves each read to the execution mode; allow also runs reads without asking when no decision model works.', key: 'permissions.tools.read' }),
       settingAction({ id: 'permissions-write', label: 'File writes', detail: 'deny refuses file writes; prompt leaves each write to the execution mode (ask-me runs an undoable change inside the workspace without asking); allow also runs writes without asking when no decision model works.', key: 'permissions.tools.write' }),
@@ -150,7 +151,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   {
     id: 'personal-ops',
     group: 'DAY-TO-DAY',
-    label: 'Personal Ops',
+    label: 'Inbox & calendar',
     summary: 'Your inbox, calendar, notes and reminders, and the accounts behind them.',
     detail: 'Use this as the daily operations hub. It gives one path for personal work while keeping missing email/calendar connectors explicit.',
     actions: [
@@ -333,8 +334,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   },
   {
     id: 'profiles',
-    group: 'LOCAL BEHAVIOR',
-    label: 'Profiles',
+    group: 'OPERATIONS',
+    label: 'Agent homes',
     summary: 'Separate Agent homes, each with its own settings and memory, and the starters they are made from.',
     detail: 'Agent profiles isolate Agent state. Named homes and starter templates let one install behave like separate assistants for household, research, travel, operations, or personal workflows.',
     actions: [
@@ -433,7 +434,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   {
     id: 'personas',
     group: 'LOCAL BEHAVIOR',
-    label: 'Personas',
+    label: 'How it talks',
     summary: 'How the assistant talks and behaves, and your VIBE.md personality files.',
     detail: 'VIBE.md is the friendly personality file for the serial Agent. Personas remain local behavior profiles, not separate Agent identities.',
     actions: [
@@ -451,7 +452,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   {
     id: 'skills',
     group: 'LOCAL BEHAVIOR',
-    label: 'Skills',
+    label: 'Procedures',
     summary: 'Step-by-step procedures the assistant can follow, and bundles of them.',
     detail: 'Skills are local, reviewable procedures with optional env/command requirements. Enabled skills inform the main conversation; secret-looking content is rejected.',
     actions: [
@@ -480,7 +481,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   {
     id: 'routines',
     group: 'LOCAL BEHAVIOR',
-    label: 'Routines',
+    label: 'Saved workflows',
     summary: 'Workflows you start by name or put on a schedule.',
     detail: 'Routines run in the main conversation by default and can declare env/command requirements. Promotion to a connected schedule requires a real schedule command and --yes.',
     actions: [
@@ -501,7 +502,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   },
   {
     id: 'work',
-    group: 'OPERATIONS',
+    group: 'DAY-TO-DAY',
     label: 'Work & Approvals',
     summary: 'What is running, what waits for your answer, and your to-do list.',
     detail: 'Use this workspace to inspect active operator state and approval posture.',
@@ -526,8 +527,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   AGENT_WORKSPACE_HOST_CATEGORY,
   {
     id: 'automation',
-    group: 'OPERATIONS',
-    label: 'Automation',
+    group: 'DAY-TO-DAY',
+    label: 'Schedules',
     summary: 'Schedules: what runs on its own, when, and the limits on it.',
     detail: 'Agent keeps no schedule of its own: /schedule keeps each one on the connected host, and reviewed routine promotion (/routines promote) does too.',
     actions: [
@@ -561,7 +562,15 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     detail: 'Use this final step after reviewing setup. Apply & close writes the user onboarding completion marker so normal future launches start in the main conversation.',
     actions: [{ id: 'onboarding-apply-close', label: 'Apply & close', detail: 'Acknowledge onboarding as finished, persist the user completion marker, and close the fullscreen Agent workspace.', kind: 'onboarding-complete', safety: 'safe' }],
   },
-]);
+]));
+
+/** The areas sorted by their group's place in AGENT_WORKSPACE_GROUP_ORDER, keeping their order within a group. */
+function inGroupOrder(categories: AgentWorkspaceCategory[]): AgentWorkspaceCategory[] {
+  const rank = (category: AgentWorkspaceCategory): number => AGENT_WORKSPACE_GROUP_ORDER.indexOf(category.group);
+  return categories.map((category, index) => ({ category, index }))
+    .sort((a, b) => rank(a.category) - rank(b.category) || a.index - b.index)
+    .map(({ category }) => category);
+}
 
 /** The declarations are static data. Freezing them here, once, lets every
  * protected reader prove them unchanged by identity instead of re-reading each

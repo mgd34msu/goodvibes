@@ -129,3 +129,27 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The chat's files: one list, each row a button to the message that brought the file. */
+.session-files {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.session-files__item {
+  width: 100%;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-files__item:hover {
+  background: var(--surface-2);
+}
+
+.session-files__item .artifact-file-mime {
+  font-family: var(--font-ui);
+}

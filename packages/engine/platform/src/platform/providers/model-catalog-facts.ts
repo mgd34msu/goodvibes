@@ -53,8 +53,11 @@ export function knownCatalogChatCapability(provider: string, modelId: string): b
   const type = catalog.get(canonicalProviderId(provider))?.get(modelId);
   if (type === undefined) return undefined;
   if (type === 'chat') return true;
-  return ['embedding', 'reranking', 'image', 'video', 'speech', 'transcription', 'decision', 'realtime'].includes(type) ? false : undefined;
+  return NON_CONVERSATION_TYPES.has(type) ? false : undefined;
 }
+
+/** Catalog types of models that do not hold a conversation. */
+const NON_CONVERSATION_TYPES: ReadonlySet<string> = new Set(['embedding', 'reranking', 'image', 'video', 'speech', 'transcription', 'decision', 'realtime']);
 
 /** Exact endpoint facts. A canonical ID can join only this provider's offerings. */
 export function catalogModelsForReference(modelId: string, provider?: string): readonly CatalogModel[] {
@@ -63,6 +66,32 @@ export function catalogModelsForReference(modelId: string, provider?: string): r
   const direct = records?.get(modelId);
   if (direct) return [direct];
   return (byReference.get(modelId) ?? []).filter(model => sameProviderCatalog(model.providerId, provider));
+}
+
+/**
+ * What the catalog says about one model's ability to read and write text, the
+ * work every conversation route (main chat, helper, tool work, spoken replies)
+ * gives it. `text` when it publishes text in and text out (or the chat type,
+ * which the repository gives a model it states no type for); `other` when it
+ * publishes a non-conversation type or modalities without text (an image,
+ * video or speech model); `unknown` when the catalog has no entry for it or
+ * its entries disagree.
+ */
+export type CatalogTextWork = 'text' | 'other' | 'unknown';
+
+function textWorkOf(model: CatalogModel): CatalogTextWork {
+  if (model.modelType !== undefined && NON_CONVERSATION_TYPES.has(model.modelType)) return 'other';
+  if (model.outputModalities !== undefined && !model.outputModalities.includes('text')) return 'other';
+  if (model.inputModalities !== undefined && !model.inputModalities.includes('text')) return 'other';
+  if (model.outputModalities !== undefined || model.inputModalities !== undefined || model.modelType === 'chat') return 'text';
+  return 'unknown';
+}
+
+/** {@link CatalogTextWork} for one provider's model, from this provider's catalog entries only. */
+export function catalogTextWork(provider: string, modelId: string): CatalogTextWork {
+  const answers = new Set(catalogModelsForReference(modelId, provider).map(textWorkOf));
+  answers.delete('unknown');
+  return answers.size === 1 ? answers.values().next().value! : 'unknown';
 }
 
 /** Unknown or conflicting endpoint limits remain unknown. */

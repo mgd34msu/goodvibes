@@ -2,11 +2,13 @@
  * status-line.ts, the one row directly under the composer: the status bar.
  *
  * Left, in order:
- *   - `Asks:` (faint) and the chosen mode's words (ModeInForceWords): `Jev
- *     decides`, then, when the mode in force differs, ` · asking you for now`
- *     (warning) and ` · decision model unreachable` (faint); then the key that
- *     changes it as a keycap (` shift+tab `). Never dropped. After a change it
- *     flashes (drawn inverse) while `flash` is set.
+ *   - `Asks:` (faint) and the mode in force (ModeInForceWords): the chosen
+ *     mode's label (`Jev decides`) when it is in force; when it is not, what
+ *     is (`you, for now`, warning), then the choice and when it takes effect
+ *     (` · Jev decides once a decision model is set`), then a failure
+ *     (` · decision model unreachable`, faint); then the key that changes it
+ *     as a keycap (` shift+tab `). Never dropped. After a change it flashes
+ *     (drawn inverse) while `flash` is set.
  *   - the chips that must stay visible (auto-approve, the live microphone,
  *     sleep disabled), never dropped; optional chips after them (an attached
  *     image, the composer's intent) are dropped first;
@@ -30,17 +32,17 @@
  * agents, the menu keycap the palette.
  *
  * When the row is short, pieces give way in this order until it fits: the
- * menu keycap, the cost, optional chips; a reason that only states a choice
- * (`no decision model set`, `decision models switched off`) goes (it is in
- * the notices and on a click); the notices lose their keycap (the count
- * stays), the branch loses its state word (`branch main`), the context goes,
- * the branch goes; a reason that reports a failure (`decision model
- * unreachable`, `failing`) shortens (`unreachable`); the background summary
- * (unless it holds focus), the model, the notices, the mode's keycap; last a
- * failure reason goes. The mode's words, `asking you for now`, the
- * kept chips and the esc hint always stay. A segment given up
+ * menu keycap, the cost, optional chips; the choice shortens (`Jev decides
+ * once a decision model is set` to `you chose Jev decides`; the rest is on a click); the
+ * notices lose their keycap (the count stays), the branch loses its state
+ * word (`branch main`), the context goes, the branch goes; a failure
+ * (`decision model unreachable`, `decision model failing`) shortens
+ * (`unreachable`); the background summary (unless it holds focus), the model,
+ * the notices, the mode's keycap; last a failure goes. `Asks:` with the mode
+ * in force (`you, for now`) and the choice, the kept chips and the esc hint
+ * always stay. A segment given up
  * before a later step freed the room comes back when it fits (the model, then
- * the context, the branch, the cost, the menu keycap).
+ * the context, the branch, the cost, the menu keycap, the choice's whole words).
  */
 import { type Line, createEmptyLine } from '@goodvibes/engine/platform/platform/types';
 import { getDisplayWidth, truncateDisplay } from '@goodvibes/engine/platform/platform/utils';
@@ -73,11 +75,14 @@ export interface StatusChip {
     /** Never dropped for lack of room (auto-approve, microphone, sleep). */
     readonly keep?: boolean | undefined;
 }
-/** The mode segment: ModeInForceWords' chosen/inForce/because, and the key that changes the mode. */
+/** The mode segment: ModeInForceWords' chosen/inForce/chosenWhen/because/failure, and the key that changes the mode. */
 export interface StatusAsks {
     readonly chosen: string;
     readonly inForce?: string | undefined;
+    readonly chosenWhen?: string | undefined;
+    readonly chosenShort?: string | undefined;
     readonly because?: string | undefined;
+    readonly failure?: boolean | undefined;
     /** The key that changes the mode as bound ("shift+tab"); no keycap when absent. */
     readonly key?: string | undefined;
     /** Drawn inverse: the mode just changed (a short flash, never a transcript line). */
@@ -214,6 +219,9 @@ function shortBecause(because: string): string | null {
 }
 /** How much of the mode segment is drawn. */
 interface AsksForm {
+    /** The choice and when it takes effect (`Jev decides once a decision model is set`), or in a few words (`you chose Jev decides`). */
+    readonly choice: 'full' | 'short';
+    /** A failure reason (`decision model unreachable`), whole, short or gone. */
     readonly because: 'full' | 'short' | 'none';
     readonly key: boolean;
 }
@@ -226,16 +234,19 @@ function asksWordRuns(asks: StatusAsks, form: AsksForm): Run[] {
         ? { text, fg: t.backgroundPanel, bg: t.text, bold: true }
         : { text, fg, bold };
     if (flash && asks.flashMessage) return [paint(asks.flashMessage, t.text, true)];
-    const runs: Run[] = [paint('Asks: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
-    if (asks.inForce) {
-        runs.push(paint(' · ', t.textFaint), paint(asks.inForce, t.warning, true));
-        // A reason with no short form stays whole until the reason goes.
-        const because = asks.because
-            ? form.because === 'full' ? asks.because : form.because === 'short' ? (shortBecause(asks.because) ?? asks.because) : null
-            : null;
-        if (because)
-            runs.push(paint(' · ', t.textFaint), paint(because, t.textFaint));
-    }
+    if (!asks.inForce)
+        return [paint('Asks: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
+    // The mode in force leads; the choice follows; a failure comes last.
+    const runs: Run[] = [paint('Asks: ', t.textFaint), paint(asks.inForce, t.warning, true)];
+    const choice = form.choice === 'full' ? asks.chosenWhen ?? asks.chosen : asks.chosenShort ?? asks.chosen;
+    runs.push(paint(' · ', t.textFaint), paint(choice, t.textMuted, false));
+    // Only a failure is drawn here: a reason that states a choice is what the choice's own words say.
+    // A failure with no short form stays whole until it goes.
+    const because = asks.failure === true && asks.because
+        ? form.because === 'full' ? asks.because : form.because === 'short' ? (shortBecause(asks.because) ?? asks.because) : null
+        : null;
+    if (because)
+        runs.push(paint(' · ', t.textFaint), paint(because, t.textFaint));
     return runs;
 }
 function asksWidth(asks: StatusAsks, form: AsksForm): number {
@@ -317,7 +328,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     const model = options.model ?? null;
     const cost = options.cost ?? null;
     const plan: Plan = {
-        asks: { because: 'full', key: true },
+        asks: { choice: 'full', because: 'full', key: true },
         chips: [...chips],
         notices: notices !== null,
         noticesKey: true,
@@ -372,8 +383,8 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         return LEFT_X + leftW + (rightW > 0 ? GAP + rightW : 0);
     };
     const fits = (): boolean => total(plan) <= rightEdge;
-    // The decision model (or the daemon) failing or out of reach, as opposed to a choice the owner made.
-    const failureReason = asks?.because !== undefined && /\b(unreachable|failing|cannot be reached|not reachable)\b/.test(asks.because);
+    // The decision model failing or out of reach, as opposed to a choice the owner made.
+    const failureReason = asks?.failure === true && asks.because !== undefined;
     // Give way in the order of the file header, stopping as soon as the row fits.
     const steps: Array<() => void> = [
         () => { plan.menu = false; },
@@ -383,11 +394,8 @@ export function renderStatusLine(options: StatusLineOptions): Line {
             if (idx >= 0)
                 plan.chips.splice(idx, 1);
         }),
-        // A reason that only states a choice goes first; one that reports a failure is kept to the last.
-        ...(failureReason ? [] : [
-            () => { plan.asks = { ...plan.asks, because: 'short' }; },
-            () => { plan.asks = { ...plan.asks, because: 'none' }; },
-        ]),
+        // The choice shortens first (it is never dropped); a failure is kept to the last.
+        ...(asks?.inForce ? [() => { plan.asks = { ...plan.asks, choice: 'short' as const }; }] : []),
         () => { plan.noticesKey = false; },
         () => { plan.branchShort = true; },
         () => { plan.context = false; },
@@ -412,6 +420,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         [() => branch !== null && !plan.branch, () => { plan.branch = true; }, () => { plan.branch = false; }],
         [() => cost !== null && !plan.cost, () => { plan.cost = true; }, () => { plan.cost = false; }],
         [() => !plan.menu, () => { plan.menu = true; }, () => { plan.menu = false; }],
+        [() => plan.asks.choice === 'short', () => { plan.asks = { ...plan.asks, choice: 'full' }; }, () => { plan.asks = { ...plan.asks, choice: 'short' }; }],
     ];
     for (const [dropped, restore, undo] of restores) {
         if (!dropped())

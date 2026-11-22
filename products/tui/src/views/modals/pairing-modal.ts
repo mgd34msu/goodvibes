@@ -51,6 +51,15 @@ export interface PairingModalConnectionInfo {
   /** The minted token's id, so the next request can reuse or replace this offer. */
   readonly tokenId?: string | undefined;
 }
+/**
+ * No code was made because a phone could not open it (the daemon serves only
+ * this machine, or no web UI): the numbered steps that say so and end in the
+ * command that fixes it, from the platform's pairing copy.
+ */
+export interface PairingModalUnreachable {
+  readonly kind: 'unreachable';
+  readonly lines: readonly string[];
+}
 /** What the modal asks of `getConnectionInfo`. */
 export interface PairingConnectionRequest {
   /** The offer the modal showed last; reused while nobody has used it, else replaced. */
@@ -95,7 +104,7 @@ export interface PairingModalDeps {
   /** Lazy connection-info provider. Returns null when the daemon/companion
    *  token cannot be resolved, or throws with the reason (for example the
    *  paired-device cap); either way the modal renders an honest degraded state. */
-  readonly getConnectionInfo: (request?: PairingConnectionRequest) => PairingModalConnectionInfo | null;
+  readonly getConnectionInfo: (request?: PairingConnectionRequest) => PairingModalConnectionInfo | PairingModalUnreachable | null;
   readonly controlPlaneReadModel?: PairingModalReadModel<PairingModalControlPlaneSnapshot>;
   /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
   readonly copyToClipboard?: (text: string) => boolean | void;
@@ -127,6 +136,8 @@ class PairingModalSurface implements ConfigModalSurface {
   readonly name = 'pairing-modal';
   readonly title = 'Device Pairing';
   private info: PairingModalConnectionInfo | null | undefined = undefined;
+  /** Set when the last request made no code because a phone could not open it. */
+  private unreachable: PairingModalUnreachable | null = null;
   /** The offer shown last, kept across close so the next open can reuse or replace it. */
   private held: PairingModalConnectionInfo | undefined = undefined;
   /** Why the last mint threw, shown in the degraded state; null when it returned null or has not run. */
@@ -147,9 +158,9 @@ class PairingModalSurface implements ConfigModalSurface {
   constructor(private readonly deps: PairingModalDeps) {}
 
   readonly actions = [
-    { key: 'v', id: 'toggleReveal', label: 'reveal token' },
-    { key: 'c', id: 'copyLink', label: 'copy link', enabledFor: () => Boolean(this.deps.copyToClipboard) },
-    { key: 'r', id: 'newToken', label: 'new device token' },
+    { key: 'v', id: 'toggleReveal', label: 'reveal token', enabledFor: () => this.unreachable === null },
+    { key: 'c', id: 'copyLink', label: 'copy link', enabledFor: () => Boolean(this.deps.copyToClipboard) && this.unreachable === null },
+    { key: 'r', id: 'newToken', label: 'new device token', enabledFor: () => this.unreachable === null },
     // The one-action serve affordance, offered ONLY when tailscale is detected
     // and not already serving https; a second 't' press (the standard confirm)
     // runs tailscale.serve.run. Absence keeps this key unadvertised and inert.
@@ -199,6 +210,7 @@ class PairingModalSurface implements ConfigModalSurface {
   /** The view is rebuilt on the next open; the offer is held so that open reuses or replaces it. */
   onClose(): void {
     this.info = undefined;
+    this.unreachable = null;
     this.infoError = null;
     this.revealed = false;
   }
@@ -206,9 +218,16 @@ class PairingModalSurface implements ConfigModalSurface {
   private ensureInfo(fresh = false): PairingModalConnectionInfo | null {
     if (this.info === undefined) {
       this.infoError = null;
+      this.unreachable = null;
       try {
-        this.info = this.deps.getConnectionInfo(this.held || fresh ? { held: this.held, fresh } : undefined);
-        if (this.info) this.held = this.info;
+        const answer = this.deps.getConnectionInfo(this.held || fresh ? { held: this.held, fresh } : undefined);
+        if (answer !== null && 'kind' in answer) {
+          this.unreachable = answer;
+          this.info = null;
+        } else {
+          this.info = answer;
+          if (this.info) this.held = this.info;
+        }
       } catch (error) { this.info = null; this.infoError = summarizeError(error); }
     }
     return this.info;
@@ -216,6 +235,16 @@ class PairingModalSurface implements ConfigModalSurface {
 
   buildView(): ConfigModalView {
     const info = this.ensureInfo();
+    if (this.unreachable) {
+      // No code is shown: a phone could not open it. The steps end in the command
+      // that fixes it; the Tailscale serve below is the other way to make it reachable.
+      const rows: ConfigModalRow[] = this.unreachable.lines.map((line, i) => infoRow(`step:${i}`, line, i === 0 ? { fg: MODAL_TONES.reasoning } : {}));
+      this.appendTailscaleRows(rows);
+      const hints: string[] = [];
+      if (this.tailscale?.available && !this.serving) hints.push('t serve over tailscale');
+      if (this.deps.stopTailscaleServe && this.activeServe && !this.serving) hints.push('x stop serving');
+      return { title: 'Device Pairing', tabs: [{ id: 'pairing', label: 'Pairing', rows, hints }] };
+    }
     if (!info) {
       return { title: 'Device Pairing', degraded: this.infoError
           ? `Device pairing is unavailable: ${this.infoError}`
@@ -349,7 +378,11 @@ class PairingModalSurface implements ConfigModalSurface {
       .then((receipt) => {
         this.serving = false;
         this.serveReceipt = receipt;
-        if (receipt?.ok && receipt.url) this.activeServe = receipt;
+        if (receipt?.ok && receipt.url) {
+          this.activeServe = receipt;
+          // The address a code would carry changed: decided again on the next render.
+          this.info = undefined;
+        }
         if (receipt?.ok && receipt.url) ctx.setStatus(`Serving over tailscale: ${receipt.url}`);
         else if (receipt) ctx.setStatus(`Tailscale serve did not complete: ${receipt.detail}`);
         this.requestRender();
@@ -378,6 +411,8 @@ class PairingModalSurface implements ConfigModalSurface {
           this.serveReceipt = result.receipt;
           if (result.receipt.ok) {
             this.activeServe = null;
+            // The address a code would carry changed: decided again on the next render.
+            this.info = undefined;
             ctx.setStatus(`Stopped serving over tailscale. ${result.publicBaseUrlDetail}`);
           } else {
             ctx.setStatus(`Tailscale serve was not stopped: ${result.receipt.detail}`);

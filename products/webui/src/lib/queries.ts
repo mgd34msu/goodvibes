@@ -109,6 +109,9 @@ export const queryKeys = {
   // than serving a stale window from cache.
   calendarEvents: (from: string, to: string, calendarId: string) =>
     ['calendar', 'events', from, to, calendarId] as const,
+  // The one-event read that answers "is a calendar connected": shared by the
+  // account status in Settings and the new-chat starters.
+  calendarProbe: ['calendar', 'surface-probe'] as const,
   // email.*, the inbox listing is keyed on the filters that change what the daemon
   // fetches from IMAP (limit, unread-only, since), so toggling a filter refetches
   // rather than re-rendering a window that no longer matches the controls. No wire
@@ -142,6 +145,10 @@ export const queryKeys = {
   // posture of THIS surface's own origin. An origin's posture never changes within a
   // session (see useOriginPosture), so this is fetched once and never invalidated.
   originPosture: ['pairing', 'posture'] as const,
+  // pairing.posture.get with no origin: the address a pairing code carries, and whether a
+  // phone can open it (`reach`). Settings change it, so it is read each time the pairing
+  // form is shown, never cached as the origin posture is.
+  pairingAddress: ['pairing', 'address'] as const,
   // power.status.get / power.keepAwake.set (platform 1.8.0's host sleep-ownership work).
   // OPS_POWER_STATE_CHANGED rides the 'ops' runtime domain, useRealtimeInvalidation
   // invalidates this key on that frame, so the always-visible "sleep disabled" chip and

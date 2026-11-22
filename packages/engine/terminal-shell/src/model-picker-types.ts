@@ -1,6 +1,6 @@
 import { modelFamilyReadings, type ModelFamily } from '@goodvibes/engine/platform/platform/providers';
 import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
-export type PickerMode = 'model' | 'provider' | 'effort' | 'contextCap' | 'embeddingProvider';
+export type PickerMode = 'model' | 'provider' | 'effort' | 'contextCap' | 'embeddingProvider' | 'choice';
 /**
  * Which config keys the model picker writes to on commit.
  * 'main'       -> provider.model (default; the model key carries its provider)
@@ -9,9 +9,19 @@ export type PickerMode = 'model' | 'provider' | 'effort' | 'contextCap' | 'embed
  * 'tts'        -> tts.llmProvider + tts.llmModel
  * 'embeddings' -> provider.embeddingProvider, via MemoryEmbeddingProviderRegistry.setDefaultProvider()
  *                 (not an LLM route, no model concept, see ModelPickerTargetInfo.configuredNote)
+ * 'decision'   -> the judgment.* decision-model settings, through the same choice
+ *                 Settings makes (settings-choice-actions.ts); its list is the target's `choices`
  */
-export type ModelPickerTarget = 'main' | 'helper' | 'tool' | 'tts' | 'embeddings';
+export type ModelPickerTarget = 'main' | 'helper' | 'tool' | 'tts' | 'embeddings' | 'decision';
 export type ModelPickerFocusRegion = 'targets' | 'items';
+/** One entry of a target that is not a provider model (the decision model): its own short list. */
+export interface ModelPickerChoice {
+    readonly id: string;
+    readonly label: string;
+    readonly detail?: string | undefined;
+    /** The entry the target is set to now. */
+    readonly current: boolean;
+}
 export interface ModelPickerTargetInfo<Target extends ModelPickerTarget = ModelPickerTarget> {
     readonly target: Target;
     readonly label: string;
@@ -27,6 +37,8 @@ export interface ModelPickerTargetInfo<Target extends ModelPickerTarget = ModelP
      * When set, this replaces the computed provider:model route text.
      */
     readonly configuredNote?: string | undefined;
+    /** Present on a target chosen from its own list instead of the model catalog (PickerMode 'choice'). */
+    readonly choices?: readonly ModelPickerChoice[] | undefined;
 }
 /** One entry in the embedding-provider picker list (PickerMode 'embeddingProvider'). */
 export interface EmbeddingProviderPickerEntry {

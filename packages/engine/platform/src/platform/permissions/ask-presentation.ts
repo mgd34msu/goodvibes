@@ -25,7 +25,7 @@ import type { RememberTier } from './approval-rules.js';
 import { buildPermissionApprovalBrief } from './briefs/build.js';
 import { execRunPlace, permissionSubject } from './subject.js';
 import { composeConsequence, folderName, readingAnswer, undoFactOf, commandEffect, type SandboxFact } from './ask-consequence.js';
-import type { ModeInForceWords } from './decision-model-readiness.js';
+import { modeInForceLine, type ModeInForceWords } from './decision-model-readiness.js';
 import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, PURCHASE_STANDING_METADATA } from '../payments/payment-ports.js';
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
@@ -566,7 +566,7 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
     ...(directory ? [{ label: 'Directory', value: directory }] : []),
     ...(kind === 'run-command' && sandbox ? [{ label: 'Sandbox', value: sandbox.enforced
       ? `on: writes only to ${sandbox.writableRoots.join(', ') || 'nothing'}${sandbox.network ? '' : ', no network'}` : 'off' }] : []),
-    { label: 'Decision', value: facts.modeInForce.inForce !== undefined ? `${facts.modeInForce.chosen} · ${facts.modeInForce.inForce}` : facts.modeInForce.chosen },
+    { label: 'Decision', value: modeInForceLine(facts.modeInForce) },
     ...(notChecked ? [{ label: 'Undo', value: notChecked }] : []),
     ...(analysis.sideEffects && analysis.sideEffects.length > 0 ? [{ label: 'Effects', value: analysis.sideEffects.join(', ') }] : []),
     ...analysis.reasons.map((reason) => ({ label: 'Review', value: reason })),

@@ -4,7 +4,7 @@
  *
  *   ✦ Commands                                                     esc
  *
- *   ▏Type a command, setting, model or key              156 commands
+ *   ▏Type a command, setting, model or key     156 commands and keys
  *
  *   ✦ suggested                                Switch model
  *     Changes                     /changes     /model
@@ -19,7 +19,8 @@
  *
  * Each row is a plain title with the slash command (or a shortcut's key)
  * right-aligned and dim. The detail pane shows the selected command's summary,
- * its actions by label, and the words that find it. On an 80-column terminal there is
+ * its actions by label when it has more than one, and the words that find it.
+ * The count beside the search and the "more" count both count listed rows. On an 80-column terminal there is
  * no detail pane: the selected row's summary is one
  * dim line under the list.
  */
@@ -66,14 +67,19 @@ function drawDetail(palette: PaletteView, entry: PaletteEntry | null, canvas: Pa
     return;
   }
   const live = palette.describe(entry.id);
+  // A command with one action does that one thing, which its summary already
+  // says: its label is left out. With several, each label names a choice.
+  const actions = entry.actions.length > 1
+    ? entry.actions.filter((label) => label.toLowerCase() !== entry.summary.toLowerCase() && label.toLowerCase() !== entry.title.toLowerCase())
+    : [];
   insetLines(canvas, p, p.l, p.top, [
     { text: entry.title, style: { fg: t.text, bold: true } },
     { text: entry.line ? `/${entry.line.command} ${entry.line.args.join(' ')}` : `/${entry.id}`, style: { fg: t.brand } },
     ...(live ? [{ text: live, style: { fg: t.textMuted } }] : []),
     blank,
     ...(entry.summary ? [{ text: entry.summary, style: { fg: t.textMuted } }, blank] : []),
-    ...entry.actions.map((label) => ({ text: label, style: { fg: t.text } })),
-    ...(entry.actions.length > 0 ? [blank] : []),
+    ...actions.map((label) => ({ text: label, style: { fg: t.text } })),
+    ...(actions.length > 0 ? [blank] : []),
     ...(entry.keywords.length > 0 ? [{ text: `Finds: ${entry.keywords.join(', ')}`, style: { fg: t.textFaint } }] : []),
   ]);
 }
@@ -86,9 +92,10 @@ export function renderCommandPalette(palette: PaletteView, screenWidth: number, 
       ? [['↑↓', 'move']]
       : [['↑↓', 'move'], ['⏎', 'run'], ['tab', 'fill composer']],
   });
-  const total = palette.entries.filter((entry) => entry.kind === 'command').length;
+  // Every count here is of listed rows (commands and keys), the same rows the "more" count below counts.
+  const total = palette.entries.length;
   const shown = palette.flat().length;
-  searchRow(f, f.top, palette.query, 'Type a command, setting, model or key', palette.query ? `${shown} of ${palette.entries.length}` : `${total} commands`);
+  searchRow(f, f.top, palette.query, 'Type a command, setting, model or key', palette.query ? `${shown} of ${total}` : `${total} commands and keys`);
 
   const body = f.top + 2;
   const inner = f.r - f.l + 1;

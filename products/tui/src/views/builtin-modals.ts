@@ -6,7 +6,7 @@ import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-
 import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
-import { pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
+import { pairingNoWebUiLines, pairingOriginUsesStableHost, pairingReachFromSettings, pairingUnreachableLines, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
@@ -29,7 +29,7 @@ import { createMemoryModalSurface, type MemoryModalDeps } from './modals/memory-
 import { createMemoryConsolidationGateway } from './memory-consolidation-gateway.ts';
 import { createWorkPlanModalSurface } from './modals/work-plan-modal.ts';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
-import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo } from './modals/pairing-modal.ts';
+import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo, type PairingModalUnreachable } from './modals/pairing-modal.ts';
 import { createDevicesModalSurface } from './modals/devices-modal.ts';
 import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 import { revokeSharedTokenOnDaemon } from '../runtime/client/shared-token-revocation.ts';
@@ -203,14 +203,17 @@ export function registerBuiltinModals(
  * the pairing modal shows its message, so the cause is not guessed here.
  * Mirrors the retired Qr view factory's construction.
  */
-export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, request: PairingConnectionRequest = {}): PairingModalConnectionInfo {
+export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, request: PairingConnectionRequest = {}): PairingModalConnectionInfo | PairingModalUnreachable {
   const ui = deps.uiServices;
   const configManager = deps.configManager;
   // Derived live from the settings (a user-set web.publicBaseUrl wins).
-  // Null when no web UI is served: the offer is still minted, as the bare `#pair=` fragment.
   const webOrigin = resolvePairingWebOrigin(configManager);
-  const url = webOrigin === null ? 'no web UI is served (goodvibes-daemon webui enable --bundle-dir <dir>)'
-    : webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
+  // No code is minted that a phone could not open: the same decision and the
+  // same steps `goodvibes pair` gives, from the settings, with no probe.
+  if (webOrigin === null) return { kind: 'unreachable', lines: pairingNoWebUiLines('/devices pair device') };
+  const reach = pairingReachFromSettings(configManager, webOrigin.origin);
+  if (!reach.otherDevices) return { kind: 'unreachable', lines: pairingUnreachableLines(webOrigin.origin, reach, '/devices pair device') };
+  const url = webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
   const held = request.held;
   // Reopening shows the same offer while nobody has used it and it has not
   // expired: no new credential, no write. Otherwise the new offer replaces it.
@@ -227,7 +230,7 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
     pairingTokens: ui.platform.pairingTokens,
     name: defaultPairingTokenName(),
     offers,
-    webOrigin: webOrigin?.origin,
+    webOrigin: webOrigin.origin,
     replacesOffer: held?.tokenId,
   });
   return {

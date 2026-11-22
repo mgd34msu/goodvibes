@@ -47,7 +47,7 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
   'block-save':            'Save nearest block to file',
   'line-start':            'Move to start of line',
   'clear-prompt':          'Clear the prompt',
-  'cycle-permission-mode': 'Change how often it asks, for this session (asks before YOLO; the saved default is set in /settings)',
+  'cycle-permission-mode': 'Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings)',
   'open-notifications':    'Open the notices (the status bar counts the unread ones)',
   'failure-other-model':   'After a failed turn: choose another model and send the prompt again',
   'failure-details':       'After a failed turn: show what the provider said',

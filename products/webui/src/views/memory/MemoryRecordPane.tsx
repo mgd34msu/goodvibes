@@ -8,7 +8,7 @@ import { Field, Input, Textarea } from '../../components/ui/Field';
 import { Select } from '../../components/ui/Select';
 import { sentence } from '../library/library-data';
 import { MemoryRecordDetail } from './MemoryRecordDetail';
-import { MEMORY_REVIEW_STATES, MEMORY_SCOPES, isFlaggedReviewState, splitTags } from './memory-helpers';
+import { MEMORY_REVIEW_STATES, MEMORY_SCOPE_LINES, MEMORY_SCOPES, confidenceMeaning, isFlaggedReviewState, splitTags } from './memory-helpers';
 
 interface MemoryRecordPaneProps {
   record: MemoryRecord;
@@ -22,6 +22,8 @@ interface MemoryRecordPaneProps {
   savingEdit: boolean;
   /** An error from the last review save or delete, shown in the pane. */
   error?: string | null;
+  /** The store's recall floor from the search that listed the record: below it, a record is not brought into answers. */
+  recallFloor?: number;
 }
 
 /** The right-hand pane for one memory record: detail, an edit form for its summary,
@@ -29,7 +31,7 @@ interface MemoryRecordPaneProps {
  * provenance), the review form (state, confidence, reason; memory.records.update-review)
  * and a confirmed delete. Each form commits only on its own Save. Keyed by record id by
  * the caller so drafts reset per record. */
-export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveReview, saving, onSaveEdit, savingEdit, error }: MemoryRecordPaneProps) {
+export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveReview, saving, onSaveEdit, savingEdit, error, recallFloor }: MemoryRecordPaneProps) {
   const formId = useId();
   const editFormId = useId();
   const [summary, setSummary] = useState(record.summary);
@@ -98,7 +100,7 @@ export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveRe
         )}
       >
         {error && <div className="dv-notice dv-notice--bad" role="alert"><span>{error}</span></div>}
-        <MemoryRecordDetail record={record} />
+        <MemoryRecordDetail record={record} recallFloor={recallFloor} />
         <DetailSection title="Edit">
           <form id={editFormId} className="lib-form" onSubmit={submitEdit}>
             <Field label="Summary" error={summaryValid ? undefined : 'A memory needs a summary.'}>
@@ -110,7 +112,7 @@ export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveRe
             <Field label="Tags" help="Comma separated.">
               <Input value={tags} aria-label={`Tags of ${record.summary}`} onChange={(event) => setTags(event.target.value)} />
             </Field>
-            <Field label="Scope" help="Moving a record to team shares it beyond this project.">
+            <Field label="Scope" help={MEMORY_SCOPE_LINES[scope]}>
               <Select<MemoryScope>
                 value={scope}
                 aria-label={`Scope of ${record.summary}`}
@@ -133,12 +135,16 @@ export function MemoryRecordPane({ record, onClose, onDelete, deleting, onSaveRe
                 options={MEMORY_REVIEW_STATES.map((option) => ({ value: option, label: sentence(option) }))}
               />
             </Field>
-            <Field label="Confidence (0 to 100)" error={confidence.trim() !== '' && !confidenceValid ? 'Enter a number from 0 to 100.' : undefined}>
+            <Field
+              label="How sure it is said to be (0 to 100)"
+              help={confidenceMeaning(recallFloor)}
+              error={confidence.trim() !== '' && !confidenceValid ? 'Enter a number from 0 to 100.' : undefined}
+            >
               <Input
                 inputMode="numeric"
                 pattern="[0-9]*"
                 value={confidence}
-                aria-label={`Confidence for ${record.summary}`}
+                aria-label={`How sure "${record.summary}" is said to be, 0 to 100`}
                 onChange={(event) => setConfidence(event.target.value)}
               />
             </Field>

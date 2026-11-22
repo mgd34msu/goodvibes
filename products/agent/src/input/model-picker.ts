@@ -1,5 +1,6 @@
 import { ModelPickerModal as PlatformModelPicker } from '@goodvibes/engine/terminal-shell/model-picker';
-import type { FavoritesStore, BenchmarkStore, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
+import type { FavoritesStore, BenchmarkStore, ProviderRegistry, CatalogTextWork, ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
+import { LOCAL_REC_PROVIDER } from './model-picker-local-fit.ts';
 import type { PickerMode, ModelPickerTarget, ModelPickerTargetInfo, ModelPickerFocusPane } from './model-picker-types.ts';
 export * from './model-picker-types.ts';
 /** Agent keeps its existing focus and effort presentation over platform-owned picker state. */
@@ -22,5 +23,9 @@ export class ModelPickerModal extends PlatformModelPicker {
   }
   override getSelectedTargetInfo(): ModelPickerTargetInfo | null {
     return this.targetInfos[this.targetIndex] ?? null;
+  }
+  /** The placeholder rows shown before any provider is signed in (a local model to install, "Sign in to a provider") keep their place: they are not catalog models. */
+  override textWork(model: ModelDefinition): CatalogTextWork {
+    return model.provider === LOCAL_REC_PROVIDER ? 'text' : super.textWork(model);
   }
 }

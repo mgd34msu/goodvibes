@@ -89,8 +89,10 @@ export interface CalendarSecretTextSlice {
  * Wrap a secret slice so every WRITE it receives is filed at the tier the
  * credential's reader actually reads from.
  *
- * The platform's `CalendarTokenStore` writes `GOODVIBES_CALENDAR_<PROVIDER>_TOKENS`,
- * `_ACCOUNT` and `_STATUS` through a two-argument `set(key, value)`, it has no
+ * The platform's `CalendarTokenStore` writes the one Google connection
+ * (`GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN` and `_ACCOUNT`, the same refresh token the
+ * daemon's calendar and mail read) and Microsoft's `GOODVIBES_CALENDAR_MICROSOFT_TOKENS`
+ * and `_STATUS` through a two-argument `set(key, value)`, it has no
  * scope parameter to pass, and nothing in the chain from
  * `/calendar connect google` down to that call ever named one. The store's own
  * default for a name it does not recognize is the project tier, so an OAuth

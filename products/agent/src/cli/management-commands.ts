@@ -26,7 +26,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<{ reado
   );
   if (!outcome.ok) {
     return {
-      output: json ? JSON.stringify({ ok: false, kind: 'pairing_failed', error: outcome.error, next: outcome.next }, null, 2) : `${outcome.error}\n  next ${outcome.next}`,
+      output: json ? JSON.stringify({ ok: false, kind: 'pairing_failed', error: outcome.error, next: outcome.next }, null, 2) : outcome.text ?? `${outcome.error}\n  next ${outcome.next}`,
       exitCode: 1,
     };
   }

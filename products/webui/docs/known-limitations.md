@@ -30,11 +30,15 @@ mistaken for hidden contracts.
 
 ## Calendar, Mail, and Dates
 
-- Calendar is bring-your-own CalDAV. An unconfigured daemon renders a pointer
-  to the config keys below, and a daemon build with no calendar handler at
-  all says the capability is missing. The engine has a separate Google and Microsoft OAuth
-  connector, but the WebUI Calendar view reads only the CalDAV keys, so
-  connecting through it does not change what the view shows. The keys the daemon needs before events flow:
+- The Calendar view shows what the daemon's calendar reads: a CalDAV server
+  when one is set, otherwise the machine's one Google connection (the account
+  connected with the Agent's `/calendar connect google`, `/google connect` or
+  the model's `google` tool; they are the same connection). A Microsoft
+  account connected with `/calendar connect outlook` is read by the Agent's
+  `/calendar` only, not by the daemon's calendar. With nothing usable the
+  daemon's answer names the accounts that exist and why none can be read, and
+  a daemon build with no calendar handler at all says the capability is
+  missing. The CalDAV keys:
 
   | Config key | Holds |
   | --- | --- |
@@ -86,9 +90,9 @@ mistaken for hidden contracts.
 ## Sessions and realtime
 
 - The daemon sends the session list a page at a time; Work's "Show older
-  sessions" loads the next page, back to the first. `sessions.search` reaches full history for
-  companion-chat session titles (Chat's history search) but cannot see inside
-  message bodies.
+  sessions" loads the next page, back to the first. Chat's history search
+  looks in two places at once: session titles over the full history
+  (`sessions.search`) and the text of messages (`chat.messages.search`).
 - Several verb families emit no wire event yet (fleet workstream rows,
   checkpoints, CI watches, check-in, principals, memory, local-voice status).
   Their freshness comes from mutation-driven invalidation, polling, and

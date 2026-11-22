@@ -709,6 +709,70 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                   "label": "Home"
                 },
                 {
+                  "value": "personal-ops",
+                  "label": "Inbox & calendar"
+                },
+                {
+                  "value": "research",
+                  "label": "Research"
+                },
+                {
+                  "value": "documents",
+                  "label": "Documents & Files"
+                },
+                {
+                  "value": "conversation",
+                  "label": "Conversation"
+                },
+                {
+                  "value": "work",
+                  "label": "Work & Approvals"
+                },
+                {
+                  "value": "automation",
+                  "label": "Schedules"
+                },
+                {
+                  "value": "owner-profile",
+                  "label": "Your Profile"
+                },
+                {
+                  "value": "memory",
+                  "label": "Memory"
+                },
+                {
+                  "value": "notes",
+                  "label": "Notes"
+                },
+                {
+                  "value": "personas",
+                  "label": "How it talks"
+                },
+                {
+                  "value": "skills",
+                  "label": "Procedures"
+                },
+                {
+                  "value": "routines",
+                  "label": "Saved workflows"
+                },
+                {
+                  "value": "tools",
+                  "label": "Tools & MCP"
+                },
+                {
+                  "value": "knowledge",
+                  "label": "Knowledge"
+                },
+                {
+                  "value": "profiles",
+                  "label": "Agent homes"
+                },
+                {
+                  "value": "host",
+                  "label": "Connected Host"
+                },
+                {
                   "value": "setup",
                   "label": "Setup"
                 },
@@ -739,70 +803,6 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 {
                   "value": "onboarding-context",
                   "label": "Local Context"
-                },
-                {
-                  "value": "personal-ops",
-                  "label": "Personal Ops"
-                },
-                {
-                  "value": "research",
-                  "label": "Research"
-                },
-                {
-                  "value": "documents",
-                  "label": "Documents & Files"
-                },
-                {
-                  "value": "conversation",
-                  "label": "Conversation"
-                },
-                {
-                  "value": "tools",
-                  "label": "Tools & MCP"
-                },
-                {
-                  "value": "knowledge",
-                  "label": "Knowledge"
-                },
-                {
-                  "value": "profiles",
-                  "label": "Profiles"
-                },
-                {
-                  "value": "owner-profile",
-                  "label": "Your Profile"
-                },
-                {
-                  "value": "memory",
-                  "label": "Memory"
-                },
-                {
-                  "value": "notes",
-                  "label": "Notes"
-                },
-                {
-                  "value": "personas",
-                  "label": "Personas"
-                },
-                {
-                  "value": "skills",
-                  "label": "Skills"
-                },
-                {
-                  "value": "routines",
-                  "label": "Routines"
-                },
-                {
-                  "value": "work",
-                  "label": "Work & Approvals"
-                },
-                {
-                  "value": "host",
-                  "label": "Connected Host"
-                },
-                {
-                  "value": "automation",
-                  "label": "Automation"
                 },
                 {
                   "value": "finish",

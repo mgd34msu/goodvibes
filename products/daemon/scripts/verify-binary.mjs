@@ -111,7 +111,7 @@ try {
   for (const argv of [['install-service'], ['refresh-service'], ['start-service'], ['restart-service']]) {
     const result = await run(argv);
     assert.equal(result.code, 1, argv.join(' ')); assert.equal(result.stdout, '', argv.join(' '));
-    assert(result.stderr.startsWith('Daemon command failed\n'), argv.join(' '));
+    assert(result.stderr.startsWith(`goodvibes-daemon ${argv[0]} failed\n`), argv.join(' '));
   }
   for (const path of [daemon, tree, join(home, '.goodvibes'), join(home, '.config'), join(root, 'xdg'), join(work, 'elsewhere')]) {
     assert(!existsSync(path), `Read-only/refused command created ${path}`);

@@ -153,6 +153,16 @@
   }
 }
 
+/* On a phone the row is words, Copy and More, always shown. */
+.message-actions__buttons--phone {
+  gap: 4px;
+  opacity: 1;
+}
+
+.message-actions__buttons--phone .gv-button {
+  color: var(--text-2);
+}
+
 .message-meta {
   padding: 0 6px;
   color: var(--text-3);

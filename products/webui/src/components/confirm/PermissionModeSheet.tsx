@@ -29,12 +29,12 @@ export function PermissionModeSheet({ open, currentMode, pendingMode, onSelect, 
     <Dialog
       open={open}
       onClose={busy ? () => undefined : onCancel}
-      title="Set execution mode"
+      title="When GoodVibes asks"
       description="Applies to this session's live runtime, while it is the daemon's own local session."
       size="confirm"
       footer={<Button variant="secondary" onClick={onCancel} disabled={busy}>Close</Button>}
     >
-      <div className="gv-choice-list" role="group" aria-label="Execution modes">
+      <div className="gv-choice-list" role="group" aria-label="When GoodVibes asks">
         {SESSION_GATE_PRESET_NAMES.map((mode) => {
           const current = mode === currentMode;
           return (

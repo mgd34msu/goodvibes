@@ -20,6 +20,7 @@ import { registerFleetCheckpointsSearchGatewayMethods, type FleetCheckpointsSear
 import { registerPushGatewayMethods } from './push.js';
 import { registerPairingGatewayMethods, type PairingGatewayService } from './pairing.js';
 import { registerPairingHandoffGatewayMethods } from './pairing-handoff.js';
+import { pairingReachFromSettings } from '../../pairing/web-origin.js';
 import { registerTailscaleGatewayMethods } from './tailscale.js';
 import { registerAcpGatewayMethods } from './acp.js';
 import { discoverAcpAgents, type AcpHostService } from '../../acp/host.js';
@@ -701,6 +702,8 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       ...(deps.stepUpService ? { stepUp: deps.stepUpService } : {}),
       relayAvailable: deps.relayAvailable ?? ((): boolean => false),
       ...(deps.pairingWebOrigin ? { webOrigin: deps.pairingWebOrigin } : {}),
+      // The daemon's own settings decide whether a phone can open the code (the one decision every pairing surface uses).
+      reach: (origin) => pairingReachFromSettings(deps.configManager, origin),
     });
   }
   // Hosted third-party coding agents (ACP): read-only discovery + the one-act

@@ -53,7 +53,7 @@ export interface PermissionProvenance {
 
 /** The permission-relevant settings, in the order the panel lists them. */
 const PERMISSION_KEYS: readonly { readonly key: string; readonly label: string; readonly note?: string }[] = [
-  { key: 'permissions.mode', label: 'Execution mode' },
+  { key: 'permissions.mode', label: 'When GoodVibes asks' },
   { key: 'permissions.engine', label: 'Permission evaluator', note: 'baseline or policy-engine' },
   ...CONFIG_SCHEMA.filter(setting => setting.key.startsWith('permissions.tools.') && !setting.deprecated).map(setting => ({
     key: setting.key, label: `Tool restriction: ${setting.key.slice('permissions.tools.'.length)}`,

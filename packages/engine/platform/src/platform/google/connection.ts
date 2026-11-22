@@ -88,6 +88,10 @@ function readString(value: unknown): string | null {
  * there. A partial set is treated as absent, a client id with no refresh
  * token cannot call anything, and reporting it as present would produce a
  * capability that claims to be ready and then fails on first use.
+ *
+ * The client secret is not part of a complete set: a Desktop-app client signed
+ * in with PKCE (what `/calendar connect google` does when no secret was kept)
+ * refreshes with its client id alone, and its grant is the same one connection.
  */
 async function storeCredentials(sources: GoogleConnectionSources, retried = false): Promise<GoogleOAuthCredentials | null> {
   const clientId = readString(safeGet(sources, GOOGLE_CONFIG_KEYS.oauthClientId));
@@ -102,13 +106,12 @@ async function storeCredentials(sources: GoogleConnectionSources, retried = fals
   if (readString(safeGet(sources, GOOGLE_CONFIG_KEYS.oauthClientId)) !== clientId) {
     return retried ? null : storeCredentials(sources, true);
   }
-  const secret = readString(clientSecret);
   const refresh = readString(refreshToken);
-  if (secret === null || refresh === null) return null;
+  if (refresh === null) return null;
 
   return {
     clientId,
-    clientSecret: secret,
+    clientSecret: readString(clientSecret) ?? '',
     refreshToken: refresh,
     accessToken: null,
     expiresAtMs: null,

@@ -1,7 +1,8 @@
 import type { ConfigChange, ConfigKey, ConfigManager, JudgmentFallbackSettings, SecretsManager } from '@goodvibes/engine/platform/platform/config';
-import { CONFIG_SCHEMA, localOwnerActor } from '@goodvibes/engine/platform/platform/config';
+import { CONFIG_SCHEMA, decisionModelSet, decisionModelSettings, localOwnerActor } from '@goodvibes/engine/platform/platform/config';
 import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes/judgment';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
+import type { ModelPickerChoice } from './model-picker-types.js';
 import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
@@ -40,12 +41,44 @@ const POLICY_DETAILS: Readonly<Record<string, string>> = {
   plan: 'Inspect and plan: every action that is not a read is refused.',
 };
 
+/** The entry that clears the primary decision model. */
+const NO_DECISION_MODEL = {
+  id: '__none__',
+  label: 'No decision model',
+  detail: 'Clear the primary decision model: decisions take their fallbacks. A key in TYPESAFE_API_KEY or a fallback target still sets one.',
+} as const;
+
+/** A decision model profile as one list entry: its name, its model id and the service it runs on. */
+function decisionProfileEntry(profile: DecisionModelProfile): { readonly id: string; readonly label: string; readonly detail: string; readonly category: string } {
+  return { id: profile.id, label: profile.name, detail: profile.model, category: PROVIDERS.find(provider => provider.id === profile.adapter)?.label ?? profile.adapter };
+}
+
+/**
+ * The primary decision model's entries as the model picker lists them, the
+ * clearing entry first, with the one in force marked: the same entries Settings
+ * offers (openSettingsChoice 'judgment-model'), and choosing one goes through
+ * that same choice (its `pick` start), so the judgment.* settings have one writer.
+ */
+export function decisionModelChoices(config: Pick<ConfigManager, 'get'>, env: Readonly<Record<string, string | undefined>> = process.env): readonly ModelPickerChoice[] {
+  const set = decisionModelSet(decisionModelSettings(key => config.get(key)), env);
+  const model = String(config.get('judgment.model') ?? '');
+  return [
+    { ...NO_DECISION_MODEL, current: !set },
+    ...DECISION_MODEL_PROFILES.map(profile => {
+      const entry = decisionProfileEntry(profile);
+      return { id: entry.id, label: entry.label, detail: `${entry.detail} · ${entry.category}`, current: set && profile.model === model };
+    }),
+  ];
+}
+
 /** Shared terminal controls; selecting decision models never changes the chat model. */
 export function openSettingsChoice(
   ctx: SettingsChoiceContext,
   action: Exclude<SettingsChoiceAction, 'decision-router'>,
   changed: () => void = ctx.renderRequest,
   setExecutionMode?: ((value: string) => void) | undefined,
+  /** 'judgment-model' only: the entry already chosen (a decisionModelChoices id); the choice continues from it. */
+  start?: { readonly pick: string } | undefined,
 ): boolean {
   const open = ctx.openSelection;
   if (!open) return false;
@@ -193,32 +226,33 @@ export function openSettingsChoice(
         });
       });
   };
-  const chooseModel = (adapter?: string) => {
+  const chooseModel = (adapter?: string, picked?: string) => {
     const previousTarget = editingFallback();
     const profiles = DECISION_MODEL_PROFILES.filter(profile => !adapter || profile.adapter === adapter);
-    const items: SelectionItem[] = profiles.map(profile => ({ id: profile.id, label: profile.name, detail: profile.model, category: PROVIDERS.find(provider => provider.id === profile.adapter)?.label ?? profile.adapter, primaryAction: 'select' }));
+    const chosen = (id: string): void => {
+      if (id === NO_DECISION_MODEL.id) {
+        save([['judgment.endpoint', ''], ['judgment.model', ''], ['judgment.keySource', 'env'], ['judgment.keyName', 'TYPESAFE_API_KEY'], ['judgment.backend', {}]]);
+        return;
+      }
+      const profile = profiles.find(profile => profile.id === id);
+      if (profile) chooseEndpoint(profile);
+      else if (id.startsWith('custom:')) {
+        const existing = captureJudgmentBackendSettings(previousTarget ? previousTarget.backend : config.get('judgment.backend'));
+        const selectedAdapter = PROVIDERS.find(provider => provider.id === adapter)?.id ?? existing.adapter ?? 'system-one';
+        chooseEndpoint({ id: 'custom', name: 'Custom model', model: id.slice(7), adapter: selectedAdapter,
+          ...(selectedAdapter === 'laya' ? { responseModels: existing.responseModels ?? ['laya-rl-agent'] } : {}), documentation: '' });
+      }
+    };
+    if (picked !== undefined) { chosen(picked); return; }
+    const items: SelectionItem[] = profiles.map(profile => ({ ...decisionProfileEntry(profile), primaryAction: 'select' }));
     // The primary model can be cleared as well as chosen; a fallback target is removed from its own menu.
-    if (action !== 'judgment-fallbacks' && !adapter) items.unshift({ id: '__none__', label: 'No decision model', detail: 'Clear the primary decision model: decisions take their fallbacks. A key in TYPESAFE_API_KEY or a fallback target still sets one.', primaryAction: 'select' });
+    if (action !== 'judgment-fallbacks' && !adapter) items.unshift({ ...NO_DECISION_MODEL, primaryAction: 'select' });
     open('Choose decision model', items, {
       allowSearch: true,
       preSelectId: profiles.find(profile => profile.model === (previousTarget?.model ?? config.get('judgment.model')))?.id,
       customItem: query => adapter !== 'cloudflare-workers-ai' && /^[A-Za-z0-9][A-Za-z0-9._:/+-]{0,255}$/.test(query)
         ? { id: `custom:${query}`, label: `Custom model: ${query}`, detail: 'Use the current endpoint and protocol.', primaryAction: 'select' } : null,
-    }, result => {
-      if (!result) return;
-      if (result.item.id === '__none__') {
-        save([['judgment.endpoint', ''], ['judgment.model', ''], ['judgment.keySource', 'env'], ['judgment.keyName', 'TYPESAFE_API_KEY'], ['judgment.backend', {}]]);
-        return;
-      }
-      const profile = profiles.find(profile => profile.id === result.item.id);
-      if (profile) chooseEndpoint(profile);
-      else if (result.item.id.startsWith('custom:')) {
-        const existing = captureJudgmentBackendSettings(previousTarget ? previousTarget.backend : config.get('judgment.backend'));
-        const selectedAdapter = PROVIDERS.find(provider => provider.id === adapter)?.id ?? existing.adapter ?? 'system-one';
-        chooseEndpoint({ id: 'custom', name: 'Custom model', model: result.item.id.slice(7), adapter: selectedAdapter,
-          ...(selectedAdapter === 'laya' ? { responseModels: existing.responseModels ?? ['laya-rl-agent'] } : {}), documentation: '' });
-      }
-    });
+    }, result => { if (result) chosen(result.item.id); });
   };
   if (action === 'judgment-fallbacks') {
     open('Decision fallback order', [
@@ -246,7 +280,7 @@ export function openSettingsChoice(
         save([['judgment.fallbacks', chain]]);
       });
     });
-  } else if (action === 'judgment-model') chooseModel();
+  } else if (action === 'judgment-model') chooseModel(undefined, start?.pick);
   else open('Choose decision provider', [
     ...PROVIDERS.map(provider => ({ ...provider, primaryAction: 'select' as const })),
     { id: '__advanced__', label: 'Advanced provider limits / aliases', detail: 'Edit the complete provider capability object as validated JSON.' },

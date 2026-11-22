@@ -400,9 +400,12 @@ export default function App() {
   }, [sessionRestored, view, activeChatSessionId, activeChatListed, activeChatRemoved, activeChatLookup.error,
     chatSessionItems, chatSessions.isSuccess, handleMissingChatSession, setSession]);
 
+  // The ask a chat's banner opened in Work: Work opens on it; any other navigation drops it.
+  const [workFocusKey, setWorkFocusKey] = useState('');
   const handleNavigate = useCallback(
     (nextView: ViewId, options?: { newChat?: boolean; tab?: string }) => {
       setMissingChatNotice(false);
+      setWorkFocusKey('');
       if (options?.newChat) {
         // One URL update for view and session together: setView then setSession would
         // build the second entry from the pre-navigation state and put the old view back.
@@ -414,6 +417,10 @@ export default function App() {
     },
     [setView, setUrlState],
   );
+  const openAskInWork = useCallback((key: string) => {
+    handleNavigate('work', { tab: 'all' });
+    setWorkFocusKey(key);
+  }, [handleNavigate]);
 
   // The settings dialog lives in the URL (?settings=<section>): opening pushes a
   // history entry, so Back closes it; switching sections replaces the entry.
@@ -768,6 +775,7 @@ export default function App() {
           onSessionMissing={handleMissingChatSession}
           userName={signedInName || profileName}
           onOpenSettings={openSettings}
+          onOpenAsk={openAskInWork}
         />
       )}
       {activeView === 'work' && (
@@ -778,6 +786,7 @@ export default function App() {
           sessionSubscriptionActive={liveUpdates.status === 'live'}
           streamPaused={realtimeError !== null}
           onOpenSession={handleOpenSession}
+          focusKey={workFocusKey}
         />
       )}
       {activeView === 'library' && <LibraryView tab={tab} onTabChange={setTab} />}

@@ -4,16 +4,17 @@ import {
   modelWorkspaceProviderRows,
   modelWorkspaceSignIn,
 } from '@goodvibes/engine/terminal-shell/model-workspace-facts';
+import { modelPickerTargetLabel } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 /**
  * The provider/model picker, drawn with the modal surface kit.
  *
- *   ✦ Models › Main Chat › Select Model                           esc
- *     Main Chat   Helper Model   Tool LLM   TTS LLM         (target tabs)
+ *   ✦ Models › Main chat › Model list                             esc
+ *     Main chat   Side work   Tool work   Spoken replies   Decision model   (target tabs)
  *
  *   ▏Search models                                        12 of 240
  *
  *   ✦ anthropic                         element panel
- *     Claude Sonnet   200k · paid         Target: Main Chat (enabled)
+ *     Claude Sonnet   200k · paid         Target: Main chat (enabled)
  *     ...                                 Selected: ...
  *
  *   ↑↓ move   ⏎ select   tab target   ctrl+t price   ctrl+k caps ...
@@ -55,7 +56,9 @@ const MODEL_WORKSPACE_MODE_LABELS = {
   model: 'Model list',
   effort: 'Reasoning effort',
   contextCap: 'Context cap',
+  choice: 'Choose one',
 } as const;
+const MODEL_WORKSPACE_CHOICE_NEXT = 'Enter asks for its address and where its key comes from, then saves it.';
 const MODEL_WORKSPACE_TABLE_HEADERS = {
   provider: 'Provider                         Configuration       Catalog',
   effort: 'Reasoning effort                 Meaning',
@@ -92,19 +95,17 @@ function formatContext(value: number | undefined): string {
   return String(value);
 }
 
-const targetSummary = (info: ModelPickerTargetInfo): string => modelWorkspaceTargetSummary(info, false);
+const targetSummary = (info: ModelPickerTargetInfo): string => modelWorkspaceTargetSummary(info, true);
 
 function selectedModel(picker: ModelPickerModal): ModelDefinition | null {
   if (picker.mode !== 'model') return null;
   return picker.getSelected();
 }
 
-function targetLabelFor(target: string): string {
-  if (target === 'helper') return 'Helper Model';
-  if (target === 'tool') return 'Tool LLM';
-  if (target === 'tts') return 'TTS LLM';
-  return 'Main Chat';
-}
+const targetLabelFor = modelPickerTargetLabel;
+
+/** Said on a model the catalog does not describe, in its row and its detail. */
+const UNKNOWN_KIND_NOTE = 'kind unknown';
 
 function providerSelectionDetail(targetLabel: string): string {
   return `Provider selection: choose a provider, then choose a model for ${targetLabel}.`;
@@ -126,6 +127,8 @@ export function renderModelWorkspacePackageText(): string {
     MODEL_WORKSPACE_MODE_LABELS.model,
     MODEL_WORKSPACE_MODE_LABELS.effort,
     MODEL_WORKSPACE_MODE_LABELS.contextCap,
+    MODEL_WORKSPACE_MODE_LABELS.choice,
+    MODEL_WORKSPACE_CHOICE_NEXT,
     'Target: <target> (<state>)',
     'Current: <route>',
     providerSelectionDetail('<target>'),
@@ -160,6 +163,8 @@ export function renderModelWorkspacePackageText(): string {
     ...hintsFor('provider').map(([, action]) => action),
     ...hintsFor('effort').map(([, action]) => action),
     ...hintsFor('contextCap').map(([, action]) => action),
+    ...hintsFor('choice').map(([, action]) => action),
+    UNKNOWN_KIND_NOTE,
   ].join('\n');
 }
 
@@ -246,6 +251,7 @@ function detailLines(picker: ModelPickerModal): string[] {
         // Show the fit hint from the description (e.g. "not yet installed (fits in GPU memory)")
         if (selected.description) lines.push(selected.description);
       }
+      if (picker.textWork(selected) === 'unknown') lines.push(`Kind: ${UNKNOWN_KIND_NOTE}, the model catalog does not say what it reads and writes`);
       const fitLine = modelHardwareFitLine(selected);
       if (fitLine) lines.push(fitLine);
       const signIn = picker.configuredProviders.has(selected.provider) ? modelWorkspaceSignIn(picker.configuredViaMap.get(selected.provider)) : undefined;
@@ -255,6 +261,12 @@ function detailLines(picker: ModelPickerModal): string[] {
     }
   } else if (picker.mode === 'effort') {
     lines.push(MODEL_WORKSPACE_REASONING_EFFORT_DETAIL);
+  } else if (picker.mode === 'choice') {
+    if (target?.description) lines.push(target.description);
+    const choice = picker.getSelectedChoice();
+    if (choice) lines.push(`Selected: ${choice.label}${choice.detail ? ` | ${choice.detail}` : ''}`);
+    if (choice && choice.id !== '__none__') lines.push(MODEL_WORKSPACE_CHOICE_NEXT);
+    return lines;
   } else {
     lines.push(MODEL_WORKSPACE_CONTEXT_CAP_DETAIL);
   }
@@ -271,6 +283,12 @@ function detailLines(picker: ModelPickerModal): string[] {
 
 /** Keycap hints for a picker step. */
 function hintsFor(mode: ModelPickerModal['mode']): KitHint[] {
+  if (mode === 'choice')
+    return [
+      ['↑↓', 'move'],
+      ['⏎', 'select'],
+      ['tab', 'target'],
+    ];
   if (mode === 'effort')
     return [
       ['↑↓', 'move'],
@@ -323,9 +341,10 @@ function modelRows(picker: ModelPickerModal): KitRow[] {
     const synthetic = isProviderSignInRow(model) || isLocalFitRecommendation(model);
     // A tier the catalog has not published (the catalog not loaded yet, say) is not shown: it is not known to be paid.
     const right = synthetic ? undefined : [formatContext(model.contextWindow), model.tier].filter((part): part is string => Boolean(part)).join(' · ');
+    const kind = picker.textWork(model) === 'unknown' ? UNKNOWN_KIND_NOTE : '';
     rows.push({
       label: model.displayName,
-      desc: synthetic ? undefined : [modelKey(model), capabilityText(model)].filter(Boolean).join(' · '),
+      desc: synthetic ? undefined : [modelKey(model), capabilityText(model), kind].filter(Boolean).join(' · '),
       right,
       rightFg: model.tier === 'free' ? t.success : undefined,
       mark: picker.pinnedIds.has(model.id) ? '★' : undefined,
@@ -338,6 +357,18 @@ function modelRows(picker: ModelPickerModal): KitRow[] {
 
 const providerRows = (picker: ModelPickerModal): KitRow[] =>
   modelWorkspaceProviderRows(picker, { unconfiguredColor: activeTokens().textFaint });
+
+/** A target's own entries (the decision model): the one in force is marked. */
+function choiceRows(picker: ModelPickerModal): KitRow[] {
+  const t = activeTokens();
+  return picker.getChoices().map((choice, index) => ({
+    label: choice.label,
+    desc: choice.id === '__none__' ? undefined : choice.detail,
+    mark: choice.current ? '●' : undefined,
+    markFg: t.brand,
+    selected: index === picker.selectedIndex,
+  }));
+}
 
 function effortRows(picker: ModelPickerModal): KitRow[] {
   return picker.effortLevels.map((effort, index) => ({
@@ -369,11 +400,10 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
 
   const searchable = picker.mode === 'model' || picker.mode === 'provider';
   if (searchable) {
-    const total = picker.mode === 'model' ? picker.models.length : picker.providers.length;
-    const count =
-      picker.query.length > 0
-        ? `${picker.mode === 'model' ? picker.getFilteredModels().length : picker.getFilteredProviders().length} of ${total}`
-        : `${total} ${picker.mode === 'model' ? 'models' : 'providers'}`;
+    // Out of the models this target can use: an image, video or speech model is not counted.
+    const total = picker.mode === 'model' ? picker.models.filter((model) => picker.textWork(model) !== 'other').length : picker.providers.length;
+    const shown = picker.mode === 'model' ? picker.getFilteredModels().length : picker.getFilteredProviders().length;
+    const count = picker.query.length > 0 || shown !== total ? `${shown} of ${total}` : `${total} ${picker.mode === 'model' ? 'models' : 'providers'}`;
     searchRow(f, top, picker.query, picker.mode === 'model' ? 'Search models' : 'Search providers', count);
     top += 2;
   }
@@ -407,7 +437,14 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
     return finishModal(f);
   }
 
-  const listed = picker.mode === 'model' ? modelRows(picker) : picker.mode === 'provider' ? providerRows(picker) : effortRows(picker);
+  const listed =
+    picker.mode === 'model'
+      ? modelRows(picker)
+      : picker.mode === 'provider'
+        ? providerRows(picker)
+        : picker.mode === 'choice'
+          ? choiceRows(picker)
+          : effortRows(picker);
   // The picker opens on its cached catalog; the rest fills in while this row shows.
   const rows = picker.catalogLoading && picker.mode !== 'effort' ? [LOADING_ROW, ...listed] : listed;
   if (rows.length === 0) {

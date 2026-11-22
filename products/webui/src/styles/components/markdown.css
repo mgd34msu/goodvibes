@@ -204,6 +204,27 @@
   white-space: pre;
 }
 
+/* The wrap toggle sits beside Copy, at the header's right end. */
+.markdown-code-header .markdown-code-label {
+  flex: 1 1 auto;
+}
+
+.markdown-code-wrap[aria-pressed="true"] {
+  color: var(--text);
+}
+
+/* Wrapped (a choice remembered on this device): long lines break inside the frame. */
+.markdown-code-block.wrapped code,
+.markdown-code-block.wrapped .markdown-code-line {
+  min-width: 0;
+}
+
+.markdown-code-block.wrapped code,
+.markdown-code-block.wrapped .markdown-code-line-content {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 /* Calm syntax colors, all from tokens (design mockup: keyword violet,
    function cyan, string green, comment tertiary). */
 .markdown-code-block .hljs-keyword,

@@ -21,10 +21,16 @@ import { queryKeys } from './queries';
 export interface ModeInForceWords {
   /** The chosen mode's label: "Jev decides". */
   readonly chosen: string;
-  /** "asking you for now" when the mode in force differs from the chosen one. */
+  /** What is in force when it differs from the chosen mode: "you, for now". */
   readonly inForce?: string;
+  /** The chosen mode and when it takes effect: "Jev decides with a decision model". */
+  readonly chosenWhen?: string;
+  /** The choice in a few words, where `chosenWhen` does not fit: "default: Jev decides". */
+  readonly chosenShort?: string;
   /** Why it differs, a few words: "decision model unreachable". */
   readonly because?: string;
+  /** True when `because` reports the decision model failing rather than a choice. */
+  readonly failure?: boolean;
   /** What the mode in force does: the explanation behind the chip. */
   readonly sentence: string;
   /** What GoodVibes asks you before, in one sentence. */
@@ -52,8 +58,24 @@ export function readModeInForceWords(value: unknown): ModeInForceWords | undefin
   const record = value as Record<string, unknown>;
   const chosen = text(record.chosen), sentence = text(record.sentence), asksBefore = text(record.asksBefore);
   if (!chosen || !sentence || !asksBefore) return undefined;
-  const inForce = text(record.inForce), because = text(record.because);
-  return { chosen, sentence, asksBefore, ...(inForce ? { inForce } : {}), ...(because ? { because } : {}) };
+  const inForce = text(record.inForce), chosenWhen = text(record.chosenWhen), chosenShort = text(record.chosenShort), because = text(record.because);
+  return {
+    chosen, sentence, asksBefore,
+    ...(inForce ? { inForce } : {}), ...(chosenWhen ? { chosenWhen } : {}), ...(chosenShort ? { chosenShort } : {}),
+    ...(because ? { because } : {}),
+    ...(record.failure === true ? { failure: true } : {}),
+  };
+}
+
+/**
+ * The words in one line, in the order the terminal's status bar draws them
+ * (the engine's modeInForceLine, which cannot load in the browser): the mode in
+ * force first, the choice second, a failure last. "Jev decides" when the chosen
+ * mode is in force; "you, for now · Jev decides with a decision model".
+ */
+export function modeInForceLine(words: ModeInForceWords): string {
+  if (words.inForce === undefined) return words.chosen;
+  return [words.inForce, words.chosenWhen ?? words.chosen, ...(words.failure === true && words.because ? [words.because] : [])].join(' · ');
 }
 
 function readAnswer(value: unknown): DaemonModeInForce {

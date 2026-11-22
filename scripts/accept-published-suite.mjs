@@ -82,7 +82,9 @@ function nativeStartupFailure(stdout, stderr) {
 function nativeDaemonFailure(stdout, stderr) {
   for (const output of [stderr, stdout]) {
     const lines = output.split(/\r?\n/).map(line => line.replace(/\u001b\[[0-9;]*m/g, '').trim());
-    if (lines.includes('Daemon command failed')) return 'cli-command-caught';
+    // A failed command's first line names it (`goodvibes-daemon webui enable failed`); releases
+    // before 3.4.5, still run as the previous release in an upgrade, print `Daemon command failed`.
+    if (lines.some(line => line === 'Daemon command failed' || /^goodvibes-daemon(?: [a-z][a-z-]{0,23}){0,2} failed$/.test(line))) return 'cli-command-caught';
     const repair = 'Native daemon startup could not verify its installation. Repair using the released suite installer: curl -fsSL https://goodvibes.sh/install.sh | sh . The installer preserves existing application data.';
     if (lines.some(line => line === repair || line === `error: ${repair}` || line === `Error: ${repair}`)) return 'native-startup-repair';
     // CLI warnings may precede its final pretty-printed failure object.

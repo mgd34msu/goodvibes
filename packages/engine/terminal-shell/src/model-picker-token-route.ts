@@ -53,6 +53,8 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
   /** Apply the selection; call `applied` once it is (never, when the selection is dropped, e.g. a key prompt cancelled). */
   readonly commit: (state: ModelPickerTokenState<Context, Picker>, selection: PickerSelection<Picker>, applied: () => void) => void;
   readonly commitEmbedding?: ((state: ModelPickerTokenState<Context, Picker>, provider: string) => void) | undefined;
+  /** Apply an entry of a target's own list (PickerMode 'choice', the decision model); the picker has closed. */
+  readonly commitChoice?: ((state: ModelPickerTokenState<Context, Picker>, target: Picker['target'], choiceId: string) => void) | undefined;
   readonly selectSpecial?:
     | ((state: ModelPickerTokenState<Context, Picker>, model: PickerSelection<Picker>['model']) => boolean)
     | undefined;
@@ -174,6 +176,12 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
           const provider = picker.embeddingProviders[picker.selectedIndex];
           if (provider) policy.commitEmbedding?.(state, provider.id);
           closeModelPickerRoute(state);
+        } else if (picker.mode === 'choice') {
+          // The picker closes first: the choice may go on in its own steps (a decision model's address and key).
+          const target = picker.target;
+          const choice = picker.getSelectedChoice();
+          closeModelPickerRoute(state);
+          if (choice) policy.commitChoice?.(state, target, choice.id);
         } else if (picker.mode === 'contextCap') {
           const model = picker.contextCapPendingModel;
           if (model) {
@@ -199,7 +207,7 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
         state.modelPicker.mode !== 'contextCap' &&
         state.modelPicker.mode !== 'effort'
       ) {
-        // The five model targets are tabs: tab / → next, shift+tab / ← previous.
+        // The targets are tabs: tab / → next, shift+tab / ← previous.
         const back = token.logicalName === 'left' || (token.logicalName === 'tab' && token.shift);
         state.modelPicker.moveTarget(back ? -1 : 1);
       } else if (token.ctrl && state.modelPicker.mode === 'model') {

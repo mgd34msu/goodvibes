@@ -3,7 +3,7 @@ import { client as platformClient, type MemoryRecord } from '../../lib/goodvibes
 import { queryKeys } from '../../lib/queries';
 import { DetailSection, Facts } from '../../components/data-view/DataView';
 import { Chip } from '../../components/ui/Chip';
-import { formatConfidence, formatProvenanceLink, formatTimestamp, isFlaggedReviewState } from './memory-helpers';
+import { formatConfidence, formatProvenanceLink, formatTimestamp, isBelowRecallFloor, isFlaggedReviewState } from './memory-helpers';
 
 /**
  * Record detail: type (cls), scope, review state, confidence, timestamps, tags and
@@ -36,9 +36,16 @@ function useReviewerLabel(reviewedBy: string | undefined): string {
   return reviewedBy;
 }
 
-export function MemoryRecordDetail({ record }: { record: MemoryRecord }) {
+export function MemoryRecordDetail({ record, recallFloor }: { record: MemoryRecord; recallFloor?: number }) {
   const flagged = isFlaggedReviewState(record.reviewState);
   const reviewer = useReviewerLabel(record.reviewedBy);
+  // A rating, not a measurement: who gave it (the last review, else whoever saved it),
+  // and whether it keeps the record out of answers.
+  const ratedBy = record.reviewedAt !== undefined
+    ? `set ${reviewer ? `by ${reviewer} ` : ''}when it was reviewed`
+    : 'as given when it was saved';
+  const belowFloor = recallFloor !== undefined && isBelowRecallFloor(record, recallFloor);
+  const rating = `${formatConfidence(record.confidence)} sure, ${ratedBy}${belowFloor ? `; below ${String(recallFloor)}%, so not brought into answers` : ''}`;
 
   return (
     <>
@@ -59,7 +66,7 @@ export function MemoryRecordDetail({ record }: { record: MemoryRecord }) {
           { label: 'Type', value: record.cls },
           { label: 'Scope', value: record.scope },
           { label: 'Review state', value: record.reviewState },
-          { label: 'Confidence', value: formatConfidence(record.confidence) },
+          { label: 'Rated', value: rating },
           { label: 'Created', value: formatTimestamp(record.createdAt) },
           { label: 'Updated', value: formatTimestamp(record.updatedAt) },
           {

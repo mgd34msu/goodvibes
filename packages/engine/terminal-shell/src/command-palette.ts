@@ -98,8 +98,8 @@ const CURATED: ReadonlyArray<readonly [string, CuratedEntry]> = [
 const CURATED_LINES: ReadonlyArray<{ readonly id: string; readonly command: string; readonly args: readonly string[]; readonly title: string; readonly summary: string; readonly group: Exclude<PaletteGroup, 'Suggested' | 'Commands' | 'Keyboard shortcuts'>; readonly keywords: readonly string[] }> = [
   {
     id: 'settings:permissions.mode', command: 'settings', args: ['open', 'permissions.mode'],
-    title: 'Change how often it asks', summary: 'Opens settings at the permission mode: ask me, Jev decides, just vibes or YOLO.',
-    group: 'Settings', keywords: ['permissions', 'mode', 'approval', 'ask', 'jev', 'yolo'],
+    title: 'Change when GoodVibes asks', summary: 'Opens settings at your setting for when GoodVibes asks: Ask me, Jev decides, Just vibes or YOLO.',
+    group: 'Settings', keywords: ['permissions', 'mode', 'approval', 'ask', 'jev', 'yolo', 'how often'],
   },
 ];
 

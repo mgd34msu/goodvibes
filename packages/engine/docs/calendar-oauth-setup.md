@@ -71,11 +71,13 @@ confidential registration only if you specifically want one.
    If you registered a Web-app (confidential) client instead, also store its secret
    and point `calendar.google.clientSecretRef` at it.
 
-The scopes requested are `calendar.readonly` and `calendar.events`, which together
-grant read access plus event creation. There is no config key that narrows this from
-the CLI. An embedder calling the platform's calendar connector directly can pass its own
-scope list to ask for read-only access instead, but a `config set` install
-always gets both.
+The scopes requested are `gmail.readonly`, `gmail.send`, `calendar.readonly` and
+`calendar.events`: a Google sign-in here is the one Google connection on the machine,
+which the daemon's calendar (the web Calendar), its Gmail access and the Agent's
+`/calendar` all read, so it asks once for what all of them need. Enable the Gmail API
+beside the Calendar API in the same project. There is no config key that narrows this
+from the CLI. An embedder calling the platform's calendar connector directly can pass
+its own scope list, but a `config set` install always gets all four.
 
 ## Microsoft
 

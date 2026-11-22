@@ -43,8 +43,12 @@ import {
   availablePairingOffers,
   defaultPairingTokenName,
   formatPairingOffers,
-  isLoopbackHost,
+  PAIRING_REACH_FIX,
+  pairingReachFromSettings,
+  pairingReadySteps,
+  pairingUnreachableLines,
   resolvePairingWebOrigin,
+  type OriginPosture,
   type PairingHandoffOfferKind,
 } from '@goodvibes/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
@@ -266,6 +270,32 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
     stepUpAvailable: true,
   });
 
+  // Whether a phone can open this address, from the daemon's own bind (its
+  // /api/health answer, or the settings) and its settings: no probe. When it
+  // cannot, no code is printed for a phone; the link still signs in a browser
+  // on this machine, so it is given for that, plainly labelled.
+  const reach = pairingReachFromSettings(input.configManager, origin.origin);
+  if (!reach.otherDevices) {
+    const local = renderPairingBanner({ version: input.version, origin: origin.origin, token, offers, includeQr: false });
+    if (flags.json) {
+      return failure(
+        `no pairing code was made: a phone could not open it yet (${reach.reason ?? 'the daemon serves only this machine'})`,
+        `${reach.fix ?? PAIRING_REACH_FIX}, then goodvibes-daemon pair`,
+        flags.json,
+      );
+    }
+    return {
+      exitCode: 1,
+      lines: [
+        ...pairingUnreachableLines(origin.origin, reach, 'goodvibes-daemon pair'),
+        '',
+        'A browser on this machine can still open the web app signed in with:',
+        `  ${local.deepLink}`,
+        ...(fromFiles.length > 0 ? ['', ...fromFiles] : []),
+      ],
+    };
+  }
+
   const banner = renderPairingBanner({
     version: input.version,
     origin: origin.origin,
@@ -297,28 +327,26 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
   return {
     exitCode: 0,
     lines: [
+      'Pair a phone',
+      ...pairingReadySteps(origin.origin, offers),
+      '',
       ...banner.lines,
       ...(fromFiles.length > 0 ? ['', ...fromFiles] : []),
-      ...localOnlyNotice(input.configManager, origin.origin),
     ],
   };
 }
 
 /**
- * The listener answers another machine only with `controlPlane.enabled` on, so
- * a link to a network address is useless to a phone while it is off. A tunnel
- * or proxy on this machine that does not forward the client address is still
- * served, hence the hedge.
+ * The line the start-up pairing block ends with when no phone could open its
+ * link: why, and the one command that fixes it. Nothing when one could.
  */
 export function localOnlyNotice(config: Pick<ConfigManager, 'get'>, origin: string): readonly string[] {
-  if (config.get('controlPlane.enabled') === true) return [];
-  let host: string;
-  try { host = new URL(origin).hostname; } catch { return []; }
-  if (isLoopbackHost(host)) return [];
+  const reach = pairingReachFromSettings(config, origin);
+  if (reach.otherDevices) return [];
   return [
     '',
-    'note: controlPlane.enabled is off, so this daemon serves only this machine; a device opening this link directly is refused.',
-    'To serve other devices: goodvibes-daemon config set controlPlane.enabled true',
+    `note: this link opens only on this machine: ${reach.reason ?? 'the daemon serves only this machine'}.`,
+    `To pair a phone: ${reach.fix ?? PAIRING_REACH_FIX}, then goodvibes-daemon pair`,
   ];
 }
 
@@ -350,6 +378,26 @@ function mintPlanResult(target: RemoteDaemonTarget, json: boolean, why: readonly
 /** The minting form, once `-y` has consented: mint and render. `local`: the daemon is this machine's own. */
 async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTarget, local = false): Promise<DaemonCommandResult> {
   const { flags } = input;
+
+  // No token is minted that a phone could not open: that daemon's own answer
+  // about the address a code would carry (pairing.posture.get mints nothing;
+  // the daemon decides from its settings). No answer leaves the mint to say
+  // what went wrong, as before.
+  const posture = await callDaemonMethod<{ readonly posture: OriginPosture }>(target, 'pairing.posture.get', { input: {} }, input.fetchImpl);
+  if (posture.ok) {
+    const reach = posture.data.posture.reach;
+    if (reach !== undefined && !reach.otherDevices) {
+      const pairAgain = local ? 'goodvibes-daemon pair -y' : `goodvibes-daemon pair --host ${target.baseUrl} -y`;
+      if (flags.json) {
+        return failure(
+          `no pairing code was made: a phone could not open it yet (${reach.reason ?? 'the daemon serves only its own machine'})`,
+          `${reach.fix ?? PAIRING_REACH_FIX} on that daemon's machine, then ${pairAgain}`,
+          flags.json,
+        );
+      }
+      return { exitCode: 1, lines: pairingUnreachableLines(posture.data.posture.origin, reach, pairAgain) };
+    }
+  }
 
   const outcome = await callDaemonMethod<PairingHandoffCreateResult>(
     target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName() } }, input.fetchImpl,

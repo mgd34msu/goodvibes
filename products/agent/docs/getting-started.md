@@ -70,29 +70,34 @@ open the list of every command and key instead. The workspace is a set of
 pages, each a list of rows. A row changes a setting, opens the shared model
 picker, or opens the guided form of the slash command that does it, the same
 form the command opens when you type it. The side pane says what the selected
-row does and shows that command's own report. Browsing the workspace never
-reaches the network: a report that reads a mailbox, a provider or the daemon
-runs only when you ask with `Ctrl+R`.
+row does and shows that command's own report, with the time it was read.
+Browsing the workspace never reaches the network: a report that reads a
+mailbox, a provider or the daemon is "not read yet" until you ask with
+`Ctrl+R`. The title row names the Agent home you are in and the account the
+chat model uses.
+
+The pages are listed everyday work first, setting up after:
 
 | Page | What it holds |
 | --- | --- |
 | Home | Everything the assistant can do, grouped by what you want to get done; or close it and type |
+| Inbox & calendar | Your inbox, calendar, notes and reminders, and the accounts behind them |
+| Research | Web research with its sources, and sourced reports |
+| Documents & Files | Drafts and their review, saved files, and comparing models on one task |
+| Conversation | This conversation and your saved ones: save, resume, find and export |
+| Work & Approvals | What is running, what waits for your answer, and your to-do list |
+| Schedules | Schedules on the connected host, and the limits on them |
+| Your Profile | What GoodVibes knows about you, and how to correct or forget a fact |
+| Memory, Notes, How it talks, Procedures, Saved workflows | What the assistant remembers, your scratchpad, its personas, its skills, and routines you start by name or on a schedule |
+| Tools & MCP | The tool servers the assistant can use, and the secrets they need |
+| Knowledge | What the assistant knows from the pages, files and bookmarks you added |
+| Agent homes | Separate Agent homes and the starters they are made from |
+| Connected Host | What the connected host is running and how it is set up |
 | Setup | The rows of one `/setup` topic |
 | Models | The model the assistant answers with, and optional models for side jobs |
 | Behavior | How much it checks in, when it shortens the history, and whether you see its reasoning |
 | Tools & Permissions | What the assistant may do without asking |
 | Interface | Theme, streaming, line numbers and where messages go |
-| Personal Ops | Your inbox, calendar, notes and reminders, and the accounts behind them |
-| Research | Web research with its sources, and sourced reports |
-| Documents & Files | Drafts and their review, saved files, and comparing models on one task |
-| Conversation | This conversation and your saved ones: save, resume, find and export |
-| Tools & MCP | The tool servers the assistant can use, and the secrets they need |
-| Knowledge | What the assistant knows from the pages, files and bookmarks you added |
-| Profiles | Separate Agent homes and the starters they are made from |
-| Your Profile | What GoodVibes knows about you, and how to correct or forget a fact |
-| Memory, Notes, Personas, Skills, Routines | What the assistant remembers, your scratchpad, how it talks, its procedures, and workflows you start by name or on a schedule |
-| Work & Approvals | What is running, what waits for your answer, and your to-do list |
-| Automation | Schedules on the connected host, and the limits on them |
 | Messaging | Chat apps and notification channels |
 | Finish | Mark setup finished, so later starts open the conversation |
 

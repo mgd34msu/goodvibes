@@ -13,12 +13,14 @@ import {
   formatPairingOffers,
   formatPostureCapabilities,
   generateQrMatrix,
+  pairingNoWebUiLines,
   pairingPostureNotice,
+  pairingReadySteps,
+  pairingUnreachableLines,
   renderQrToString,
   type OriginPosture,
   type PairingHandoffOfferKind,
-} from '@goodvibes/engine/platform/platform/pairing';
-import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+} from '@goodvibes/engine/platform/platform/pairing';import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 
 /** What `pairing.handoff.create` answers. */
 interface PairingHandoffCreateResult {
@@ -33,18 +35,67 @@ interface PairingHandoffCreateResult {
 
 export type AgentDevicePairingOutcome =
   | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly text: string }
-  | { readonly ok: false; readonly error: string; readonly next: string };
+  /** `text`, when present, is the whole answer as the numbered list `pair` prints. */
+  | { readonly ok: false; readonly error: string; readonly next: string; readonly text?: string };
+
+/** The origin a deep link opens (`<origin>/#pair=...`). */
+function originOf(link: string): string {
+  const cut = link.indexOf('/#');
+  return cut === -1 ? link : link.slice(0, cut);
+}
 
 function isOfferKind(kind: string): kind is PairingHandoffOfferKind {
   return (PAIRING_HANDOFF_OFFER_KINDS as readonly string[]).includes(kind);
 }
 
+/** The code a host refusal carries, when it carries one. */
+function refusalCode(error: unknown): string | undefined {
+  const record = error as { readonly code?: unknown; readonly body?: { readonly code?: unknown } } | null;
+  const code = record?.code ?? record?.body?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/**
+ * Before any token is minted: the host's own answer about the address a code
+ * would carry (`pairing.posture.get`, which reads and mints nothing) says
+ * whether a phone could open it; the host decides from its own settings. No
+ * answer leaves the mint to report what went wrong, as before.
+ */
+async function pairingRefusal(verbs: DaemonVerbCaller, pairCommand: string): Promise<Extract<AgentDevicePairingOutcome, { ok: false }> | null> {
+  let posture: OriginPosture;
+  try {
+    posture = (await verbs.invoke<{ readonly posture: OriginPosture }>('pairing.posture.get', {})).posture;
+  } catch (error) {
+    if (refusalCode(error) !== 'ORIGIN_UNKNOWN') return null;
+    return {
+      ok: false,
+      error: 'No pairing code was made: the connected host serves no web UI, so a code would open nothing.',
+      next: `On the host: goodvibes-daemon webui enable --lan, then ${pairCommand}.`,
+      text: pairingNoWebUiLines(pairCommand).join('\n'),
+    };
+  }
+  const reach = posture.reach;
+  if (reach === undefined || reach.otherDevices) return null;
+  return {
+    ok: false,
+    error: `No pairing code was made: a phone could not open it yet${reach.reason ? ` (${reach.reason})` : ''}.`,
+    next: `On the host: ${reach.fix ?? 'make the web UI reachable from your network'}, then ${pairCommand}.`,
+    text: pairingUnreachableLines(posture.origin, reach, pairCommand).join('\n'),
+  };
+}
+
 /** One request to the connected host: mint a device token and render its link, QR and posture. */
-export async function mintAgentDevicePairing(verbs: DaemonVerbCaller, options: { readonly name?: string; readonly qr?: boolean } = {}): Promise<AgentDevicePairingOutcome> {
+export async function mintAgentDevicePairing(
+  verbs: DaemonVerbCaller,
+  options: { readonly name?: string; readonly qr?: boolean; readonly pairCommand?: string } = {},
+): Promise<AgentDevicePairingOutcome> {
   const reach = verbs.probe();
   if (!reach.available) {
     return { ok: false, error: `No device was paired: ${reach.reason}.`, next: 'Start or connect the GoodVibes host, then pair again.' };
   }
+  // A code a phone could not open is never made.
+  const refused = await pairingRefusal(verbs, options.pairCommand ?? 'goodvibes-agent pair');
+  if (refused !== null) return refused;
   let result: PairingHandoffCreateResult;
   try {
     result = await verbs.invoke<PairingHandoffCreateResult>('pairing.handoff.create', {
@@ -68,7 +119,10 @@ export async function mintAgentDevicePairing(verbs: DaemonVerbCaller, options: {
       '  Set web.publicBaseUrl on the host, revoke this token in the host\'s device list, then pair again for a scannable link.',
     );
   } else {
-    lines.push('Scan to pair a device; the QR opens the web app already signed in:', '', `  ${link}`);
+    // What is done and what is next, as one list; the code and its details follow.
+    lines.push('Pair a phone', ...pairingReadySteps(result.posture?.origin ?? originOf(link), offerKinds));
+    if (options.qr !== false) lines.push('', renderQrToString(generateQrMatrix(link)));
+    lines.push('', `  ${link}`);
   }
   lines.push(`  Token name: ${result.token.name}  (rename or revoke it in the host's device list)`);
   if (offerKinds.length > 0) {
@@ -78,6 +132,5 @@ export async function mintAgentDevicePairing(verbs: DaemonVerbCaller, options: {
   if (capabilities.length > 0) lines.push('', 'This device will get:', ...capabilities);
   const notice = pairingPostureNotice(result.posture);
   if (notice) lines.push('', notice);
-  if (result.deepLink !== undefined && options.qr !== false) lines.push('', renderQrToString(generateQrMatrix(link)));
   return { ok: true, tokenName: result.token.name, tokenId: result.token.id, link, text: lines.join('\n') };
 }

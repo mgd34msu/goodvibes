@@ -69,7 +69,7 @@ The modal and direct commands write the platform TTS config keys:
 | `tts.llmModel` | Model override for the spoken-turn response model; empty uses the active chat model |
 | `tts.speed` | The playback speed multiplier (see the Speed section below) |
 
-By default, `/voice speak` uses the active chat provider/model for text generation. If `tts.llmProvider` and `tts.llmModel` are set through `/settings`, `/voice speak` uses that configured spoken-turn model for `/voice speak` turns without changing the main chat model. Selecting either TTS LLM row opens the same fullscreen provider/model workspace used by the main model/provider commands, with the target route set to `TTS LLM`.
+By default, `/voice speak` uses the active chat provider/model for text generation. If `tts.llmProvider` and `tts.llmModel` are set through `/settings`, `/voice speak` uses that configured spoken-turn model for `/voice speak` turns without changing the main chat model. Selecting either of those rows opens the same fullscreen model picker used by the main model/provider commands, on its `Spoken replies` tab.
 
 Spoken turns stay active until the logical turn reaches `TURN_COMPLETED`, `TURN_ERROR`, `TURN_CANCEL`, or `PREFLIGHT_FAIL`. platform `STREAM_END` is provider-stream scoped and non-terminal, so tool-using or multi-step `/voice speak` turns must not stop audio collection just because one provider stream iteration ended.
 

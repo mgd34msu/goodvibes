@@ -9,6 +9,24 @@
   min-width: 0;
 }
 
+.calendar-range-preset {
+  width: 160px;
+  min-width: 0;
+}
+
+/* The time zone every time on the page is in, said once. */
+.calendar-zone {
+  color: var(--text-2);
+  font-size: var(--text-meta);
+  white-space: nowrap;
+}
+
+.calendar-zone--phone {
+  display: block;
+  margin: 0 0 8px;
+  white-space: normal;
+}
+
 .calendar-month-nav {
   display: flex;
   align-items: center;

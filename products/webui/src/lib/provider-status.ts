@@ -36,6 +36,8 @@ export interface ProviderRouteStatus {
   readonly usable?: boolean;
   readonly detail?: string;
   readonly repairHints: readonly string[];
+  /** The subscription a sign-in route belongs to (`/provider sign-in <providerId>`), when the daemon names it. */
+  readonly providerId?: string;
 }
 
 export interface ProviderStatus {
@@ -121,6 +123,7 @@ function normalizeRoute(raw: unknown): ProviderRouteStatus {
     repairHints: Array.isArray(record.repairHints)
       ? record.repairHints.filter((hint): hint is string => typeof hint === 'string')
       : [],
+    providerId: firstString(record, ['providerId']) || undefined,
   };
 }
 
@@ -261,4 +264,40 @@ export function freshnessPhrase(freshness: ProviderFreshness): string {
 export function providerStatePhrase(status: ProviderStatus): string {
   const phrase = freshnessPhrase(status.freshness);
   return status.configured && status.configuredVia ? `${phrase} · set up via ${status.configuredVia}` : phrase;
+}
+
+/**
+ * What fixes a provider whose state needs the person, for its row:
+ *   - a subscription sign-in that expired or is expiring: sign in again, which a
+ *     terminal app on the daemon's machine does (`/provider sign-in <id>`; the
+ *     browser cannot hold a subscription sign-in), so the row carries that command;
+ *   - another route that expired: the daemon's own repair hint;
+ *   - status unavailable: why, and what to do about it.
+ * Null when nothing needs doing.
+ */
+export interface ProviderRepair {
+  /** The button's word, when the fix is a command to copy. */
+  readonly action?: string;
+  /** The command that fixes it, run in the terminal app. */
+  readonly command?: string;
+  /** What to do, in one short sentence. */
+  readonly says: string;
+}
+
+export function providerRepair(status: ProviderStatus): ProviderRepair | null {
+  if (status.freshness === 'expired' || status.freshness === 'expiring') {
+    const route = status.routes.find((candidate) => candidate.freshness === status.freshness);
+    if (route?.route === 'subscription-oauth' && route.providerId) {
+      const command = `/provider sign-in ${route.providerId}`;
+      return { action: 'Sign in again', command, says: `Sign in again in the terminal app: ${command}` };
+    }
+    const hint = route?.repairHints[0];
+    return { says: hint ?? 'Open it to see which sign-in needs renewing.' };
+  }
+  if (status.freshness === 'status unavailable') {
+    return status.routes.length === 0
+      ? { says: 'The daemon did not say how this provider signs in: open it for details, or update the daemon.' }
+      : { says: 'The daemon reported a sign-in state this page does not read: reload the page, or open it for each route.' };
+  }
+  return null;
 }

@@ -52,6 +52,7 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
 export const DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS: readonly string[] = [
   "cluster.groupMaterial",
   "google.oauth.refreshToken",
+  "google.oauth.account",
   "email.passwordRef",
   "email.smtpPasswordRef"
 ] as const;

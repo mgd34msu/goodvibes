@@ -135221,7 +135221,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise).
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -135249,6 +135249,9 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
       }
     },
     "fromSharedToken": {
+      "type": "boolean"
+    },
+    "forThisMachine": {
       "type": "boolean"
     }
   },
@@ -135356,6 +135359,54 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
             ],
             "additionalProperties": false
           }
+        },
+        "reach": {
+          "type": "object",
+          "properties": {
+            "otherDevices": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "fix": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "next",
+                      "then"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "state",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "otherDevices"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -135379,7 +135430,7 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
 
 #### `pairing.posture.get`
 
-The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https, available via tailscale" so surfaces render labels instead of dead buttons. Localhost keeps all three. The daemon never mints certificates.
+The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https, available via tailscale" so surfaces render labels instead of dead buttons. Localhost keeps all three. With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done|next|then, text, detail, command). Every pairing surface asks this before minting. The daemon never mints certificates.
 
 - Title: `Get Origin TLS/Capability Posture`
 - Source: `builtin`
@@ -135450,6 +135501,54 @@ The honest TLS/capability posture of a web origin, pass your surface's current o
             ],
             "additionalProperties": false
           }
+        },
+        "reach": {
+          "type": "object",
+          "properties": {
+            "otherDevices": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "fix": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "next",
+                      "then"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "state",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "otherDevices"
+          ],
+          "additionalProperties": false
         }
       },
       "required": [
@@ -159022,7 +159121,7 @@ Return a page of retained session messages. Offset counts backward from the newe
 
 #### `sessions.permissionMode.get`
 
-Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, "Jev decides"), `inForce` ("asking you for now") and `because` ("decision model unreachable") when the mode in force differs, `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL.
+Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, "Jev decides"); when the mode in force differs, `inForce` (what is in force, written to lead: "you, for now"), `chosenWhen` (the chosen mode and the condition it waits on: "Jev decides once a decision model is set"), `chosenShort` (the choice in a few words, for where `chosenWhen` does not fit: "you chose Jev decides", or "default: Jev decides" while it is only the shipped default), `because` ("no decision model set", "decision model unreachable") and `failure` (true when `because` reports the decision model failing or out of reach, not a choice); a surface shows `inForce · chosenWhen`, then `because` when `failure` is true. Then `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Get Session Permission Mode`
 - Source: `builtin`
@@ -159092,8 +159191,17 @@ Return the session execution mode in force (`mode`): ask-me, jev-decides, just-v
         "inForce": {
           "type": "string"
         },
+        "chosenWhen": {
+          "type": "string"
+        },
+        "chosenShort": {
+          "type": "string"
+        },
         "because": {
           "type": "string"
+        },
+        "failure": {
+          "type": "boolean"
         },
         "sentence": {
           "type": "string"

@@ -93,16 +93,19 @@ export function buildRememberOptions(toolName: string, args: Record<string, unkn
     });
   }
 
+  // This session only sits right after the exact command: it lasts the session, where the others are kept.
+  const session = sessionScope(toolName, args);
+  const exactAt = options.findIndex((option) => option.tier === 'exact');
+  options.splice(exactAt + 1, 0, {
+    tier: 'session',
+    label: `${session}, this session only`,
+    detail: 'forgotten when this session ends',
+  });
+  // The broadest tier is always last.
   options.push({
     tier: 'tool',
     label: `Any ${toolNoun(toolName)} in this project`,
     detail: 'whatever it names, until you remove the rule',
-  });
-  const session = sessionScope(toolName, args);
-  options.push({
-    tier: 'session',
-    label: `${session}, this session only`,
-    detail: 'forgotten when this session ends',
   });
   return options;
 }

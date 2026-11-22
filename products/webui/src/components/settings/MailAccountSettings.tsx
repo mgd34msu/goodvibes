@@ -160,7 +160,7 @@ export function MailAccountSettings() {
     retry: false,
   });
   const calendarProbe = useQuery({
-    queryKey: ['calendar', 'surface-probe'],
+    queryKey: queryKeys.calendarProbe,
     queryFn: () => platformClient.operator.calendar.events.list({ limit: 1 }),
     retry: false,
   });

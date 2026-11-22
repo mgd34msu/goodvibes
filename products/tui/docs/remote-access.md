@@ -48,6 +48,17 @@ computes, so it is stated where you pair a device and never repeated as a nag.
      `pairing.handoff.create`), so surfaces render a
      "needs https, available via tailscale" label next to each capability
      instead of a dead button. Localhost keeps all three.
+- **A link only this machine can open is not printed as a code for a phone.**
+  The pairing contract carries `reach` (`pairing.posture.get` with no origin):
+  whether another device can open the code, decided by the daemon from its
+  settings (a loopback address cannot; `web.publicBaseUrl` is your statement
+  that it can; otherwise `controlPlane.enabled` decides), with numbered steps
+  when not. `goodvibes pair`, the pairing screen and the web UI's `Pair a new
+  device` ask it before minting and, when no other device could open the
+  code, mint nothing and show the next step instead:
+  `goodvibes-daemon webui enable --lan`, run in a terminal on the daemon's
+  machine. `pairing.handoff.create` itself refuses such a code
+  (`PAIRING_CODE_UNREACHABLE`).
 - **The full progressive-web-app feature set needs TLS, and TLS on a home
   network is your responsibility.** The daemon never mints certificates and
   never provisions its own CA. It will not conjure one for `192.168.1.20`.

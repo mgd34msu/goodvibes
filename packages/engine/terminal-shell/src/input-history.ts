@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { logger, maskCredentialCandidates, readDocument, summarizeError, writeDocument } from '@goodvibes/engine/platform/platform/utils';
+import { mkdirSync, readFileSync, unlinkSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { logger, maskCredentialCandidates, readDocument, summarizeError, writeDocument, writeFileAtomic } from '@goodvibes/engine/platform/platform/utils';
 import { IMAGE_BLOCK_MARKER, TEXT_BLOCK_MARKER, type ComposerBlock, type ComposerMessage } from './input-content.js';
 /**
  * InputHistory, Persisted command history with arrow-key navigation.
@@ -154,47 +154,57 @@ export interface InputHistoryOptions {
     readonly redactionRules?: readonly HistoryRedactionRule[] | undefined;
 }
 /**
- * Pasted content kept for recall, counted over the newest lines first: as
- * much as one paste can hold (the tokenizer takes up to 8 MiB). Content of
- * older lines past it is let go, and those lines recall as their markers.
+ * Pasted content kept for recall, counted over the newest lines first, for
+ * text and for images apart: as much as one paste can hold (the tokenizer
+ * takes up to 8 MiB). Content of older lines past it is let go, and those
+ * lines recall as their markers.
  */
 const MAX_KEPT_BLOCK_CHARS = 8 * 1024 * 1024;
-/** A content key: `h` and 16 hex digits of the block's SHA-256. */
-const BLOCK_KEY = /^h[0-9a-f]{16}$/;
+/**
+ * A content key: `h`, 16 hex digits of the block's SHA-256, `-` and its size
+ * in characters. The size in the key lets the bound be kept from the list of
+ * lines alone, with no file read.
+ */
+const BLOCK_KEY = /^h[0-9a-f]{16}-\d+$/;
+function blockSize(block: ComposerBlock): number {
+    return block.kind === 'text' ? block.text.length : block.data.length;
+}
 function blockKey(block: ComposerBlock): string {
     const hash = createHash('sha256');
     if (block.kind === 'text')
         hash.update('text\0').update(block.text);
     else
         hash.update(`image\0${block.mediaType}\0`).update(block.data);
-    return `h${hash.digest('hex').slice(0, 16)}`;
+    return `h${hash.digest('hex').slice(0, 16)}-${blockSize(block)}`;
 }
-function blockSize(block: ComposerBlock): number {
-    return block.kind === 'text' ? block.text.length : block.data.length;
+function keySize(key: string): number {
+    return Number(key.slice(key.indexOf('-') + 1));
 }
-/** The content keys a line's markers name, text blocks first. */
-function markerKeys(line: string): string[] {
-    const keys: string[] = [];
+/** The content keys a line's markers name, with the kind of block each marker is. */
+function markerKeys(line: string): { readonly key: string; readonly kind: ComposerBlock['kind'] }[] {
+    const keys: { readonly key: string; readonly kind: ComposerBlock['kind'] }[] = [];
     for (const match of line.matchAll(TEXT_BLOCK_MARKER))
-        if (match[1] !== undefined && BLOCK_KEY.test(match[1])) keys.push(match[1]);
+        if (match[1] !== undefined && BLOCK_KEY.test(match[1])) keys.push({ key: match[1], kind: 'text' });
     for (const match of line.matchAll(IMAGE_BLOCK_MARKER))
-        if (match[1] !== undefined && BLOCK_KEY.test(match[1])) keys.push(match[1]);
+        if (match[1] !== undefined && BLOCK_KEY.test(match[1])) keys.push({ key: match[1], kind: 'image' });
     return keys;
 }
-/**
- * The file's last element when any pasted text is kept: `{ "blocks": { key: text } }`.
- * A reader that knows only lines passes over it (it has no `text`).
- */
-function readStoredBlocks(raw: unknown): Map<string, string> | null {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || 'text' in raw)
-        return null;
-    const blocks = (raw as { readonly blocks?: unknown }).blocks;
-    if (!blocks || typeof blocks !== 'object' || Array.isArray(blocks))
-        return null;
-    const read = new Map<string, string>();
-    for (const [key, text] of Object.entries(blocks))
-        if (BLOCK_KEY.test(key) && typeof text === 'string') read.set(key, text);
-    return read;
+/** The keys of one kind the newest lines name, newest first, up to MAX_KEPT_BLOCK_CHARS; an older one that does not fit is left out. */
+function keptKeys(lines: readonly string[], kind: ComposerBlock['kind']): Set<string> {
+    const kept = new Set<string>();
+    let size = 0;
+    for (const line of lines) {
+        for (const named of markerKeys(line)) {
+            if (named.kind !== kind || kept.has(named.key))
+                continue;
+            const next = size + keySize(named.key);
+            if (next > MAX_KEPT_BLOCK_CHARS)
+                continue;
+            size = next;
+            kept.add(named.key);
+        }
+    }
+    return kept;
 }
 function resolveHistoryPath(options?: InputHistoryOptions | undefined): string {
     if (options?.historyPath) {
@@ -209,14 +219,21 @@ function resolveHistoryPath(options?: InputHistoryOptions | undefined): string {
     return join(userRoot, '.goodvibes', surfaceRoot, 'input-history.json');
 }
 export class InputHistory {
-    /** Each line as typed, newest first; a pasted block's marker names its content key in `blocks`. */
+    /** Each line as typed, newest first; a pasted block's marker names its content key. */
     private entries: string[] = [];
-    /** Pasted content by content key, stored once however many lines name it. Images are kept for this run only. */
-    private blocks = new Map<string, ComposerBlock>();
+    /** Pasted text this run wrote or read, by content key; the files in `pasteDir` are its record. */
+    private texts = new Map<string, string>();
+    /** Pasted images by content key, kept for this run only. */
+    private images = new Map<string, ComposerBlock>();
+    /** The text keys within the bound at the last write or load: each has its file in `pasteDir`. */
+    private storedTextKeys = new Set<string>();
     private position = -1; // -1 = not browsing
     private draft = ''; // Saves current input when entering history
     private maxEntries = 500;
     private historyPath: string;
+    /** `input-history-pastes/` beside the history file: one `<key>.txt` per pasted text, written once. */
+    private pasteDir: string;
+    private pasteDirMade = false;
     private persist: boolean;
     private redactionRules: readonly HistoryRedactionRule[];
     /** Display texts this process last read from or wrote to the file; anything else on disk came from another process. */
@@ -224,6 +241,7 @@ export class InputHistory {
     constructor(options: InputHistoryOptions) {
         this.persist = options.persist ?? true;
         this.historyPath = resolveHistoryPath(options);
+        this.pasteDir = join(dirname(this.historyPath), 'input-history-pastes');
         this.redactionRules = [
             ...BUILTIN_REDACTION_RULES,
             ...(options.redactionRules ?? []),
@@ -272,24 +290,46 @@ export class InputHistory {
         if (this.entries.length > this.maxEntries) {
             this.entries.length = this.maxEntries;
         }
-        this.releaseBlocks();
-        if (this.persist) {
-            this.write();
-        }
+        this.write();
     }
     /**
      * A stored line as the composer takes it back: its text and the content of
-     * each block its markers name. A marker whose content is not kept (a line
-     * saved with its marker only, or one past the kept size) has no block.
+     * each block its markers name. Pasted text not yet read this run is read
+     * now from its own file, and only for the keys this line names. A marker
+     * whose content is not kept (a line saved with its marker only, or one
+     * past the kept size) has no block.
      */
     recall(line: string): ComposerMessage {
         const blocks = new Map<string, ComposerBlock>();
-        for (const key of markerKeys(line)) {
-            const block = this.blocks.get(key);
-            if (block)
-                blocks.set(key, block);
+        for (const { key, kind } of markerKeys(line)) {
+            if (kind === 'image') {
+                const image = this.images.get(key);
+                if (image)
+                    blocks.set(key, image);
+                continue;
+            }
+            const text = this.texts.get(key) ?? this.readPaste(key);
+            if (text !== undefined)
+                blocks.set(key, { kind: 'text', text });
         }
         return { text: line, blocks };
+    }
+    private pastePath(key: string): string {
+        return join(this.pasteDir, `${key}.txt`);
+    }
+    /** One kept paste's text, read from its file and redacted again as loaded lines are. */
+    private readPaste(key: string): string | undefined {
+        if (!this.persist || !this.storedTextKeys.has(key))
+            return undefined;
+        try {
+            const text = this.applyRedaction(readFileSync(this.pastePath(key), 'utf-8'));
+            this.texts.set(key, text);
+            return text;
+        }
+        catch (err) {
+            logger.debug('InputHistory paste read failed (the line recalls as its marker)', { error: summarizeError(err) });
+            return undefined;
+        }
     }
     /**
      * Navigate up (older entry).
@@ -353,36 +393,69 @@ export class InputHistory {
      * the file is replaced whole.
      */
     save(): void {
-        this.mergeFromDisk();
-        this.releaseBlocks();
+        if (this.persist)
+            this.mergeFromDisk();
         this.write();
     }
     /**
-     * The file is a JSON list of the lines as typed, newest first, then, when
-     * any pasted text is kept, one `{ "blocks": { key: text } }` element with
-     * that text, redacted like the lines and stored once per content. A
+     * The history file is a JSON list of the lines as typed, newest first,
+     * the only file rewritten on each send. Each pasted text lives in its own
+     * file, `input-history-pastes/<key>.txt`, redacted like the lines and
+     * written once, by the write whose list first names its key within the
+     * bound; a send with no new paste writes no paste file. A paste file no
+     * kept line names any more (its line dropped past 500, or its text past
+     * the bound) is removed, by its own path, by the write that drops it. A
      * referenced file is not written: `@path` is read again when the line is
      * sent again. Pasted images stay in memory for this run. Losing the newest
-     * line to a power cut is acceptable for a history, so the write is a plain
+     * line to a power cut is acceptable for a history, so the list is a plain
      * replace (temp file and rename) with no directory sync.
      */
     private write(): void {
+        const stored = keptKeys(this.entries, 'text');
+        const images = keptKeys(this.entries, 'image');
+        for (const key of [...this.images.keys()])
+            if (!images.has(key))
+                this.images.delete(key);
+        if (!this.persist) {
+            for (const key of [...this.texts.keys()])
+                if (!stored.has(key))
+                    this.texts.delete(key);
+            return;
+        }
         try {
-            const kept: Record<string, string> = {};
-            let anyKept = false;
-            for (const [key, block] of this.blocks) {
-                if (block.kind !== 'text')
+            // Content before the list that names it, so a line on disk never names text not yet written.
+            for (const key of stored) {
+                const text = this.texts.get(key);
+                if (this.storedTextKeys.has(key) || text === undefined)
                     continue;
-                kept[key] = block.text;
-                anyKept = true;
+                if (!this.pasteDirMade) {
+                    mkdirSync(this.pasteDir, { recursive: true, mode: 0o700 });
+                    this.pasteDirMade = true;
+                }
+                writeFileAtomic(this.pastePath(key), text, { mode: 0o600, cleanupStaleTemps: false });
             }
-            const stored: unknown[] = anyKept ? [...this.entries, { blocks: kept }] : [...this.entries];
-            writeDocument(this.historyPath, stored, { indent: null });
+            writeDocument(this.historyPath, this.entries, { indent: null });
             this.persistedTexts = new Set(this.entries);
         }
         catch (err) {
             logger.debug('InputHistory save failed (non-fatal)', { error: summarizeError(err) });
+            return;
         }
+        for (const key of this.storedTextKeys) {
+            if (stored.has(key))
+                continue;
+            this.texts.delete(key);
+            try {
+                unlinkSync(this.pastePath(key));
+            }
+            catch (err) {
+                logger.debug('InputHistory paste removal failed (non-fatal)', { error: summarizeError(err) });
+            }
+        }
+        for (const key of [...this.texts.keys()])
+            if (!stored.has(key))
+                this.texts.delete(key);
+        this.storedTextKeys = stored;
     }
     /** One read of the file. A file that turned unreadable since this process opened it is replaced by the next write. */
     private mergeFromDisk(): void {
@@ -398,11 +471,6 @@ export class InputHistory {
         const known = new Set(this.entries);
         const foreign: string[] = [];
         for (const raw of parsed as unknown[]) {
-            const stored = readStoredBlocks(raw);
-            if (stored) {
-                this.takeStoredBlocks(stored);
-                continue;
-            }
             const entry = this.normalizeStoredEntry(raw);
             if (!entry)
                 continue;
@@ -438,30 +506,26 @@ export class InputHistory {
             if (parsed) {
                 const entries: string[] = [];
                 for (const raw of parsed) {
-                    const stored = readStoredBlocks(raw);
-                    if (stored) {
-                        this.takeStoredBlocks(stored);
-                        continue;
-                    }
                     const entry = this.normalizeStoredEntry(raw);
                     if (entry !== null)
                         entries.push(this.applyRedaction(entry));
                 }
                 this.entries = entries.slice(0, this.maxEntries);
                 this.persistedTexts = new Set(this.entries);
-                this.releaseBlocks();
+                // From the list alone: no paste file is read until its line is recalled.
+                this.storedTextKeys = keptKeys(this.entries, 'text');
             }
         }
         catch (err) {
             logger.debug('InputHistory load failed (non-fatal, using empty history)', { error: summarizeError(err) });
             this.entries = [];
-            this.blocks.clear();
+            this.storedTextKeys = new Set();
         }
     }
     /**
      * The line as kept: each marker whose composer id has a block in `blocks`
      * names the block's content key instead, and the block, its text redacted
-     * as a typed line is, is kept under that key.
+     * as a typed line is, is held under that key until the write stores it.
      */
     private keepBlocks(line: string, blocks: ReadonlyMap<string, ComposerBlock>): string {
         if (blocks.size === 0)
@@ -472,7 +536,10 @@ export class InputHistory {
                 return undefined;
             const kept: ComposerBlock = block.kind === 'text' ? { kind: 'text', text: this.applyRedaction(block.text) } : block;
             const key = blockKey(kept);
-            this.blocks.set(key, kept);
+            if (kept.kind === 'text')
+                this.texts.set(key, kept.text);
+            else
+                this.images.set(key, kept);
             return key;
         };
         return line
@@ -484,35 +551,6 @@ export class InputHistory {
                 const key = keyFor(id, 'image');
                 return key === undefined ? marker : `[IMAGE: ${key}, ${label}]`;
             });
-    }
-    /** Pasted text read from the file, redacted again as loaded lines are; content already held is kept as is. */
-    private takeStoredBlocks(stored: ReadonlyMap<string, string>): void {
-        for (const [key, text] of stored)
-            if (!this.blocks.has(key))
-                this.blocks.set(key, { kind: 'text', text: this.applyRedaction(text) });
-    }
-    /**
-     * Keeps the content the newest lines name, up to MAX_KEPT_BLOCK_CHARS, and
-     * lets go of the rest: content no kept line names, and content of older
-     * lines that does not fit.
-     */
-    private releaseBlocks(): void {
-        const kept = new Set<string>();
-        let size = 0;
-        for (const entry of this.entries) {
-            for (const key of markerKeys(entry)) {
-                const block = this.blocks.get(key);
-                if (!block || kept.has(key))
-                    continue;
-                if (size + blockSize(block) > MAX_KEPT_BLOCK_CHARS)
-                    continue;
-                size += blockSize(block);
-                kept.add(key);
-            }
-        }
-        for (const key of [...this.blocks.keys()])
-            if (!kept.has(key))
-                this.blocks.delete(key);
     }
     /**
      * Entries persisted before CR normalization was deployed (registerPaste now

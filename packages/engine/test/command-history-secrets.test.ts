@@ -1,7 +1,7 @@
 // Proves: A secret typed on a command line is written in plain text to the input-history file.
 // Red when: A command's declared secret arguments are no longer applied before the line reaches history, or the history's own rule for token flags stops matching.
 // Proves: A message holding a pasted block, recalled from input history after a restart, comes back without the text that was pasted.
-// Red when: The history file keeps a pasted block's marker but not its content, so the recalled message sends the marker in place of the forty pasted lines.
+// Red when: Input history keeps a pasted block's marker but not its content file, so the recalled message sends the marker in place of the forty pasted lines.
 /**
  * A secret typed as a command argument is not written to input history.
  *
@@ -17,8 +17,9 @@
  *
  * A pasted block in a sent message is kept by the same history: a message is
  * sent through the real prompt key route with a forty-line paste folded in
- * it, and a second composer with its own history read from the same file (as
- * the next start of the program has) recalls it with Up and sends it again.
+ * it, and a second composer with its own history read from the same files
+ * (the list and the paste file beside it, as the next start of the program
+ * has) recalls it with Up and sends it again.
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';

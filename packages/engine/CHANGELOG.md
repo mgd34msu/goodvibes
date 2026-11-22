@@ -1,5 +1,35 @@
 # Changelog
 
+## [3.4.4] - 2026-11-22
+
+The full write-up is in
+[docs/releases/3.4.4.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.4/docs/releases/3.4.4.md).
+
+### Upgrading from 3.4.3
+
+- History lines saved by 3.4.3 and earlier hold a long paste's placeholder
+  only (its text was never saved); they load and are sent as that plain text.
+- After a rollback to 3.4.3, lines saved by 3.4.4 show their placeholders and
+  the `input-history-pastes` folder is left alone.
+
+### Fixed
+
+- A message brought back from the input history (Up, Down, `Ctrl+R`) comes
+  back with its pasted text, in the same run and after a restart, in the
+  terminal app and the Agent: each long paste is folded as its shortcut,
+  holds its whole text, and is sent in full. Pasted images come back for the
+  rest of the run.
+- A placeholder recalled after a restart no longer picks up the text of
+  another paste with the same number.
+
+### Changed
+
+- Pasted text in the input history is kept in `input-history-pastes/<key>.txt`
+  beside the history list, written once when first sent, read only when
+  recalled, redacted like typed lines, up to 8 MiB in all (newest first); a
+  file is removed when no kept line names it. The list itself stays lines as
+  typed, so a send with no new paste writes what it wrote in 3.4.3.
+
 ## [3.4.3] - 2026-11-21
 
 The full write-up is in

@@ -91,7 +91,7 @@ How each option behaves:
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. |
 | `-h, --help` | Prints help. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.4.3`. |
+| `-v, --version` | Prints `goodvibes 3.4.4`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -622,7 +622,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.4.3`.
+`goodvibes version` prints `goodvibes 3.4.4`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface
@@ -654,7 +654,7 @@ Text that was not typed into the composer (a skill body, `/retry`, a template, `
 In the terminal app, `@<path>` is plain text that names the file; the model reads it with its tools. (The Agent expands `@<path>` itself; see "Composer differences" in the Agent part.)
 A paste of more than 8 lines folds into a marker `[TEXT: pN, M lines]`; `/paste list` shows what each fold holds before sending.
 
-Input history (`Up`, `Down`, `Ctrl+R`, in both programs) gives a sent message back as the composer held it: each fold comes back as a fold that holds its text (`/paste list` shows it; text can be typed around it; `Enter` sends the whole text), and a pasted image comes back as its marker holding the image for the rest of the run. Each program keeps one history for every project, `~/.goodvibes/tui/input-history.json` or `~/.goodvibes/agent/input-history.json`: a JSON list of the last 500 lines as typed, newest first, and, when a line holds a fold, a last element `{"blocks": {...}}` with the folded text. Folded text is kept once however many lines name it, goes through the same secret redaction as typed text, and is kept up to 8 MiB in all, counted from the newest line; an older line past that comes back as its marker alone. Pasted images are not written to the file. `@path` and `!@path` are kept as typed and read again when the line is sent. A line saved by 3.4.3 or earlier holds the marker only (its text was never kept) and comes back as that plain text; after a return to 3.4.3, lines saved since show their markers, and 3.4.3 drops the kept text the next time it saves.
+Input history (`Up`, `Down`, `Ctrl+R`, in both programs) gives a sent message back as the composer held it: each fold comes back as a fold that holds its text (`/paste list` shows it; text can be typed around it; `Enter` sends the whole text), and a pasted image comes back as its marker holding the image for the rest of the run. Each program keeps one history for every project, `~/.goodvibes/tui/input-history.json` or `~/.goodvibes/agent/input-history.json`: a JSON list of the last 500 lines as typed, newest first, in which a fold's marker names its content key (`[TEXT: h<hash>-<size>, M lines]`). Each folded text is a file of its own beside the list, `input-history-pastes/<key>.txt` (readable by the owner only), written once when the message that first holds it is sent and read only when a line naming it is recalled; a send without a new paste writes the list alone. Folded text goes through the same secret redaction as typed text, is stored once however many lines name it, and is kept up to 8 MiB in all, counted from the newest line; its file is removed when no kept line names it (the line dropped past 500, or older text past 8 MiB), and that line comes back as its marker alone. Pasted images are not written to disk. `@path` and `!@path` are kept as typed and read again when the line is sent. A line saved by 3.4.3 or earlier holds the marker only (its text was never kept) and comes back as that plain text; after a return to 3.4.3, lines saved since show their markers and the `input-history-pastes` folder is left alone.
 
 Images in the terminal app:
 

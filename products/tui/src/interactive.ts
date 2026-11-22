@@ -238,10 +238,12 @@ async function main(prepared: PreparedShellCliRuntime) {
   applyTerminalRuntimeConfigDefaults(configManager);
 
   // Re-surface pre-TUI launch-update lines in-session (the alt screen wipes
-  // stdout). Launch-time update mechanics are routine, not urgent, low
-  // priority, not high (a skipped/deferred check is not the kind of thing
-  // that should compete with real session alerts for attention).
-  for (const line of launchUpdateLines) systemMessageRouter.low(`[Update] ${line}`);
+  // stdout). What the update did to this install (finished in the background,
+  // still finishing, failed) is a notice; the download in progress is not.
+  for (const line of launchUpdateLines) {
+    if (line.startsWith('downloading ')) systemMessageRouter.low(`[Update] ${line}`);
+    else systemMessageRouter.high(`[Update] ${line}`);
+  }
 
   const buildSessionContinuityHints = createSessionContinuityHintsBuilder({ readModels: uiServices.readModels });
 

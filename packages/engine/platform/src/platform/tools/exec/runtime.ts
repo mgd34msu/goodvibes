@@ -963,7 +963,7 @@ interface RetryDecision { readonly retry: boolean; readonly note?: string }
  * Whether a failed exec result is retried. A timed-out or cancelled run never
  * is (structure: the caller or an operator stopped it). A failure the program
  * can name from its exit code or errno is decided in code; any other is read
- * by Jev (`engine.tools.exec-retry`) within the decision deadline. The run is
+ * by Jev (`engine.tools.exec-retry`), with its fallback when Jev fails. The run is
  * retried only when the category is one the caller listed in `retry.on`
  * (default network, lock, busy). A failure no one could classify is not
  * retried and the result says so; the command's own result is never replaced.

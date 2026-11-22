@@ -93,7 +93,7 @@ export const findSchema: ToolDefinition = {
             },
             include_hidden: {
               type: 'boolean',
-              description: 'Include hidden files and directories (dot-prefixed) (mode: files). Default: false.',
+              description: 'Include hidden files and directories (dot-prefixed) (mode: files). Default: false. The product\'s own .goodvibes state folder is left out either way unless path names it.',
             },
             // content mode
             pattern: {
@@ -281,8 +281,8 @@ export const findSchema: ToolDefinition = {
       timeout_ms: {
         type: 'integer',
         minimum: 1,
-        description: 'Deadline for the whole call. A query still running then returns timed_out with no results '
-          + 'while finished queries keep theirs. Default: 60000.',
+        description: 'Time budget for the whole call. A query still scanning then stops and returns what it found so far, '
+          + 'with a warning that says how far it got. Default: none (the search runs to the end unless cancelled).',
       },
     },
     required: ['queries'],

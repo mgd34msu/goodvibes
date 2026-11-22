@@ -232,7 +232,6 @@ export function archiveVerificationCompaction(owner: object, before: readonly Re
   const originalMessages = captureOwnedJson(before) as readonly Record<string, unknown>[];
   const replacements = captureOwnedJson(after) as readonly Record<string, unknown>[];
   const origins = originalMessages.map((message, index) => messageOrigin(entry, message, index));
-  const originals = originalMessages.flatMap((message, index) => origins[index] === 'derived' ? [] : [projectMessage(message, origins[index])]);
   // Match each occurrence once; duplicate values retain their original order.
   // Only positions and references to existing values are sorted, with no body
   // serialization, body Map keys or repeated private-content digest work.
@@ -253,7 +252,13 @@ export function archiveVerificationCompaction(owner: object, before: readonly Re
     previous[match] = previous[cursor]!; previous[cursor] = found;
     positions.set(replacement.index, found.index); cursor++;
   }
-  const next: Archive = { histories: [...entry.histories, { messages: originals }], derived: new Map(), runtimeMessages: new Map(), messageRecords: new Map(), changed: true };
+  // Only what this compaction removed is archived: a message carried into the new history is still in the
+  // conversation and is archived when a later compaction removes it. The archive and the live history
+  // together hold every original message once, so memory and the saved archive grow with what was said,
+  // not with the number of compactions times the size of the context.
+  const carried = new Set(positions.values());
+  const originals = originalMessages.flatMap((message, index) => origins[index] === 'derived' || carried.has(index) ? [] : [projectMessage(message, origins[index])]);
+  const next: Archive = { histories: originals.length > 0 ? [...entry.histories, { messages: originals }] : [...entry.histories], derived: new Map(), runtimeMessages: new Map(), messageRecords: new Map(), changed: true };
   replacements.forEach((message, index) => {
     const original = positions.get(index), origin = original === undefined ? 'derived' : origins[original];
     if (origin === undefined) return;

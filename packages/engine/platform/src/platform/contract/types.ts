@@ -295,6 +295,12 @@ export interface UnitCheck {
   /** The quality items read as problems. */
   readonly qualityProblems?: readonly QualityItem[] | undefined;
   readonly decisionIds: readonly string[];
+  /**
+   * Why the set decision model could not judge this check (it failed, refused
+   * the request or did not answer): the work was kept as delivered and checked
+   * by code alone. Absent when a decision model judged it, or none is in use.
+   */
+  readonly notJudged?: string;
   /** Exact saved evidence commitment for nonpass refusal replay. Historical
    * pass checks may retain it; fresh pass checks use actual check/decision IDs. */
   readonly evidenceDigest?: string;

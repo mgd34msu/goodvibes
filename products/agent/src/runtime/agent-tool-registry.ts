@@ -69,6 +69,8 @@ export function composeAgentToolRegistry(deps: AgentToolRegistryDeps): AgentTool
     hookDispatcher: services.hookDispatcher,
     // A model changing a hook is always put to the owner, whatever the mode or earlier answers.
     hookChangeGate: (request, { signal }) => services.permissionManager.checkHookChange(request, { signal }),
+    // A delegation nothing the owner said settles, and the decision model could not read, is put to him in the ordinary approval prompt.
+    delegationAsk: (question, { signal }) => services.permissionManager.askDelegation(question, { signal }),
     // find, repo_map and the agent tool apply the same per-file read decision the read tool gets.
     readAccessFilter: async (absolutePath) => (await services.permissionManager.readAccess(absolutePath, resolveSessionId())) === 'allow',
     // goodvibes_context reads Cloudflare tokens held in the secret store.

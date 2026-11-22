@@ -337,6 +337,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     // A model changing a hook is always put to the owner, whatever the mode or earlier answers.
     hookDispatcher: services.hookDispatcher,
     hookChangeGate: (request, { signal }) => services.permissionManager.checkHookChange(request, { signal }),
+    // A delegation nothing the owner said settles, and the decision model could not read, is put to him in the ordinary approval prompt.
+    delegationAsk: (question, { signal }) => services.permissionManager.askDelegation(question, { signal }),
     contractRunner: options.floor.contractRunner,
     projectRoot: options.workspaceRoot,
     sandboxSessionRegistry: services.sandboxSessionRegistry,

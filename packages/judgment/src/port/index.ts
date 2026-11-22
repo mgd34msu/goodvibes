@@ -2,9 +2,6 @@ export { checkAnswers } from './answers.ts';
 export {
   HOSTED_BASE_URL,
   DEFAULT_MODEL,
-  DEFAULT_DECISION_DEADLINE_MS,
-  MAX_DECISION_DEADLINE_MS,
-  validDecisionDeadline,
   endpointKind,
   judgmentConfigFromEnv,
   type JudgmentConfig,

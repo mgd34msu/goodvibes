@@ -77,6 +77,35 @@ export function deliverableOutput(contract: Pick<Contract, 'units' | 'groups'>):
   return parts.filter((part) => part.length > 0).join('\n\n');
 }
 
+const unitList = (ids: readonly string[]): string => `unit${ids.length === 1 ? '' : 's'} ${ids.join(', ')}`;
+
+/**
+ * How the units' work was checked, when the decision model could not judge
+ * some of it: which units were judged and passed, which were delivered but
+ * not judged and why, which were not delivered, and where the work is. Empty
+ * when every unit's last check was judged (or no decision model is in use),
+ * so an ordinary result says nothing more.
+ */
+export function unitCheckingLines(contract: Pick<Contract, 'units' | 'isolation' | 'branch' | 'worktreePath'>): string[] {
+  const notJudged = new Map<string, string[]>();
+  const judged: string[] = [], undelivered: string[] = [];
+  for (const unit of contract.units) {
+    const last = unit.checks.findLast((check) => check.trigger !== 'turn-end');
+    if (last?.notJudged !== undefined) notJudged.set(last.notJudged, [...(notJudged.get(last.notJudged) ?? []), unit.id]);
+    else if ((unit.status === 'passed' || unit.status === 'held-merge') && (last?.decisionIds.length ?? 0) > 0) judged.push(unit.id);
+    else if (unit.status === 'failed' || unit.status === 'cancelled') undelivered.push(`${unit.id} (${unit.status}${unit.failureReason === undefined ? '' : `: ${unit.failureReason}`})`);
+  }
+  if (notJudged.size === 0) return [];
+  return [
+    ...(judged.length > 0 ? [`Judged and passed: ${unitList(judged)}.`] : []),
+    ...[...notJudged].map(([reason, ids]) => `Delivered but not judged: ${unitList(ids)}; the decision model could not judge ${ids.length === 1 ? 'it' : 'them'} (${reason}). The work is kept as delivered.`),
+    ...(undelivered.length > 0 ? [`Not delivered: ${undelivered.join(', ')}.`] : []),
+    contract.isolation === 'worktree' && contract.branch !== undefined
+      ? `The work is on branch ${contract.branch}${contract.worktreePath === undefined ? '' : ` (worktree ${contract.worktreePath})`}.`
+      : 'The work is in the working tree.',
+  ];
+}
+
 /**
  * The commit outcome as one honest line: a real commit (with any ignored
  * paths it skipped), or which of the "nothing was committed" cases happened.

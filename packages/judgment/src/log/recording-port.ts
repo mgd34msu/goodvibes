@@ -284,7 +284,6 @@ export function withDecisionLog(inner: JudgmentPort, log: DecisionLog, options: 
   };
   return {
     get model() { return inner.model; },
-    get decisionDeadlineMs() { return inner.decisionDeadlineMs; },
     ...(inner.revision ? { revision: () => inner.revision!() } : {}),
     ...(inner.health ? { health: () => inner.health!() } : {}),
     recorder: {

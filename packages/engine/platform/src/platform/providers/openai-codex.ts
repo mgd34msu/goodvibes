@@ -18,6 +18,7 @@ import { mapCodexStopReason } from './stop-reason-maps.js';
 import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { toolCallArgumentFields } from './tool-formats.js';
 import { SseLineBuffer } from './sse-line-buffer.js';
+import { listingHttpError } from './live-model-discovery.js';
 
 /**
  * The subscription route of the `openai` provider: a ChatGPT plan signed in
@@ -46,7 +47,8 @@ export async function fetchOpenAISubscriptionModelIds(accessToken: string): Prom
       'User-Agent': getOpenAICodexUserAgent(),
     },
   }, MODEL_LIST_TIMEOUT_MS, instrumentedFetch);
-  if (!res.ok) throw new Error(`OpenAI subscription model list returned ${res.status} ${res.statusText}`);
+  // The status rides on the error so a listing the route refused (400) is not read as a provider that cannot serve.
+  if (!res.ok) throw listingHttpError(`OpenAI subscription model list returned ${res.status} ${res.statusText}`, res.status);
   const body = await res.json() as { models?: unknown; data?: unknown };
   const entries = Array.isArray(body.models) ? body.models : Array.isArray(body.data) ? body.data : [];
   const ids = entries.flatMap((entry: unknown) => {

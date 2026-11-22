@@ -26,7 +26,7 @@ import type * as Resources from '@anthropic-ai/sdk/resources/index';
 import type { AuthClient, GoogleAuth } from 'google-auth-library';
 import { AnthropicMessagesProvider } from './anthropic-messages-provider.js';
 import type { ProviderModelSource } from './interface.js';
-import { runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
+import { listingHttpError, runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { isRecord } from '../utils/record-coerce.js';
 import { loadOptionalDependency } from '../utils/optional-dependency.js';
@@ -390,7 +390,7 @@ async function fetchVertexModelIds(authClient?: Pick<AuthClient, 'getRequestHead
   });
   const res = await fetchWithTimeout(url, { headers }, VERTEX_LIVE_FETCH_TIMEOUT_MS, instrumentedFetch);
   if (!res.ok) {
-    throw new Error(`Vertex publisher model listing (${url}) returned ${res.status} ${res.statusText}`);
+    throw listingHttpError(`Vertex publisher model listing (${url}) returned ${res.status} ${res.statusText}`, res.status);
   }
   const body = await res.json() as VertexListPublisherModelsResponse;
   const ids = (body.publisherModels ?? [])

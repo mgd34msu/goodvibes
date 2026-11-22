@@ -68,24 +68,20 @@ export interface PersonFacingEvent {
  * allowlist, so a new platform event type stays out until someone names it here.
  */
 export const PERSON_FACING_EVENTS: Readonly<Record<string, PersonFacingEvent>> = {
-  // agents
-  AGENT_COMPLETED: { title: 'Agent finished', level: 'info' },
-  AGENT_FAILED: { title: 'Agent failed', level: 'warning' },
-  AGENT_CANCELLED: { title: 'Agent cancelled', level: 'info' },
+  // agents: an agent's end is reported by the answer of the turn or follow-up
+  // that waited for it, and the agents view shows its state; only an agent
+  // waiting for a reply needs the person.
   AGENT_AWAITING_MESSAGE: { title: 'Agent is waiting for a reply', level: 'info' },
   // tasks
   TASK_COMPLETED: { title: 'Task finished', level: 'info' },
   TASK_FAILED: { title: 'Task failed', level: 'warning' },
   TASK_BLOCKED: { title: 'Task blocked', level: 'warning' },
-  TASK_CANCELLED: { title: 'Task cancelled', level: 'info' },
-  // contracts: cancellation and commit outcomes are distinct lifecycle facts.
-  CONTRACT_PASSED: { title: 'Workstream passed', level: 'info' },
+  // contracts: a pass, a cancellation and a regressed requirement on the way
+  // are reported by the follow-up answer or shown on the contract's row; a
+  // failure and a commit to the person's repository are notices.
   CONTRACT_FAILED: { title: 'Workstream failed', level: 'warning' },
-  CONTRACT_CANCELLED: { title: 'Workstream cancelled', level: 'info' },
   CONTRACT_COMMITTED: { title: 'Workstream commit updated', level: 'info' },
-  CONTRACT_CRITERION_REGRESSED: { title: 'Requirement regressed', level: 'warning' },
-  // automation (scheduled jobs)
-  AUTOMATION_RUN_COMPLETED: { title: 'Scheduled job finished', level: 'info' },
+  // automation (scheduled jobs): a routine run that succeeded is silent.
   AUTOMATION_RUN_FAILED: { title: 'Scheduled job failed', level: 'warning' },
   AUTOMATION_JOB_AUTO_DISABLED: { title: 'Scheduled job turned off after repeated failures', level: 'warning' },
   // deliveries (outgoing channel messages)

@@ -1,4 +1,4 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 import { bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
 import { waitForTaskRecovery } from '../core/response-completion.js';
 import { assertOwnedContractSource, checkOwnedSourcePlan, hasDerivedAcceptanceChecks } from './owned-source.js';
@@ -23,7 +23,7 @@ import { assertContractInputView, contractInputPath } from './input-snapshot.js'
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import { ownerEvidenceForModel, type OwnerEvidenceReader } from './owner-evidence.js';
 
-import { JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
+import { decisionModelPolicyState, JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
 import { JudgmentError } from '@goodvibes/judgment';
 import type { ContractEvent } from '../../events/contract.js';
 import type { DecompositionBounds, DecompositionRunner, DecompositionRunResult } from '../core/plan-decomposition.js';
@@ -417,12 +417,14 @@ export async function shapeContract(contract: Contract, deps: ContractPlannerDep
   let read: Awaited<ReturnType<typeof readRequestShape>>;
   const reusedShape = contract.nativeSource !== undefined && contract.shape !== undefined;
   let unread = false;
+  let notJudged: string | undefined;
   try {
+    // A shape the decision model could not read is read as with none in use: the work goes on.
     read = contract.nativeSource !== undefined && contract.shape !== undefined
       ? { shape: contract.shape, usage: { inputTokens: 0, outputTokens: 0 } }
-      : await decisionOrClassic(
+      : await judgedOrNot(REQUEST_SHAPE_SITE,
         () => readRequestShape(nativeContractPort(contract, deps.native, judgmentPort(REQUEST_SHAPE_SITE), options.signal), contract.ask, { ...options, nativeSource: contract.nativeSource }),
-        () => { unread = true; return { shape: unreadRequestShape(), usage: { inputTokens: 0, outputTokens: 0 } }; });
+        (reason) => { unread = true; notJudged = reason; return { shape: unreadRequestShape(), usage: { inputTokens: 0, outputTokens: 0 } }; });
   } catch (error) {
     if (isAbort(error, options.signal)) return { kind: 'cancelled' };
     const reason = judgmentFailureReason(error);
@@ -435,7 +437,7 @@ export async function shapeContract(contract: Contract, deps: ContractPlannerDep
     contract.reviewInventory = await captureReviewInventory(contract.projectRoot, options.signal);
   }
   context.addJudgmentUsage({ calls: reusedShape || unread ? 0 : 1, ...usage });
-  context.decide('shaped', unread ? UNREAD_SHAPE_REASON : describeShape(shape), shape.decisionIds);
+  context.decide('shaped', unread ? (notJudged === undefined ? UNREAD_SHAPE_REASON : `${UNREAD_SHAPE_REASON_NOT_JUDGED}: ${notJudged}`) : describeShape(shape), shape.decisionIds);
   deps.emit({
     type: 'CONTRACT_SHAPED',
     contractId: contract.id,
@@ -469,6 +471,7 @@ function unreadRequestShape(): RequestShape {
 }
 
 const UNREAD_SHAPE_REASON = 'not read: no decision model is in use, so delegating is allowed as for any request, no parallel agents or attempts are assumed, and the planner settles whether files may change from the request itself';
+const UNREAD_SHAPE_REASON_NOT_JUDGED = 'not read: the decision model could not read it, so delegating is allowed as for any request, no parallel agents or attempts are assumed, and the planner settles whether files may change from the request itself';
 
 function describeShape(shape: RequestShape): string {
   const said = (name: string, reading: RequestShape['forbids_writing']): string => `${name} ${reading.verdict} (${reading.outcome})`;
@@ -513,9 +516,12 @@ interface CheckedPlan {
   readonly text: string;
   readonly problems: readonly PlanProblem[];
   readonly verdict: PlanVerdict | undefined;
+  /** The planner returned a plan already rejected this planning: it was not checked again, and its problems are the earlier ones. */
+  readonly unchanged?: true;
 }
 
-async function checkPlanText(context: PlanningContext, output: string, repair: number, signal: AbortSignal | undefined): Promise<CheckedPlan> {
+async function checkPlanText(context: PlanningContext, output: string, repair: number, signal: AbortSignal | undefined,
+  rejected?: ReadonlyMap<string, readonly PlanProblem[]>): Promise<CheckedPlan> {
   const { contract, deps, config } = context;
   const shape = contract.shape!;
   const parsed = parseContractPlan(output);
@@ -525,6 +531,9 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
   }
   const plan = contract.draftPlan === undefined ? parsed.plan : joinDraft(parsed.plan, contract.draftPlan);
   const text = renderContractPlan(plan);
+  // An unchanged plan is not checked again: the same plan would only meet the same objections, at the cost of the checks.
+  const earlier = rejected?.get(text);
+  if (earlier !== undefined) return { plan, text, problems: earlier, verdict: undefined, unchanged: true };
   context.move('checking-plan');
   context.decide('planned', repair === 0 ? 'the planner wrote a plan' : `the planner wrote repair ${repair}`);
   const codeProblems = [
@@ -543,7 +552,15 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
   }
   deps.emit({ type: 'CONTRACT_PLAN_CHECKED', contractId: contract.id, check: 'structure', passed: codeProblems.length === 0, problems: codeProblems, decisionIds: [] });
   if (codeProblems.length > 0) return { plan, text, problems: codeProblems, verdict: undefined };
-  const verdict = await runPlanChecks(plan, contract.ask, shape, { signal, nativeSource: contract.nativeSource, originalSource: contract.originalSource, native: { contract, services: deps.native }, cache: context.planChecks });
+  let verdict: PlanVerdict;
+  try {
+    verdict = await runPlanChecks(plan, contract.ask, shape, { signal, nativeSource: contract.nativeSource, originalSource: contract.originalSource, native: { contract, services: deps.native }, cache: context.planChecks });
+  } catch (error) {
+    // The decision model could not answer (over its limit, failed, too slow): the plan goes ahead
+    // unchecked, as when no decision model is in use, unless the owner chose Decision Model Only.
+    if (isAbort(error, signal) || judgmentFailureReason(error) === undefined || decisionModelPolicyState().policy === 'Decision Model Only') throw error;
+    verdict = { problems: [], dispositions: new Map(), reports: [], decisionIds: [], usage: { calls: 0, inputTokens: 0, outputTokens: 0 }, unchecked: true };
+  }
   context.addJudgmentUsage(verdict.usage);
   for (const entry of verdict.reports) {
     deps.emit({ type: 'CONTRACT_PLAN_CHECKED', contractId: contract.id, check: entry.check, passed: entry.passed, problems: entry.problems, decisionIds: entry.decisionIds });
@@ -579,9 +596,9 @@ function repeatsRejectedPlan(seen: Set<string>, checked: CheckedPlan): boolean {
 }
 
 async function checkPlanOwned(context: PlanningContext, output: string, repair: number,
-  signal: AbortSignal | undefined, assertCurrent: () => Promise<void>): Promise<CheckedPlan> {
+  signal: AbortSignal | undefined, assertCurrent: () => Promise<void>, rejected?: ReadonlyMap<string, readonly PlanProblem[]>): Promise<CheckedPlan> {
   await assertCurrent();
-  return checkPlanText(context, output, repair, signal);
+  return checkPlanText(context, output, repair, signal, rejected);
 }
 
 /**
@@ -676,6 +693,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
   if (contract.nativeSource !== undefined) return planNativeContract(context, input, route, repositoryMap, bounds, systemPrompt, { workingDirectory, authority, assertCurrent, assertView, assertReadAccess });
 
   const rejectedPlans = new Set<string>();
+  const rejectedTexts = new Map<string, readonly PlanProblem[]>();
   let repair = 0;
   let previous: { readonly problems: readonly PlanProblem[]; readonly previousPlan: string } | undefined;
   try {
@@ -716,7 +734,7 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       if (signal?.aborted) return { kind: 'cancelled' };
       await assertCurrent();
       await assertReadAccess();
-      const checked = run.status === 'completed' ? await checkPlanOwned(context, run.output, repair, signal, assertCurrent)
+      const checked = run.status === 'completed' ? await checkPlanOwned(context, run.output, repair, signal, assertCurrent, rejectedTexts)
         : { text: run.output, plan: undefined, verdict: undefined,
           problems: [{ code: 'unparseable' as const, message: runFailureReason(run) + '. Repair this failed planning attempt; the original request remains active.' }] };
       if (run.status !== 'completed') await backOff(deps, Math.min(250 * (repair + 1), 5_000), signal);
@@ -731,8 +749,9 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
       // A run that failed to finish (an outage, a refused call) is retried with a backoff; only a plan the planner actually returned can repeat.
       // A repeated rejected plan, or the same problems on the same targets two rounds running: the planner is
       // not converging, so the owner is asked now (whatever the repair limit) rather than repairing in a loop.
-      const repeated = run.status === 'completed' && repeatsRejectedPlan(rejectedPlans, checked);
+      const repeated = run.status === 'completed' && (checked.unchanged === true || repeatsRejectedPlan(rejectedPlans, checked));
       const stuck = repeated || (run.status === 'completed' && checked.plan !== undefined && sameProblemTargets(previous?.problems, checked.problems));
+      if (run.status === 'completed' && checked.plan !== undefined) rejectedTexts.set(checked.text, checked.problems);
       if (stuck || (context.config.planRepairLimit > 0 && repair >= context.config.planRepairLimit)) {
         if (checked.plan === undefined) {
           return context.fail('planning', `the planner's answer was not a readable plan after ${repair} repairs: ${checked.problems.map((entry) => entry.message).join(' ')}`);
@@ -775,7 +794,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
   const sourceOf = nativeContractActionSource(contract, deps.native, signal);
   const state = nativeDecisionState(contract);
   const budgetKey = 'plan';
-  const rejectedPlans = new Set<string>();
+  const rejectedPlans = new Map<string, readonly PlanProblem[]>();
   let output = state.plannerOutputs[budgetKey];
   let needsPlan = output === undefined;
   /** The output being checked is a planner failure to retry after a backoff, not a plan to be revised. */
@@ -810,7 +829,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
         if (run.status !== 'completed') await backOff(deps, Math.min(250 * attempt, 5_000), signal);
         state.plannerOutputs[budgetKey] = output; deps.native?.changed(contract);
       }
-      const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent);
+      const checked = await checkPlanOwned(context, output!, nativeSpent(contract, budgetKey) - 1, signal, admitted.assertCurrent, failedRun ? undefined : rejectedPlans);
       await admitted.assertCurrent();
       // Native contracts take no owner approval of a plan: a repeated rejected plan is their refusal, in the words the owner question would use.
       if (!failedRun && rejectedPlans.has(checked.text)) {
@@ -838,7 +857,7 @@ async function planNativeContract(context: PlanningContext, input: PlanContractI
         : 'the decision model rejected the plan, and no repair was eligible');
       if (decision.continuationId !== 'repair-plan' || !canRepair) throw new Error('Native planner continuation is no longer eligible');
       decision.assertCurrent();
-      if (!failedRun) rejectedPlans.add(checked.text);
+      if (!failedRun) rejectedPlans.set(checked.text, checked.problems);
       previous = { problems: checked.problems, previousPlan: checked.text }; needsPlan = true;
       context.decide('plan-repaired', decidedWithoutModel(decision) ? 'the plan did not pass its checks: another planner attempt repairs it' : 'Jev selected registered native plan repair', decision.decision.judgmentDecisionIds);
       context.move('planning');

@@ -76,7 +76,7 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `type` | Fields |
 | --- | --- |
 | `STREAM_DELTA` | `content`, `accumulated` (unless `--omit-accumulated`) |
-| `DRAFT_WITHDRAWN` | `reason`: the completion check sent back the answer streamed so far; drop that text, the replacement streams from empty |
+| `DRAFT_WITHDRAWN` | `reason`: the answer streamed so far was withdrawn (the turn moved to another model after it had begun); drop that text, the replacement streams from empty |
 | `TOOL_EXECUTING`, `TOOL_SUCCEEDED`, `TOOL_FAILED`, `TOOL_CANCELLED` | `turnId`, `callId`, `tool`; plus `durationMs`, `error` or `reason` |
 | `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` (one per gated tool call, written when its decision is known) |
 | `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `ownerPrompt` (follows its request) |

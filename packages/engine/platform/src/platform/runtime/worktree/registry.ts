@@ -110,6 +110,12 @@ export interface ManagedWorktreeMeta {
    * process died) is cleared by the next write of the record.
    */
   readonly removal?: WorktreeRemovalClaim | undefined;
+  /**
+   * When a terminal app's start-up told the owner this worktree was kept for
+   * their decision, with where its work is and the commands to take or discard
+   * it. It is told once; /worktree review lists it for as long as it stays.
+   */
+  readonly toldAt?: number | undefined;
 }
 
 /** Who is removing a worktree, until when (see {@link ManagedWorktreeMeta.removal}). */
@@ -248,6 +254,7 @@ function validateRecord(value: unknown): ManagedWorktreeMeta | null {
     ...(setup !== null && typeof setup === 'object' ? { setup: setup as WorktreeSetupResult } : {}),
     ...(removal !== null && typeof removal === 'object' && typeof removal['owner'] === 'string' && isFiniteNumber(removal['expiresAt'])
       ? { removal: { owner: removal['owner'], expiresAt: removal['expiresAt'] } } : {}),
+    ...(isFiniteNumber(candidate['toldAt']) ? { toldAt: candidate['toldAt'] } : {}),
     updatedAt,
   };
 }
@@ -564,6 +571,7 @@ export class WorktreeRegistry {
         ...(meta?.taskId ? { taskId: meta.taskId } : {}),
         ...(meta?.setup ? { setup: meta.setup } : {}),
         ...(meta?.removal ? { removal: meta.removal } : {}),
+        ...(meta?.toldAt !== undefined ? { toldAt: meta.toldAt } : {}),
         updatedAt: meta?.updatedAt ?? Date.now(),
       };
     });
@@ -594,6 +602,7 @@ export class WorktreeRegistry {
           ...(record.taskId ? { taskId: record.taskId } : {}),
           ...(record.setup ? { setup: record.setup } : {}),
           ...(record.removal ? { removal: record.removal } : {}),
+          ...(record.toldAt !== undefined ? { toldAt: record.toldAt } : {}),
           updatedAt: record.updatedAt,
         };
       }
@@ -689,14 +698,19 @@ export class WorktreeRegistry {
       return report;
     }
     const storePath = getStorePath(this.workingDirectory);
+    // Worktrees still on disk; one removed in this pass leaves it, so the tree it lived in is decided in the same pass.
     const allPaths = rows.map((row) => row.path);
-    for (const row of rows) {
+    const gone = (path: string): void => { const at = allPaths.indexOf(path); if (at >= 0) allPaths.splice(at, 1); };
+    // A worktree nested in another (a contract's work-item trees inside the contract's tree) is decided first.
+    const ordered = [...rows].sort((a, b) => b.path.split(sep).length - a.path.split(sep).length);
+    for (const row of ordered) {
       if (row.kind === 'manual' || !isProductWorktreePath(row.path, this.workingDirectory)) continue;
       if (onlyPaths && !onlyPaths.has(row.path)) continue;
       const keepReason = (reason: WorktreeKeepReason) => report.kept.push({ path: row.path, branch: row.branch, head: row.head, reason });
       const guarded = sweepProtection(row) ?? gitHeldProtection(row.path, allPaths);
       if (guarded) { keepReason(guarded); continue; }
-      const evaluation = await this.evaluateRow(row, owner(row.path), now, retentionMs);
+      const rowOwner = owner(row.path);
+      const evaluation = await this.evaluateRow(row, rowOwner, now, retentionMs);
       if (evaluation.action === 'keep') { keepReason(evaluation.reason); continue; }
       // The register as it is now, read under its lock with no await in between: another process or another
       // contract here may have attached, paused, kept or set up this worktree since the listing the decision used.
@@ -739,7 +753,11 @@ export class WorktreeRegistry {
         await this.git.worktreeRemove(row.path);
         const branch = evaluation.assessment.kind === 'nothing-unique' || evaluation.assessment.kind === 'unmerged' ? evaluation.assessment.branch : null;
         let branchDeleted = false;
-        if ((evaluation.action === 'remove-unmarked' || evaluation.action === 'remove-all') && branch) {
+        if (evaluation.action === 'remove-all' && branch && (rowOwner.baseCommits?.length ?? 0) > 0) {
+          // Every commit on it is in its base or in what its owner keeps elsewhere (the captured input, the
+          // contract's branch), which the assessment just counted, so the branch holds nothing of its own.
+          branchDeleted = (await runGit(this.workingDirectory, ['branch', '-D', branch])).ok;
+        } else if ((evaluation.action === 'remove-unmarked' || evaluation.action === 'remove-all') && branch) {
           // `-d` refuses a branch that is not merged, so a commit the base lacks can never be dropped here.
           branchDeleted = (await runGit(this.workingDirectory, ['branch', '-d', branch])).ok;
         } else if (branch?.startsWith('contract-input/')) {
@@ -747,6 +765,7 @@ export class WorktreeRegistry {
           branchDeleted = (await runGit(this.workingDirectory, ['branch', '-D', branch])).ok;
         }
         this.forgetRemoved(storePath, row.path);
+        gone(row.path);
         const saved = evaluation.saveAs ? `; its detached HEAD was saved to new branch ${evaluation.saveAs}` : '';
         const note = evaluation.action === 'remove-unmarked'
           ? `${evaluation.reason.detail}${branchDeleted ? '; its branch was merged and is deleted' : ''}`
@@ -757,7 +776,7 @@ export class WorktreeRegistry {
         logger.info('worktree retention: removed a worktree', { path: row.path, branch, note });
       } catch (error) {
         // Another process sweeping at the same moment may have removed it first; that is not a failure here.
-        if (!existsSync(row.path)) continue;
+        if (!existsSync(row.path)) { gone(row.path); continue; }
         // The tree stays: the claim goes, so it can be kept, paused or attached again at once.
         this.releaseRemoval(storePath, row.path);
         const message = summarizeError(error);
@@ -852,20 +871,39 @@ export class WorktreeRegistry {
 
   /**
    * Release the worktrees of an owner that just reached a terminal state
-   * (passed, failed, cancelled): ones with nothing unique go at once, the rest
-   * stay for the retention period. `baseBranch` is the branch each was made from.
+   * (passed, failed, cancelled, or ended by a crash and found at the next
+   * start), with every worktree nested inside them (a contract's work-item
+   * trees): ones with nothing unique go at once, the rest stay for the
+   * retention period. `baseBranch` is the branch each was made from;
+   * `baseCommits` what its owner keeps elsewhere (see
+   * {@link WorktreeOwnerInfo.baseCommits}); a nested tree also counts the
+   * branch of the tree it lives in (`nestedBase`) as kept.
    */
-  public releaseEnded(
-    targets: ReadonlyArray<{ readonly path: string; readonly baseBranch?: string | undefined }>,
+  public async releaseEnded(
+    targets: ReadonlyArray<{ readonly path: string; readonly baseBranch?: string | undefined; readonly baseCommits?: readonly string[] | undefined; readonly nestedBase?: string | undefined }>,
     options: Pick<WorktreeRetentionOptions, 'now' | 'retentionMs'> = {},
   ): Promise<WorktreeSweepReport> {
     const now = (options.now ?? Date.now)();
-    const bases = new Map(targets.map((target) => [normalizePath(target.path, this.workingDirectory), target.baseBranch]));
+    const owners = new Map<string, WorktreeOwnerInfo>();
+    for (const target of targets) {
+      const path = normalizePath(target.path, this.workingDirectory);
+      owners.set(path, { state: 'ended', endedAt: now, baseBranch: target.baseBranch, ...(target.baseCommits?.length ? { baseCommits: target.baseCommits } : {}) });
+    }
+    let listed: WorktreeStatusRecord[] = [];
+    try { listed = await this.list(); } catch { /* the sweep below reads the register again and reports it */ }
+    for (const target of targets) {
+      const parent = normalizePath(target.path, this.workingDirectory);
+      const nestedBases = [...(target.baseCommits ?? []), ...(target.nestedBase ? [`refs/heads/${target.nestedBase}`] : [])];
+      for (const row of listed) {
+        if (!row.path.startsWith(`${parent}${sep}`) || owners.has(row.path)) continue;
+        owners.set(row.path, { state: 'ended', endedAt: now, baseBranch: target.baseBranch, ...(nestedBases.length > 0 ? { baseCommits: nestedBases } : {}) });
+      }
+    }
     return this.sweepRetention({
       ...options,
       now: () => now,
-      only: targets.map((target) => target.path),
-      owner: (path) => ({ state: 'ended', endedAt: now, baseBranch: bases.get(path) }),
+      only: [...owners.keys()],
+      owner: (path) => owners.get(path) ?? { state: 'unknown' },
     });
   }
 
@@ -943,10 +981,13 @@ export class WorktreeRegistry {
    * when kept worktrees hold a lot. Null only when the pass could not run.
    * Never throws: start-up must not fail on it.
    */
-  public async startupSweep(options: { readonly thresholdBytes?: number | undefined } = {}): Promise<WorktreeStartupReport | null> {
+  public async startupSweep(options: { readonly thresholdBytes?: number | undefined; readonly tellOnce?: boolean | undefined } = {}): Promise<WorktreeStartupReport | null> {
     try {
       const sweep = await this.sweepRetention();
-      const attention = sweep.kept.filter((entry) => needsOwnerDecision(entry.reason)).map((entry) => ({
+      const needing = sweep.kept.filter((entry) => needsOwnerDecision(entry.reason));
+      // A terminal app tells the owner about each kept worktree once; /worktree review lists it while it stays.
+      const told = options.tellOnce ? this.markTold(needing.map((entry) => entry.path)) : new Set<string>();
+      const attention = needing.filter((entry) => !told.has(entry.path)).map((entry) => ({
         path: entry.path,
         branch: entry.branch,
         reason: entry.reason,
@@ -965,6 +1006,35 @@ export class WorktreeRegistry {
       logger.warn('worktree retention: the start-up pass did not complete', { error: summarizeError(error) });
       return null;
     }
+  }
+
+  /**
+   * Records that the owner is being told about these worktrees now, in one
+   * register write, and returns the ones they were already told about. A
+   * register that cannot be written tells them all again next time.
+   */
+  private markTold(paths: readonly string[]): Set<string> {
+    const already = new Set<string>();
+    if (paths.length === 0) return already;
+    try {
+      const storePath = getStorePath(this.workingDirectory);
+      withRegistryWriteLock(storePath, () => {
+        const store = readStore(storePath, true, true);
+        const now = Date.now();
+        let changed = false;
+        for (const path of paths) {
+          const current = store.records[path];
+          if (!current) continue;
+          if (current.toldAt !== undefined) { already.add(path); continue; }
+          store.records[path] = { ...current, toldAt: now };
+          changed = true;
+        }
+        if (changed) writeStore(store, storePath);
+      });
+    } catch (error) {
+      logger.warn('worktree retention: could not record that kept worktrees were reported; they are reported again at the next start', { error: summarizeError(error) });
+    }
+    return already;
   }
 
   /**

@@ -1595,7 +1595,7 @@ What the programs do instead for the plain files:
 | Setting | Default | Effect |
 | --- | --- | --- |
 | `atRest.redactionEnabled` | `true` | Credential patterns (API keys, bearer tokens, GitHub, GitLab, Slack and AWS credentials) are replaced with `[REDACTED_*]` markers when the per-agent transcript journal is written. Crash reports are always redacted. Home paths are not redacted. |
-| `atRest.retentionMaxAgeDays` | `30` | Transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots older than this are deleted at start and every six hours. Saved conversations are never deleted by it. |
+| `atRest.retentionMaxAgeDays` | `30` | Transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots older than this are deleted at start and every six hours. Decision-log readings older than this are removed ten seconds after start and once a day (a reading with an owner correction or outcome is kept). Saved conversations are never deleted by it. |
 | `atRest.retentionMaxTotalMb` | `512` | Each of those file sets is kept under this many megabytes, oldest first. |
 
 These `atRest.*` settings are shared settings in a cluster.

@@ -1,4 +1,5 @@
-import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 /**
  * Owner escalations: the question
  * put to the owner, built in code, and the owner's free-text reply, read with
@@ -29,6 +30,7 @@ import { ownerPick } from './batteries/owner-pick.js';
 import { ownerReply } from './batteries/owner-reply.js';
 import { readForbidsWriting, REQUEST_SHAPE_SITE, saysNoAtAct, saysYesAtAct } from './batteries/request-shape.js';
 import { acceptAttempt, assertAttemptTakeable } from './best-of-n.js';
+import { unitCheckingLines } from './answer.js';
 import { engineItem } from './group-runner.js';
 import { emptyJudgmentUsage, meteredPort, type DecidedCheck } from './check.js';
 import { amendTarget } from './amendment.js';
@@ -264,6 +266,8 @@ export interface OwnerAcceptanceInput {
   readonly branch?: string | undefined;
   /** The head of the result's answer. */
   readonly answer: string;
+  /** Why the set decision model could not check the result; absent when no decision model is in use. */
+  readonly notJudged?: string | undefined;
 }
 
 /** The answers the owner-acceptance question takes; code reads them. */
@@ -285,7 +289,10 @@ export function readAcceptanceAnswer(text: string): AcceptanceAnswer | undefined
 export function buildOwnerAcceptanceQuestion(contract: Contract, input: OwnerAcceptanceInput): string {
   const answer = input.answer.replace(/\s+/g, ' ').trim();
   return [
-    `Contract ${contract.id} finished "${titleOf(contract.goal || contract.ask)}", but no decision model is in use, so the result was not independently checked against what you asked for.`,
+    input.notJudged === undefined
+      ? `Contract ${contract.id} finished "${titleOf(contract.goal || contract.ask)}", but no decision model is in use, so the result was not independently checked against what you asked for.`
+      : `Contract ${contract.id} finished "${titleOf(contract.goal || contract.ask)}", but the decision model could not check the result against what you asked for (${input.notJudged}).`,
+    ...unitCheckingLines(contract),
     input.gates.length === 0 ? 'No required checks are configured for this project.' : `Required checks that passed: ${input.gates.join(', ')}.`,
     ...(answer.length === 0 ? [] : [`Its answer begins: ${answer.length <= 400 ? answer : `${answer.slice(0, 397)}...`}`]),
     input.branch === undefined
@@ -716,7 +723,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const usage = emptyJudgmentUsage();
     let read: Awaited<ReturnType<typeof readForbidsWriting>> | undefined;
     try {
-      read = await decisionOrClassic<Awaited<ReturnType<typeof readForbidsWriting>> | undefined>(() => readForbidsWriting(meteredPort(judgmentPort(REQUEST_SHAPE_SITE), usage), text, { signal: run.abort.signal }), () => undefined);
+      read = await judgedOrNot<Awaited<ReturnType<typeof readForbidsWriting>> | undefined>(REQUEST_SHAPE_SITE, () => readForbidsWriting(meteredPort(judgmentPort(REQUEST_SHAPE_SITE), usage), text, { signal: run.abort.signal }), () => undefined);
     } finally {
       addJudgmentUsage(run.contract.judgmentUsage, usage);
     }
@@ -794,7 +801,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     assertJudgmentInput({ reply: text, question: escalation.question, candidates });
     const usage = emptyJudgmentUsage();
     try {
-      return await decisionOrClassic(async () => {
+      return await judgedOrNot(OWNER_PICK_SITE, async () => {
         const read = await ownerPick.select(meteredPort(judgmentPort(OWNER_PICK_SITE), usage), { reply: text, question: escalation.question }, candidates, { site: OWNER_PICK_SITE, signal: run.abort.signal });
         const taken = read.outcome === 'act' ? read.chosen : undefined;
         read.recordAction(taken === undefined ? 'no attempt taken: asked again' : `took ${taken}`);
@@ -991,7 +998,7 @@ export function createEscalations(context: StepContext, rejudge: Rejudge): Escal
     const usage = emptyJudgmentUsage();
     let read: ReplyRead;
     try {
-      read = await decisionOrClassic(async (): Promise<ReplyRead> => {
+      read = await judgedOrNot(OWNER_REPLY_SITE, async (): Promise<ReplyRead> => {
         const answered = await ownerReply.read(
           meteredPort(judgmentPort(OWNER_REPLY_SITE), usage),
           { reason: escalation.reason, question: escalation.question },

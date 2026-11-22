@@ -303,14 +303,12 @@ export function wireSessionPersistenceAndRecovery(
       const root = normalizeWorkspaceRoot(workingDir);
       workspaceRegistrationAsked = root;
       deps.askWorkspaceRegistration(root, (accepted) => {
-        // The line says what the store did, once it did it.
+        // The answer was saved as given (the question said what each answer does): nothing more to say.
+        // An answer the store could not take is said, with how to try again.
         void answerWorkspaceRegistrationPrompt(shellPaths, root, accepted).then((answer) => {
-          systemMessageRouter.userAction(answer.outcome === 'registered'
-            ? `[Workspace] Registered ${root}, automatic checkpoints are now allowed here.`
-            : answer.outcome === 'declined'
-              ? `[Workspace] Not registered, automatic checkpoints stay off here (won't ask again for this location).`
-              : `[Workspace] ${accepted ? 'Not registered' : 'Your answer was not saved'}: ${answer.reason}. Automatic checkpoints stay off here; run "goodvibes-agent workspaces register --yes" in this directory to try again.`,
-          answer.outcome === 'registered' || answer.outcome === 'declined' ? 'info' : 'warning');
+          if (answer.outcome !== 'registered' && answer.outcome !== 'declined') {
+            systemMessageRouter.userAction(`[Workspace] ${accepted ? 'Not registered' : 'Your answer was not saved'}: ${answer.reason}. Automatic checkpoints stay off here; run "goodvibes-agent workspaces register --yes" in this directory to try again.`, 'warning');
+          }
           render();
         });
       });

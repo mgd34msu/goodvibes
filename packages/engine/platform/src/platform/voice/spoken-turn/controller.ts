@@ -265,7 +265,7 @@ export class SpokenTurnController {
     }
     this.chunker = new TtsTextChunker({ now: this.now });
     this.startTimer();
-    this.notice(`[TTS] Live playback queued through ${this.sink.label}.`);
+    // Playback starting is heard, not announced: a routine start is not a notice.
   }
 
   private onTurnConfigChanged(turnId: string): void {

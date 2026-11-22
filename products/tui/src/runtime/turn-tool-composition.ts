@@ -78,6 +78,12 @@ export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: Runti
     secretsManager: services.secretsManager, // goodvibes_context reads Cloudflare tokens held in the secret store
     cloudflareAuthToken: () => readDaemonOperatorToken(services.shellPaths.homeDirectory), // and counts the daemon's own token as the Worker operator token, as the daemon's status route does
     ...(options.hookChangeGate ? { hookChangeGate: options.hookChangeGate } : {}),
+    // A delegation nothing the owner said settles, and the decision model could not read, is put to him in the ordinary approval prompt.
+    delegationAsk: async (question, { signal }) => {
+      const manager = turnPermissionManagers.get(services);
+      if (manager === undefined) return { approved: false, asked: false, reason: 'no approval prompt is available here to ask the owner' };
+      return manager.askDelegation(question, { signal });
+    },
   });
 }
 

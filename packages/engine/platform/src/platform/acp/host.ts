@@ -36,7 +36,7 @@ import type { ClientSideConnection } from '@agentclientprotocol/sdk';
 import type { Agent, Client, NewSessionResponse, PromptResponse, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from './protocol.js';
 import { drainStderrTail } from '../utils/stderr-tail.js';
 import { ACP_HANDSHAKE_TIMEOUT_MS, messageChunkText, permissionOutcomeFor, readNdJsonMessages, stopAcpChild, wellFormedPermissionOptions, withTimeout } from './protocol.js';
-import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost } from '../permissions/external-request.js';
+import { admitExternalRequest, type ExternalPermissionHost } from '../permissions/external-request.js';
 import { captureAutonomousSource, type AutonomousToolSource } from '../permissions/autonomous.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -564,11 +564,10 @@ export class AcpHostService {
         if (previous) { previous.abort(); return refuse(`the agent reused tool call id ${requestId} while its first ask was pending`); }
         const requestLife = new AbortController();
         record.permissionRequests.set(requestId, requestLife);
-        const deadlineMs = externalAskDeadlineMs(host);
-        const deadline = AbortSignal.timeout(deadlineMs);
         // The one owner of "this ask is still wanted": the row, the prompt, this
-        // request, the wire binding and the deadline all abort this signal.
-        const signal = AbortSignal.any([record.lifetime.signal, operation.lifetime.signal, requestLife.signal, binding.signal, deadline]);
+        // request and the wire binding all abort this signal. The ask waits for
+        // its decision: it ends when the decision model answers or fails.
+        const signal = AbortSignal.any([record.lifetime.signal, operation.lifetime.signal, requestLife.signal, binding.signal]);
         const wire = binding;
         const assertCurrent = () => { signal.throwIfAborted(); wire.assertCurrent(); record.assertWorkspaceCurrent?.(); };
         let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
@@ -593,9 +592,7 @@ export class AcpHostService {
           return response;
         } catch (error) {
           if (record.lifetime.signal.aborted || operation.lifetime.signal.aborted) return cancelled;
-          return refuse(deadline.aborted
-            ? `the permission decision did not arrive within ${deadlineMs} ms ("Longest a waiting decision may take" in /settings open)`
-            : `the permission ask could not be decided: ${summarizeError(error)}`);
+          return refuse(`the permission ask could not be decided: ${summarizeError(error)}`);
         } finally {
           if (!deferred) { admission?.close(); cleanup(); }
         }

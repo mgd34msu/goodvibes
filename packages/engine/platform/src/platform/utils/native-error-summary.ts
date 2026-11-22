@@ -77,6 +77,20 @@ export function extractErrorMessage(error: unknown): string {
   return String(error);
 }
 
+/**
+ * The whole message with its native tags, never shortened: for a refusal or
+ * failure a model or person must act on (the display may wrap it; nothing cuts it).
+ */
+export function describeErrorInFull(error: unknown, options: ErrorNormalizationOptions = {}): string {
+  const raw = extractErrorMessage(error);
+  const message = extractStructuredMessage(raw) ?? (raw.trim() || options.fallbackMessage || 'Unexpected error');
+  return buildSummary(message, {
+    requestId: error instanceof AppError ? error.requestId : undefined,
+    providerCode: error instanceof AppError ? error.providerCode : undefined,
+    phase: error instanceof AppError ? error.phase : undefined,
+  });
+}
+
 /** Native formatting only: preserve structured messages, bounded text and native error tags. */
 export function summarizeError(error: unknown, options: ErrorNormalizationOptions = {}): string {
   const message = cleanMessage(extractErrorMessage(error), options.fallbackMessage);

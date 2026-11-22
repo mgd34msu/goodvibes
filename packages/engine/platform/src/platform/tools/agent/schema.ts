@@ -28,6 +28,7 @@ const AGENT_TOOL_DEFINITION: ToolDefinition = {
     'message (send a message to an agent), ' +
     'contracts (list the contracts of the current session with their status, goal, units and criteria met), ' +
     'contract-history (the decisions, checks and escalations of one contract, by contractId), ' +
+    'activity (what this session\'s contracts and agents actually did, from the product\'s records, also across a restart of the app: each contract\'s state and units, and each agent\'s state, the files it read (whole or line ranges), the files it changed and its last report; one call answers "did it run and what did it do"), ' +
     'cohort-status (JSON summary of all agents in a named cohort), ' +
     'cohort-report (markdown table report for all agents in a named cohort).' +
     ' A team is a cohort: spawn its members with one cohort name, each with its template as its role and its communicationLane, brief each with context and successCriteria, and track the work items in the work plan; cohort-status and cohort-report read the team back, and the fleet view shows the cohort on each agent.' +
@@ -46,7 +47,7 @@ const AGENT_TOOL_DEFINITION: ToolDefinition = {
     properties: {
       mode: {
         type: 'string',
-        enum: ['spawn', 'batch-spawn', 'status', 'cancel', 'list', 'templates', 'get', 'budget', 'plan', 'wait', 'message', 'contracts', 'contract-history', 'cohort-status', 'cohort-report'],
+        enum: ['spawn', 'batch-spawn', 'status', 'cancel', 'list', 'templates', 'get', 'budget', 'plan', 'wait', 'message', 'contracts', 'contract-history', 'activity', 'cohort-status', 'cohort-report'],
         description: 'Operation mode.',
       },
       // mode: spawn
@@ -335,7 +336,7 @@ export interface ProposedUnit {
 
 /** Input shape for the agent tool. */
 export interface AgentInput {
-  mode: 'spawn' | 'batch-spawn' | 'status' | 'cancel' | 'list' | 'templates' | 'get' | 'budget' | 'plan' | 'wait' | 'message' | 'contracts' | 'contract-history' | 'cohort-status' | 'cohort-report';
+  mode: 'spawn' | 'batch-spawn' | 'status' | 'cancel' | 'list' | 'templates' | 'get' | 'budget' | 'plan' | 'wait' | 'message' | 'contracts' | 'contract-history' | 'activity' | 'cohort-status' | 'cohort-report';
   // spawn
   task?: string | undefined;
   authoritativeTask?: string | undefined;

@@ -144,7 +144,8 @@ async function partitionAndSelect(port: JudgmentPort, request: SelectionRequest,
   for (const candidate of candidates) {
     const added = estimateTokens(candidate) + estimateTokens({ [candidate.id]: null })
       + estimateTokens(noul({ question: FIT_REFERENCE, candidate: `\`candidates[${MAX_CANDIDATES}]\` (id ${JSON.stringify(candidate.id)})` })) + 4;
-    if (group.length && (group.length >= MAX_CANDIDATES || tokens + added > LIMITS.maxLongContextTokens)) {
+    // A group fits the small context a decision model reads in one request; more groups run side by side.
+    if (group.length && (group.length >= MAX_CANDIDATES || tokens + added > LIMITS.maxStateWithQuestionTokens)) {
       groups.push(group); group = []; tokens = baseTokens;
     }
     group.push(candidate); tokens += added;

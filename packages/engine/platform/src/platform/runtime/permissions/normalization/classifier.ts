@@ -31,8 +31,8 @@ const UNASSESSED: CommandNeeds = Object.freeze({ needsNetwork: null, needsPrivil
 export const COMMAND_NEEDS_SITE = 'engine.gate.sandbox-needs';
 
 /**
- * One reading per command and workspace for the life of the process. With no
- * answer within the decision deadline, or with decision models off, the
+ * One reading per command and workspace for the life of the process. When the
+ * decision model fails, or with decision models off, the
  * command is unassessed and the sandbox policy asks.
  */
 export async function readCommandNeeds(

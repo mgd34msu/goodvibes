@@ -1,8 +1,8 @@
-import { assertAgentBriefFidelity, DelegationPlanHeldError } from '../../agents/brief-fidelity.js';
+import { decideDelegation, delegationRefusalResult, type DelegationOwnerAsk } from '../../agents/delegation-authority.js';
+import { readDelegationRequest } from '../../core/delegation-request-context.js';
 import { classicAgentInput } from './classic-policy.js';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
-import { delegationPlanHolds, delegationPlanKey } from '../../agents/delegation-plan-holds.js';
-import { readAgentSessionHistory } from '../../agents/session-history.js';
+import { readAgentJournalActivity, readAgentSessionHistory } from '../../agents/session-history.js';
 import { readCompletionRepairContext } from '../../core/completion-repair-context.js';
 import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
 import { assertCurrentToolInvocation } from '../registry.js';
@@ -16,7 +16,7 @@ import { contractChecks, summarizeCheck, summarizeContract, summarizeContractDec
 import { AGENT_TEMPLATES, AgentManager, type AgentRecord, type OwnedAgentExecution } from './manager.js';
 import { evaluateOrchestrationSpawn, ORCHESTRATION_CAP_KEYS } from '../../runtime/orchestration/spawn-policy.js';
 import { isNativeConversationTurn, NATIVE_TURN_EXECUTION_REFUSAL } from '../../core/native-turn-scope.js';
-import { summarizeError } from '../../utils/error-display.js';
+import { describeErrorInFull } from '../../utils/error-display.js';
 import { currentTurn } from '../../security/turn-boundary.js';
 import {
   buildChildFailureEnvelope,
@@ -166,10 +166,15 @@ function briefAssignment(input: AgentInput) {
     ...(input.writeScope ? { writeScope: input.writeScope } : {}) };
 }
 
-/** The ask for a batch's contract: the user's own words when the host attached them, otherwise the tasks listed. */
-function batchAsk(input: AgentInput, units: readonly ProposedUnit[]): string {
-  if (input.authoritativeTask && input.authoritativeTask.trim() !== '') return input.authoritativeTask;
-  return units.map((unit) => `- ${unit.task}`).join('\n');
+/**
+ * The ask of a contract this call starts: the work as the owner asked for it
+ * (stamped by the host from his standing request, never only his latest
+ * message), then the units planned for it. Its first line names the contract.
+ */
+function contractAsk(input: AgentInput, units: readonly ProposedUnit[]): string {
+  const planned = units.map((unit) => `- ${unit.task}`).join('\n');
+  const request = input.authoritativeTask?.trim();
+  return request ? `${request}\n\nPlanned for the agents:\n${planned}` : planned;
 }
 
 /** A message to an agent never expires on a clock: an agent inside one long turn reads its messages only at the next turn. The bus drops it when the agent is forgotten. */
@@ -219,11 +224,6 @@ function contractPathNotApplied(inputs: readonly AgentInput[]): { notApplied: { 
     reason: 'These apply only with outsideContract=true; the contract path did not carry them.' } };
 }
 
-/** Said in a result when no original request was attached, so a skipped brief check is never read as a passed one. */
-function briefCheckNote(input: AgentInput): { briefCheck?: string } {
-  return input.authoritativeTask ? {} : { briefCheck: 'not run: no original user request was attached to this call, so the brief was not compared with it' };
-}
-
 export interface AgentToolConfig {
   /** Session-local user selection, rather than the shared workspace registry's selection. */
   readonly getSelectedModel?: (() => import('../../providers/registry-types.js').ModelDefinition) | undefined;
@@ -239,6 +239,12 @@ export interface AgentToolConfig {
   readonly readAccessFilter?: import('../shared/read-access.js').ReadAccessFilter | undefined;
   /** The conversation session a contract started here belongs to, read on each call. */
   readonly resolveSessionId: () => string;
+  /**
+   * Puts a delegation nothing settled to the owner, in the product's ordinary
+   * ask (PermissionManager.askDelegation). Absent: nobody can be asked from
+   * here, and a delegation the gate admitted starts.
+   */
+  readonly delegationAsk?: DelegationOwnerAsk | undefined;
 }
 
 /** Longest one wait call blocks when no silence limit applies. */
@@ -268,9 +274,6 @@ function awaitWithin(work: Promise<unknown>, ms: number, signal: AbortSignal | u
 
 export function createAgentTool(config: AgentToolConfig): Tool {
   const archetypeLoader = config.archetypeLoader ?? new ArchetypeLoader();
-  // A refused delegation remains a pending proposal, including when the model changes spawn modes.
-  // Keyed by host-stamped source request and session, never a model-supplied parent ID.
-  const heldPlans = delegationPlanHolds(config.contractRunner);
 
   /**
    * Starts one contract for work handed to the tool. The unit
@@ -386,7 +389,6 @@ export function createAgentTool(config: AgentToolConfig): Tool {
     const callerAgentId = currentTurn()?.callerAgentId ?? undefined;
     const input = classicAgentInput({ ...modelAgentInput(args as unknown as AgentInput), sessionId: session,
       ...(callerAgentId ? { parentAgentId: callerAgentId } : {}) });
-    const completionRepair = readCompletionRepairContext();
     if (isNativeConversationTurn() && decisionModelPolicyState().operation !== 'no-decision-model' && (input.mode === 'spawn' || input.mode === 'batch-spawn')) {
       return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
     }
@@ -395,41 +397,62 @@ export function createAgentTool(config: AgentToolConfig): Tool {
       return { success: false, error: 'Missing required parameter: mode' };
     }
 
-    const validModes = ['spawn', 'batch-spawn', 'status', 'cancel', 'list', 'templates', 'get', 'budget', 'plan', 'wait', 'message', 'contracts', 'contract-history', 'cohort-status', 'cohort-report'];
+    const validModes = ['spawn', 'batch-spawn', 'status', 'cancel', 'list', 'templates', 'get', 'budget', 'plan', 'wait', 'message', 'contracts', 'contract-history', 'activity', 'cohort-status', 'cohort-report'];
     if (!validModes.includes(input.mode)) {
       return { success: false, error: `Invalid mode: '${input.mode}'. Must be one of: ${validModes.join(', ')}` };
     }
 
     const manager = config.manager;
-    const delegationSession = session;
+    /**
+     * An agent id this process holds no record of. The session's contracts are read for it (the contract record
+     * survives a restart; its agents do not), so the model is told what the agent was and what its contract is
+     * now, never just "unknown". `answered` is true for the reading modes (status, get, wait), which succeed
+     * with this as their answer; the acting modes (cancel, message, budget, plan) fail with it.
+     */
+    const notLive = (agentId: string, answered: boolean): { success: boolean; output?: string; error?: string } => {
+      let fact = `Agent '${agentId}' is not running in this process, and no contract of this session names it. Agents do not survive a restart of the app.`;
+      try {
+        for (const contract of config.contractRunner.list({ sessionId: session, includeTerminal: true, includeInputSnapshot: false })) {
+          const unit = contract.units.find((candidate) => candidate.agentIds.includes(agentId));
+          const role = contract.ownerAgentId === agentId ? 'the owner record'
+            : contract.plannerAgentIds.includes(agentId) ? 'a planner'
+              : unit !== undefined ? `the agent of unit ${unit.id} (${unit.title}, now ${unit.status})` : undefined;
+          if (role === undefined) continue;
+          fact = `Agent '${agentId}' is not running in this process. It was ${role} of contract ${contract.id}, which is now ${contract.status}${contract.statusLine ? ` (${contract.statusLine})` : ''}. `
+            + 'An agent does not survive a restart of the app; its contract does, and continues with fresh agents.';
+          break;
+        }
+      } catch { /* the contract records could not be read; the plain fact stands */ }
+      fact += ' agent mode=activity shows what each agent of this session read, changed and reported.';
+      return answered
+        ? { success: true, output: JSON.stringify({ id: agentId, live: false, status: 'not running', fact }) }
+        : { success: false, error: fact };
+    };
     // Another session's agent is not this session's to read, steer or cancel: it is unknown here.
     if (typeof input.agentId === 'string' && input.agentId.trim() !== '') {
       const named = manager.getStatus(input.agentId);
       if (named && named.sessionId === undefined) return { success: false, error: `Agent '${input.agentId}' belongs to no session (it was started outside any conversation), so this session cannot read, steer or cancel it.` };
       if (named && named.sessionId !== session) return { success: false, error: `Unknown agent: '${input.agentId}'` };
     }
-    const delegationKey = delegationPlanKey(delegationSession, input.authoritativeTask ?? '');
-    const heldPlan = heldPlans.get(delegationKey);
-    if (heldPlan && decisionModelPolicyState().policy === 'Hybrid' && decisionModelPolicyState().operation === 'no-decision-model')
-      return publish({ success: false, error: 'The previous delegation plan remains held. Availability fallback cannot override its semantic refusal.' });
-    // Only a judgement that held the plan records a hold. A cancelled or superseded call
-    // rethrows through publish; any other failure of the check is a failed check the
-    // model may simply retry, and leaves no hold behind.
-    const holdPlan = (assignments: readonly { readonly task: string }[], error: unknown, mode: 'spawn' | 'batch-spawn' = 'batch-spawn') => {
-      if (!(error instanceof DelegationPlanHeldError)) return publish({ success: false, error: summarizeError(error) });
-      const reason = summarizeError(error);
-      const proposal = { sessionId: delegationSession, request: input.authoritativeTask!, assignments, reason, mode,
-        ...(mode === 'spawn' ? { outsideContract: input.outsideContract === true } : {}),
-        fixes: error.fixes };
-      heldPlans.set(delegationKey, proposal);
-      return publish({ success: false, error: reason,
-        output: JSON.stringify({ recovery: { kind: 'revise-delegation', ...proposal,
-          instruction: `Revise these assignments and resubmit mode=${mode}${mode === 'spawn' ? ` with outsideContract=${input.outsideContract === true}` : ''} for Jev revalidation. Do not abandon the held plan by starting another agent or contract. Continue the original request after validation.` } }) });
+    /**
+     * Whether the owner's words let these agents start (agents/delegation-authority.ts):
+     * null when they start, else the refusal, whole, with the owner's words it rests
+     * on and what would be accepted. The conversation's own turn answers to everything
+     * its owner said; an agent delegating further answers to its own task.
+     */
+    const authorize = async (tasks: readonly string[]) => {
+      const source = readDelegationRequest();
+      const ownerMessages = input.parentAgentId === undefined && source !== undefined ? source.ownerMessages
+        : input.authoritativeTask?.trim() ? [input.authoritativeTask] : [];
+      try {
+        const verdict = await decideDelegation(config.contractRunner, { sessionId: session, ownerMessages, tasks },
+          { ask: config.delegationAsk, signal, assertCurrent });
+        assertCurrent();
+        return verdict.start ? null : publish(delegationRefusalResult(verdict.refusal));
+      } catch (error) {
+        return publish({ success: false, error: `Not started: whether the owner allows these agents could not be settled: ${describeErrorInFull(error)}` });
+      }
     };
-    if (input.mode === 'spawn' && heldPlan && (heldPlan.mode === 'batch-spawn'
-      || (input.outsideContract === true) !== (heldPlan.outsideContract ?? true))) return publish({ success: false,
-      error: 'Delegation remains held. Repair and revalidate the pending plan before switching execution modes.',
-      output: JSON.stringify({ recovery: { kind: 'revise-delegation', ...heldPlan, requiredMode: heldPlan.mode } }) });
 
     switch (input.mode) {
       case 'spawn': {
@@ -444,22 +467,16 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           if (fenceError) return { success: false, error: fenceError };
         }
 
-        try {
-          if (input.authoritativeTask) await assertAgentBriefFidelity({ request: input.authoritativeTask, assignments: [briefAssignment(input)], ...(input.context ? { context: input.context } : {}), ...(completionRepair ? { repairContext: completionRepair } : {}) }, { signal, assertCurrent });
-          assertCurrent();
-        } catch (error) { return holdPlan([briefAssignment(input)], error, 'spawn'); }
-        heldPlans.delete(delegationKey);
+        const refused = await authorize([input.task]);
+        if (refused) return refused;
 
         if (!input.outsideContract) {
           let started: StartedContract;
           try {
-            started = await startOwnedContract(
-              input,
-              input.authoritativeTask && input.authoritativeTask.trim() !== '' ? input.authoritativeTask : input.task,
-              [{ task: input.task, ...(input.template ? { template: input.template } : {}) }],
-            );
+            const units: ProposedUnit[] = [{ task: input.task, ...(input.template ? { template: input.template } : {}) }];
+            started = await startOwnedContract(input, contractAsk(input, units), units);
           } catch (error) {
-            return { success: false, error: summarizeError(error) };
+            return { success: false, error: describeErrorInFull(error) };
           }
           const owner = started.owner;
           return publish({
@@ -473,7 +490,6 @@ export function createAgentTool(config: AgentToolConfig): Tool {
               ...agentExecutionContract(owner),
               ...agentTopology(owner),
               ...contractPathNotApplied([input]),
-              ...briefCheckNote(input),
             }),
           });
         }
@@ -484,7 +500,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         } catch (error) {
           return {
             success: false,
-            error: summarizeError(error, {
+            error: describeErrorInFull(error, {
               ...(typeof input.provider === 'string' ? { provider: input.provider } : {}),
             }),
           };
@@ -499,7 +515,6 @@ export function createAgentTool(config: AgentToolConfig): Tool {
             task: record.task,
             ...agentExecutionContract(record),
             ...agentTopology(record),
-            ...briefCheckNote(input),
           }),
         });
       }
@@ -511,7 +526,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
 
         const record = manager.getStatus(input.agentId);
         if (!record) {
-          return { success: false, error: `Unknown agent: '${input.agentId}'` };
+          return notLive(input.agentId, true);
         }
 
         const duration =
@@ -544,7 +559,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
 
         const before = manager.getStatus(input.agentId);
         if (!before) {
-          return { success: false, error: `Unknown agent: '${input.agentId}'` };
+          return notLive(input.agentId, false);
         }
         const cancelled = manager.cancel(input.agentId);
         const record = manager.getStatus(input.agentId);
@@ -612,7 +627,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           if (unreadable !== undefined) {
             return { success: false, error: `Agent '${input.agentId}' has saved history that cannot be read (${unreadable}). It is not running; do not treat it as unknown. Ask the operator to check the agent's session journal.` };
           }
-          return { success: false, error: `Unknown agent: '${input.agentId}'` };
+          return notLive(input.agentId, true);
         }
 
         const recentMessages = config.messageBus.getMessages(input.agentId).slice(-10);
@@ -687,7 +702,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
 
         const record = manager.getStatus(input.agentId);
         if (!record) {
-          return { success: false, error: `Unknown agent: '${input.agentId}'` };
+          return notLive(input.agentId, false);
         }
 
         // The agent's own recorded usage (orchestrator-runner.ts), never an estimate.
@@ -716,7 +731,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
 
         const record = manager.getStatus(input.agentId);
         if (!record) {
-          return { success: false, error: `Unknown agent: '${input.agentId}'` };
+          return notLive(input.agentId, false);
         }
 
         const templateDef = AGENT_TEMPLATES[record.template];
@@ -749,7 +764,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
         const record = manager.getStatus(input.agentId);
         assertCurrent();
         if (!record) {
-          return { success: false, error: `Unknown agent: '${input.agentId}'` };
+          return notLive(input.agentId, true);
         }
 
         // A terminal agent is answered at once; otherwise the call awaits the agent's run (no polling)
@@ -813,7 +828,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
 
         const record = manager.getStatus(input.agentId);
         if (!record) {
-          return { success: false, error: `Unknown agent: '${input.agentId}'` };
+          return notLive(input.agentId, false);
         }
 
         if (record.status === 'failed' || record.status === 'completed' || record.status === 'cancelled') {
@@ -904,20 +919,15 @@ export function createAgentTool(config: AgentToolConfig): Tool {
             manager.guardContractLeafSpawn(requester);
           }
         } catch (error) {
-          return { success: false, error: summarizeError(error) };
+          return { success: false, error: describeErrorInFull(error) };
         }
         const outsideInputs = spawnInputs.filter((spawnInput) => spawnInput.outsideContract === true);
         const contractTasks = input.tasks.filter((_, index) => spawnInputs[index]!.outsideContract !== true);
         const contractInputs = spawnInputs.filter((spawnInput) => spawnInput.outsideContract !== true);
         const fenceError = contractPathFenceError(contractInputs);
         if (fenceError) return { success: false, error: fenceError };
-        if (input.authoritativeTask) {
-          try {
-            await assertAgentBriefFidelity({ request: input.authoritativeTask, assignments: spawnInputs.map(briefAssignment), ...(input.context ? { context: input.context } : {}), ...(completionRepair ? { repairContext: completionRepair } : {}) }, { signal, assertCurrent });
-            assertCurrent();
-          } catch (error) { return holdPlan(input.tasks.map(task => ({ task: task.task })), error); }
-          heldPlans.delete(delegationKey);
-        }
+        const refused = await authorize(input.tasks.map((taskDef) => taskDef.task));
+        if (refused) return refused;
 
         const batchOutput: Record<string, unknown> = { cohort: input.cohort };
         if (contractTasks.length > 0) {
@@ -927,9 +937,9 @@ export function createAgentTool(config: AgentToolConfig): Tool {
           }));
           let started: StartedContract;
           try {
-            started = await startOwnedContract(input, batchAsk(input, units), units);
+            started = await startOwnedContract(input, contractAsk(input, units), units);
           } catch (error) {
-            return { success: false, error: summarizeError(error) };
+            return { success: false, error: describeErrorInFull(error) };
           }
           Object.assign(batchOutput, startedContractFields(started), {
             owner: agentSummary(started.owner),
@@ -975,7 +985,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
                 const notStarted = [...toSpawn.slice(index).map((remaining) => remaining.task!), ...skippedTasks];
                 return {
                   success: false,
-                  error: `${summarizeError(error)} The batch stopped partway: ${results.length} agent${results.length === 1 ? '' : 's'}${batchOutput.contractStarted === true ? ' and the contract' : ''} already started and keep running. Do not resubmit them; submit only the tasks listed in notStarted.`,
+                  error: `${describeErrorInFull(error)} The batch stopped partway: ${results.length} agent${results.length === 1 ? '' : 's'}${batchOutput.contractStarted === true ? ' and the contract' : ''} already started and keep running. Do not resubmit them; submit only the tasks listed in notStarted.`,
                   output: JSON.stringify({ ...batchOutput, agents: results, count: results.length, notStarted }),
                 };
               }
@@ -991,7 +1001,6 @@ export function createAgentTool(config: AgentToolConfig): Tool {
             }
           }
         }
-        if (!input.authoritativeTask) Object.assign(batchOutput, briefCheckNote(input));
         batchOutput.agents = results;
         batchOutput.count = results.length;
         batchOutput.skipped = skipped;
@@ -1070,7 +1079,60 @@ export function createAgentTool(config: AgentToolConfig): Tool {
             }),
           };
         } catch (err) {
-          return { success: false, error: `Failed to list contracts: ${summarizeError(err)}` };
+          return { success: false, error: `Failed to list contracts: ${describeErrorInFull(err)}` };
+        }
+      }
+
+      case 'activity': {
+        // One answer to "what did my agents and contracts actually do", from the product's own records: the
+        // session's contracts (also those from before a restart) and every agent they or this session started,
+        // with what each read, changed and reported from its saved journal.
+        try {
+          const contracts = config.contractRunner.list({ sessionId: session, includeTerminal: true, includeInputSnapshot: false });
+          const roles = new Map<string, string>();
+          for (const contract of contracts) {
+            for (const planner of contract.plannerAgentIds) roles.set(planner, `planner of contract ${contract.id}`);
+            for (const unit of contract.units) for (const agentId of unit.agentIds) roles.set(agentId, `unit ${unit.id} of contract ${contract.id}`);
+          }
+          const owners = new Set(contracts.map((contract) => contract.ownerAgentId));
+          const ids = [...new Set([...manager.list({ sessionId: session }).map((record) => record.id).filter((id) => !owners.has(id)), ...roles.keys()])];
+          const agents = [];
+          for (const agentId of ids) {
+            const record = manager.getStatus(agentId);
+            let unreadable: string | undefined;
+            const journal = await readAgentJournalActivity({ projectRoot: config.projectRoot, surfaceRoot: config.surfaceRoot, agentId,
+              readAccessFilter: config.readAccessFilter, signal, assertCurrent, onUnreadable: (reason) => { unreadable = reason; } });
+            assertCurrent();
+            const state = record ? record.status
+              : journal === undefined ? 'not running; no saved journal'
+                : journal.cutOff ? 'cut off: not running, and its run never ended (the app stopped or the run was killed)' : 'ended';
+            const report = record?.fullOutput ?? journal?.report;
+            agents.push({
+              id: agentId, state, ...(roles.has(agentId) ? { role: roles.get(agentId) } : {}),
+              task: (record?.task ?? journal?.task ?? '').slice(0, 300),
+              read: journal?.read ?? {}, changed: journal?.changed ?? [], commandsRun: journal?.commandsRun ?? 0,
+              ...(report ? { report: report.length > 1_500 ? `${report.slice(0, 1_500)}...` : report }
+                : record && ['pending', 'running'].includes(record.status) ? {}
+                  : { report: null, noReport: 'it stopped before it wrote a final reply (its contract ended it, its run failed, or the app stopped); what it read is still listed' }),
+              ...(unreadable === undefined ? {} : { journalUnreadable: unreadable }),
+            });
+          }
+          return publish({
+            success: true,
+            output: JSON.stringify({
+              mode: 'activity',
+              meaning: 'Recorded by GoodVibes: each contract of this session and each agent it or this session started, with what the agent read (whole file or line ranges), changed and last reported. An agent does not survive a restart of the app; its record does.',
+              contracts: contracts.map((contract) => ({
+                id: contract.id, status: contract.status, statusLine: contract.statusLine ?? null,
+                units: contract.units.map((unit) => ({ id: unit.id, title: unit.title, status: unit.status, agentIds: [...unit.agentIds],
+                  ...(unit.answer ? { answer: unit.answer.length > 1_000 ? `${unit.answer.slice(0, 1_000)}...` : unit.answer } : {}) })),
+              })),
+              agents,
+            }),
+          });
+        } catch (err) {
+          if (signal?.aborted) throw err;
+          return { success: false, error: `Failed to read this session's agent and contract records: ${describeErrorInFull(err)}` };
         }
       }
 
@@ -1100,7 +1162,7 @@ export function createAgentTool(config: AgentToolConfig): Tool {
             }),
           };
         } catch (err) {
-          return { success: false, error: `Failed to read the contract's history: ${summarizeError(err)}` };
+          return { success: false, error: `Failed to read the contract's history: ${describeErrorInFull(err)}` };
         }
       }
 

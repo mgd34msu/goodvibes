@@ -826,8 +826,9 @@ async function executeToolCallsInMode(
       }
 
       // A plain allow by code or rule is not reported; one Jev or the owner made is (with Jev's decision log id).
+      // A refusal the tool itself returned is the call's decision and is kept.
       const decided = checkResult.decision;
-      if (decided && (decided.state !== 'allowed' || decided.decidedBy === 'owner')) result = { ...result, decision: decided };
+      if (decided && (decided.state !== 'allowed' || decided.decidedBy === 'owner') && result.decision?.state !== 'refused') result = { ...result, decision: decided };
       // The body returned, so this result is the call's receipt whatever a cancel
       // says now: it is appended (and settled, below) even when the turn was
       // cancelled meanwhile, so the transcript says the call ran and the model

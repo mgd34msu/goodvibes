@@ -193,7 +193,10 @@ In-process subagent management. See [Agent system](#agent-system) below for arch
 - Execution plan introspection via `plan` mode
 - Batch spawning via `batch-spawn` mode
 - contract introspection via `contracts` and `contract-history` modes
+- what the session's agents and contracts actually did (state, files read and changed, last report, also across a restart) via the `activity` mode
 - Cohort tracking via `cohort-status` and `cohort-report` modes
+
+Agents start when you asked for them earlier in the conversation ("fan out agents over these files", "assign these to a set of agents") and have not since forbidden or limited them; a later message about something else does not withdraw that. When you said "do not use agents" or "do it yourself", the call is refused with your words quoted. Only when your words do not settle it is the decision model asked; when it cannot answer, `yolo` and `just-vibes` start the agents and `ask-me` asks you once in the approval prompt, and your answer stands for the rest of the conversation.
 
 ### state
 

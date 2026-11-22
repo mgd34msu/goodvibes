@@ -210,8 +210,6 @@ export interface JudgmentPort {
   readonly recorder?: DecisionRecorder;
   /** A credential-free snapshot of the currently configured targets. */
   readonly health?: () => readonly JudgmentEndpointHealth[];
-  /** The owner's deadline for decisions a person or a tool call waits on; `judge` uses it when the caller names none. */
-  readonly decisionDeadlineMs?: number | undefined;
   /** Moves up when what decides this port's answers changes (targets, models, credentials); `judge` keys cached answers by it. */
   readonly revision?: (() => number) | undefined;
 }

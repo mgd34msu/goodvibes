@@ -18,6 +18,7 @@
 
 import fs from 'node:fs';
 import { assertSynchronousJudgmentGuard, drainOwned } from '@goodvibes/judgment/decisions';
+import { classifyFailure } from '@goodvibes/engine/errors';
 import { dirname, join } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { writeJsonFileAtomic } from '../utils/atomic-json-store.js';
@@ -58,6 +59,27 @@ export interface LiveModelDiscoveryResult {
    * listing reported none or came from a cache file written before this field existed.
    */
   readonly maxOutputTokens?: Readonly<Record<string, number>> | undefined;
+  /**
+   * Set with `error` when the failure says the provider cannot serve calls now: nothing answered, the
+   * credentials were refused, the bill is unpaid, or the service failed. Routing then holds the provider
+   * out until a call succeeds. A listing the endpoint refused as a request (a 400 or 404 from a model-list
+   * route the sign-in does not offer) says nothing about calls, and leaves the provider routable.
+   */
+  readonly cannotServe?: boolean | undefined;
+}
+
+/** Failure categories of a listing that say the provider's calls fail too. */
+const CANNOT_SERVE_CATEGORIES: ReadonlySet<string> = new Set(['authentication', 'authorization', 'billing', 'network', 'timeout', 'service']);
+
+/** Whether a failed model listing says the provider cannot serve calls now (see `LiveModelDiscoveryResult.cannotServe`). */
+export function listingFailureMeansCannotServe(error: unknown): boolean {
+  const failure = classifyFailure(error);
+  return failure !== undefined && CANNOT_SERVE_CATEGORIES.has(failure.category);
+}
+
+/** A model listing's HTTP failure, with its status, so `listingFailureMeansCannotServe` can read what it says about the provider. */
+export function listingHttpError(message: string, status: number): Error {
+  return Object.assign(new Error(message), { status });
 }
 
 /** What a provider's live fetch returns: the ids, or the ids with what the listing also said about them. */
@@ -321,11 +343,12 @@ async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: 
       return listed({ models: [], source: 'catalog', added: [], removed: [], skippedReason: 'local-endpoint-unavailable' });
     }
     const message = summarizeError(err);
+    const cannotServe = listingFailureMeansCannotServe(err) ? { cannotServe: true } : {};
     logger.warn('[provider-models] Live model discovery failed', { provider: opts.providerName, error: message });
     if (cache) {
-      return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message, listedAt: cache.fetchedAt, ...cachedFacts }, cache.fetchedAt);
+      return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message, ...cannotServe, listedAt: cache.fetchedAt, ...cachedFacts }, cache.fetchedAt);
     }
-    return listed({ models: [], source: 'catalog', added: [], removed: [], error: message });
+    return listed({ models: [], source: 'catalog', added: [], removed: [], error: message, ...cannotServe });
   }
 }
 
@@ -375,7 +398,7 @@ export async function fetchModelIdsFromListing(
 ): Promise<string[]> {
   const res = await fetchWithTimeout(url, { headers }, LIVE_FETCH_TIMEOUT_MS, instrumentedFetch);
   if (!res.ok) {
-    throw new Error(`${providerName} model listing (${url}) returned ${res.status} ${res.statusText}`);
+    throw listingHttpError(`${providerName} model listing (${url}) returned ${res.status} ${res.statusText}`, res.status);
   }
   const body = await res.json() as
     | { data?: ListedModelEntry[] }
@@ -413,7 +436,7 @@ export async function fetchFireworksModelIds(apiKey: string): Promise<string[]> 
       headers: { Authorization: `Bearer ${apiKey}` },
     }, LIVE_FETCH_TIMEOUT_MS, instrumentedFetch);
     if (!res.ok) {
-      throw new Error(`Fireworks model listing (${url}) returned ${res.status} ${res.statusText}`);
+      throw listingHttpError(`Fireworks model listing (${url}) returned ${res.status} ${res.statusText}`, res.status);
     }
     const body = await res.json() as { models?: Array<{ name?: unknown }>; nextPageToken?: unknown };
     for (const model of body.models ?? []) {
@@ -468,7 +491,7 @@ export async function fetchAnthropicModels(apiKey: string): Promise<AnthropicLiv
     },
   }, LIVE_FETCH_TIMEOUT_MS, instrumentedFetch);
   if (!res.ok) {
-    throw new Error(`Anthropic /v1/models returned ${res.status} ${res.statusText}`);
+    throw listingHttpError(`Anthropic /v1/models returned ${res.status} ${res.statusText}`, res.status);
   }
   const body = await res.json() as {
     data?: Array<{ id?: unknown; max_tokens?: unknown; max_input_tokens?: unknown }>;
@@ -498,7 +521,7 @@ export async function fetchOpenAIModelIds(apiKey: string): Promise<{ models: str
     headers: { Authorization: `Bearer ${apiKey}` },
   }, LIVE_FETCH_TIMEOUT_MS, instrumentedFetch);
   if (!res.ok) {
-    throw new Error(`OpenAI /v1/models returned ${res.status} ${res.statusText}`);
+    throw listingHttpError(`OpenAI /v1/models returned ${res.status} ${res.statusText}`, res.status);
   }
   const body = await res.json() as { data?: ListedModelEntry[] };
   // OpenAI's listing mixes speech, image and moderation models with no type field. The catalog
@@ -519,7 +542,7 @@ export async function fetchGeminiModelIds(apiKey: string): Promise<string[]> {
     instrumentedFetch,
   );
   if (!res.ok) {
-    throw new Error(`Gemini ListModels returned ${res.status} ${res.statusText}`);
+    throw listingHttpError(`Gemini ListModels returned ${res.status} ${res.statusText}`, res.status);
   }
   const body = await res.json() as { models?: Array<{ name?: unknown; supportedGenerationMethods?: unknown }> };
   const ids = (body.models ?? [])

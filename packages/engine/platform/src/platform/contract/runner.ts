@@ -505,10 +505,14 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
    */
   function releaseEndedWorktree(contract: Contract): void {
     const worktrees = deps.worktrees ?? new WorktreeRegistry(contract.projectRoot);
-    const targets = [{ path: contract.worktreePath!, baseBranch: contract.baseBranch },
-      ...(contract.inputSnapshot === undefined ? [] : [{ path: contractInputPath(contract.inputSnapshot), baseBranch: contract.baseBranch }])];
+    // The captured input is the person's own checkout as it was, so a commit made only to capture it is no work of
+    // the contract's; the work-item trees nested in the contract's tree also count the contract's branch as kept.
+    const baseCommits = contract.inputSnapshot === undefined ? [] : [contract.inputSnapshot.inputCommit];
+    const targets = [{ path: contract.worktreePath!, baseBranch: contract.baseBranch, baseCommits, nestedBase: contract.branch },
+      ...(contract.inputSnapshot === undefined ? [] : [{ path: contractInputPath(contract.inputSnapshot), baseBranch: contract.baseBranch, baseCommits }])];
     void worktrees.releaseEnded(targets).then((report) => {
-      // What the release did is recorded; a tree kept with work in it is listed again with its next steps at the next start.
+      // What the release did is recorded. The contract's end line already said where kept work is; a tree kept for the
+      // owner's decision (uncommitted changes) is told once more, with its next steps, at the next start of a terminal app.
       for (const entry of report.removed) logger.info('contract worktree released', { contractId: contract.id, path: entry.path, note: entry.note });
       for (const entry of report.kept) logger.info('contract worktree kept', { contractId: contract.id, path: entry.path, why: entry.reason.why, detail: entry.reason.detail });
       for (const entry of report.failed) logger.warn('contract worktree could not be removed', { contractId: contract.id, path: entry.path, error: entry.error });

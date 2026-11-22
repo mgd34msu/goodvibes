@@ -9,7 +9,7 @@
 import { loadBedrockAuth, loadBedrockLibrary } from './optional-bedrock.js';
 import { AnthropicMessagesProvider, type AnthropicMessagesProviderOptions } from './anthropic-messages-provider.js';
 import type { ProviderModelSource } from './interface.js';
-import { diffModelIds, runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
+import { diffModelIds, listingHttpError, runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { fetchWithTimeout, instrumentedFetch } from '../utils/fetch-with-timeout.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -101,7 +101,7 @@ async function bedrockControlPlaneGet(path: string, credentials: AwsCredentialFa
     headers = { Accept: 'application/json', ...signed };
   }
   const res = await fetchWithTimeout(url, { headers }, BEDROCK_LIVE_FETCH_TIMEOUT_MS, instrumentedFetch);
-  if (!res.ok) throw new Error(`Bedrock control plane (${url}) returned ${res.status} ${res.statusText}`);
+  if (!res.ok) throw listingHttpError(`Bedrock control plane (${url}) returned ${res.status} ${res.statusText}`, res.status);
   return res.json();
 }
 

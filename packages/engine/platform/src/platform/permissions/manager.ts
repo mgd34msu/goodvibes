@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
@@ -795,6 +795,15 @@ const OWNER_REVISION_CAPACITY = 10_000;
  */
 const RETIRED_CLAIM_RETENTION = 4_096;
 
+/** The tasks an agent call would start, in order, as the key the delegation check asks by; undefined for any other call. */
+function delegatedTasks(toolName: string, args: Record<string, unknown>): string | undefined {
+  if (toolName !== 'agent') return undefined;
+  if (args.mode === 'spawn' && typeof args.task === 'string') return JSON.stringify([args.task]);
+  if (args.mode !== 'batch-spawn' || !Array.isArray(args.tasks)) return undefined;
+  const tasks = args.tasks.map((entry: unknown) => (entry !== null && typeof entry === 'object' ? (entry as Record<string, unknown>).task : undefined));
+  return tasks.every((task): task is string => typeof task === 'string') ? JSON.stringify(tasks) : undefined;
+}
+
 export class PermissionManager {
   private readonly autonomousChoiceProjections = new AutonomousChoiceProjectionOwner();
   private readonly autonomousPending = new Set<string>();
@@ -814,6 +823,12 @@ export class PermissionManager {
   private sessionApprovalRevision = 0;
   /** Recipients the owner allowed for the rest of a session, keyed `<session>|<recipient>`. */
   private readonly allowedRecipients = new Set<string>();
+  /**
+   * The owner's answer to an agent call the gate put to him, keyed by its tasks,
+   * until the delegation check of that call takes it (askDelegation): he is asked
+   * about one delegation once, not by the gate and then again by the check.
+   */
+  private readonly answeredDelegations = new Map<string, { readonly approved: boolean; readonly reason?: string }>();
   private readonly requestPermission: PermissionRequestHandler;
   private readonly configReader: PermissionConfigReader;
   private readonly hookDispatcher: Pick<HookDispatcher, 'fire'> | null;
@@ -1387,6 +1402,9 @@ export class PermissionManager {
     const modified = reply.modifiedArgs === undefined ? undefined : captureOwnedJson(reply.modifiedArgs) as Record<string, unknown>;
     const notSaved = await this.rememberReply(input.toolName, input.args, reply, modified, o.ownerOnly);
     input.assertCurrent();
+    // The owner just answered for these agents: the delegation check of the same call takes this answer instead of asking again.
+    const delegated = delegatedTasks(input.toolName, modified ?? input.args);
+    if (delegated !== undefined) this.answeredDelegations.set(delegated, { approved: reply.approved, ...(reply.reason ? { reason: reply.reason } : {}) });
     // A new recipient the owner allowed and asked to be remembered is his for the rest of the session, whatever is sent there next.
     if (o.ownerOnly === 'new-recipient' && reply.approved && (reply.rememberTier ?? (reply.remember === true ? 'session' : undefined)) !== undefined
       && (modified === undefined || isDeepStrictEqual(modified, input.args))) {
@@ -1449,23 +1467,18 @@ export class PermissionManager {
     if (privacy.passed) {
       const base = judgmentPort('engine.gate.execution-safety');
       const installed = input.decoratePort?.(base) ?? base;
-      // One deadline for the whole decision (judgment.decisionDeadlineMs): every request it makes
-      // gets what is left of it. A model that has not answered by then fails the request as
-      // `deadline-missed`, and the decision takes its fallback like any other decision: under
+      // The decision waits for the model: each request ends when it answers, errors or the
+      // connection fails. A failure takes the decision's fallback like any other decision: under
       // Hybrid the no-model path decides with a notice; under Decision Model Only the call stops
-      // with that reason. One clock read per request.
-      const deadlineAt = performance.now() + (installed.decisionDeadlineMs ?? DEFAULT_DECISION_DEADLINE_MS);
+      // with that reason.
       port = {
         get model() { return installed.model; },
-        get decisionDeadlineMs() { return installed.decisionDeadlineMs; },
         ...(installed.recorder ? { recorder: installed.recorder } : {}),
         async ask(request) {
           // Checked before every attempt, the first included. The one caller that brings
           // its own attempt guard (decideAutonomous) runs this same check in it.
           const prior = request.beforeAttempt;
-          const left = Math.max(1, Math.ceil(deadlineAt - performance.now()));
-          const deadlineMs = request.deadlineMs === undefined ? left : Math.min(request.deadlineMs, left);
-          const result = await awaitPermission(() => installed.ask({ ...request, deadlineMs, beforeAttempt() {
+          const result = await awaitPermission(() => installed.ask({ ...request, beforeAttempt() {
             if (prior) assertSynchronousJudgmentGuard(() => prior()); else input.assertCurrent();
           } }), input.signal);
           input.assertCurrent();
@@ -1756,6 +1769,42 @@ export class PermissionManager {
     assertPermissionActive(signal);
     if (reply.approved) return { approved: true };
     return { approved: false, reason: reply.reason ?? `the ${hook.type} hook change was not approved${notSaved ? `. ${notSaved}` : ''}` };
+  }
+
+  /**
+   * Puts a delegation to the owner when nothing he said settles it and the
+   * decision model could not read it (agents/delegation-authority.ts): which
+   * agents, how many, to do what, yes or no. yolo and just-vibes run without
+   * asking, so they start it; plan mode starts nothing; ask-me and jev-decides
+   * ask, in the ordinary approval prompt. Nothing is offered to remember here:
+   * the agent tool keeps the answer for the rest of the conversation.
+   */
+  async askDelegation(question: { readonly tasks: readonly string[]; readonly reason: string }, options?: { readonly signal?: AbortSignal | undefined }): Promise<{ approved: boolean; asked: boolean; reason?: string }> {
+    this.assertSelectedModeCurrent();
+    const signal = options?.signal;
+    assertPermissionActive(signal);
+    const mode = this.getMode();
+    if (mode === 'yolo' || mode === 'just-vibes') return { approved: true, asked: false };
+    if (mode === 'plan') return { approved: false, asked: false, reason: 'plan mode is on, and agents are not started while planning' };
+    // The gate put this very call to the owner a moment ago: his answer is the answer.
+    const key = JSON.stringify(question.tasks);
+    const answered = this.answeredDelegations.get(key);
+    if (answered !== undefined) {
+      this.answeredDelegations.delete(key);
+      return { ...answered, asked: true };
+    }
+    const args: Record<string, unknown> = question.tasks.length === 1
+      ? { mode: 'spawn', task: question.tasks[0] } : { mode: 'batch-spawn', tasks: question.tasks.map((task) => ({ task })) };
+    const category = this.getCategory('agent', args);
+    const analysis = analyzePermissionRequest('agent', args, category);
+    const reply = await awaitPermission(() => this.requestPermission({
+      callId: crypto.randomUUID(), tool: 'agent', args, category,
+      analysis: { ...analysis, reasons: [...analysis.reasons, question.reason] },
+      workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
+      rememberOptions: [],
+    }, { signal }), signal);
+    assertPermissionActive(signal);
+    return reply.approved ? { approved: true, asked: true } : { approved: false, asked: true, ...(reply.reason ? { reason: reply.reason } : {}) };
   }
 
   /**

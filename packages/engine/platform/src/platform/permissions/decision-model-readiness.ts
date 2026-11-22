@@ -144,7 +144,7 @@ export interface ModeInForceWords {
  * model could not be reached or did not answer at all, as opposed to answering
  * wrongly or refusing a key.
  */
-const UNREACHABLE_FAILURE = /could not be reached|did not answer in time|did not answer within the decision deadline|missing the decision deadline|could not answer/;
+const UNREACHABLE_FAILURE = /could not be reached|did not answer in time|did not answer within the time allowed|not answering in time|could not answer/;
 
 /** The few words of becauseSentence, for the chip and the status bar: the same state in the same words. */
 function becauseWords(why: DecisionModelUnreadyReason): string {

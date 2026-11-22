@@ -2,18 +2,20 @@ import { assertSynchronousJudgmentGuard } from './attempt-guard.ts';
 import { APIError, APITimeoutError, type Questions } from '@typesafe-ai/sdk';
 import { checkAnswers, markCheckedAnswers, projectAnswers } from './answers.ts';
 import { PreparedBody, toJudgmentError } from './client.ts';
-import { acceptsBackendModel, askBackend, judgmentAdapter, sharedContextForm, validateBackendInput } from './backends.ts';
+import { acceptsBackendModel, askBackend, cloudflareContextFits, judgmentAdapter, sharedContextForm, validateBackendInput } from './backends.ts';
 import { DEFAULT_ATTEMPT_TIMEOUT_MS, validateJudgmentConfig, type JudgmentConfig, type JudgmentEndpoint } from './config.ts';
 import { DEADLINE_COOLDOWN_MS, DEADLINE_MISSES_BEFORE_COOLDOWN } from './deadline.ts';
 import { JudgmentContextLimitError, JudgmentError, type JudgmentFailureReason } from './errors.ts';
-import { checkInputBytes, requiresLongContextFor, serializeInput, validateQuestions, wireBody, wireBodyBytes, type SerializedInput } from './limits.ts';
+import { partitionJudgmentInput, type JudgmentPart, type RequestLimit } from './fit.ts';
+import { checkInputBytes, LIMITS, requiresLongContextFor, serializeInput, validateQuestions, wireBody, wireBodyBytes, type SerializedInput } from './limits.ts';
+import { mapLimit } from '../patterns/common.ts';
 import { placeSharedContext, type SharedContextForm } from './shared-context.ts';
 import { withRequestId } from './request-id.ts';
 import { connectionRefused, delay, interruptible, retryable, retryDelay, retryPolicy } from './retry.ts';
-import { recordNativeModelObservation } from './model-observation.ts';
+import { observeJudgmentModel, recordNativeModelObservation } from './model-observation.ts';
 import { captureJudgmentInput } from './input-snapshot.ts';
 import { cooldownNotice, DECISION_MODELS_UNAVAILABLE_NOTICE, missedDeadlineNotice, slowTargetsNotice } from './availability-notice.ts';
-import type { JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
+import type { EntryType, JudgmentAttempt, JudgmentEndpointHealth, JudgmentPort, JudgmentRequest, JudgmentResult } from './types.ts';
 
 /** The reason AbortSignal.timeout gives; the owner's deadline passed. */
 function isTimeoutReason(reason: unknown): boolean {
@@ -71,9 +73,8 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
     return value;
   };
 
-  return {
+  const whole: JudgmentPort = {
     model: defaultModel,
-    ...(config.decisionDeadlineMs === undefined ? {} : { decisionDeadlineMs: config.decisionDeadlineMs }),
     health: () => health.map((item, index) => {
       const remaining = Math.max(0, (cooldowns[index] ?? 0) - Date.now());
       return { ...item, ...(remaining > 0 ? { cooldownRemainingMs: remaining } : {}) };
@@ -393,4 +394,96 @@ export function createSystemOnePort(config: JudgmentConfig): JudgmentPort {
       }
     },
   };
+  const limit = requestLimit(targets);
+  return {
+    ...whole,
+    ask<const Q extends Questions>(request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
+      return askInParts(whole, limit, request);
+    },
+  };
+}
+
+/** Requests split from one run side by side, at most this many at once. */
+const PARTS_AT_ONCE = 8;
+
+/**
+ * What every target accepts in one request, in their documented limits: a
+ * System One target (and the servers on its wire) without its long-context
+ * mode, so a request stays within the small context a fast decision model
+ * has; a Cloudflare target within its context budget; and any target within
+ * its configured maxInputBytes and maxQuestions.
+ */
+function requestLimit(targets: readonly { readonly model: string; readonly endpoint: JudgmentEndpoint }[]): (sharedContext: string | undefined, without: readonly string[] | undefined) => RequestLimit {
+  return (sharedContext, without) => {
+    const wire = (state: EntryType, questions: Questions) => {
+      const asked = without?.filter(name => Object.hasOwn(questions, name));
+      const placed = placeSharedContext('state-head', state, questions, sharedContext, asked);
+      return serializeInput(placed.state, placed.questions);
+    };
+    return {
+      fits(state, questions) {
+        const serialized = wire(state, questions);
+        if (serialized.bytes > LIMITS.maxRequestBytes) return false;
+        const count = Object.keys(questions).length;
+        return targets.every(({ model, endpoint }) => {
+          const bytes = wireBodyBytes(serialized, model);
+          if (endpoint.maxInputBytes !== undefined && bytes > endpoint.maxInputBytes) return false;
+          if (endpoint.maxQuestions !== undefined && count > endpoint.maxQuestions) return false;
+          return judgmentAdapter(endpoint) === 'cloudflare-workers-ai' ? cloudflareContextFits(bytes, count) : !requiresLongContextFor(serialized);
+        });
+      },
+      stateChars(questions) {
+        const serialized = wire({}, questions);
+        const overhead = serialized.bytes;
+        const questionTokens = serialized.questionLengths.map(chars => Math.ceil(chars / 3));
+        const count = questionTokens.length;
+        return Math.max(0, Math.min(...targets.map(({ model, endpoint }) => {
+          const room = judgmentAdapter(endpoint) === 'cloudflare-workers-ai'
+            ? Math.floor((65_536 - 4096 - count * 512) / 4) - overhead - model.length
+            : 3 * Math.min(LIMITS.maxRequestTokens - questionTokens.reduce((sum, tokens) => sum + tokens, 0),
+              LIMITS.maxStateWithQuestionTokens - Math.max(0, ...questionTokens)) - (sharedContext?.length ?? 0);
+          return endpoint.maxInputBytes === undefined ? room : Math.min(room, endpoint.maxInputBytes - overhead - model.length);
+        })));
+      },
+    };
+  };
+}
+
+/**
+ * Sends a request whole when it fits every target, else as the parts
+ * `partitionJudgmentInput` splits it into, side by side, and answers with
+ * every part's answers together: one result, its usage the sum of the parts'.
+ */
+async function askInParts<const Q extends Questions>(whole: JudgmentPort, limit: ReturnType<typeof requestLimit>, request: JudgmentRequest<Q>): Promise<JudgmentResult<Q>> {
+  let parts: readonly JudgmentPart[] | undefined;
+  try {
+    const input = captureJudgmentInput(request);
+    validateQuestions(input.questions);
+    parts = partitionJudgmentInput(input.state, input.questions, limit(input.sharedContext, input.withoutSharedContext));
+  } catch {
+    // The whole request reports what is wrong with it.
+    parts = undefined;
+  }
+  if (parts === undefined) return whole.ask(request);
+  const results = await mapLimit(parts, PARTS_AT_ONCE, part => whole.ask({
+    ...request,
+    state: part.state,
+    questions: part.questions,
+    ...(request.withoutSharedContext === undefined ? {} : { withoutSharedContext: request.withoutSharedContext.filter(name => Object.hasOwn(part.questions, name)) }),
+  }));
+  const first = results[0]!;
+  const answers = Object.fromEntries(Object.keys(request.questions).map(name => [name,
+    results.find(result => Object.hasOwn(result.answers, name))!.answers[name]])) as JudgmentResult<Q>['answers'];
+  const merged: JudgmentResult<Q> = {
+    answers,
+    requestedModel: first.requestedModel,
+    model: first.model,
+    usage: { inputTokens: results.reduce((sum, result) => sum + result.usage.inputTokens, 0), outputTokens: results.reduce((sum, result) => sum + result.usage.outputTokens, 0) },
+    latencyMs: Math.max(...results.map(result => result.latencyMs)),
+    requestId: first.requestId,
+    ...(first.lineage === undefined ? {} : { lineage: first.lineage }),
+  };
+  markCheckedAnswers(request.questions, merged.answers);
+  const observed = observeJudgmentModel(first);
+  return observed === undefined ? merged : recordNativeModelObservation(merged, observed);
 }

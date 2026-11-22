@@ -10,6 +10,7 @@ import { createSimpleGit } from '../git/optional-simple-git.js';
 import { GitService, readGitWorktreeCreation, type GitWorktreeCreationObservation } from '../git/service.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
+import { regenerableIgnoredEntry } from '../runtime/worktree/retention.js';
 import { done, failedOutcome, observe, refusal, type EffectOutcome } from '@goodvibes/engine/errors';
 
 
@@ -82,7 +83,10 @@ export async function uniqueWork(rootDir: string, worktreePath: string, branch: 
     if (existsSync(worktreePath)) {
       const tree = await createSimpleGit({ baseDir: worktreePath });
       const status: string = await tree.raw(['status', '--porcelain', '--untracked-files=all', '--ignored']);
-      const lines = status.split('\n').filter((line) => line.length > 0);
+      // Installed dependency folders, the product's own state folder and unchanged copies of the main checkout's
+      // files are not this tree's own (retention.ts): removing the tree loses none of them.
+      const lines = status.split('\n').filter((line) => line.length > 0
+        && !(line.startsWith('!! ') && regenerableIgnoredEntry(line.slice(3), worktreePath, rootDir)));
       if (lines.some((line) => !line.startsWith('!! '))) return 'it has uncommitted changes';
       if (lines.length > 0) return `it has ignored files no commit holds (${lines.slice(0, 3).map((line) => line.slice(3)).join(', ')}${lines.length > 3 ? `, +${lines.length - 3} more` : ''})`;
       if (await ahead(tree, 'HEAD') > 0) return 'it has commits the base branch does not have';
@@ -646,7 +650,8 @@ export class IsolatedWorktree {
         const entry = fields[index]!;
         if (entry.length < 4) continue;
         const code = entry.slice(0, 2);
-        if (code === '!!') ignored.push(entry.slice(3));
+        // Installed or linked dependency folders and the product's own state folder are no work to keep; a link is never followed.
+        if (code === '!!') { if (!regenerableIgnoredEntry(entry.slice(3), this.path, this.rootGit.getCwd())) ignored.push(entry.slice(3)); }
         else if (code !== '??') staged = true;
         // A rename or copy is followed by a field holding its source path.
         if (code[0] === 'R' || code[0] === 'C') index += 1;

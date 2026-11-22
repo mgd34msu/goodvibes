@@ -656,7 +656,7 @@ function notFoundAnswer(windows: readonly NearWindow[], hintsWarning: string | u
 /**
  * The near-match fuzzy mode may apply: the closest window when it is the one
  * best window and Jev reads it as the code the find text was copied from
- * (`engine.tools.edit-target`, one request within the decision deadline); no
+ * (`engine.tools.edit-target`, one request with a fallback); no
  * similarity cutoff decides. Two windows tied for best stay ambiguous. An
  * unsure, late or unavailable reading applies nothing.
  */

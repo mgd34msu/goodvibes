@@ -9,6 +9,7 @@ import { createTerminalOrchestrator, terminalCompanionInputHandler } from '@good
 import { buildPluginStartupContext } from '@goodvibes/engine/terminal-shell/plugin-startup';
 import { createPluginStartupTask } from '@goodvibes/engine/terminal-shell/plugin-startup';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
+import { wireContractRecoveryNotices } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 /**
  * Bootstrap composition root for goodvibes-tui.
  *
@@ -66,7 +67,6 @@ import { createBootstrapShutdown } from './bootstrap-shutdown.ts';
 import { ensureBootModelResolvable } from './provider-fallback.ts';
 import { createBootstrapShell } from './bootstrap-shell.ts';
 import type { ShellViews } from '../views/builtin-views.ts';
-import { announceResumeState } from './resume-notice.ts';
 import { announceInstallHealth } from './install-self-check-startup.ts';
 import { buildSharedOrchestratorCoreServices, refreshMemoryRecallSnapshot } from './orchestrator-core-services.ts';
 import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platform/tools';
@@ -85,8 +85,12 @@ import { registerStartupProviders } from './startup-provider-registration.ts';
 import { createSerialSteps } from './serial-steps.ts';
 import { retryTerminalRoutineMove, startTerminalRoutines } from './terminal-routines.ts';
 import { wireFailedTurnActions } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
 
 type ExternalServiceFactories = NonNullable<Parameters<typeof startExternalServices>[3]>;
+
+/** The announce-once id of "no daemon is installed": said once on this machine, said again after one was found. */
+const DAEMON_NOT_INSTALLED_ANNOUNCEMENT = 'daemon-not-installed';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 
@@ -373,6 +377,17 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       systemMessageRouter.high(`[Contracts] ${refusal.reason} Now: ${refusal.state}. Next: ${refusal.next.join(' ')}`, 'warning');
     }
   });
+  // A contract that was running when the app stopped: one line for the owner, and the same fact for its session's model.
+  bootstrapUnsubs.push(wireContractRecoveryNotices({
+    recovery: contractRecovery,
+    get: (contractId) => services.contractRunner.get(contractId),
+    say: (text, level) => systemMessageRouter.high(text, level),
+    bus: runtimeBus,
+    sessionId: () => runtime.sessionId,
+    hostInstructions: () => conversation.hostInstructions,
+  }));
+  // An older decision log carried forward to its smaller form says once how much space came back.
+  void services.judgment.decisionLogCarriedForward.then((text) => { if (text) systemMessageRouter.high(`[Decision log] ${text}`); });
   // The work-plan writes recovery queued are flushed by the graph's contract-runner disposal, which runs after this.
   bootstrapUnsubs.unshift(async () => {
     services.contractRunner.dispose();
@@ -387,22 +402,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     commandContext,
     render: requestRender,
   });
-  // Recovery loads persisted history before continuing its work. Announce
-  // that history without waiting for the resumed work to finish.
-  void announceResumeState({
-    surface: services.surface,
-    sessionManager: services.sessionManager,
-    checkpointManager: services.workspaceCheckpointManager,
-    contractHistory: services.contractRunner.list({ includeTerminal: true, includeInputSnapshot: false }),
-    memoryAvailable: Boolean(commandContext.clients?.knowledgeApi?.memory),
-    router: systemMessageRouter,
-  }).catch(() => {
-    // Best-effort, never let the resume notice block or crash boot.
-  });
   announceInstallHealth(systemMessageRouter);
   // Retention for worktrees earlier runs left (the daemon runs the same pass at its start). Everything it removed
-  // and every worktree it kept for the owner's decision is shown; only the disk-use line alone stays in the activity feed.
-  void services.worktreeRegistry.startupSweep().then((report) => {
+  // and each worktree it kept for the owner's decision is shown, once per worktree; only the disk-use line alone stays in the activity feed.
+  void services.worktreeRegistry.startupSweep({ tellOnce: true }).then((report) => {
     const text = report ? formatWorktreeStartupReport(report, workingDir) : null;
     if (!text || !report) return;
     if (report.removed.length > 0 || report.attention.length > 0 || report.failed.length > 0) systemMessageRouter.high(`[Worktrees] ${text}`, report.attention.length > 0 || report.failed.length > 0 ? 'warning' : 'info');
@@ -530,7 +533,12 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     await daemonHandshake.attach(adoptedDaemonToken(externalServices));
     settleHomeHousekeeping();
   };
+  // That no daemon is installed is said once on this machine, not at every start; once a
+  // daemon is found the announce-once id is forgotten, so losing it again is said again.
+  const announcements = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
   const announceAutostart = (outcome: Parameters<typeof describeDaemonAutostart>[0]): void => {
+    if (outcome.action === 'not-installed' && !announcements.record(DAEMON_NOT_INSTALLED_ANNOUNCEMENT)) return;
+    if (externalServices.daemonStatus.mode === 'external') announcements.forgetMatching((id) => id === DAEMON_NOT_INSTALLED_ANNOUNCEMENT);
     const notice = describeDaemonAutostart(
       outcome,
       externalServices.daemonStatus.mode === 'external',

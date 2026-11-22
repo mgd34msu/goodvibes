@@ -388,7 +388,7 @@ Every `stream-json` line carries `schemaVersion` and `type`. Consumers should ig
 | `type` | Fields | When |
 | --- | --- | --- |
 | `STREAM_DELTA` | `content`, `accumulated` (omitted with `--omit-accumulated`) | Each chunk of model output. |
-| `DRAFT_WITHDRAWN` | `reason` | The completion check sent back the answer streamed so far. Drop that text; the replacement streams from empty. |
+| `DRAFT_WITHDRAWN` | `reason` | The answer streamed so far was withdrawn (the turn moved to another model after it had begun). Drop that text; the replacement streams from empty. |
 | `TOOL_EXECUTING` | `turnId`, `callId`, `tool` | A tool call starts. |
 | `TOOL_SUCCEEDED` | `turnId`, `callId`, `tool`, `durationMs` | It finished. |
 | `TOOL_FAILED` | `turnId`, `callId`, `tool`, `durationMs`, `error` | It failed. |

@@ -57,6 +57,12 @@ export interface NoticeMeta {
   readonly level: NoticeLevel;
   readonly kind?: NoticeKind | undefined;
   readonly priority?: SystemMessagePriorityLevel | undefined;
+  /**
+   * The condition the notice is about, when it can end (a decision model that
+   * stopped answering): `withdrawNotice(key)` takes the notice back once it
+   * has, and a second notice with the same key updates the first.
+   */
+  readonly key?: string | undefined;
 }
 
 /** The runtime event a turn's failure line restates (`addTurnFailure`). */
@@ -487,10 +493,23 @@ export class ConversationManager {
    */
   public addNotice(content: string, meta: NoticeMeta): void {
     const notice: NoticeMeta = Object.freeze({ level: meta.level,
-      ...(meta.kind ? { kind: meta.kind } : {}), ...(meta.priority ? { priority: meta.priority } : {}) });
+      ...(meta.kind ? { kind: meta.kind } : {}), ...(meta.priority ? { priority: meta.priority } : {}),
+      ...(meta.key ? { key: meta.key } : {}) });
     this.messages.push({ role: 'system', content, notice, presentation: noticePresentation(notice) });
     this._messagesRevision++;
     this._noticeRevisions++;
+  }
+
+  /**
+   * The condition a keyed notice was about has ended: a host that keeps a pile
+   * of notices takes it back from there. The line stays in the saved history,
+   * where it says what happened when.
+   */
+  public withdrawNotice(_key: string): void {}
+
+  /** Whether the user-role message at `index` was appended by the host for the model (runtime data), not typed by the person. */
+  public isRuntimeMessage(index: number): boolean {
+    return isVerificationRuntimeMessage(this, index);
   }
 
   /**
@@ -557,6 +576,23 @@ export class ConversationManager {
       }
     }
     return null;
+  }
+
+  /**
+   * What the person said in this conversation, oldest first, as text: his own
+   * messages only. A host-made message in a user slot (runtime reference data,
+   * a tool's pictures) is not his and is left out.
+   */
+  public getOwnerMessages(): string[] {
+    const owned: string[] = [];
+    for (let i = 0; i < this.messages.length; i++) {
+      const msg = this.messages[i];
+      if (msg?.role !== 'user' || isVerificationRuntimeMessage(this, i)) continue;
+      const text = typeof msg.content === 'string' ? msg.content
+        : msg.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])).join('\n');
+      if (text.trim()) owned.push(text);
+    }
+    return owned;
   }
 
   public getMessageCount(): number {

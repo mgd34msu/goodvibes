@@ -32,7 +32,7 @@ import {
 } from './protocol.js';
 import { drainStderrTail } from '../utils/stderr-tail.js';
 import { OwnedScope, type CloseReport } from '../utils/owned-work.js';
-import { admitExternalRequest, externalAskDeadlineMs, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
+import { admitExternalRequest, type ExternalPermissionHost, type ExternalOperationSource } from '../permissions/external-request.js';
 import { AcpPermissionWire } from './permission-wire.js';
 import { runnerCeilingRefusal } from './runner-ceiling.js';
 import { logger } from '../utils/logger.js';
@@ -446,8 +446,6 @@ export class AcpConnection {
         let binding: ReturnType<AcpPermissionWire['binding']>;
         let admission: Awaited<ReturnType<typeof admitExternalRequest>> | undefined;
         let deferred = false;
-        let deadline: AbortSignal | undefined;
-        let deadlineMs = 0;
         try {
           if (isProxy(params)) return this.refuse('the permission ask could not be read');
           const call = Object.getOwnPropertyDescriptor(params, 'toolCall')?.value as unknown;
@@ -474,9 +472,8 @@ export class AcpConnection {
             logger.warn('AcpConnection: a call outside the runner ceiling was refused', { id: this.id, reason: outside });
             return refusal;
           }
-          deadlineMs = externalAskDeadlineMs(host);
-          deadline = AbortSignal.timeout(deadlineMs);
-          const signal = AbortSignal.any([this.lifetime.signal, binding.signal, deadline]);
+          // The ask waits for its decision: it ends when the decision model answers or fails, or the ask is withdrawn.
+          const signal = AbortSignal.any([this.lifetime.signal, binding.signal]);
           const wire = binding;
           const assertCurrent = () => { signal.throwIfAborted(); wire.assertCurrent(); operation.assertCurrent(); };
           assertCurrent();
@@ -494,9 +491,7 @@ export class AcpConnection {
           return response;
         } catch (error) {
           if (this.lifetime.signal.aborted) return cancelled;
-          return this.refuse(deadline?.aborted
-            ? `the permission decision did not arrive within ${deadlineMs} ms ("Longest a waiting decision may take" in /settings open)`
-            : `the permission ask could not be decided: ${summarizeError(error)}`);
+          return this.refuse(`the permission ask could not be decided: ${summarizeError(error)}`);
         } finally { if (!deferred) admission?.close(); }
       },
 

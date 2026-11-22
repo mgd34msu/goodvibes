@@ -39,4 +39,3 @@ export {
   type JudgeOptions,
   type JudgeOutcome,
 } from './port/judge.ts';
-export { DEFAULT_DECISION_DEADLINE_MS, MAX_DECISION_DEADLINE_MS, validDecisionDeadline } from './port/deadline.ts';

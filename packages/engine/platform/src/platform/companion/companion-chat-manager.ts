@@ -1620,7 +1620,7 @@ export class CompanionChatManager {
       }, {
         speaker: 'owner',
         budget: { turns: COMPANION_MAX_TOOL_ROUNDS },
-        completion: { maxRejectedDrafts: 0, deadlineMs: 0 },
+        completion: { maxRejectedDrafts: 0 },
         delegates: 'return',
         sink: {
           delta: (raw) => {

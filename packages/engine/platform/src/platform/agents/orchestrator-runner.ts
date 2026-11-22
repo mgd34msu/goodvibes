@@ -19,7 +19,7 @@ import { captureProjectionArgs, describeToolInputProjectionProblem, ToolInputPro
 import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
 import { CIRCUIT_BREAKER_TRIPPED, CONSECUTIVE_ERROR_BREAK } from '../core/circuit-breaker.js';
-import { COMPLETION_CHECK_DEADLINE_MS, MAX_REJECTED_DRAFTS, TURN_RETRY_DELAYS_MS, TurnEnded, runTurn } from '../core/turn-loop.js';
+import { MAX_REJECTED_DRAFTS, TURN_RETRY_DELAYS_MS, TurnEnded, runTurn } from '../core/turn-loop.js';
 import { collectResponseDelegates, ResponseCompletionGuard, ResponseCompletionError } from '../core/response-completion.js';
 import { createVerificationWriter, reportVerificationUsage } from '../core/verification/writer.js';
 import { VerificationStore } from '../core/verification/store.js';
@@ -1160,8 +1160,9 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       },
       conversation: activeConversation,
       hostInstructions: activeConversation.hostInstructions,
-      runTools: async (_response, { round }) => {
-        const raw = lastResponse!;
+      runTools: async (sent, { round }) => {
+        // The calls the loop sends, which leave out a repeat of a call refused earlier in the turn.
+        const raw = { ...lastResponse!, toolCalls: [...sent.toolCalls] };
         // Apply the existing delegated exec defaults before the immutable
         // projection, history publication, progress and permission readers.
         const ingress = captureToolInputCalls(raw.toolCalls).map(call => {
@@ -1280,15 +1281,13 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
     }, {
       speaker: 'parent-agent',
       budget: { turns: turnBudget.limit > 0 ? turnBudget.limit : undefined },
-      completion: { maxRejectedDrafts: MAX_REJECTED_DRAFTS, deadlineMs: COMPLETION_CHECK_DEADLINE_MS },
+      completion: { maxRejectedDrafts: MAX_REJECTED_DRAFTS },
       delegates: 'return',
       sink: {
         // A worker's drafts stay private: its answer reaches whoever delegated it as its output.
         delta: () => {},
-        notVerified: (note) => {
-          logger.warn(`Agent ${record.id}: answer stands unverified`, { note });
-          progress(`Answered; not verified: ${note}`, 'owner');
-        },
+        // A check that could not run or ran out of drafts says nothing to the owner; the log keeps why.
+        notVerified: (note) => { logger.warn(`Agent ${record.id}: answer stands unverified`, { note }); },
         notice: (text) => { logger.warn(`Agent ${record.id}: ${text}`); },
       },
     });

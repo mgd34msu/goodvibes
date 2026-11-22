@@ -11,8 +11,8 @@
  */
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, type BigIntStats } from 'node:fs';
-import { join } from 'node:path';
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, readlinkSync, realpathSync, symlinkSync, type BigIntStats } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { CONTRACT_INPUT_EXCLUSIONS, listContractInputPaths } from './input-snapshot.js';
 import { workingTreeIdentity } from './tree-identity.js';
 import { canonicalJson } from '../utils/target-ref.js';
@@ -75,6 +75,46 @@ export function captureGateInput(cwd: string, _previous?: GateSourceInputIdentit
     return Object.freeze({ source: `paths:${source}`, packageScripts: scripts });
   }
   return captureStatIdentity(cwd);
+}
+
+/**
+ * Gives a worktree the project's installed dependencies, so a gate runs the
+ * project's own scripts as they run in the checkout the worktree was made
+ * from. Git leaves ignored folders such as node_modules out of a new
+ * worktree; for each tracked package.json whose node_modules the main
+ * checkout has and the worktree lacks, a node_modules folder is made whose
+ * entries link to the main checkout's, only where git ignores that folder
+ * (it never shows as a change and never reaches a commit). `missing` is true
+ * when `cwd` holds a package.json and no node_modules is reachable from it
+ * even so.
+ */
+export function linkProjectDependencies(cwd: string): { readonly missing: boolean } {
+  let root: string;
+  try { root = realpathSync(cwd); } catch { return { missing: false }; }
+  if (!existsSync(join(root, 'package.json'))) return { missing: false };
+  const git = (args: readonly string[]) => spawnSync('git', ['-C', root, ...args], { encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024, env: gitEnv() });
+  const top = git(['rev-parse', '--show-toplevel']).stdout?.trim();
+  const common = git(['rev-parse', '--path-format=absolute', '--git-common-dir']).stdout?.trim();
+  const main = common && basename(common) === '.git' ? dirname(common) : undefined;
+  if (top && main && existsSync(main) && realpathSync(main) !== realpathSync(top)) {
+    const listed = git(['ls-files', '-z', '--', 'package.json', ':(glob)**/package.json']);
+    const directories = listed.status === 0 ? listed.stdout.split('\0').filter(Boolean).map((path) => dirname(path)) : [];
+    for (const directory of new Set(directories)) {
+      const relativeLink = directory === '.' ? 'node_modules' : `${directory}/node_modules`;
+      const link = join(top, relativeLink), source = join(main, relativeLink);
+      if (lstatSync(link, { throwIfNoEntry: false }) !== undefined || !existsSync(source)) continue;
+      // Only a folder git ignores: nothing made here can show as a change.
+      if (spawnSync('git', ['-C', top, 'check-ignore', '-q', '--', `${relativeLink}/`], { env: gitEnv() }).status !== 0) continue;
+      try {
+        mkdirSync(link);
+        for (const entry of readdirSync(source)) symlinkSync(join(source, entry), join(link, entry));
+      } catch { /* Another check made it, or the tree is read-only: the gate runs as it can. */ }
+    }
+  }
+  for (let directory = root; ; directory = dirname(directory)) {
+    if (existsSync(join(directory, 'node_modules'))) return { missing: false };
+    if (dirname(directory) === directory) return { missing: true };
+  }
 }
 
 function isGitWorkTree(root: string): boolean {

@@ -1,4 +1,4 @@
-import { assertSynchronousJudgmentGuard, DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes/judgment/decisions';
+import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 /**
  * memory-usage-detection.ts, reference detection and the per-turn usage
  * tracker every product shares.
@@ -90,15 +90,13 @@ async function detectDecisionReferencedMemoryIds(responseText: string, records: 
   // Any past the cap stay unassessed rather than costing a second request.
   const read = input.records.slice(0, MAX_READ_PER_TURN);
   const owner = captureJudgmentPort(SITE, { ...options, assertCurrent: current, prepareResultCapture: prepareJudgmentResult });
-  // Bounded by the one decision deadline (judgment.decisionDeadlineMs): a missed
-  // deadline counts toward the target's cooldown, and the caller's fallback
-  // counts the injections unassessed.
-  const deadline = AbortSignal.timeout(owner.port.decisionDeadlineMs ?? DEFAULT_DECISION_DEADLINE_MS);
+  // The reading ends when the decision model answers or fails; a failure is the
+  // caller's fallback, which counts the injections unassessed.
   const { ranked } = await memoryUsage.rerank(
     owner.port,
     input.responseText,
     read.map((record) => ({ id: record.id, content: { summary: record.summary, ...(record.detail === undefined ? {} : { detail: record.detail }) } })),
-    { site: SITE, signal: AbortSignal.any([owner.signal, deadline]), beforeAttempt: owner.assertCurrent },
+    { site: SITE, signal: owner.signal, beforeAttempt: owner.assertCurrent },
   );
   owner.assertCurrent();
   const readings = new Map(ranked.map((entry) => [entry.id, entry.reading]));

@@ -1,6 +1,6 @@
 import { currentFileObservationsAsync } from './current-file-observations.js';
 import { setAgentProgress } from '../agents/progress-audience.js';
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 import { nativeContractSourceData } from './native-source.js';
 import { reviewInventoryObservationAsync, compactReviewInventory } from './review-inventory.js';
 import { projectCheckEvidence } from './check-evidence-projection.js';
@@ -66,14 +66,14 @@ import { decideRecorded, decisionReceipt, decisionReceiptText, receiptRecord } f
 import { GitService } from '../git/service.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
-import { describeCommitOutcome, describeContractOutcome, finalAnswerUnit, renderContractAnswer, CONTRACT_PASSED_WITHOUT_OUTPUT } from './answer.js';
+import { describeCommitOutcome, describeContractOutcome, finalAnswerUnit, renderContractAnswer, unitCheckingLines, CONTRACT_PASSED_WITHOUT_OUTPUT } from './answer.js';
 import { parseCompletionReportParts } from '../agents/completion-report.js';
 import { DELIVERABLE_JUDGES } from './batteries/deliverable-judge.js';
 import { GROUP_JUDGES } from './batteries/group-judge.js';
 import { FINAL_ANSWER_REVIEWS } from './batteries/final-answer-review.js';
 import { responseFinding } from '../core/batteries/response-finding.js';
 import { completionFinding, type CompletionFinding } from '../core/response-completion-findings.js';
-import { criterionVerdict, emptyJudgmentUsage, meteredPort, UNCHECKED_RATIONALE } from './check.js';
+import { criterionVerdict, emptyJudgmentUsage, meteredPort, notJudgedRationale, UNCHECKED_RATIONALE } from './check.js';
 import { readContractConfig } from './config.js';
 import type { Correction } from './correction.js';
 import { nativeContractPort } from './native-decisions.js';
@@ -129,6 +129,12 @@ export function contractTree(contract: Pick<Contract, 'worktreePath' | 'projectR
  */
 export function gateScope(contract: Pick<Contract, 'isolation' | 'units'>): readonly string[] | undefined {
   return contract.isolation === 'shared' ? [...new Set(contract.units.flatMap((unit) => unit.touchedPaths))].sort() : undefined;
+}
+
+/** The paths the given units changed (every unit when none are named): what a group's or the deliverable's gates have to check. */
+export function touchedPathsOf(contract: Pick<Contract, 'units'>, unitIds?: ReadonlySet<string>): string[] {
+  return [...new Set(contract.units.filter((unit) => unitIds === undefined || unitIds.has(unit.id))
+    .flatMap((unit) => [unit, ...(unit.attemptUnits ?? [])]).flatMap((unit) => unit.touchedPaths))];
 }
 
 function judged(criteria: readonly Criterion[]): Criterion[] {
@@ -357,12 +363,18 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
   }
 
   /**
-   * Reads one group or deliverable check: the decision model's judgment, or
-   * with none in use the code check (`readTargetWithoutModel`). Under Decision
-   * Model Only a failing model fails the check as before.
+   * Reads one group or deliverable check: the decision model's judgment, or,
+   * with none in use or when the set one cannot judge it, the code check
+   * (`readTargetWithoutModel`), which says why.
    */
   function readTarget(run: ContractRun, input: Parameters<typeof readTargetWithModel>[1]): Promise<TargetReading | null> {
-    return decisionOrClassic(() => readTargetWithModel(run, input), () => readTargetWithoutModel(run, input));
+    const checks = input.checks.length;
+    return judgedOrNot(input.scope === 'group' ? COMPLETION_SITES.group : COMPLETION_SITES.deliverable,
+      () => readTargetWithModel(run, input), (notJudged) => {
+        // A reading that stopped part way left no check of its own: the code check is this one.
+        input.checks.splice(checks);
+        return readTargetWithoutModel(run, input, notJudged);
+      });
   }
 
   /**
@@ -374,14 +386,15 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
    * check waits (`awaitingOwner`). Criteria are recorded met at `confirm`,
    * never at act, each saying it was not independently checked. No request is made.
    */
-  async function readTargetWithoutModel(run: ContractRun, input: Parameters<typeof readTargetWithModel>[1]): Promise<TargetReading | null> {
+  async function readTargetWithoutModel(run: ContractRun, input: Parameters<typeof readTargetWithModel>[1], notJudged?: string): Promise<TargetReading | null> {
     const { contract } = run;
     assertOwnedContractSource(contract);
     const tree = contractTree(contract);
     const scope = gateScope(contract);
     const source = input.scope === 'deliverable' ? captureGateInput(tree, undefined, scope) : undefined;
     if (input.scope === 'deliverable') acceptedSources.delete(run);
-    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope, signal: run.abort.signal });
+    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope,
+      changedPaths: touchedPathsOf(contract, input.scope === 'group' ? input.unitIds : undefined), signal: run.abort.signal });
     for (const unit of contract.units.filter(unit => input.unitIds.has(unit.id))) {
       const preservation = verifyPrivateReceiptPreservation(contract, unit, tree);
       if (preservation) gates.push(preservation);
@@ -404,7 +417,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     const judgedCriteria = judged(input.criteria);
     const verdicts = new Map<string, CriterionVerdict>(judgedCriteria.map((criterion) => [criterion.id, 'met']));
     for (const criterion of judgedCriteria) {
-      criterion.readings.push({ checkId, at: now, probabilityUnmet: 0.5, verdict: 'met', outcome: 'confirm', decisionId: undefined, rationale: UNCHECKED_RATIONALE });
+      criterion.readings.push({ checkId, at: now, probabilityUnmet: 0.5, verdict: 'met', outcome: 'confirm', decisionId: undefined,
+        rationale: notJudged === undefined ? UNCHECKED_RATIONALE : notJudgedRationale(notJudged) });
       criterion.status = 'met';
     }
     const check: UnitCheck = {
@@ -418,6 +432,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       problems,
       qualityProblems: [],
       decisionIds: [],
+      ...(notJudged === undefined ? {} : { notJudged }),
     };
     input.checks.push(check);
     if (passed && source !== undefined) {
@@ -429,7 +444,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       }
     }
     const said = passed ? (source === undefined ? 'pass' : 'pass, accepted by the owner') : awaitingOwner ? 'the owner is asked to accept the result' : problems.join(', ');
-    run.decide('checked', input.targetId, `check ${checkId} (${input.trigger}): ${said}; not independently checked: no decision model is in use`);
+    run.decide('checked', input.targetId, `check ${checkId} (${input.trigger}): ${said}; ${notJudged === undefined ? 'not independently checked: no decision model is in use' : `not judged: ${notJudged}`}`);
     run.emit({
       type: 'CONTRACT_CHECKED',
       contractId: contract.id,
@@ -449,6 +464,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         gates: currentGates.filter((gate) => gate.passed && gate.skipped !== true).map((gate) => gate.gate),
         ...(contract.isolation === 'worktree' && contract.branch !== undefined ? { branch: contract.branch } : {}),
         answer: input.output,
+        notJudged,
       });
       const record: OwnerAcceptanceRecord = { version: 1, escalationId, source: source.source, fixRounds: contract.fixRounds };
       decideRecorded(run, 'checked', ownerAcceptanceTarget(contract.id), `the owner is asked to accept the result (${escalationId}): no decision model is in use to check it`, receiptRecord(record));
@@ -484,7 +500,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     preserveDeclaredReadReceipts(contract, context.readOwnerEvidence?.(contract, ''));
     const paths = new Set(contract.units.filter((unit) => input.unitIds.has(unit.id)).flatMap((unit) => unit.touchedPaths));
     const changes = (await collectChanges({ baseline: input.baseline }, { cwd: tree, writtenPaths: writtenPathsOf(run, input.unitIds) })).filter((change) => paths.has(change.path));
-    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope, signal: run.abort.signal });
+    const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: input.targetId, scope,
+      changedPaths: touchedPathsOf(contract, input.scope === 'group' ? input.unitIds : undefined), signal: run.abort.signal });
     for (const unit of contract.units.filter(unit => input.unitIds.has(unit.id))) {
       const preservation = verifyPrivateReceiptPreservation(contract, unit, tree);
       if (preservation) gates.push(preservation);
@@ -554,7 +571,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
         criteria: judged(unit.criteria).map(criterion => ({ id: criterion.id, text: criterion.text, verdict: criterion.status,
           serves: [...criterion.serves], ...(criterion.contribution ? { contribution: { ...criterion.contribution } } : {}) })),
         acceptedAnswer: unit.status === 'passed' ? unit.answer ?? '' : null,
-        latestCheck: unit.checks.length ? JSON.parse(JSON.stringify(unit.checks.at(-1)!)) as JsonValue : null,
+        // A unit's gates are shown by their outcomes; their output stays on the unit's check.
+        latestCheck: unit.checks.length ? JSON.parse(JSON.stringify({ ...unit.checks.at(-1)!, gates: unit.checks.at(-1)!.gates?.map(gateEventSummary) })) as JsonValue : null,
         readObservations: (unit.readEvidence ?? []).map(({ path, returnedRanges, returnedLines, contentKind, returnedContent }, index) => {
           const check = unit.checks.at(-1);
           const accepted = input.scope === 'deliverable' && unit.status === 'passed' && check?.result === 'pass' && check.decisionIds.length > 0;
@@ -1212,7 +1230,8 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       if (workingTreeIdentity(tree) !== record.tree) return false;
       const scope = gateScope(contract);
       const source = captureGateInput(tree, undefined, scope);
-      const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: contract.id, scope, signal: run.abort.signal });
+      const gates = await runContractGates({ configManager: context.configManager, cwd: tree, runtimeBus: context.runtimeBus, sessionId: contract.sessionId, contractId: contract.id, targetId: contract.id, scope,
+        changedPaths: touchedPathsOf(contract), signal: run.abort.signal });
       if (run.terminal) return true;
       if (failedGates(gates).length > 0 || unverifiedGates(gates).length > 0) return false;
       acceptedSources.set(run, { checkId: check.id, tree, source, gates });
@@ -1276,7 +1295,10 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
     }
     publicationAssessments.delete(run);
     publicationRepairs.delete(run);
-    run.control.finishPassed({ answer: answer.length > 0 ? answer : CONTRACT_PASSED_WITHOUT_OUTPUT, statusLine: describeContractOutcome(contract) });
+    // When the decision model could not judge some of the work, the result says which units, why, and where the work is.
+    const checking = unitCheckingLines(contract).join('\n');
+    const delivered = answer.length > 0 ? answer : CONTRACT_PASSED_WITHOUT_OUTPUT;
+    run.control.finishPassed({ answer: checking.length > 0 ? `${delivered}\n\n${checking}` : delivered, statusLine: describeContractOutcome(contract) });
   }
 
   /**
@@ -1318,7 +1340,7 @@ export function createCompletion(context: StepContext, correction: Pick<Correcti
       if (!(error instanceof ContractInputOwnerChangedError))
         return { status: 'failed', note: `not applied: ${summarizeError(error)}; the work stays on branch ${branch}` };
       try {
-        const admitted = await admitPublicationInput(contract, context.plannerDeps(run).readAccessFilter, run.abort.signal, evidence => decisionOrClassic(async () => {
+        const admitted = await admitPublicationInput(contract, context.plannerDeps(run).readAccessFilter, run.abort.signal, evidence => judgedOrNot('contract.publication-owner', async () => {
             const site = 'contract.publication-owner', usage = emptyJudgmentUsage();
             const owner = captureJudgmentPort(site, { signal: run.abort.signal, assertCurrent: () => assertOwnedContractSource(contract) });
             try {

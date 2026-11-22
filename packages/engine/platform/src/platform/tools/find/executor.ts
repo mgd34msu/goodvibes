@@ -18,12 +18,8 @@ import { isInsideProductWorktrees } from '../../utils/walk-dir.js';
 import type { ReadAccessFilter } from '../shared/read-access.js';
 
 const MAX_PARALLEL_FIND_QUERIES = 5;
-/** Default per-call deadline; a query still running then reports a timeout instead of holding the turn. */
-export const DEFAULT_FIND_TIMEOUT_MS = 60_000;
 /** Queries at least this slow report their wall time. */
 const SLOW_QUERY_MS = 2_000;
-/** Share of timeout_ms after which a scan stops by itself and reports a partial result. */
-const SOFT_BUDGET_RATIO = 0.8;
 
 export function createFindTool(
   projectRoot: string,
@@ -89,19 +85,18 @@ export function createFindTool(
           }
           seenIds.add(query.id);
         }
-        const timeoutMs = typeof input.timeout_ms === 'number' && Number.isSafeInteger(input.timeout_ms) && input.timeout_ms > 0
+        // A search runs until it is done or the caller cancels it. A caller that passes timeout_ms gets a
+        // budget, not a deadline: a scan that reaches it stops, returns what it found and says how far it got.
+        const budgetMs = typeof input.timeout_ms === 'number' && Number.isSafeInteger(input.timeout_ms) && input.timeout_ms > 0
           ? input.timeout_ms
-          : DEFAULT_FIND_TIMEOUT_MS;
-        const deadline = AbortSignal.timeout(timeoutMs);
-        const searchSignal = opts?.signal ? AbortSignal.any([opts.signal, deadline]) : deadline;
-        const reading = { signal: searchSignal, assertCurrent: current };
-        // Soft stop ahead of the hard deadline: a scan that reaches it returns what it found and says how far it
-        // got, rather than being cut off at the deadline with nothing.
+          : undefined;
+        const searchSignal = opts?.signal;
+        const signalOption = searchSignal === undefined ? {} : { signal: searchSignal };
+        const reading = { ...signalOption, assertCurrent: current };
         const callStartedAt = performance.now();
-        const softBudgetMs = timeoutMs * SOFT_BUDGET_RATIO;
-        const budgetExpired = (): boolean => performance.now() - callStartedAt >= softBudgetMs;
+        const budgetExpired = (): boolean => budgetMs !== undefined && performance.now() - callStartedAt >= budgetMs;
         // Product worktrees are skipped unless the task itself runs inside one.
-        const walkOptions = { signal: searchSignal, beforeAttempt: current, allowOutsideProject: outsideProjectAllowed, shouldContinue: () => !budgetExpired(), includeProductWorktrees: isInsideProductWorktrees(projectRoot) };
+        const walkOptions = { ...signalOption, beforeAttempt: current, allowOutsideProject: outsideProjectAllowed, shouldContinue: () => !budgetExpired(), includeProductWorktrees: isInsideProductWorktrees(projectRoot) };
         const queryOptions = { ...walkOptions, ...reading };
 
         // Handed to the modes that read file text; they apply it as content mode does.
@@ -139,24 +134,16 @@ export function createFindTool(
           } catch (error) {
             // A cancel or a currentness failure still ends the call.
             if (opts?.signal?.aborted || error === staleError) throw error;
-            if (deadline.aborted) {
-              result = {
-                error: `Timed out after ${timeoutMs}ms before this ${query.mode} query finished; it returned no results. `
-                  + 'Narrow path or patterns, split the query, or pass a larger timeout_ms.',
-                timed_out: true,
-              };
-            } else {
-              // This query's own failure (an invalid pattern, say) is its result;
-              // the other queries of the call keep theirs.
-              result = { error: `${query.mode} query failed: ${summarizeError(error)}` };
-            }
+            // This query's own failure (an invalid pattern, say) is its result;
+            // the other queries of the call keep theirs.
+            result = { error: `${query.mode} query failed: ${summarizeError(error)}` };
           }
           // Files mode is the one walk that stops at the budget without a report of its own; the other modes
           // say how far they got, and one that finished must not be labelled incomplete.
-          if (query.mode === 'files' && budgetExpired() && result.timed_out === undefined && result.error === undefined
+          if (query.mode === 'files' && budgetExpired() && result.error === undefined
             && !(Array.isArray(result.warnings) && result.warnings.some((w) => typeof w === 'string' && w.startsWith('Stopped at the time budget')))) {
-            result = withFindWarnings(result, [`Stopped at the time budget (${Math.round(softBudgetMs / 1000)}s of the ${Math.round(timeoutMs / 1000)}s timeout_ms): results may be incomplete. `
-              + "Narrow 'path' or the patterns, or pass a larger timeout_ms."]);
+            result = withFindWarnings(result, [`Stopped at the time budget (the ${Math.round((budgetMs ?? 0) / 1000)}s timeout_ms): results may be incomplete. `
+              + "Narrow 'path' or the patterns, or pass a larger timeout_ms or none."]);
           }
           const elapsedMs = Math.round(performance.now() - startedAt);
           if (elapsedMs >= SLOW_QUERY_MS) result = { ...result, elapsed_ms: elapsedMs };
@@ -186,7 +173,7 @@ export function createFindTool(
         current();
         // Partial failure stays a success with the per-query errors; a call where
         // every query failed did not search anything and says so.
-        const failures = pairs.filter(([, result]) => result.error !== undefined || result.timed_out === true);
+        const failures = pairs.filter(([, result]) => result.error !== undefined);
         if (failures.length === pairs.length) {
           return {
             success: false,

@@ -82,8 +82,8 @@ const ORCHESTRATOR_SOURCE = 'orchestrator';
  * the same way in every product. A turn is counted where it ran: a relayed
  * turn end (a client showing a turn its daemon ran) is not this process's, and
  * the tracker counts one turn id once. Costs one decision-model request per
- * completed turn that carried memories, after the turn's result is out and
- * bounded by the decision deadline; none with decision models off. A new
+ * completed turn that carried memories, after the turn's result is out (it
+ * ends when the decision model answers or fails); none with decision models off. A new
  * turn abandons a reading still in flight; shutdown abandons all.
  */
 function followTurnMemoryUsage(bus: RuntimeEventBus, tracker: MemoryUsageTracker): () => void {

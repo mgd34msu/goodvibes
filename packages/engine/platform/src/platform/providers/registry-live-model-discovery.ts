@@ -17,6 +17,7 @@ import type { LLMProvider } from './interface.js';
 import type { ModelDefinition } from './registry-types.js';
 import {
   buildProviderNativeModelDefinition,
+  listingFailureMeansCannotServe,
   type LiveModelDiscoveryResult,
   type LiveModelListings,
   type ProviderModelRefreshOptions,
@@ -115,6 +116,7 @@ export async function sweepLiveModelDiscovery(
         added: [],
         removed: [],
         error: summarizeError(error),
+        ...(listingFailureMeansCannotServe(error) ? { cannotServe: true } : {}),
       };
       return { report, threw: true };
     }
@@ -153,8 +155,9 @@ export class StartupModelDiscovery {
         for (const report of reports) {
           if (report.error !== undefined) {
             this.#unreachable.set(report.providerId, report.error);
-            // Routing reads provider health; the hold ends, and a successful call clears it sooner.
-            recordProviderUnreachable(report.providerId, report.error);
+            // Routing reads provider health; the hold ends, and a successful call clears it sooner. A listing
+            // refused as a request (the route is not offered to this sign-in) holds nothing: calls still work.
+            if (report.cannotServe === true) recordProviderUnreachable(report.providerId, report.error);
           } else {
             this.#unreachable.delete(report.providerId);
           }

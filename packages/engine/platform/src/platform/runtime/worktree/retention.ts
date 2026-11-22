@@ -41,6 +41,14 @@ export interface WorktreeOwnerInfo {
   readonly endedAt?: number | undefined;
   /** The branch the worktree was created from, when the owner recorded it. */
   readonly baseBranch?: string | undefined;
+  /**
+   * Commits or refs whose history is already kept outside the worktree, beside
+   * the base branch: a contract's captured input (the person's own checkout,
+   * which still holds those files) and, for a contract's work-item trees, the
+   * contract's branch their work is integrated into. A commit reachable from
+   * one of them is not work this worktree alone holds.
+   */
+  readonly baseCommits?: readonly string[] | undefined;
 }
 
 /** What git says is in a worktree. */
@@ -96,8 +104,11 @@ export function isProductWorktreePath(path: string, workingDirectory: string): b
  *
  * `baseBranch` is the branch the worktree was created from when the caller
  * knows it; otherwise the repository root's current HEAD is the base.
+ * `baseCommits` are further commits or refs whose history counts as kept
+ * elsewhere (see {@link WorktreeOwnerInfo.baseCommits}); one that no longer
+ * resolves is left out, which only makes the assessment keep more.
  */
-export async function assessWorktree(path: string, rootDir: string, baseBranch?: string): Promise<WorktreeAssessment> {
+export async function assessWorktree(path: string, rootDir: string, baseBranch?: string, baseCommits: readonly string[] = []): Promise<WorktreeAssessment> {
   if (!existsSync(path)) return { kind: 'unreadable', reason: 'the directory is missing' };
   try {
     // A linked worktree has a `.git` FILE; a directory there is a whole repository, never ours to remove.
@@ -112,7 +123,7 @@ export async function assessWorktree(path: string, rootDir: string, baseBranch?:
   const lines = status.out.length > 0 ? status.out.split('\n') : [];
   const ignoredEntries = lines.filter((line) => line.startsWith('!! ')).map((line) => line.slice(3));
   const changes = lines.length - ignoredEntries.length;
-  const ignored = ignoredEntries.filter((entry) => !regenerable(entry, path, rootDir)).length;
+  const ignored = ignoredEntries.filter((entry) => !regenerableIgnoredEntry(entry, path, rootDir)).length;
   if (changes > 0) return { kind: 'uncommitted', changes, ignored };
 
   const head = await runGit(path, ['rev-parse', '--verify', '-q', 'HEAD']);
@@ -120,7 +131,12 @@ export async function assessWorktree(path: string, rootDir: string, baseBranch?:
   const baseRef = baseBranch ? `refs/heads/${baseBranch}` : 'HEAD';
   const base = await runGit(rootDir, ['rev-parse', '--verify', '-q', `${baseRef}^{commit}`]);
   if (!base.ok || base.out.length === 0) return { kind: 'unreadable', reason: `the base ${baseBranch ? `branch ${baseBranch}` : 'HEAD'} cannot be resolved` };
-  const count = await runGit(rootDir, ['rev-list', '--count', head.out, '--not', base.out]);
+  const kept: string[] = [];
+  for (const extra of baseCommits) {
+    const resolved = await runGit(rootDir, ['rev-parse', '--verify', '-q', `${extra}^{commit}`]);
+    if (resolved.ok && resolved.out.length > 0) kept.push(resolved.out);
+  }
+  const count = await runGit(rootDir, ['rev-list', '--count', head.out, '--not', base.out, ...kept]);
   const commits = Number.parseInt(count.out, 10);
   if (!count.ok || !Number.isFinite(commits)) return { kind: 'unreadable', reason: 'git could not compare it with its base' };
   const branchResult = await runGit(path, ['symbolic-ref', '-q', '--short', 'HEAD']);
@@ -187,7 +203,7 @@ export function worktreeNextSteps(input: {
   ];
 }
 
-/** Keep reasons that need the owner's decision, so they are listed at every start until it is made. */
+/** Keep reasons that need the owner's decision: a terminal app's start tells them once, and /worktree review lists them until it is made. */
 export function needsOwnerDecision(reason: WorktreeKeepReason): boolean {
   return reason.why === 'uncommitted' || reason.why === 'detached' || reason.why === 'unreadable';
 }
@@ -195,16 +211,25 @@ export function needsOwnerDecision(reason: WorktreeKeepReason): boolean {
 /** Folders the derived setup commands install (bun/npm/pnpm/yarn, uv): rebuilt by running setup again. */
 const INSTALLED_DEPENDENCY_DIRS: ReadonlySet<string> = new Set(['node_modules/', '.venv/']);
 
+/** The product's own state folder at a worktree's root: its bookkeeping, and the folder its nested worktrees live in (decided on their own first). */
+const PRODUCT_STATE_DIR = '.goodvibes/';
+
 /**
  * An ignored entry that is not this worktree's own state: an installed
- * dependency folder, or a file whose bytes equal the main checkout's file at
- * the same path (what setup carried over and nothing changed since).
+ * dependency folder, the product's own state folder at its root, or a file
+ * whose bytes equal the main checkout's file at the same path (what setup
+ * carried over and nothing changed since). `entry` is as `git status
+ * --ignored` prints it, relative to the worktree.
  */
-function regenerable(entry: string, worktree: string, rootDir: string): boolean {
-  if (INSTALLED_DEPENDENCY_DIRS.has(entry) || [...INSTALLED_DEPENDENCY_DIRS].some((dir) => entry.endsWith(`/${dir}`))) return true;
+export function regenerableIgnoredEntry(entry: string, worktree: string, rootDir: string): boolean {
+  // With --untracked-files=all git names each file inside an ignored folder, so the folder is found among the entry's parents.
+  if (entry.startsWith(PRODUCT_STATE_DIR)) return true;
+  const folders = entry.split('/').slice(0, -1).map((segment) => `${segment}/`);
+  if (folders.some((folder) => INSTALLED_DEPENDENCY_DIRS.has(folder))) return true;
   if (entry.endsWith('/')) return false;
   try {
-    const own = statSync(join(worktree, entry)), source = statSync(join(rootDir, entry));
+    // lstat: a link in the worktree is never followed; only a plain file can be a copy.
+    const own = lstatSync(join(worktree, entry)), source = statSync(join(rootDir, entry));
     return own.isFile() && source.isFile() && own.size === source.size && readFileSync(join(worktree, entry)).equals(readFileSync(join(rootDir, entry)));
   } catch {
     return false;
@@ -298,7 +323,7 @@ export async function evaluateWorktree(input: {
   if (owner.state === 'running') {
     return { action: 'keep', reason: { why: 'running', detail: 'its contract, workstream or agent is still running' }, assessment: { kind: 'unreadable', reason: 'not read while running' }, sinceMs: now };
   }
-  const assessment = await assessWorktree(path, rootDir, owner.baseBranch);
+  const assessment = await assessWorktree(path, rootDir, owner.baseBranch, owner.baseCommits);
   const ended = owner.state === 'ended' && owner.endedAt !== undefined;
   const sinceMs = ended ? owner.endedAt! : await lastWorktreeActivity(path, input.registeredAt);
   const keep = (reason: WorktreeKeepReason): WorktreeEvaluation => ({ action: 'keep', reason, assessment, sinceMs });
@@ -362,7 +387,7 @@ export async function evaluateUnmarkedWorktree(input: {
   if (owner.state !== 'ended' && now - lastUse < WORKTREE_CREATION_GRACE_MS) {
     return { action: 'keep', reason: { why: 'running', detail: `kept because git used it ${Math.max(0, Math.round((now - lastUse) / 1000))} s ago, so a program may still be working in it` }, assessment: { kind: 'unreadable', reason: 'not read while in use' }, sinceMs: now };
   }
-  const assessment = await assessWorktree(path, rootDir, owner.baseBranch);
+  const assessment = await assessWorktree(path, rootDir, owner.baseBranch, owner.baseCommits);
   const sinceMs = owner.state === 'ended' && owner.endedAt !== undefined ? owner.endedAt : lastUse > 0 ? lastUse : input.registeredAt;
   const keep = (reason: WorktreeKeepReason): WorktreeEvaluation => ({ action: 'keep', reason, assessment, sinceMs });
   if (assessment.kind === 'unreadable') return keep({ why: 'unreadable', detail: `kept because ${assessment.reason}` });

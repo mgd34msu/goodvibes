@@ -42,7 +42,7 @@ import { logger } from '../utils/logger.js';
 import type { CompletionReport } from '../agents/completion-report.js';
 import { verifyUnitClaims, type ClaimVerificationResult } from './claims.js';
 import type { ContractConfigReader } from './config.js';
-import { runContractGates, type QualityGateResult } from './gates.js';
+import { gateEventSummary, runContractGates, type QualityGateResult } from './gates.js';
 import type { CheckTrigger, ContractUnit, ContractView } from './types.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 
@@ -474,6 +474,8 @@ export async function collectUnitEvidence(
       targetId: unit.id,
       // In a shared tree the results are evidence for this unit's files only, so the owner's other saves leave them current.
       ...(contract.isolation === 'shared' ? { scope: changes.map((change) => change.path) } : {}),
+      // Only the gates that check something this unit changed run: a unit that changed nothing is not gated.
+      changedPaths: changes.map((change) => change.path),
       signal: sources.signal,
     })
     : undefined;
@@ -556,7 +558,8 @@ export async function collectUnitEvidence(
         ...(planned.id === unit.id ? {} : { status: planned.status,
           latestCheck: planned.checks.length ? { id: planned.checks.at(-1)!.id, trigger: planned.checks.at(-1)!.trigger,
             result: planned.checks.at(-1)!.result, decisionIds: [...planned.checks.at(-1)!.decisionIds],
-            ...(planned.checks.at(-1)!.gates === undefined ? {} : { gates: gateEvidence(planned.checks.at(-1)!.gates!) }) } : null,
+            // Another unit's gates are its own evidence: their outcomes are shown, their output stays on that unit's check.
+            ...(planned.checks.at(-1)!.gates === undefined ? {} : { gates: planned.checks.at(-1)!.gates!.map(gate => ({ ...gateEventSummary(gate) })) }) } : null,
           ...(planned.status === 'passed' ? { readObservations: (planned.readEvidence ?? []).map(read => ({ path: read.path,
             returnedRanges: [...read.returnedRanges], returnedLines: read.returnedLines })),
             commands: (planned.commandEvidence ?? []).map((command, index) => {

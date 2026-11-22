@@ -8,7 +8,7 @@ import {
   type RestartOntoUpdatedBinaryOptions,
 } from '@goodvibes/engine/terminal-shell/service-io';
 export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes/engine/terminal-shell/service-io';
-import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
+import { IS_WORKSPACE_DISTRIBUTION } from '../runtime/workspace-update-policy.ts';
 /**
  * Launch-time self-update, clients land on the newest release at startup so
  * an installed binary never drifts behind. At TUI launch (before any runtime
@@ -126,7 +126,8 @@ export interface SelfUpdateAtLaunchParams {
  * stdout copies written here are wiped by the TUI's alternate screen.
  */
 export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Promise<readonly string[]> {
-  if (IS_WORKSPACE_DISTRIBUTION) return [WORKSPACE_UPDATE_GUIDANCE];
+  // A copy run from its source folder does not update itself; /update says how to update it. Launch says nothing.
+  if (IS_WORKSPACE_DISTRIBUTION) return [];
   const lines: string[] = [];
   const print = (line: string): void => {
     lines.push(line);

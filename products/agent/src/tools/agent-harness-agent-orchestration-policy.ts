@@ -14,6 +14,7 @@ export const AGENT_TOOL_MODES = [
   'cancel',
   'contracts',
   'contract-history',
+  'activity',
   'cohort-status',
   'cohort-report',
 ] as const;
@@ -46,7 +47,7 @@ export function agentOrchestrationDecisionCards(agentToolAvailable: boolean): re
       status: agentToolAvailable ? 'ready' : 'unavailable',
       chooseWhen: ['Tasks are genuinely independent and parallel work materially improves time-to-result.'],
       doNotUseWhen: ['Review/test/verification role fanout for one deliverable; that collapses to one owner chain.'],
-      requiredFields: ['tasks[]', 'authoritativeTask for the original user ask when applicable'],
+      requiredFields: ['tasks[]'],
       modelRoute: 'agent { mode: "batch-spawn" }',
       inspectRoute: 'agent_harness mode:"agent_orchestration"',
     },
@@ -64,8 +65,8 @@ export function agentOrchestrationDecisionCards(agentToolAvailable: boolean): re
       id: 'inspect-or-control-visible-agent',
       label: 'Inspect or control a visible agent',
       status: agentToolAvailable ? 'ready' : 'unavailable',
-      chooseWhen: ['The user asks for progress, budget, plan, message, wait, cancel, contract status, or cohort status.'],
-      modelRoutes: ['agent { mode: "list" }', 'agent { mode: "get" }', 'agent { mode: "message" }', 'agent { mode: "wait" }', 'agent { mode: "cancel" }'],
+      chooseWhen: ['The user asks for progress, budget, plan, message, wait, cancel, contract status, cohort status, or what the agents and contracts actually did.'],
+      modelRoutes: ['agent { mode: "list" }', 'agent { mode: "get" }', 'agent { mode: "activity" }', 'agent { mode: "message" }', 'agent { mode: "wait" }', 'agent { mode: "cancel" }'],
     },
     {
       id: 'hidden-fanout-blocked',

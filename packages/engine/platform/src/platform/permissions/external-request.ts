@@ -3,7 +3,6 @@ import { captureExternalRequestEvidence } from './external-request-evidence.js';
 /** ACP/MCP use the same recorded autonomous admission as native tools. No human fallback. */
 import { randomUUID } from 'node:crypto';
 import type { JudgmentPort } from '@goodvibes/judgment';
-import { DEFAULT_DECISION_DEADLINE_MS } from '@goodvibes/judgment/decisions';
 import { captureOwnedJson } from '../gate/judgment-input.js';
 import { captureCurrentAutonomousChoices, captureCurrentAutonomousSourceFrame, type AutonomousToolSource } from './autonomous.js';
 import { awaitPermission } from './cancellation.js';
@@ -36,15 +35,6 @@ export interface ExternalPermissionHost {
   readonly permissionManager: Pick<PermissionManager, 'admitAutonomous'> & Partial<Pick<PermissionManager, 'retireAutonomousSource'>>;
   readonly config: { onDidInvalidate(listener: () => void): () => void };
   readonly signal: AbortSignal;
-}
-
-/**
- * How long an external protocol ask may wait for its decision: the decision
- * deadline the host's judgment port declares, the one timeout owner for
- * decisions a tool call waits on.
- */
-export function externalAskDeadlineMs(host: Pick<ExternalPermissionHost, 'port'>): number {
-  return host.port.decisionDeadlineMs ?? DEFAULT_DECISION_DEADLINE_MS;
 }
 
 /** The original host goal and facts, scoped to an actual pending operation. */

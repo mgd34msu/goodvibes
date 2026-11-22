@@ -20,7 +20,7 @@ import { executionAssurance } from './batteries/execution-assurance.js';
 import type { AgentManager } from '../tools/agent/manager.js';
 import { completionFindings, completionFinding, type CompletionFinding } from './response-completion-findings.js';
 import { responseProgress } from './batteries/response-progress.js';
-import { judge } from '../runtime/judge.js';
+import { judge, judgeSome } from '../runtime/judge.js';
 import { appendVerificationObservation } from './verification/archive.js';
 import { CompletionVerification } from './verification/coordinator.js';
 import { VerificationHeldError, VerificationUnsettledError, VerificationSubdivisionError, type VerificationWriter } from './verification/types.js';
@@ -437,8 +437,8 @@ export class ResponseCompletionGuard {
   /**
    * Reads interim text shown before its tools: does it claim results the
    * observations do not support, or repeat an earlier status. It never holds
-   * the tools: it reads the text and the last few messages only, with the
-   * decision deadline, and an unsure or unavailable reading finds nothing.
+   * the tools: it reads the text and the last few messages only, beside the
+   * work, and an unsure or unavailable reading finds nothing.
    * Resolves with a correction for the model's next request, or null.
    */
   async checkProgress(input: { readonly request: string; readonly response: string; readonly recent: readonly ConversationMessageSnapshot[] }, signal?: AbortSignal): Promise<string | null> {
@@ -1041,8 +1041,64 @@ export async function waitForResponseDelegates(conversation: ConversationManager
   delegates = collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds);
   const evidence = '[Delegated work state] ' + JSON.stringify(delegates.map(({ evidence: _evidence, ...agent }) => agent))
     + '\nReview these results against the original request. Recover failed or incomplete work, consolidate findings, and produce every requested deliverable. Delegation itself does not complete the task.';
-  conversation.addNotice(`[Delegated work] ${delegates.map(agent => `${agent.id} ${agent.status}`).join(', ')}. The results were given to the model.`, { level: 'info', kind: 'operational' });
+  // The model reads the results; the person reads its answer, and the agents view shows each delegate's state.
   appendVerificationObservation(conversation, evidence);
   // A delegate stopped on a question is still running; its later end is news.
   return true;
+}
+
+/** Messages of one turn: from the person's request that started it (the last user message with its text) to the end. */
+function turnMessages(messages: readonly ConversationMessageSnapshot[], request: string): readonly ConversationMessageSnapshot[] {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]!;
+    if (message.role === 'user' && typeof message.content === 'string' && message.content === request) return messages.slice(index);
+  }
+  return messages;
+}
+
+/**
+ * The one check an answer gets, and only after a turn that ended delegated work
+ * (agents or a contract) and committed its answer: does the answer claim work
+ * was done or verified that this turn's observations and its delegates' final
+ * states do not support? One reading of the completion battery's `unsupported`
+ * question, asked after the answer is shown, with no clock of its own: it ends
+ * when the decision model answers or fails. True only when the model answered
+ * yes; false when it answered no, was unsure, failed or no decision model is in
+ * use, so a check that cannot answer says nothing.
+ */
+export async function answerClaimsUndoneDelegatedWork(input: {
+  readonly request: string;
+  readonly response: string;
+  readonly conversation: ConversationManager;
+  readonly delegated: NonNullable<ResponseCompletionInput['delegated']>;
+  readonly tools: readonly string[];
+}, signal: AbortSignal): Promise<boolean> {
+  if (isClassicOperation() || input.delegated.length === 0 || input.response.trim().length === 0) return false;
+  const state = {
+    request: input.request,
+    transcript: completionTranscript(turnMessages(input.conversation.getMessageSnapshot(), input.request)),
+    delegated: input.delegated.map(({ evidence: _evidence, ...agent }) => agent),
+    tools: input.tools,
+    response: input.response,
+  };
+  try {
+    const { value } = await judgeSome({
+      site: responseCompletion.name,
+      battery: responseCompletion,
+      only: ['unsupported'] as const,
+      state: state as never,
+      settle: (readings): boolean | undefined => {
+        const reading = (readings as unknown as Readonly<Record<string, { readonly verdict: string; readonly outcome: string } | undefined>>)['unsupported'];
+        if (reading === undefined || reading.outcome !== 'act') return undefined;
+        return reading.verdict === 'yes';
+      },
+      fallback: () => false,
+      describe: (found) => found ? 'tell the owner the answer claims undone delegated work' : 'the answer\'s claims about delegated work are supported',
+      signal,
+    });
+    return value;
+  } catch (error) {
+    logger.debug('Response completion: the delegated-work claim reading did not settle', { error: error instanceof Error ? error.name : typeof error });
+    return false;
+  }
 }

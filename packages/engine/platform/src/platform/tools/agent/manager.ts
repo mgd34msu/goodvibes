@@ -26,7 +26,7 @@ import type { AgentTaskContract } from '../../runtime/events/index.js';
 import { evaluateOrchestrationSpawn } from '../../runtime/orchestration/spawn-policy.js';
 import { logger } from '../../utils/logger.js';
 import type { AgentInput } from './schema.js';
-import { summarizeError } from '../../utils/error-display.js';
+import { describeErrorInFull, summarizeError } from '../../utils/error-display.js';
 import { OwnedScope } from '../../utils/owned-work.js';
 import { splitModelRegistryKey } from '../../providers/registry-helpers.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
@@ -416,7 +416,7 @@ export class AgentManager {
       try {
         this.contractRunner.assertOwnedExecution();
       } catch (error) {
-        throw new OwnedAgentExecutionUnavailableError(summarizeError(error));
+        throw new OwnedAgentExecutionUnavailableError(describeErrorInFull(error));
       }
     }
     let handle: OwnedAgentExecution | undefined;
@@ -722,10 +722,10 @@ export class AgentManager {
           begin(Promise.resolve(starting).then(started => started.settled).catch(error => {
             // Publish the failed/cancelled record only after startup and its
             // cleanup drained, just as standalone executor settlement does.
-            if (moveAgentRun(record, 'failed')) this.publishFailed(record, `The contract could not start: ${summarizeError(error)}`);
+            if (moveAgentRun(record, 'failed')) this.publishFailed(record, `The contract could not start: ${describeErrorInFull(error)}`);
           }));
         } catch (error) {
-          if (moveAgentRun(record, 'failed')) this.publishFailed(record, `The contract could not start: ${summarizeError(error)}`);
+          if (moveAgentRun(record, 'failed')) this.publishFailed(record, `The contract could not start: ${describeErrorInFull(error)}`);
           throw error;
         }
         return record;
@@ -756,7 +756,7 @@ export class AgentManager {
       begin();
       // A spawn that failed after reservation must not stay pending: a pending record holds a fleet slot for good.
       if (moveAgentRun(record, 'failed')) {
-        try { this.publishFailed(record, `The agent could not start: ${summarizeError(error)}`); }
+        try { this.publishFailed(record, `The agent could not start: ${describeErrorInFull(error)}`); }
         catch (publishError) { logger.warn('AgentManager: could not publish a failed spawn', { agentId: id, error: summarizeError(publishError) }); }
       }
       throw error;
@@ -944,7 +944,7 @@ export class AgentManager {
       logger.warn(settledMessage, { agentId: record.id, status: record.status, error: summarizeError(error) });
       return;
     }
-    this.publishFailed(record, summarizeError(error, { ...(record.provider ? { provider: record.provider } : {}) }));
+    this.publishFailed(record, describeErrorInFull(error, { ...(record.provider ? { provider: record.provider } : {}) }));
   }
 
   /**

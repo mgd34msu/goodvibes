@@ -42,8 +42,8 @@ function whatAndNext(error: JudgmentError): { readonly what: string; readonly ne
     case 'no-credential': return { what: 'it has no API key', nextStep: `Give it a key in Settings (Where the decision model key comes from, Decision model key name), ${CHOOSE}` };
     case 'unreachable': return { what: 'its endpoint could not be reached', nextStep: `Check that the decision model server is running and its address (Decision model server in Settings) is right, ${CHOOSE}` };
     case 'endpoint-timeout': return { what: 'its endpoint did not answer in time', nextStep: `Check the decision model server's load, raise "Give up on the decision model after" in Settings, ${CHOOSE}` };
-    case 'deadline-missed': return { what: 'it did not answer within the decision deadline', nextStep: `Check the decision model server's load, raise "Longest a waiting decision may take" in Settings, ${CHOOSE}` };
-    case 'targets-slow': return { what: 'it kept missing the decision deadline and is skipped for a minute', nextStep: `Raise "Longest a waiting decision may take" in Settings, ${CHOOSE}` };
+    case 'deadline-missed': return { what: 'it did not answer within the time allowed', nextStep: `Check the decision model server's load, ${CHOOSE}` };
+    case 'targets-slow': return { what: 'it kept not answering in time and is skipped for a minute', nextStep: `Check the decision model server's load, ${CHOOSE}` };
     case 'rate-limited': return { what: 'it is rate limited', nextStep: `Wait for the limit to clear, add one under Backup decision models in Settings, ${CHOOSE}` };
     case 'endpoint-status': return { what: `its endpoint answered${error.status === undefined ? ' with an error' : ` HTTP ${error.status}`}`, nextStep: `Retry later; if it persists, check the decision service, ${CHOOSE}` };
     case 'malformed-response': return { what: 'it sent an answer this client cannot read', nextStep: `Check that the Decision model server setting points at a supported decision server, ${CHOOSE}` };

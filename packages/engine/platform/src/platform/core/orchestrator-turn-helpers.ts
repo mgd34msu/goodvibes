@@ -2,6 +2,7 @@ import { publishTurnTerminal } from './turn-cancellation.js';
 import { isNativeConversationTurn } from './native-turn-scope.js';
 import { withCompletionRepairContext } from './completion-repair-context.js';
 import { withDelegationRequest } from './delegation-request-context.js';
+import { standingWorkRequest } from '../agents/delegation-authority.js';
 import type { ConversationManager } from './conversation.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ContentPart, LLMProvider } from '../providers/interface.js';
@@ -219,8 +220,9 @@ export function holdSessionFinalResponse(
 /** Said to the conversation model after its agent tool call started a contract. */
 const CONTRACT_STARTED_NOTE = 'A contract is carrying out delegated work for this request. Its plan and units are checked against the acceptance criteria. You remain responsible for the original request: inspect its outcome, recover failures, consolidate the results, and produce all requested deliverables before ending. Do not duplicate work while it is running.';
 
-function attachAuthoritativeTaskToAgentCalls(toolCalls: readonly ToolCall[], userText: string): ToolCall[] {
-  const authoritativeTask = userText.trim();
+/** Stamps the work as the owner asked for it on each agent start; the model's own copy is replaced. */
+function attachAuthoritativeTaskToAgentCalls(toolCalls: readonly ToolCall[], request: string): ToolCall[] {
+  const authoritativeTask = request.trim();
   return toolCalls.map((call) => {
     if (call.name !== 'agent') return call;
     const args = call.arguments as Record<string, unknown>;
@@ -273,8 +275,12 @@ type ToolResponseOutcomeArgs = {
 };
 
 export async function handleToolResponseOutcome(args: ToolResponseOutcomeArgs): Promise<{ results: ToolResult[] }> {
-  return withDelegationRequest({ request: args.userText, signal: args.inputProjection?.signal, assertCurrent: args.inputProjection?.assertCurrent }, () => withCompletionRepairContext(args.completionRepair, async () => {
-    const originalCalls = attachAuthoritativeTaskToAgentCalls(captureToolInputCalls(args.response.toolCalls), args.userText);
+  // The owner's authority is everything he said in this conversation, not only this turn's message.
+  const recorded = args.conversation.getOwnerMessages();
+  const ownerMessages = recorded.length > 0 ? recorded : args.userText.trim() ? [args.userText] : [];
+  const request = standingWorkRequest(ownerMessages);
+  return withDelegationRequest({ request, ownerMessages, signal: args.inputProjection?.signal, assertCurrent: args.inputProjection?.assertCurrent }, () => withCompletionRepairContext(args.completionRepair, async () => {
+    const originalCalls = attachAuthoritativeTaskToAgentCalls(captureToolInputCalls(args.response.toolCalls), request);
     const batch = args.toolRegistry ? await projectToolInputBatch(args.toolRegistry, originalCalls, args.inputProjection) : undefined;
     try {
       batch?.assertCurrent();
@@ -310,15 +316,11 @@ async function handleOwnedToolResponseOutcome(args: ToolResponseOutcomeArgs): Pr
   const startedContract = spawnedAgents && results.some(toolResultStartedContract);
 
   if (spawnedAgents) {
-    // Said to the model on its next request. The person is told what happened
-    // in his own terms, never the instruction written for the model.
+    // Said to the model on its next request. The person sees the agents start
+    // where the work is shown (the turn's own row, the agents view), not as a notice.
     const note = startedContract ? CONTRACT_STARTED_NOTE
       : 'You spawned agents for part of the task. You retain responsibility for the complete request. Incorporate their results, recover failures, and continue any remaining work.';
     args.conversation.hostInstructions.set('delegation', note, { once: true });
-    args.conversation.addNotice(startedContract
-      ? '[Agents] A contract started for part of this request; its work is checked against its acceptance criteria and the turn finishes with its results. F2 shows it.'
-      : '[Agents] Agents started for part of this request; the turn waits for them and finishes with their results. F2 shows them.',
-    { level: 'info', kind: 'operational' });
     // Every additional assignment must pass normal tool admission and appear
     // in the retained delegation evidence; no hidden plan-based spawns here.
     args.requestRender();

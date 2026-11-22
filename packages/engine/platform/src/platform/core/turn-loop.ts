@@ -12,14 +12,17 @@
  *   (providers/failover.ts: the person's fallback order), which moves the
  *   rest of the turn to another model and sends the request again, or stops
  *   with the error;
- * - the completion check runs after a draft was shown, within a deadline, and
- *   sends back at most `maxRejectedDrafts` drafts; then the draft stands with
- *   a "not verified" note;
+ * - the completion check, for a caller that has one, runs after a draft was
+ *   shown and ends when the decision model answers or fails (it has no clock
+ *   of its own); it sends back at most `maxRejectedDrafts` drafts, then the
+ *   draft stands with a "not verified" note;
  * - interim text is read beside its tools, never ahead of them;
  * - consecutive rounds in which every call failed warn the model, then end the
  *   turn after one closing reply without tools;
  * - the same call returning the same result again and again ends the turn the
  *   same way;
+ * - a call identical to one a tool refused earlier in the turn is not sent
+ *   again: the model gets the refusal once more, the person one line;
  * - a turn budget ends the turn after one closing reply without tools.
  *
  * What differs between callers (who is speaking, where text goes, the budget,
@@ -51,8 +54,6 @@ export const TURN_RETRY_DELAYS_WITH_FAILOVER_MS: readonly number[] = Object.free
 const MAX_RETRY_AFTER_MS = 5 * 60_000;
 /** Drafts the completion check may send back in one turn; the next one is shown with what was not verified. */
 export const MAX_REJECTED_DRAFTS = 2;
-/** How long one completion check of a draft may take before the draft is shown unverified. */
-export const COMPLETION_CHECK_DEADLINE_MS = 30_000;
 /** The same call with the same arguments and the same result this many times ends the turn. */
 export const REPEAT_STOP_THRESHOLD = 8;
 /** Identical calls the model is told to review its history for, when a reading says they are stuck. */
@@ -85,8 +86,8 @@ export interface TurnPolicy {
   readonly sink: TurnSink;
   /** `turns`: most model rounds that may ask for tools. `tokens`: most input plus output tokens over the turn. Absent: unbounded. */
   readonly budget: { readonly turns?: number | undefined; readonly tokens?: number | undefined };
-  /** At most `maxRejectedDrafts` drafts are withdrawn; each check has `deadlineMs`. Used only when the context can check a draft. */
-  readonly completion: { readonly maxRejectedDrafts: number; readonly deadlineMs: number };
+  /** At most `maxRejectedDrafts` drafts are withdrawn. Used only when the context can check a draft. */
+  readonly completion: { readonly maxRejectedDrafts: number };
   /** `await-events`: delegated work is awaited after the round that started it, and before an answer ends the turn. `return`: the turn never waits for it. */
   readonly delegates: 'await-events' | 'return';
 }
@@ -339,6 +340,9 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
   const breaker = new ConsecutiveErrorBreaker();
   const history: TurnCallObservation[] = [];
   const repeatReading = { pending: false };
+  // Calls refused this turn, by signature: an identical call is not sent again (see blockRefusedRepeats).
+  const refusedCalls = new Map<string, RefusedCall>();
+  const toldBlocked = new Set<string>();
   // The readings that run beside the next request write to the conversation's
   // host channel; they end with this turn, so a late one cannot reach the next turn.
   const turnLifetime = new AbortController();
@@ -376,7 +380,12 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
   };
   /** The answer stands: the caller records it, or it is appended. */
   const commit = async (draft: string, result: { verified?: boolean | undefined; note?: string | undefined }): Promise<'end' | 'continue'> => {
-    if (ctx.commit) return ctx.commit(draft, result);
+    if (ctx.commit) {
+      const next = await ctx.commit(draft, result);
+      // The owner may have spoken meanwhile: what was refused before is decided afresh.
+      if (next === 'continue') refusedCalls.clear();
+      return next;
+    }
     ctx.conversation.addAssistantMessage(draft);
     return 'end';
   };
@@ -384,9 +393,9 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
   try {
     while (true) {
       if (ctx.signal.aborted) return outcome('cancelled', '');
-      const response = await ask(true);
+      let response = await ask(true);
       if (ctx.signal.aborted) return outcome('cancelled', '');
-      const calls = [...response.toolCalls];
+      let calls = [...response.toolCalls];
 
       if (calls.length === 0) {
         const draft = response.content;
@@ -403,7 +412,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
           if (await commit(draft, {}) === 'continue') continue;
           return outcome('answered', draft);
         }
-        const verdict = await checkWithDeadline(ctx, draft, policy);
+        const verdict = await checkOnce(ctx, draft, policy);
         if (ctx.signal.aborted) return outcome('cancelled', '');
         if (verdict.kind === 'accepted') {
           if (await commit(draft, { verified: true }) === 'continue') continue;
@@ -433,6 +442,25 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
         const closing = await closingReply();
         if (closing === undefined) return outcome('cancelled', '');
         return outcome('budget', closing, { note: limit });
+      }
+
+      // A call identical to one refused earlier in this turn is not sent again: the model is
+      // given the refusal once more, whole, and the owner one line; the other calls run.
+      const remaining = blockRefusedRepeats(ctx, sink, refusedCalls, toldBlocked, calls);
+      if (remaining.length < calls.length) {
+        if (remaining.length === 0) {
+          if (response.content) ctx.conversation.addAssistantMessage(response.content);
+          // A round of nothing but refused repeats counts as a failed round, so the stop rule still ends a turn that only repeats them.
+          if (breaker.recordAllFailed() === 'break') {
+            const stop = failedRoundsStop(ctx, sink, breaker);
+            const closing = await closingReply();
+            if (closing === undefined) return outcome('cancelled', '');
+            return outcome('stopped', closing, stop);
+          }
+          continue;
+        }
+        calls = remaining;
+        response = { ...response, toolCalls: remaining };
       }
 
       // Interim text never holds its tools: it is read beside them, and a finding corrects the next request.
@@ -467,6 +495,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
       }
       sink.toolResults?.(calls, results);
       if (ctx.signal.aborted) return outcome('cancelled', '');
+      recordRefusals(refusedCalls, calls, results);
 
       const stop = applyStopRules(ctx, turnSignal, sink, breaker, history, repeatReading, calls, results);
       if (stop) {
@@ -489,11 +518,68 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
   }
 }
 
+const FINAL_REPLY = 'You have one final reply. Tools are no longer available and any tool call in it will not run. ';
+
+/** Every call failed in too many rounds running: the model is told it has one closing reply, and the person why the turn stops. */
+function failedRoundsStop(ctx: TurnContext, sink: TurnSink, breaker: ConsecutiveErrorBreaker): { readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } {
+  ctx.hostInstructions?.set('breaker', `[Tool recovery] Every tool call failed in ${breaker.consecutiveErrors} consecutive rounds, so this turn is stopping. ` + FINAL_REPLY
+    + 'Report what you were trying to do, the errors you encountered, and what remains undone.', { once: true, append: true });
+  sink.notice?.(`[Tool recovery] Stopped after ${breaker.consecutiveErrors} consecutive tool rounds in which every call failed. The request is not complete. Check the tool failures above, fix the cause (permissions, an unavailable service, the inputs), then send the request again.`, 'error');
+  return { note: `every tool call failed in ${breaker.consecutiveErrors} consecutive rounds`, stop: { rule: 'all-calls-failed', count: breaker.consecutiveErrors } };
+}
+
+/** A call refused this turn: the tool said so with a refused decision, which holds until what it names changes. */
+interface RefusedCall {
+  readonly toolName: string;
+  /** The refusal's reason, for the person's one line. */
+  readonly reason: string;
+  /** Everything the model was told, given again in full on a repeat. */
+  readonly text: string;
+}
+
+/** Keeps each refused call of the round (a result whose decision is `refused`), by its exact signature. */
+function recordRefusals(refused: Map<string, RefusedCall>, calls: readonly ToolCall[], results: readonly ToolResult[]): void {
+  const byId = new Map(results.map((result) => [result.callId, result] as const));
+  for (const call of calls) {
+    const result = byId.get(call.id);
+    if (!result || result.success || result.cancelled === true || result.decision?.state !== 'refused') continue;
+    const text = [result.error, result.output].filter((part): part is string => typeof part === 'string' && part.length > 0).join('\n') || result.decision.reason;
+    refused.set(callSignature(call), { toolName: call.name, reason: result.decision.reason, text });
+  }
+}
+
+/**
+ * The calls of a round that are not repeats of a call refused this turn. For
+ * each repeat the model is told, on its next request, that this exact call was
+ * already refused and will be again until what the refusal names changes,
+ * with the refusal in full; the person sees one line per refused call, the
+ * first time it is repeated.
+ */
+function blockRefusedRepeats(ctx: TurnContext, sink: TurnSink, refused: ReadonlyMap<string, RefusedCall>, told: Set<string>, calls: readonly ToolCall[]): ToolCall[] {
+  const remaining: ToolCall[] = [];
+  const blocked = new Set<string>();
+  for (const call of calls) {
+    const signature = callSignature(call);
+    if (refused.has(signature)) blocked.add(signature);
+    else remaining.push(call);
+  }
+  for (const signature of blocked) {
+    const entry = refused.get(signature)!;
+    ctx.hostInstructions?.set('breaker', `[Blocked call] ${entry.toolName} was not run: this exact call was already refused in this turn, and it will be refused again until what the refusal names changes. `
+      + `Do not make it again; act on the refusal instead. The refusal, in full:\n${entry.text}`, { once: true, append: true });
+    if (told.has(signature)) continue;
+    told.add(signature);
+    sink.notice?.(`[Blocked] ${entry.toolName} was asked for again exactly as before and was not run: ${entry.reason}`, 'warning');
+  }
+  return remaining;
+}
+
 /**
  * The stop rules after a tool round, the same for every caller: rounds in
  * which every call failed, and calls repeated with the same result. A warning
- * reaches the model on its next request and the person as a notice; a stop
- * tells the model it has one closing reply and returns why the turn ends.
+ * reaches the model on its next request only; a stop tells the model it has
+ * one closing reply, tells the person the request is not complete, and
+ * returns why the turn ends.
  * Nothing here waits: a reading of repeated calls runs beside the next request.
  */
 function applyStopRules(ctx: TurnContext, turnSignal: AbortSignal, sink: TurnSink, breaker: ConsecutiveErrorBreaker, history: TurnCallObservation[],
@@ -509,17 +595,11 @@ function applyStopRules(ctx: TurnContext, turnSignal: AbortSignal, sink: TurnSin
 
   if (results.length > 0 && results.every((result) => result.success === false)) {
     const state = breaker.recordAllFailed();
-    if (state === 'break') {
-      const note = `every tool call failed in ${breaker.consecutiveErrors} consecutive rounds`;
-      tell(`[Tool recovery] Every tool call failed in ${breaker.consecutiveErrors} consecutive rounds, so this turn is stopping. ` + finalReply
-        + 'Report what you were trying to do, the errors you encountered, and what remains undone.');
-      sink.notice?.(`[Tool recovery] Stopped after ${breaker.consecutiveErrors} consecutive tool rounds in which every call failed. The request is not complete. Check the tool failures above, fix the cause (permissions, an unavailable service, the inputs), then send the request again.`, 'error');
-      return { note, stop: { rule: 'all-calls-failed', count: breaker.consecutiveErrors } };
-    }
+    if (state === 'break') return failedRoundsStop(ctx, sink, breaker);
     if (state === 'warn') {
+      // The model is told; the person sees the failed calls themselves, so no notice repeats them.
       tell(`[Tool recovery] Your last ${breaker.consecutiveErrors} tool rounds all failed. Stop attempting the same approach. `
         + `Say what you are trying to do and what is going wrong, then try a different strategy. At ${CONSECUTIVE_ERROR_BREAK} such rounds the turn stops.`);
-      sink.notice?.(`[Tool recovery] ${breaker.consecutiveErrors} tool rounds in a row failed; the model was told to change its approach.`, 'warning');
     }
   } else if (results.length > 0) {
     breaker.recordSuccess();
@@ -567,29 +647,14 @@ type CheckVerdict =
   | { readonly kind: 'rejected'; readonly reason: string; readonly correction: string }
   | { readonly kind: 'unchecked'; readonly why: string };
 
-async function checkWithDeadline(ctx: TurnContext, draft: string, policy: TurnPolicy): Promise<CheckVerdict> {
-  const late = `the completion check did not finish within ${Math.round(policy.completion.deadlineMs / 1000)} s`;
-  const deadline = AbortSignal.timeout(policy.completion.deadlineMs);
-  const signal = AbortSignal.any([ctx.signal, deadline]);
-  // The deadline holds even for a check that ignores its signal.
-  let onAbort = (): void => {};
-  const stopped = new Promise<'stopped'>((resolve) => {
-    onAbort = () => resolve('stopped');
-    if (signal.aborted) resolve('stopped');
-    else signal.addEventListener('abort', onAbort, { once: true });
-  });
-  const check = ctx.checkDraft!(draft, { speaker: policy.speaker, signal });
-  check.catch(() => {});
+/** One completion check of a draft: it ends when the decision model answers or fails, or the turn is cancelled. */
+async function checkOnce(ctx: TurnContext, draft: string, policy: TurnPolicy): Promise<CheckVerdict> {
   try {
-    const verdict = await Promise.race([check, stopped]);
+    const verdict = await ctx.checkDraft!(draft, { speaker: policy.speaker, signal: ctx.signal });
     if (ctx.signal.aborted) throw new TurnCancelled();
-    if (verdict === 'stopped' || deadline.aborted) return { kind: 'unchecked', why: late };
     return verdict.accepted ? { kind: 'accepted' } : { kind: 'rejected', reason: verdict.reason, correction: verdict.correction };
   } catch (error) {
     if (error instanceof TurnCancelled || ctx.signal.aborted) throw new TurnCancelled();
-    if (deadline.aborted) return { kind: 'unchecked', why: late };
     return { kind: 'unchecked', why: `the completion check could not run: ${error instanceof Error ? error.message : String(error)}` };
-  } finally {
-    signal.removeEventListener('abort', onAbort);
   }
 }

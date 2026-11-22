@@ -12,8 +12,6 @@ import {
   JudgmentError,
   captureJudgmentBackendSettings,
   describeDecisionModelFailure,
-  DEFAULT_DECISION_DEADLINE_MS,
-  validDecisionDeadline,
   withDecisionLog,
   type JudgmentConfig,
   type JudgmentPort,
@@ -27,7 +25,8 @@ import type { SecretsManager } from '../config/secrets.js';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
 import { decisionModelSet, decisionModelSettings } from '../config/decision-model-set.js';
 import { requestedDecisionEndpoint, requestedDecisionModel } from '../config/decision-model-request.js';
-import { openStateDecisionLogWithNotice, scheduleDecisionLogRetention } from '../state/decision-log.js';
+import { describeDecisionLogCarriedForward, openStateDecisionLogWithNotice, scheduleDecisionLogRetention } from '../state/decision-log.js';
+import { noteCarriedForwardChange } from '../state/carried-forward.js';
 import { logger } from '../utils/logger.js';
 import { maskJudgmentStateCredentials } from '../gate/judgment-input.js';
 import { withWebuiAnswerBoundary, type WebuiAnswerBoundaryOptions } from '../judgment-browser/batteries/webui-answers.js';
@@ -39,7 +38,7 @@ export const JUDGMENT_KEY_NAME = 'TYPESAFE_API_KEY';
 /** What the judgment settings are read from. */
 export interface JudgmentSettingsSource {
   readonly config: {
-    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.decisionDeadlineMs' | 'judgment.fallbacks' | 'judgment.volumeMonitor'): unknown;
+    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks' | 'judgment.volumeMonitor' | 'atRest.retentionMaxAgeDays'): unknown;
     subscribe?(key: 'judgment.volumeMonitor', listener: () => void): () => void;
     getConfigurationIncarnation?(): number;
     onDidChangeIncarnation?(listener: () => void): () => void;
@@ -60,12 +59,6 @@ const text = (value: unknown): string => (typeof value === 'string' ? value.trim
 /** The model a request names when it names none: judgment.model, then TYPESAFE_DEFAULT_MODEL, then jev-latest (the one resolver, config/decision-model-request.ts). */
 function settingsModel(source: JudgmentSettingsSource): string {
   return requestedDecisionModel(source.config.get('judgment.model'), source.env);
-}
-
-/** The deadline judge() gives a decision a person or tool call waits on: judgment.decisionDeadlineMs, else the default. */
-function settingsDecisionDeadline(source: JudgmentSettingsSource): number {
-  const value = source.config.get('judgment.decisionDeadlineMs');
-  return validDecisionDeadline(value) ? value : DEFAULT_DECISION_DEADLINE_MS;
 }
 
 /** A secret-store read is local; a store that has not answered by then is reported as such, not waited on for the model's timeout. */
@@ -202,9 +195,6 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       if (configuration !== observed[0] || credentials !== observed[1]) { observed = [configuration, credentials]; revision++; }
       return revision;
     },
-    get decisionDeadlineMs(): number {
-      return settingsDecisionDeadline(source);
-    },
     health: () => current?.port.health?.() ?? [],
     async ask(request) {
       assertDecisionModelsEnabled('configured decision transport');
@@ -269,6 +259,11 @@ export interface JudgmentServices {
   readonly decisionLog: SqliteDecisionLog;
   /** Set when the previous log could not be read: it was kept aside and this one is new. */
   readonly decisionLogNotice?: string;
+  /**
+   * Settles with the one line saying how much space came back when this process finished carrying an
+   * older decision log forward; with undefined at disposal when it did not (nothing to carry, or not yet).
+   */
+  readonly decisionLogCarriedForward: Promise<string | undefined>;
   /** Notes (readings, actions) the log could not write since the composition started; the work they describe was done. */
   readonly unrecordedNotes?: () => number;
   /** The call-volume monitor's last alert (budget breach, unreadable log), for status reads; the log line stays too. */
@@ -320,7 +315,19 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   input.disposal.add('decision-model policy', () => { restorePolicy(); resetDecisionModelEpisode(); });
   const { log: decisionLog, notice: decisionLogNotice } = openStateDecisionLogWithNotice(input.stateRoot);
   const transport = createSettingsJudgmentPort(input);
-  const retention = scheduleDecisionLogRetention(decisionLog);
+  const carriedForward = Promise.withResolvers<string | undefined>();
+  const retention = scheduleDecisionLogRetention(decisionLog, {
+    // The owner's age cap for logs and transcripts applies to the decision log too.
+    days: () => Number(input.config.get('atRest.retentionMaxAgeDays')),
+    onCarriedForward: (result) => {
+      const text = describeDecisionLogCarriedForward(result);
+      logger.info(text, { stateRoot: input.stateRoot, ...result });
+      // The daemon says it through its receipts; a terminal app reads `decisionLogCarriedForward`.
+      noteCarriedForwardChange(text);
+      carriedForward.resolve(text);
+    },
+  });
+  input.disposal.add('decision log carried-forward notice', () => { carriedForward.resolve(undefined); });
   let unrecordedNotes = 0;
   const onUnrecordedNote = (count: number): void => {
     unrecordedNotes += 1;
@@ -336,7 +343,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     const recorded = withDecisionLog(base, decisionLog, { onUnrecordedNote });
     return {
       get model() { return recorded.model; },
-      get decisionDeadlineMs() { return recorded.decisionDeadlineMs; },
       ...(recorded.health ? { health: () => recorded.health!() } : {}),
       ...(recorded.revision ? { revision: () => recorded.revision!() } : {}),
       recorder: recorded.recorder!,
@@ -367,7 +373,6 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   // log, so a malformed answer or a failure echo is never retained.
   const browserPort = owned({
     get model() { return transport.model; },
-    get decisionDeadlineMs() { return transport.decisionDeadlineMs; },
     health: () => transport.health?.() ?? [],
     revision: () => transport.revision?.() ?? 0,
     ask(request) {
@@ -396,6 +401,7 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
   });
   const volumeMonitor = composeJudgmentVolumeMonitor(decisionLog, input.env, input.disposal, input.config);
   return { port, browserPort, decisionLog, volumeMonitor, unrecordedNotes: () => unrecordedNotes,
+    decisionLogCarriedForward: carriedForward.promise,
     primaryEndpoint: () => requestedDecisionEndpoint(input.config.get('judgment.endpoint'), input.env),
     ...(decisionLogNotice === undefined ? {} : { decisionLogNotice }) };
 }

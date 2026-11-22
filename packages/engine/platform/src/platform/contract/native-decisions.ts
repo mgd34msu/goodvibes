@@ -1,6 +1,7 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { isDeepStrictEqual } from 'node:util';
 import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 import { bindNativeCiSourceIssuer } from '../ci-watch/native-owner.js';
 import type { ExternalOperationSource } from '../permissions/external-request.js';
 /** Native semantic ownership. Registered continuations never run through an owner reply or a fake tool. */
@@ -323,11 +324,12 @@ export function decidedWithoutModel(decision: Pick<NativeContractDecision, 'deci
 /**
  * Decides one native contract operation: the decision model reads it, or, with
  * no decision model in use (none set, No Decision Model, or Hybrid with the set
- * model unavailable), code takes the offered operation by its own checks.
- * Under Decision Model Only a failing model still stops the operation.
+ * model unavailable), or when the set model cannot read it, code takes the
+ * offered operation by its own checks: a decision that cannot be made never
+ * ends the work.
  */
 export function decideNativeContract(contract: Contract, services: NativeContractServices | undefined, input: NativeContractDecisionInput): Promise<NativeContractDecision> {
-  return decisionOrClassic(() => decideNativeContractWithModel(contract, services, input), () => decideNativeContractInCode(contract, services, input));
+  return judgedOrNot(`contract.native.${input.stage}`, () => decideNativeContractWithModel(contract, services, input), () => decideNativeContractInCode(contract, services, input));
 }
 
 /**

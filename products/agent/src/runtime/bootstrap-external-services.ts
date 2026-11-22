@@ -43,6 +43,9 @@ import type { RuntimeServices } from './services.ts';
 import type { UiRuntimeServices } from './ui-services.ts';
 import { firstShowingOfSettingsNotice } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
 
+/** The announce-once id of "no daemon is installed": said once on this machine, said again after one was found. */
+const DAEMON_NOT_INSTALLED_ANNOUNCEMENT = 'daemon-not-installed';
+
 // Pending status shown before the deferred probe completes, honest
 // 'unavailable', never a guessed 'external'.
 function createPendingServiceStatus(configManager: HostServicesConfig, service: 'daemon' | 'httpListener'): HostServiceStatus {
@@ -273,9 +276,15 @@ export function wireAgentExternalServices(options: {
           detail: `Connected host is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it with: ${DAEMON_START_COMMAND}`,
         };
       case 'not-installed':
-        // Said at start-up: without it every host-backed feature fails one at a time with no reason given.
-        return { answered: false, level: 'high', detail: `No GoodVibes host is running and no daemon service is installed on this machine, so host-backed features are off. Install and start it with: ${DAEMON_INSTALL_COMMAND}` };
+        // Said once on this machine (not at every start): without it every host-backed feature fails one at a time with no reason given.
+        return {
+          answered: false,
+          level: services.featureAnnouncementStore.record(DAEMON_NOT_INSTALLED_ANNOUNCEMENT) ? 'high' : null,
+          detail: `No GoodVibes host is running and no daemon service is installed on this machine, so host-backed features are off. Install and start it with: ${DAEMON_INSTALL_COMMAND}`,
+        };
       case 'none':
+        // A daemon answers: losing it again is said again.
+        if (outcome.reason === 'daemon-active') services.featureAnnouncementStore.forgetMatching((id) => id === DAEMON_NOT_INSTALLED_ANNOUNCEMENT);
         return {
           answered: outcome.reason === 'daemon-active',
           level: null,

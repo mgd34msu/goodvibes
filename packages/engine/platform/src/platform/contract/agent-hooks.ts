@@ -1,5 +1,6 @@
 import { isDeepStrictEqual as sameUnitCheckEvidence } from 'node:util';
-import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { nativeContractActionSource, nativeContractPort } from './native-decisions.js';
 import { captureJudgmentPort, judgmentPort, type JudgmentPortCapture } from '@goodvibes/engine/errors';
@@ -315,10 +316,11 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       });
       if (check.superseded || signal.aborted) { retire(runtime, check); return; }
       if (!unitMustWrite(run.contract, unit)) unit.readEvidence = structuredClone(evidence.sourceReads ?? []);
-      // With no decision model in use every cited read stays whole: nothing is narrowed and nothing is asked.
-      const selection = await decisionOrClassic(
-        () => selectSourceCitationEvidence(unit, evidence, nativeContractPort(run.contract, run.env.native, judgmentPort('contract.check.source-citation-purpose'), signal), signal),
-        () => ({ evidence, usage: emptyJudgmentUsage() }));
+      // With no decision model in use, or one that cannot read them, every cited read stays whole.
+      const whole = evidence;
+      const selection = await judgedOrNot('contract.check.source-citation-purpose',
+        () => selectSourceCitationEvidence(unit, whole, nativeContractPort(run.contract, run.env.native, judgmentPort('contract.check.source-citation-purpose'), signal), signal),
+        () => ({ evidence: whole, usage: emptyJudgmentUsage() }));
       if (check.superseded || signal.aborted) { retire(runtime, check); return; }
       addJudgmentUsage(run.contract.judgmentUsage, selection.usage);
       evidence = selection.evidence;
@@ -360,9 +362,9 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       if (runtime.check === check) runtime.check = null;
       if (check.superseded || isAbortError(error, signal) || run.terminal) return;
       const failure = failureFromError(error);
-      // The judgment port already tried its configured fallbacks. Stop this
-      // operation without resubmitting the candidate or judging it incorrect;
-      // the failed contract retains its output and files for explicit recovery.
+      // A decision the model could not make is decided in code (runUnitCheck);
+      // what reaches here is the check itself failing (its evidence could not
+      // be collected). The failed contract retains its output and files.
       deps.failContract(run, failure.kind, `the check of unit ${unit.id} could not run: ${failure.reason}`);
       return;
     }
@@ -562,11 +564,7 @@ export function createUnitCheckLoop(deps: UnitCheckLoopDeps): UnitCheckLoop {
       applySeverities(unit, checkId, read.severities);
     } catch (error) {
       if (isAbortError(error, runtime.abort.signal) || run.terminal) return;
-      const failure = failureFromError(error);
-      if (failure.kind === 'judgment-unavailable') {
-        deps.failContract(run, failure.kind, `severity of unit ${unit.id}'s unmet criteria could not be read: ${failure.reason}`);
-        return;
-      }
+      // A severity that could not be read stays unknown; the nudge already went out and the work goes on.
       logger.warn('contract runner: severity reading did not complete', { contractId: run.id, unitId: unit.id, error: summarizeError(error) });
     } finally {
       // readUnmetSeverities has drained its workers on either path. Count each

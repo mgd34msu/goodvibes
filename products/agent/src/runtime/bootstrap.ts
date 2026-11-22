@@ -34,7 +34,8 @@ import type { Compositor } from '../renderer/compositor.ts';
 
 import type { RuntimeContext, BootstrapOptions } from './context.ts';
 import { createTaskManager, emitSessionResumed } from '@/runtime/index.ts';
-import { ProcessTaskAdapter } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { ProcessTaskAdapter, resumeContracts } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { wireContractRecoveryNotices } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 import { emitSessionRecoveryFailed } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import type { SystemMessageRouter } from '../core/system-message-router.ts';
 import { loadLastConversation } from '@/runtime/index.ts';
@@ -476,13 +477,25 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     systemMessageRouter.low(`[Startup] ${announcement.text}`);
   }
   // Retention for worktrees earlier runs left (the daemon runs the same pass at its start). Everything it removed
-  // and every worktree it kept for the owner's decision is shown; only the disk-use line alone stays in the activity feed.
-  void services.worktreeRegistry.startupSweep().then((report) => {
+  // and each worktree it kept for the owner's decision is shown, once per worktree; only the disk-use line alone stays in the activity feed.
+  void services.worktreeRegistry.startupSweep({ tellOnce: true }).then((report) => {
     const text = report ? formatWorktreeStartupReport(report, workingDir) : null;
     if (!text || !report) return;
     if (report.removed.length > 0 || report.attention.length > 0 || report.failed.length > 0) systemMessageRouter.high(`[Worktrees] ${text}`, report.attention.length > 0 || report.failed.length > 0 ? 'warning' : 'info');
     else systemMessageRouter.low(`[Worktrees] ${text}`);
   });
+  // A contract that was running when the app stopped: one line for the owner, and the same fact for its
+  // session's model. The platform started the resume; asking again for this root returns the same report.
+  runtimeUnsubs.push(wireContractRecoveryNotices({
+    recovery: resumeContracts(services.contractRunner, services.workingDirectory),
+    get: (contractId) => services.contractRunner.get(contractId),
+    say: (text, level) => systemMessageRouter.high(text, level),
+    bus: runtimeBus,
+    sessionId: () => runtime.sessionId,
+    hostInstructions: () => conversation.hostInstructions,
+  }));
+  // An older decision log carried forward to its smaller form says once how much space came back.
+  void services.judgment.decisionLogCarriedForward.then((text) => { if (text) systemMessageRouter.high(`[Decision log] ${text}`); });
   const commandRegistry = shell.commandRegistry;
   const commandContext = shell.commandContext;
   const inputHistory = shell.inputHistory;

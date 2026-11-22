@@ -2,13 +2,32 @@ import type { Database, Statement } from 'bun:sqlite';
 import type { JsonValue } from '../port/types.ts';
 import type { DecisionEntry, DecisionId, DecisionLog, DecisionNote, DecisionQuery, DecisionRetention, DecisionSummary, DecisionTruth, DecisionVolumeEntry, NewDecisionEntry } from './types.ts';
 import { decisionVolumeRow, type DecisionVolumeRow } from './volume-row.ts';
-import { COLUMNS, NOTES_TABLE, TABLE, openLog, openSyncedWriter, rowsOf, type Params } from './sqlite-schema.ts';
+import { COLUMNS, META_TABLE, NOTES_TABLE, QUESTIONS_TABLE, TABLE, openLog, openSyncedWriter, rowsOf, type Params } from './sqlite-schema.ts';
 
 /** What reading an entry back needs from its row. */
 interface Row {
   readonly id: string;
   readonly entry: string;
+  /** The row's questions from the questions table; null on a row that still carries them in `entry`. */
+  readonly questions: string | null;
   readonly notes: string;
+}
+
+/** The file's page accounting and vacuum mode, for the retention pass (state/decision-log.ts). */
+export interface DecisionLogStorage {
+  readonly pageSize: number;
+  readonly pageCount: number;
+  readonly freePages: number;
+  /** `incremental`: freed pages go back with `reclaim`; `none`: an older file, until `finishCarryForward` rewrites it once. */
+  readonly vacuum: 'none' | 'full' | 'incremental';
+  /** Rows written before version 6 that still carry their questions in the row. */
+  readonly rowsToCarry: number;
+}
+
+/** What carrying an older file forward gave back: its size before and after. */
+export interface DecisionLogCarriedForward {
+  readonly fromBytes: number;
+  readonly toBytes: number;
 }
 
 /** One row of the payload-free summary read. */
@@ -31,15 +50,30 @@ const NOTE_CODECS: { readonly [K in NoteColumn]: NoteCodec<Extract<DecisionNote,
   action: { write: (note) => note.action, read: (text) => ({ kind: 'action', action: text }) },
   truth: { write: (note) => JSON.stringify(note.truth), read: (text) => ({ kind: 'truth', truth: JSON.parse(text) as DecisionTruth }) },
 };
-/** A new row stores its id and the entry; SQLite derives the rest, and notes attach later. */
-const INSERT_COLUMNS = ['id', 'entry'] as const satisfies readonly (keyof typeof COLUMNS)[];
+/** A new row stores its id, the entry without its questions, and their key; SQLite derives the rest, and notes attach later. */
+const INSERT_COLUMNS = ['id', 'entry', 'questions_hash'] as const satisfies readonly (keyof typeof COLUMNS)[];
 type InsertParams = Readonly<Record<(typeof INSERT_COLUMNS)[number], string>>;
 const codecFor = (column: NoteColumn): NoteCodec<DecisionNote> => NOTE_CODECS[column] as NoteCodec<DecisionNote>;
 
-const toParams = (id: DecisionId, entry: NewDecisionEntry): InsertParams => ({ id, entry: JSON.stringify(entry) });
+/** An entry split for storage: the row's text without its questions, and the questions with their key. */
+interface StoredEntry {
+  readonly entry: string;
+  readonly questions: string;
+  readonly hash: string;
+}
+
+/** Splits an entry's questions from the rest of it; equal question sets get equal keys. */
+function splitQuestions(entry: NewDecisionEntry | Readonly<Record<string, unknown>>): StoredEntry {
+  const { questions, ...rest } = entry as Readonly<Record<string, unknown>>;
+  const text = JSON.stringify(questions ?? null);
+  return { entry: JSON.stringify(rest), questions: text, hash: Bun.CryptoHasher.hash('sha256', text, 'hex') };
+}
+
+const toParams = (id: DecisionId, stored: StoredEntry): InsertParams => ({ id, entry: stored.entry, questions_hash: stored.hash });
 
 function toEntry(row: Row): DecisionEntry {
-  const entry = { ...(JSON.parse(row.entry) as NewDecisionEntry), id: row.id as DecisionId };
+  const parsed = JSON.parse(row.entry) as NewDecisionEntry;
+  const entry = { ...parsed, ...(row.questions === null ? {} : { questions: JSON.parse(row.questions) as JsonValue }), id: row.id as DecisionId };
   if (entry.status === 'failed') return entry;
   const saved = JSON.parse(row.notes) as { kind: NoteColumn; payload: string }[];
   const notes = saved.map(note => codecFor(note.kind).read(note.payload));
@@ -56,6 +90,19 @@ const matchingWindow = (conditions: readonly string[]) =>
 /** Every statement the log runs. */
 const SQL = {
   insert: `INSERT INTO ${TABLE} (${INSERT_COLUMNS.join(', ')}) VALUES (${INSERT_COLUMNS.map(param).join(', ')})`,
+  /** A question set is written once; every later decision asking it names it by its key. */
+  insertQuestions: `INSERT OR IGNORE INTO ${QUESTIONS_TABLE} (hash, questions) VALUES ($hash, $questions)`,
+  /** Rows written before version 6, a batch at a time (found through the questions-key index). */
+  legacyRows: `SELECT id, entry FROM ${TABLE} WHERE questions_hash IS NULL LIMIT $limit`,
+  legacyCount: `SELECT count(*) AS n FROM ${TABLE} WHERE questions_hash IS NULL`,
+  carryRow: `UPDATE ${TABLE} SET entry = $entry, questions_hash = $hash WHERE id = $id AND questions_hash IS NULL`,
+  /** The question sets a batch of entries names, read before the entries go. */
+  batchQuestionKeys: `SELECT DISTINCT questions_hash AS hash FROM ${TABLE} WHERE questions_hash IS NOT NULL AND id IN (SELECT value FROM json_each($ids))`,
+  /** A question set no remaining entry names. */
+  deleteOrphanQuestions: `DELETE FROM ${QUESTIONS_TABLE} WHERE hash IN (SELECT value FROM json_each($hashes))
+    AND NOT EXISTS (SELECT 1 FROM ${TABLE} WHERE questions_hash = ${QUESTIONS_TABLE}.hash)`,
+  carriedFrom: `SELECT value FROM ${META_TABLE} WHERE key = 'carried_from_bytes'`,
+  forgetCarriedFrom: `DELETE FROM ${META_TABLE} WHERE key = 'carried_from_bytes'`,
   /** A note attaches only to an answered entry; one statement, so it needs no transaction. */
   append: `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload)
     SELECT $id, $kind, $payload WHERE EXISTS (SELECT 1 FROM ${TABLE} WHERE ${ID_IS} AND status = 'answered')`,
@@ -71,12 +118,13 @@ const SQL = {
     RETURNING decision_id`,
   /** The entry at a position from the newest, by time then id; the row cap keeps it and every newer one. */
   nthNewest: `SELECT at, id FROM ${TABLE} ORDER BY at DESC, id DESC LIMIT 1 OFFSET $offset`,
+  count: `SELECT count(*) AS n FROM ${TABLE}`,
   /**
    * Entries the retention rule no longer keeps, oldest first: older than
    * $before, or past the row cap (before the capping entry by time then id, so
    * entries tied on its time count too). An entry with a truth note always stays.
    */
-  expired: `SELECT id FROM ${TABLE} WHERE (at < $before OR at < $capAt OR (at = $capAt AND id < $capId))
+  expired: `SELECT id FROM ${TABLE} WHERE at <= $bound AND (at < $before OR at < $capAt OR (at = $capAt AND id < $capId))
     AND NOT EXISTS (SELECT 1 FROM ${NOTES_TABLE} WHERE decision_id = ${TABLE}.id AND kind = 'truth')
     ORDER BY at, id LIMIT $limit`,
   deleteNotes: `DELETE FROM ${NOTES_TABLE} WHERE decision_id IN (SELECT value FROM json_each($ids))`,
@@ -87,6 +135,7 @@ const SQL = {
   /** Newest first, up to $limit, meeting every condition given. */
   matching: (conditions: readonly string[]) =>
     `SELECT ${TABLE}.id, ${TABLE}.entry,
+       (SELECT questions FROM ${QUESTIONS_TABLE} WHERE hash = ${TABLE}.questions_hash) AS questions,
        (SELECT json_group_array(json_object('kind', kind, 'payload', payload)) FROM
          (SELECT kind, payload FROM ${NOTES_TABLE} WHERE decision_id = ${TABLE}.id ORDER BY seq)) AS notes
      ${matchingWindow(conditions)}`,
@@ -175,6 +224,7 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
   readonly #synced: Database;
   /** The writing statements, prepared once. */
   readonly #insert: Statement;
+  readonly #insertQuestions: Statement;
   readonly #append: Statement;
   readonly #appendMany: Statement;
   #pending: PendingNote[] = [];
@@ -185,20 +235,31 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
     try { this.#synced = openSyncedWriter(path, this.#db); }
     catch (error) { this.#db.close(); throw error; }
     this.#insert = this.#synced.prepare(SQL.insert);
+    this.#insertQuestions = this.#synced.prepare(SQL.insertQuestions);
     this.#append = this.#synced.prepare(SQL.append);
     this.#appendMany = this.#db.prepare(SQL.appendMany);
   }
 
+  /**
+   * One synced commit per entry, as before version 6: the question set's row (written only the first time
+   * that set is asked) and the entry's row go in the same transaction.
+   */
   record(entry: NewDecisionEntry): DecisionId {
     const id = Bun.randomUUIDv7() as DecisionId;
-    this.#insert.run(toParams(id, entry));
+    const stored = splitQuestions(entry);
+    this.#synced.transaction(() => {
+      this.#insertQuestions.run({ hash: stored.hash, questions: stored.questions });
+      this.#insert.run(toParams(id, stored));
+    }).immediate();
     return id;
   }
 
   recordWithNotes(entry: NewDecisionEntry, notes: readonly DecisionNote[]): DecisionId {
     const id = Bun.randomUUIDv7() as DecisionId;
+    const stored = splitQuestions(entry);
     this.#synced.transaction(() => {
-      this.#insert.run(toParams(id, entry));
+      this.#insertQuestions.run({ hash: stored.hash, questions: stored.questions });
+      this.#insert.run(toParams(id, stored));
       for (const note of notes) this.#note(id, note);
     }).immediate();
     return id;
@@ -256,17 +317,90 @@ export class SqliteDecisionLog implements DecisionLog, Disposable {
     }
     this.flushNotes();
     // Exactly the newest `maxEntries` stay under the cap: ties on the capping time are broken by id.
-    const capped = rowsOf<{ readonly at: string; readonly id: string }>(this.#db, SQL.nthNewest, { offset: rule.maxEntries - 1 })[0];
+    // Only a log holding more than the cap looks for the capping entry: that read sorts every row by time and id.
+    const total = rowsOf<{ readonly n: number }>(this.#db, SQL.count)[0]?.n ?? 0;
+    const capped = total > rule.maxEntries ? rowsOf<{ readonly at: string; readonly id: string }>(this.#db, SQL.nthNewest, { offset: rule.maxEntries - 1 })[0] : undefined;
     return this.#db.transaction(() => {
+      // `bound` is the later of the two cut-offs, so the search walks the time index up to it instead of
+      // reading every row's time out of its entry (a whole-table pass of a large log held the file for long).
+      const capAt = capped?.at ?? '';
       const ids = rowsOf<{ readonly id: string }>(this.#db, SQL.expired, {
-        before: rule.before, capAt: capped?.at ?? '', capId: capped?.id ?? '', limit: rule.batch,
+        bound: capAt > rule.before ? capAt : rule.before, before: rule.before, capAt, capId: capped?.id ?? '', limit: rule.batch,
       }).map(row => row.id);
       if (ids.length === 0) return 0;
       const list = JSON.stringify(ids);
+      const hashes = rowsOf<{ readonly hash: string }>(this.#db, SQL.batchQuestionKeys, { ids: list }).map(row => row.hash);
       this.#db.query(SQL.deleteNotes).run({ ids: list });
       this.#db.query(SQL.deleteEntries).run({ ids: list });
+      if (hashes.length > 0) this.#db.query(SQL.deleteOrphanQuestions).run({ hashes: JSON.stringify(hashes) });
       return ids.length;
     }).immediate();
+  }
+
+  /**
+   * Moves the questions of up to `batch` rows written before version 6 into the questions table, each row
+   * keeping everything else; returns how many rows it moved. One unsynced transaction per call. An entry
+   * read back is the same before and after (`get`, `query`).
+   */
+  carryForward(batch: number): number {
+    if (!Number.isSafeInteger(batch) || batch < 1) throw new RangeError('Carrying the decision log forward needs a positive batch.');
+    this.flushNotes();
+    return this.#db.transaction(() => {
+      const rows = rowsOf<{ readonly id: string; readonly entry: string }>(this.#db, SQL.legacyRows, { limit: batch });
+      const questions = this.#db.query(SQL.insertQuestions), carry = this.#db.query(SQL.carryRow);
+      for (const row of rows) {
+        const stored = splitQuestions(JSON.parse(row.entry) as Readonly<Record<string, unknown>>);
+        questions.run({ hash: stored.hash, questions: stored.questions });
+        carry.run({ id: row.id, entry: stored.entry, hash: stored.hash });
+      }
+      return rows.length;
+    }).immediate();
+  }
+
+  /** The file's pages, free pages, vacuum mode and rows still to carry forward. Reads only SQLite's own counters and one indexed count. */
+  storage(): DecisionLogStorage {
+    const number = (sql: string): number => Number(Object.values(rowsOf<Record<string, number>>(this.#db, sql)[0] ?? {})[0] ?? 0);
+    const mode = number('PRAGMA auto_vacuum');
+    return {
+      pageSize: number('PRAGMA page_size'),
+      pageCount: number('PRAGMA page_count'),
+      freePages: number('PRAGMA freelist_count'),
+      vacuum: mode === 2 ? 'incremental' : mode === 1 ? 'full' : 'none',
+      rowsToCarry: number(SQL.legacyCount),
+    };
+  }
+
+  /**
+   * Gives up to `pages` free pages back to the file system (a file in incremental vacuum mode); returns how many
+   * went. Each call is one short write that moves pages from the end of the file, never a whole-file rewrite.
+   */
+  reclaim(pages: number): number {
+    if (!Number.isSafeInteger(pages) || pages < 1) throw new RangeError('Reclaiming decision log space needs a positive page count.');
+    this.flushNotes();
+    const before = this.storage().freePages;
+    this.#db.query(`PRAGMA incremental_vacuum(${pages})`).all();
+    return before - this.storage().freePages;
+  }
+
+  /**
+   * The last step of carrying a file written before version 6 forward, once every row is carried: one rewrite
+   * of the file (VACUUM) that switches it to incremental vacuum mode, so every later pass frees space a batch
+   * at a time. Returns the sizes before carrying forward began and now, once; undefined when this file was not
+   * carried forward or the step already ran. The caller runs it only when the live data is small, because the
+   * rewrite holds the file for as long as copying that data takes.
+   */
+  finishCarryForward(): DecisionLogCarriedForward | undefined {
+    this.flushNotes();
+    const recorded = rowsOf<{ readonly value: string }>(this.#db, SQL.carriedFrom)[0];
+    if (recorded === undefined) return undefined;
+    if (this.storage().vacuum !== 'incremental') {
+      this.#db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
+      this.#db.exec('VACUUM;');
+    }
+    this.#db.query(SQL.forgetCarriedFrom).run();
+    this.#db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    const now = this.storage();
+    return { fromBytes: Number(recorded.value), toBytes: now.pageCount * now.pageSize };
   }
 
   /** Hands the space freed by pruning back from the write-ahead log. */

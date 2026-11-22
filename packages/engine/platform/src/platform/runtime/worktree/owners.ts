@@ -7,7 +7,7 @@ import type { WorktreeOwnerInfo } from './retention.js';
 
 /** The slice of the contract store the owner lookup needs; tests pass a plain object. */
 export interface ContractLookup {
-  load(contractId: string): Observed<Pick<Contract, 'status' | 'completedAt' | 'baseBranch' | 'inputSnapshot'>>;
+  load(contractId: string): Observed<Pick<Contract, 'status' | 'completedAt' | 'baseBranch' | 'inputSnapshot' | 'branch'>>;
 }
 
 /**
@@ -98,17 +98,23 @@ function readWorkstreamOwners(workingDirectory: string, worktreesRoot: string): 
  */
 export function createContractOwnerResolver(workingDirectory: string, contracts: ContractLookup): (path: string) => WorktreeOwnerInfo {
   const base = productWorktreeRoot(workingDirectory);
-  const loaded = new Map<string, WorktreeOwnerInfo & { readonly inputId?: string | undefined }>();
-  const contractOwner = (id: string): WorktreeOwnerInfo & { readonly inputId?: string | undefined } => {
+  type ContractOwner = WorktreeOwnerInfo & { readonly inputId?: string | undefined; readonly branch?: string | undefined };
+  const loaded = new Map<string, ContractOwner>();
+  const contractOwner = (id: string): ContractOwner => {
     const known = loaded.get(id);
     if (known) return known;
-    let owner: WorktreeOwnerInfo & { readonly inputId?: string | undefined } = UNKNOWN;
+    let owner: ContractOwner = UNKNOWN;
     if (isContractId(id)) {
       try {
         const read = contracts.load(id);
         const contract = read.kind === 'present' ? read.value : null;
         if (contract) {
-          const shared = { baseBranch: contract.baseBranch, inputId: contract.inputSnapshot?.id };
+          // The captured input is the person's own checkout as it was: a commit made only to capture it is not work.
+          const inputCommit = contract.inputSnapshot?.inputCommit;
+          const shared = {
+            baseBranch: contract.baseBranch, inputId: contract.inputSnapshot?.id, branch: contract.branch,
+            ...(inputCommit ? { baseCommits: [inputCommit] } : {}),
+          };
           owner = !isTerminalContractStatus(contract.status) ? { state: 'running', ...shared }
             : contract.completedAt === undefined ? { state: 'unknown', ...shared }
               : { state: 'ended', endedAt: contract.completedAt, ...shared };
@@ -132,15 +138,19 @@ export function createContractOwnerResolver(workingDirectory: string, contracts:
     return inputOwners.get(snapshotId) ?? UNKNOWN;
   };
   let workstreamOwners: Map<string, WorktreeOwnerInfo> | undefined;
-  const strip = (owner: WorktreeOwnerInfo & { readonly inputId?: string | undefined }): WorktreeOwnerInfo =>
-    owner.state === 'ended' ? { state: 'ended', endedAt: owner.endedAt, baseBranch: owner.baseBranch } : { state: owner.state, baseBranch: owner.baseBranch };
+  // A work item's tree nested in the contract's tree: work integrated into the contract's branch is kept there.
+  const strip = (owner: ContractOwner, nested = false): WorktreeOwnerInfo => {
+    const baseCommits = [...(owner.baseCommits ?? []), ...(nested && owner.branch ? [`refs/heads/${owner.branch}`] : [])];
+    const bases = baseCommits.length > 0 ? { baseCommits } : {};
+    return owner.state === 'ended' ? { state: 'ended', endedAt: owner.endedAt, baseBranch: owner.baseBranch, ...bases } : { state: owner.state, baseBranch: owner.baseBranch, ...bases };
+  };
   return (path) => {
     const parts = productWorktreeSegments(workingDirectory, path);
     const kind = kindOfProductWorktree(workingDirectory, path);
     if (parts === null || kind === null) return UNKNOWN;
     try {
       switch (kind) {
-        case 'contract': return parts.length >= 2 ? strip(contractOwner(`ctr-${parts[1]}`)) : UNKNOWN;
+        case 'contract': return parts.length >= 2 ? strip(contractOwner(`ctr-${parts[1]}`), parts.length > 2) : UNKNOWN;
         case 'contract-planner': return parts.length === 2 ? strip(contractOwner(plannerContractId(parts[1]!))) : UNKNOWN;
         case 'contract-input': return parts.length === 2 ? inputOwner(parts[1]!) : UNKNOWN;
         case 'ws':

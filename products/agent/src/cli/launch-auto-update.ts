@@ -7,7 +7,7 @@ import {
 } from '@goodvibes/engine/terminal-shell/launch-auto-update';
 import { restartOntoUpdatedBinary as restart, type RestartOntoUpdatedBinaryOptions } from '@goodvibes/engine/terminal-shell/service-io';
 export type { RestartOntoUpdatedBinaryOptions } from '@goodvibes/engine/terminal-shell/service-io';
-import { IS_WORKSPACE_DISTRIBUTION, WORKSPACE_UPDATE_GUIDANCE } from '../runtime/workspace-update-policy.ts';
+import { IS_WORKSPACE_DISTRIBUTION } from '../runtime/workspace-update-policy.ts';
 /**
  * Launch-time self-update, the agent lands on the newest release at startup
  * so an installed binary never drifts behind. At interactive launch (before
@@ -161,7 +161,8 @@ export interface SelfUpdateAtLaunchParams {
  * stdout copies written here are wiped by the agent's alternate screen.
  */
 export async function selfUpdateAtLaunch(params: SelfUpdateAtLaunchParams): Promise<readonly string[]> {
-  if (IS_WORKSPACE_DISTRIBUTION) return [WORKSPACE_UPDATE_GUIDANCE];
+  // A copy run from its source folder does not update itself; /update says how to update it. Launch says nothing.
+  if (IS_WORKSPACE_DISTRIBUTION) return [];
   const lines: string[] = [];
   const outcome = await runLaunchAutoUpdate({
     fetchImpl: fetch as UpdateFetchLike,

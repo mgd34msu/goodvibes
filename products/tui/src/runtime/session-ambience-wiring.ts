@@ -64,7 +64,8 @@ export function wireSessionAmbience(deps: SessionAmbienceDeps): SessionAmbience 
   const sessionAutoTitler = createSessionAutoTitler({
     conversation: deps.conversation, model: titleModel, configManager, turns: deps.events.turns,
     getSessionId: deps.getSessionId, isActive: deps.isActive,
-    onTitled: (title) => notifyAndPaint(`[Session] Auto-titled: "${title}"`),
+    // The new title is shown in the header; a routine title is not a notice.
+    onTitled: () => render(),
   });
   const routingUnsub = attachSpokenTurnModelRouting({
     orchestrator: deps.orchestrator,

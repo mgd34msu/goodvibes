@@ -97,25 +97,34 @@ Important pieces:
 
 ## Completion verification
 
-`ResponseCompletionGuard` owns final-response checking separately from input
-delivery and tool permissions. Its applicability reading considers the current
-request and original user instructions before starting fulfillment checks.
-Conversation, explanations, factual questions and status requests can finish
-without completing an earlier project. Requests to implement, inspect, audit,
-run checks or produce an artifact require verification. An unsettled
-applicability reading retains the checks. This routing neither completes nor
-cancels earlier pending work.
+The main conversation's answer is never held for a check: it stands as soon as
+it ends, and a plain answer to a plain question costs no decision-model
+request. The one case a check guards is an answer that claims delegated work
+finished when it did not. So only a turn that waited for delegated work (agents
+or a contract) and handed the model their results gets one reading after its
+answer is committed: the completion battery's `unsupported` question over this
+turn's messages and the delegates' final states
+(`answerClaimsUndoneDelegatedWork` in `core/response-completion.ts`). It has no
+clock of its own and ends when the decision model answers or fails. When it
+answers yes, the person gets one line, `[Check] The answer above says work was
+done that its agents or contract did not do or did not finish; F2 shows what
+each one did.`; when it answers no, is unsure, fails, or no decision model is
+in use, nothing is said.
 
-When verification applies, the guard checks the requested outcome against
-native observations, delegated work and the exact proposed answer. The check
-runs after the draft is shown and has 30 seconds; a draft it sends back is
-withdrawn. The model receives numbered findings with repair and closure
-conditions, so it can fix the remaining work while preserving valid results.
-An equivalent draft over unchanged evidence gets the held findings again
-without another full check; new execution evidence triggers a fresh check.
-Rewording cannot satisfy a finding that requires more work. A turn sends back
-at most two drafts: the next one stands with a "Not verified" note that says
-why, as does a draft whose check did not finish in time or could not run.
+`ResponseCompletionGuard` still checks a worker agent's answer for whoever
+delegated it (`agents/orchestrator-runner.ts`). Its applicability reading
+considers the current request and original user instructions before starting
+fulfillment checks: conversation, explanations, factual questions and status
+requests can finish without completing an earlier project, and requests to
+implement, inspect, audit, run checks or produce an artifact require
+verification. The guard checks the requested outcome against native
+observations, delegated work and the exact proposed answer; the check ends when
+the decision model answers or fails (it has no clock of its own). A draft it
+sends back returns to the worker with numbered findings with repair and closure
+conditions. An equivalent draft over unchanged evidence gets the held findings
+again without another full check; new execution evidence triggers a fresh
+check. A worker sends back at most two drafts; the next one stands, and why it
+was not verified goes to the log.
 
 Original instructions and execution observations are audited separately.
 Read receipts preserve returned ranges, hashes and truncation; reading a file
@@ -126,8 +135,8 @@ to approval or established counterevidence. Work-quality, integration and final
 publication checks still apply, and a changed evidence binding starts fresh
 attempts. Contract reviews also expose [file inventory and version-bound assessments](./contract-criteria.md#project-review-inventory).
 
-Jev authentication, access or billing failures are named in the "Not verified"
-note on the answer, so the person sees what to fix. Completed work is retained.
+Jev authentication, access or billing failures reach the person through the
+decision model's own failure notice (one per outage). Completed work is retained.
 These mechanisms describe implemented behavior; they do not establish
 live-provider accuracy or end-to-end acceptance for an untested candidate.
 
@@ -385,9 +394,18 @@ waits.
   working, the lock is released; the answer takes it again.
 - **Worktree retention.** A worktree the product created under
   `.goodvibes/.worktrees` is judged when its contract or agent ends (passed,
-  failed, cancelled) and again when the daemon starts. One that is clean and
-  whose commits are all in its base branch is removed at once, with its
-  branch. One that is clean but holds commits its base lacks stays for 14 days
+  failed, cancelled, or ended by a crash and settled at the next start) and
+  again when the daemon or a terminal app starts. A contract's own worktree,
+  its captured-input view and the unit worktrees nested inside its worktree
+  are released together, units first. For them the base is the project's
+  branch plus the contract's captured input (a commit made from the person's
+  uncommitted files, which their checkout still holds) and, for a unit, the
+  contract's branch; installed dependency folders and the product's own
+  `.goodvibes/` folder are not counted as the worktree's own files. One that is
+  clean and whose commits are all in its base is removed at once, with its
+  branch. A terminal app's start names each worktree kept for the owner's
+  decision once, with its next steps; `/worktree review` lists it while it
+  stays. One that is clean but holds commits its base lacks stays for 14 days
   after the owner ended; then its directory is removed and its branch is kept,
   so the commits stay reachable. One with uncommitted changes (tracked or
   untracked) or with files git ignores (`.env`, local databases, build output,

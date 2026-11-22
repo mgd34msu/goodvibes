@@ -20,6 +20,8 @@ export type NoticeSink = (content: string, options: {
     readonly runtimeEvent?: RuntimeEventProvenance | undefined;
     /** The writer's declaration (addNotice); a sink shows it as given and reads nothing. */
     readonly notice?: NoticeMeta | undefined;
+    /** The notice keyed `notice.key` is taken back (withdrawNotice): its entry is removed, nothing is recorded. */
+    readonly withdraw?: boolean | undefined;
     readonly signal: AbortSignal;
 }) => void | Promise<void>;
 export interface TerminalConversationPresentation {
@@ -268,7 +270,9 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.messageKindRegistry.delete(nextIndex);
         super.addEventNotice(content, runtimeEvent);
         this.markDirty();
-        this.publishSystemNotice(nextIndex, false);
+        // A cancelled response was stopped by the person; the turn's own row shows it, so it is not a notice.
+        if (runtimeEvent.type !== 'TURN_CANCEL')
+            this.publishSystemNotice(nextIndex, false);
     }
     public override addNotice(content: string, meta: NoticeMeta): void {
         const nextIndex = this.getMessageCount();
@@ -307,6 +311,18 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.messageKindRegistry.delete(this.getMessageCount());
         super.addShellOutput(content, failed);
         this.markDirty();
+    }
+    /** The keyed notice's condition ended: its entry leaves the notification history and the count. */
+    public override withdrawNotice(key: string): void {
+        const sink = this.noticeSink;
+        if (!sink)
+            return;
+        try {
+            const result = sink('', { restored: false, notice: { level: 'info', key }, withdraw: true, signal: this.noticeLifetime.signal });
+            if (result)
+                void Promise.resolve(result).catch(() => { });
+        }
+        catch { /* The entry stays; it is still true that the condition happened. */ }
     }
     /** Where system notices go (core/notices.ts); the transcript draws none but a turn's failure or retry and a `!` command's output (isTranscriptNotice). Absent in bare test conversations. */
     public setNoticeSink(sink: NoticeSink | null): void {
@@ -723,6 +739,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
             configManager: this._configManager,
             splashOptions: this.splashOptions,
             systemNotices: 'elsewhere' as const,
+            isRuntimeMessage: (index: number) => this.isRuntimeMessage(index),
             workTreeSources: this.workTreeSources,
             treeGlyphSet: this.treeGlyphSet(),
             focusId: this.workTree.focus,

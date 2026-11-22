@@ -1,6 +1,5 @@
 import { contextFor, sharedContextFor } from '../batteries/asking.ts';
 import { readItem, type Battery, type BatteryItems, type BatteryRun, type PartialBatteryRun } from '../batteries/battery.ts';
-import { DEFAULT_DECISION_DEADLINE_MS } from './deadline.ts';
 import { JudgmentError } from './errors.ts';
 import { toJson, type EntryType, type JudgmentConclusion, type JudgmentPort, type JudgmentResult, type Questions } from './types.ts';
 
@@ -94,7 +93,11 @@ export interface JudgeOptions<Items extends BatteryItems, R> {
   readonly site: string;
   readonly battery: Battery<Items>;
   readonly state: EntryType;
-  /** Total time allowed; defaults to the port's decision deadline, then 1500 ms. */
+  /**
+   * Total time allowed, when the caller has a real limit of its own. Absent
+   * (every engine decision): the request ends when the decision server
+   * answers, errors or the connection fails.
+   */
   readonly deadlineMs?: number;
   readonly cache?: JudgeCacheOption;
   /** Turns the readings into a value; undefined means unsure, and the fallback applies. */
@@ -230,14 +233,15 @@ async function judgeAsked<Items extends BatteryItems, R>(o: Omit<JudgeOptions<It
     }
   };
 
-  const deadlineMs = o.deadlineMs ?? port.decisionDeadlineMs ?? DEFAULT_DECISION_DEADLINE_MS;
+  const deadlineMs = o.deadlineMs;
   const deadline = new AbortController();
-  const timer = setTimeout(() => deadline.abort(new DOMException('The decision deadline passed.', 'TimeoutError')), deadlineMs);
+  const timer = deadlineMs === undefined ? undefined
+    : setTimeout(() => deadline.abort(new DOMException('The decision deadline passed.', 'TimeoutError')), deadlineMs);
   const signal = o.signal === undefined ? deadline.signal : AbortSignal.any([o.signal, deadline.signal]);
   let result: JudgmentResult<Questions>;
   try {
     result = await untilAborted(port.ask({
-      state: o.state, questions, signal, deadlineMs, conclude,
+      state: o.state, questions, signal, ...(deadlineMs === undefined ? {} : { deadlineMs }), conclude,
       ...sharedContextFor(battery, Object.keys(questions)),
       ...(battery.model === undefined ? {} : { model: battery.model }),
       context: contextFor(battery, 'battery', { site: o.site }),

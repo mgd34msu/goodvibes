@@ -1,5 +1,5 @@
 export { withDecisionLog, recordedJudgmentInputHash, type DecisionLogOptions } from './recording-port.ts';
-export { SqliteDecisionLog } from './sqlite.ts';
+export { SqliteDecisionLog, type DecisionLogCarriedForward, type DecisionLogStorage } from './sqlite.ts';
 export {
   actionOf,
   canonicalJson,

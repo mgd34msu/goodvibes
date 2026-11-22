@@ -11,6 +11,10 @@ import { logger } from '../../utils/logger.js';
 import { resolveAndValidatePath } from '../../utils/path-safety.js';
 import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { accessRestrictedNote, partitionByReadAccess, type ReadAccessFilter } from '../shared/read-access.js';
+import { PRODUCT_WORKTREE_DIR_SEGMENTS } from '../../git/product-worktree-marker.js';
+
+/** The product's own state folder under a project root. */
+const PRODUCT_STATE_DIR = PRODUCT_WORKTREE_DIR_SEGMENTS[0];
 
 export type FindSearchOptions = JudgmentReadingOptions & WalkDirOptions & {
   allowOutsideProject?: boolean;
@@ -117,7 +121,7 @@ export interface FindInput {
   queries: FindQuery[];
   output?: OutputOptions | undefined;
   parallel?: boolean | undefined;
-  /** Per-call deadline; defaults to DEFAULT_FIND_TIMEOUT_MS. */
+  /** Per-call time budget: a scan that reaches it stops and returns what it found. None by default. */
   timeout_ms?: number | undefined;
 }
 
@@ -489,7 +493,7 @@ export function directoryIgnoreFiles(directory: string): readonly string[] {
 export function buildIgnoreFileMatcher(
   paths: readonly string[],
   diagnostics?: FindDiagnostics,
-): ((rel: string) => boolean) | null {
+): ((rel: string, isDirectory?: boolean) => boolean) | null {
   const sources: string[] = [];
   for (const path of paths) {
     if (!existsSync(path)) continue;
@@ -534,12 +538,12 @@ export function buildIgnoreFileMatcher(
 
   if (rules.length === 0) return null;
 
-  return (rel: string): boolean => {
+  return (rel: string, isDirectory = false): boolean => {
     // An excluded parent directory excludes its descendants too. A file
     // negation cannot reinclude a child until its parent is included again.
     const segments = rel.split('/');
     for (let length = 1; length <= segments.length; length++) {
-      const directory = length < segments.length;
+      const directory = length < segments.length || isDirectory;
       const candidate = segments.slice(0, length).join('/');
       let ignored = false;
       for (const rule of rules) {
@@ -562,13 +566,13 @@ export function buildIgnoreFileMatcher(
  * the ignore files as they were when it first read them, so a long-lived caller
  * makes a new one per build.
  */
-export function createNestedIgnoreMatcher(root: string, diagnostics?: FindDiagnostics): (absPath: string) => boolean {
-  const byDirectory = new Map<string, ((rel: string) => boolean) | null>();
-  const matcherFor = (directory: string): ((rel: string) => boolean) | null => {
+export function createNestedIgnoreMatcher(root: string, diagnostics?: FindDiagnostics): (absPath: string, isDirectory?: boolean) => boolean {
+  const byDirectory = new Map<string, ((rel: string, isDirectory?: boolean) => boolean) | null>();
+  const matcherFor = (directory: string): ((rel: string, isDirectory?: boolean) => boolean) | null => {
     if (!byDirectory.has(directory)) byDirectory.set(directory, buildIgnoreFileMatcher(directoryIgnoreFiles(directory), diagnostics));
     return byDirectory.get(directory) ?? null;
   };
-  return (absPath: string): boolean => {
+  return (absPath: string, isDirectory = false): boolean => {
     const rel = relative(root, absPath);
     if (!rel || rel.startsWith('..')) return false;
     const segments = rel.split(sep);
@@ -576,7 +580,7 @@ export function createNestedIgnoreMatcher(root: string, diagnostics?: FindDiagno
     let directory = root;
     for (let depth = 0; depth < segments.length; depth++) {
       const matcher = matcherFor(directory);
-      if (matcher?.(segments.slice(depth).join('/'))) return true;
+      if (matcher?.(segments.slice(depth).join('/'), isDirectory)) return true;
       directory = resolve(directory, segments[depth]!);
     }
     return false;
@@ -587,6 +591,9 @@ export function createNestedIgnoreMatcher(root: string, diagnostics?: FindDiagno
  * denial must prune that subtree, not prevent searching the ordinary project.
  * Explicit roots and every opened path still require the original authority. */
 function searchDirectorySelection(directory: string, options: WalkDirOptions, diagnostics?: FindDiagnostics): boolean | undefined {
+  // The product's own state folder (logs, sessions, the decision log, worktrees) is never walked
+  // into, hidden files included; a search whose path names a place inside it still searches there.
+  if (basename(directory) === PRODUCT_STATE_DIR) return false;
   const selection = options.selectDirectory?.(directory);
   if (selection === false) return false;
   try { assertCapturedInputPathContext(directory); }
@@ -653,12 +660,73 @@ export async function collectFilesForSearch(
   diagnostics?: FindDiagnostics,
   walkOptions: WalkDirOptions = {},
 ): Promise<string[]> {
+  const ignore = searchIgnoreRules(basePath, queryGlob, diagnostics);
   const held = await heldSearchFiles(basePath, queryGlob === undefined ? undefined : [queryGlob], diagnostics, walkOptions);
-  if (held) return held.files;
-  if (!queryGlob) {
-    return collectWalkFiles(basePath, diagnostics, walkOptions);
+  if (held) return ignore.keep(held.files);
+  // The walk does not enter an ignored directory at all, so a large one costs nothing.
+  const pruned: WalkDirOptions = ignore.applies
+    ? { ...walkOptions, selectDirectory: (directory) => (ignore.prune(directory) ? false : walkOptions.selectDirectory?.(directory)) }
+    : walkOptions;
+  const files = queryGlob
+    ? Array.from(await collectGlobFiles(basePath, [queryGlob], false, false, diagnostics, new DirectoryWalk(basePath), pruned))
+    : await collectWalkFiles(basePath, diagnostics, pruned);
+  return ignore.keep(files);
+}
+
+/**
+ * The project's ignore files (`.gitignore` and `.ignore`, nested ones where they live) as a text
+ * search applies them: from the repository root that holds `basePath` (the nearest ancestor with
+ * `.git`, else `basePath`), so a root rule such as `coverage/` also holds for a search of a
+ * subfolder. A search whose path or glob names an ignored place searches it: the caller asked for
+ * it. What was left out is said once in the result's warnings.
+ */
+function searchIgnoreRules(basePath: string, queryGlob: string | undefined, diagnostics: FindDiagnostics | undefined): {
+  readonly applies: boolean;
+  prune(directory: string): boolean;
+  keep(files: readonly string[]): string[];
+} {
+  const root = resolve(basePath);
+  let ignoreRoot = root;
+  // A contract's captured input is searched by its own rules only: nothing above it is read.
+  if (!hasCapturedToolInvocation() && !isCapturedInputPath(root)) {
+    for (let directory = root; ; directory = dirname(directory)) {
+      if (existsSync(join(directory, '.git'))) { ignoreRoot = directory; break; }
+      if (dirname(directory) === directory) break;
+    }
   }
-  return Array.from(await collectGlobFiles(basePath, [queryGlob], false, false, diagnostics, new DirectoryWalk(basePath), walkOptions));
+  const ignored = createNestedIgnoreMatcher(ignoreRoot, diagnostics);
+  const named = queryGlob === undefined ? root : globLiteralDirectory(root, queryGlob);
+  const applies = !ignored(root, true) && !ignored(named, true);
+  let files = 0;
+  let folders = 0;
+  const report = (): void => {
+    if (files + folders === 0) return;
+    const parts = [folders > 0 ? `${folders} folder(s)` : '', files > 0 ? `${files} file(s)` : ''].filter(Boolean).join(' and ');
+    addFindWarning(diagnostics, `Left out ${parts} the project's .gitignore or .ignore excludes; name one in 'path' or 'glob' to search it.`);
+  };
+  return {
+    applies,
+    prune(directory) {
+      if (!ignored(directory, true)) return false;
+      folders += 1;
+      return true;
+    },
+    keep(list) {
+      if (!applies) return [...list];
+      const kept = list.filter((file) => !ignored(file));
+      files += list.length - kept.length;
+      report();
+      return kept;
+    },
+  };
+}
+
+/** The directory a glob's literal leading parts name under `basePath` (`src/app/**` names `src/app`). */
+function globLiteralDirectory(basePath: string, glob: string): string {
+  const parts = glob.split('/');
+  const end = parts.findIndex((part) => !/^[A-Za-z0-9_. -]+$/.test(part) || part === '.' || part === '..');
+  const literal = parts.slice(0, Math.min(end < 0 ? parts.length : end, parts.length - 1));
+  return resolve(basePath, ...literal);
 }
 
 /** `.`: the first character of a hidden entry's name. */

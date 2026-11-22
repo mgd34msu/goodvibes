@@ -44,6 +44,12 @@ export interface NoticeOptions {
   readonly runtimeEvent?: RuntimeEventProvenance | undefined;
   /** The writer's declaration (ConversationManager.addNotice): recorded at its level, no reading. */
   readonly notice?: NoticeMeta | undefined;
+  /** The notice keyed `notice.key` is taken back (ConversationManager.withdrawNotice): its entry is removed, nothing is recorded. */
+  readonly withdraw?: boolean | undefined;
+}
+/** The feed's event key of a keyed notice. */
+function keyedNoticeEvent(key: string): string {
+  return `notice:${key}`;
 }
 const FEED_LEVEL: Readonly<Record<NoticeMeta['level'], 'info' | 'warning' | 'critical'>> = { info: 'info', success: 'info', warning: 'warning', error: 'critical' };
 /** Keep one system notice in the history; the status bar counts it while unread. */
@@ -65,6 +71,10 @@ export interface NoticePublicationPolicy {
 }
 export function createNoticePublisher(policy: NoticePublicationPolicy) {
   return function publishNotice(feed: NotificationFeed, text: string, options: NoticeOptions = {}): void {
+    if (options.withdraw === true) {
+      if (options.notice?.key) feed.withdrawEvent(keyedNoticeEvent(options.notice.key));
+      return;
+    }
     if (text.trim().length === 0 || options.signal?.aborted) return;
     const restored = options.restored === true;
     const runtimeEvent = options.runtimeEvent;
@@ -87,6 +97,7 @@ export function createNoticePublisher(policy: NoticePublicationPolicy) {
       });
       return;
     }
-    feed.recordNotice({ ...parts, level: FEED_LEVEL[options.notice?.level ?? 'info'], timestamp, restored });
+    const key = options.notice?.key;
+    feed.recordNotice({ ...parts, level: FEED_LEVEL[options.notice?.level ?? 'info'], timestamp, restored, ...(key ? { eventKey: keyedNoticeEvent(key) } : {}) });
   };
 }

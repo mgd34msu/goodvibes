@@ -215,8 +215,11 @@ export function createConversationRenderer(presentation: ConversationPresentatio
     }
     /** A standalone message unit (a user message, or a system message outside any turn). */
     function renderConversationMessageUnit(context: ConversationRenderContext, message: Message, width: number, msgIdx: number): void {
-        if (message.role === 'user')
-            renderConversationUserMessage(context, message, width, msgIdx);
+        if (message.role === 'user') {
+            // Runtime data the host gave the model sits in a user-role slot; it is not the person's words, so no prompt row is drawn.
+            if (!context.isRuntimeMessage?.(msgIdx))
+                renderConversationUserMessage(context, message, width, msgIdx);
+        }
         else if (message.role === 'system') {
             // The main transcript's notices are history entries, not rows; a turn's failure or retry and a `!` command's output are drawn.
             if (context.systemNotices !== 'elsewhere' || isTranscriptNotice(message))

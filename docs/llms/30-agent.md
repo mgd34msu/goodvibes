@@ -182,7 +182,7 @@ The text goes back into the composer; remove the image marker or reference and d
 
 ### What the conversation shows besides messages
 
-Other notices are never drawn over the conversation: the status bar counts the unread ones and `Ctrl+N` (or `/notifications`) opens them. These lines are drawn in the conversation itself, where they happened:
+Other notices are never drawn over the conversation: the status bar counts the unread ones and `Ctrl+N` (or `/notifications`) opens them, newest first. What is a notice follows the same rule as in the terminal app (see "Notifications" in the terminal app part): only what needs you or tells you what you could not otherwise see; work in flight, routine successes and things already said are not. These lines are drawn in the conversation itself, where they happened:
 
 - Why a turn ended without an answer, with what to do next, for example `sample chat request failed 500: ...` then `Hint: ...`, or `openrouter chat request failed: Connection error.` then `Next: send it again, or choose another provider or model with /model.`
 - The first time a model request fails and is retried, why, and how long the retries can take: `Retrying up to 5 times over about 2 minutes. Next: wait, press Esc to stop, or choose another model with /model.`, or, when a fallback model is open (see "Failover" in the terminal app part), `Retrying once in about 2 s, then moving to the next model of your fallback order. Next: wait, or press Esc to stop.` The row under the conversation counts the attempts (`Retrying (attempt 2/5)...`).

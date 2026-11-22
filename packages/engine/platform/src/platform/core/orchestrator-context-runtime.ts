@@ -297,12 +297,10 @@ export async function checkContextWindowPreflight(
       reason: forcedByModelWarning ? 'model-warning' : preflightDecision.reason,
       ...(modelWarning?.providerStopReason ? { providerStopReason: modelWarning.providerStopReason } : {}),
     });
-    deps.conversation.addNotice(
-      forcedByModelWarning && modelWarning
-        ? `${describeModelContextWarning(modelWarning)}. Auto-compacting before the next request, regardless of ${knownWindow === null ? 'the unknown context window' : `the ~${Math.round(preflightDecision.usagePct)}% estimated usage`}...`
-        : `Context pre-check: request is at ${Math.round(preflightDecision.usagePct)}% (${estimatedTokens}/${contextWindow} tokens), ${formatAutoCompactTrigger(preflightDecision)}. Auto-compacting...`,
-      { level: 'info' }
-    );
+    // Compaction in progress is shown by the turn's activity; its outcome by the receipt (COMPACTION_RECEIPT), not by notices.
+    logger.info(forcedByModelWarning && modelWarning
+      ? `${describeModelContextWarning(modelWarning)}. Auto-compacting before the next request, regardless of ${knownWindow === null ? 'the unknown context window' : `the ~${Math.round(preflightDecision.usagePct)}% estimated usage`}`
+      : `Context pre-check: request is at ${Math.round(preflightDecision.usagePct)}% (${estimatedTokens}/${contextWindow} tokens), ${formatAutoCompactTrigger(preflightDecision)}; auto-compacting`);
     deps.requestRender();
 
     try {
@@ -332,7 +330,6 @@ export async function checkContextWindowPreflight(
       // An applied compaction is always announced, even when the turn was cancelled meanwhile.
       if (preflightReceipt) emitReceipt(deps, turnId, preflightReceipt);
       deps.signal?.throwIfAborted();
-      deps.conversation.addNotice('Context compacted. Retrying request...', { level: 'info' });
       if (deps.hookDispatcher) {
         deps.hookDispatcher.fire({
           path: 'Post:compact:preflight',
@@ -586,12 +583,10 @@ export async function handlePostTurnContextMaintenance(
       // Only a compaction that will really run consumes the provider's warning
       // and announces itself.
       deps.clearModelContextWarning?.();
-      deps.conversation.addNotice(
-        forcedByModelWarning && modelWarning
-          ? `${describeModelContextWarning(modelWarning)}. Auto-compacting now, regardless of ${knownWindow === null ? `the unknown context window (${totalTokens} tokens in use)` : `the ~${usagePct}% estimated usage (${totalTokens}/${maxTokens} tokens)`}...`
-          : `Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens), ${formatAutoCompactTrigger(autoDecision)}. Auto-compacting conversation...`,
-        { level: 'info' }
-      );
+      // In progress: the activity log; the outcome is the receipt (COMPACTION_RECEIPT).
+      logger.info(forcedByModelWarning && modelWarning
+        ? `${describeModelContextWarning(modelWarning)}. Auto-compacting now, regardless of ${knownWindow === null ? `the unknown context window (${totalTokens} tokens in use)` : `the ~${usagePct}% estimated usage (${totalTokens}/${maxTokens} tokens)`}`
+        : `Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens), ${formatAutoCompactTrigger(autoDecision)}; auto-compacting the conversation`);
       deps.requestRender();
     }
 
@@ -635,7 +630,6 @@ export async function handlePostTurnContextMaintenance(
           deps.setIsCompacting(false);
           deps.setLastWarningBracket(0);
           if (smallWindowReceipt) emitReceipt(deps, turnId, smallWindowReceipt);
-          deps.conversation.addNotice(`Context auto-compacted (small window mode). Kept last ${SMALL_WINDOW_KEEP_RECENT} messages.`, { level: 'success' });
           deps.requestRender();
         } catch (err: unknown) {
           deps.setIsCompacting(false);
@@ -673,7 +667,6 @@ export async function handlePostTurnContextMaintenance(
           deps.signal?.throwIfAborted();
           deps.setIsCompacting(false);
           deps.setLastWarningBracket(0);
-          deps.conversation.addNotice('Context auto-compacted. Conversation history summarized to free context window.', { level: 'success' });
           deps.requestRender();
           logger.info('Orchestrator: auto-compact complete', {
             modelId: currentModel.registryKey,
@@ -744,8 +737,8 @@ export async function handlePostTurnContextMaintenance(
     } catch (compactErr: unknown) {
       deps.setIsCompacting(false);
       if (deps.signal?.aborted) {
-        // Close the "Auto-compacting..." notice above rather than leave it open-ended.
-        deps.conversation.addNotice('Auto-compaction cancelled.', { level: 'info' });
+        // The turn was cancelled; the compaction stopped with it, and nothing of the conversation changed.
+        logger.info('Auto-compaction cancelled with its turn');
         deps.requestRender();
         deps.signal.throwIfAborted();
       }
@@ -763,10 +756,8 @@ export async function handlePostTurnContextMaintenance(
     bracket > deps.lastWarningBracket
   ) {
     deps.setLastWarningBracket(bracket);
-    deps.conversation.addNotice(
-      `Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens). Auto-compact will trigger at ${configuredThreshold}% or when the ${COMPACTION_BUFFER_TOKENS.toLocaleString()} token safety buffer is reached.`,
-      { level: 'warning' }
-    );
+    // The status bar shows how full the context is; nothing here needs the person, so it is not a notice.
+    logger.info(`Context usage at ${usagePct}% (${totalTokens}/${maxTokens} tokens); auto-compact will trigger at ${configuredThreshold}% or when the ${COMPACTION_BUFFER_TOKENS.toLocaleString()} token safety buffer is reached`);
     if (deps.runtimeBus) {
       emitOpsContextWarning(deps.runtimeBus, deps.emitterContext(turnId), {
         usage: usagePct,

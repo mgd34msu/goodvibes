@@ -3,7 +3,8 @@
  * `--disable`, `--hostname`/`--port`, and a front-end's own launch-time
  * settings defaults onto a live ConfigManager.
  */
-import { describeIngestionNotice, type ConfigKey, type ConfigManager, type SettingsIngestionNotice } from '@goodvibes/engine/platform/platform/config';
+import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { FeatureAnnouncementStore, featureAnnouncementsPath } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
 import type { NoticeLevel } from '@goodvibes/engine/platform/platform/core';
 import { featureEnablementWrite, getFeatureSetting } from './cli-feature-settings.js';
 import { FEATURE_SETTINGS } from '@goodvibes/engine/platform/platform/runtime/feature-flags/feature-settings';
@@ -76,23 +77,23 @@ export function firstShowingOfSettingsNotice(line: string): boolean {
 }
 
 /**
- * Shows every settings value the app could not read as written: first the ones
- * the start-up load set aside (their copy on stderr is wiped when the full
- * screen opens), then each later load's as it happens, as warnings. Returns the
- * unsubscribe function.
+ * Shows what the app's settings loads said for the first time on this machine
+ * (ConfigManager.onSettingsAnnouncement): a setting it could not read as
+ * written, settings an earlier version left that were carried forward. Each is
+ * an announce-once receipt, so the next start says nothing about the same
+ * file and key; the receipt is acknowledged here, so an attached daemon does
+ * not deliver it a second time. A skipped or held setting is a warning; a
+ * carried-forward one is information. Returns the unsubscribe function.
  */
 export function announceSettingsIngestionNotices(
-  configManager: Pick<ConfigManager, 'getIngestionQuarantine' | 'subscribeIngestionNotices'>,
+  configManager: Pick<ConfigManager, 'onSettingsAnnouncement' | 'getControlPlaneConfigDir'>,
   show: (line: string, level: NoticeLevel) => void,
 ): () => void {
-  // Each notice once per session: a later load (a daemon attaching, a settings
-  // reload) reports the same stray setting again, and saying it twice reads as two problems.
-  const announce = (notice: SettingsIngestionNotice): void => {
-    const line = describeIngestionNotice(notice);
-    if (firstShowingOfSettingsNotice(line)) show(line, 'warning');
-  };
-  for (const notice of configManager.getIngestionQuarantine()) announce(notice);
-  return configManager.subscribeIngestionNotices(announce);
+  const store = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
+  return configManager.onSettingsAnnouncement(({ id, text }) => {
+    store.acknowledge(new Set([id]));
+    if (firstShowingOfSettingsNotice(text)) show(text, id.startsWith('carried-forward:') ? 'info' : 'warning');
+  });
 }
 
 /**

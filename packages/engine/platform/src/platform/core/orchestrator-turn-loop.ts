@@ -7,8 +7,8 @@ import { isNativeConversationTurn, markNativeConversationTurnEffectsPossible, re
 import { publishTurnTerminal } from './turn-cancellation.js';
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import type { ConversationManager } from './conversation.js';
-import { collectResponseDelegates, ResponseCompletionGuard, waitForResponseDelegates } from './response-completion.js';
-import { COMPLETION_CHECK_DEADLINE_MS, MAX_REJECTED_DRAFTS, TURN_RETRY_DELAYS_MS, TurnEnded, runTurn, type TurnModelResponse, type TurnRequest } from './turn-loop.js';
+import { answerClaimsUndoneDelegatedWork, collectResponseDelegates, ResponseCompletionGuard, waitForResponseDelegates } from './response-completion.js';
+import { TURN_RETRY_DELAYS_MS, TurnEnded, runTurn, type TurnModelResponse, type TurnRequest } from './turn-loop.js';
 import { readRepeatStuck } from '../agents/orchestrator-observations.js';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { createVerificationWriter, reportVerificationUsage } from './verification/writer.js';
@@ -363,10 +363,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   const turnReasoning = () => decisionRoute
     ? { reasoningEffort: decisionRoute.effort.value, reasoningEffortSpec: decisionRoute.effort.spec }
     : resolveTurnReasoning(model, context.configManager.get('provider.reasoningEffort'));
-  if (decisionRoute) {
-    context.conversation.addNotice(describeDecisionRoute(decisionRoute.info), { level: 'info', kind: 'operational' });
-    context.requestRender();
-  }
+  // The route a turn took is shown where the turn is (its row names the model that answers), not as a notice per turn.
+  if (decisionRoute) logger.info(describeDecisionRoute(decisionRoute.info));
   // Core tools in full, the rest as one-line entries loadable through tool_schema;
   // read again before each request so a tool loaded in one round is sent in full in the next.
   let toolDefinitions = context.toolRegistry.getModelToolDefinitions();
@@ -504,6 +502,24 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     completedWork: context.getCompletedWork?.(),
     delegated: collectResponseDelegates(context.conversation, context.agentManager, intakeAgentIds),
   });
+  /** True once this turn handed the model the results of delegated work (agents or a contract) it waited for. */
+  let delegatedWorkEnded = false;
+  /**
+   * After an answer that followed delegated work is committed: one reading of
+   * whether it claims work its delegates did not do. It never holds the answer
+   * or the next turn and has no clock of its own; a reading that cannot answer
+   * says nothing, and one that finds a false claim is one line.
+   */
+  const readDelegatedClaims = (answer: string): void => {
+    const input = checkInput();
+    void answerClaimsUndoneDelegatedWork({ request: context.text, response: answer, conversation: context.conversation, delegated: input.delegated, tools: input.tools },
+      new AbortController().signal)
+      .then((found) => {
+        if (!found) return;
+        context.conversation.addNotice('[Check] The answer above says work was done that its agents or contract did not do or did not finish; F2 shows what each one did.', { level: 'warning', kind: 'operational' });
+        context.requestRender();
+      });
+  };
 
   /**
    * One attempt at the next model request: the context check, the request
@@ -1033,8 +1049,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
     },
     conversation: context.conversation,
     hostInstructions,
-    runTools: async () => {
-      const response = lastResponse!;
+    runTools: async (sent) => {
+      // The calls the loop sends, which leave out a repeat of a call refused earlier in the turn.
+      const response = { ...lastResponse!, toolCalls: [...sent.toolCalls] };
       if (context.runtimeBus) {
         emitToolBatchReady(context.runtimeBus, context.emitterContext(context.turnId), {
           turnId: context.turnId,
@@ -1090,33 +1107,22 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       recent: context.conversation.getRecentMessageSnapshot(PROGRESS_CHECK_RECENT_MESSAGES) }, progressSignal),
     judgeRepeat: (history, signature, repeatSignal) => readRepeatStuck(history, signature, repeatSignal),
     // A session-mode unit's turn is held where it would complete; a nudge keeps the turn going.
+    // The main session's answer is not held for a check: it is committed as it
+    // arrives, and only a turn that ended delegated work gets one reading of its
+    // claims afterwards (readDelegatedClaims below).
     ...(contractSession ? {
       holdDraft: async () => holdSessionFinalResponse({ ...context, emitterContext: (id) => context.emitterContext(id), ...(lastAnsweredBy ? { answeredBy: lastAnsweredBy } : {}) }, contractSession, lastResponse!,
         message => requestRevision('[Contract response check] ' + message + '\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(lastResponse!.content))),
-    } : {
-      checkDraft: async (draft: string, { signal: checkSignal }: { signal: AbortSignal }) => {
-        try {
-          const correction = await completionGuard.checkUntilAvailable(checkInput, { signal: checkSignal, assertCurrent: assertActiveTurn }, () => {
-            context.setCompletionActivity?.('waiting'); context.requestRender();
-          });
-          assertActiveTurn();
-          return correction === null ? { accepted: true as const }
-            // Revision context belongs to the provider request, never the public
-            // transcript or the next check's observations of performed work.
-            : { accepted: false as const, reason: 'the completion check sent this draft back',
-              correction: correction + '\n\nUnpublished draft to revise (quoted data):\n' + JSON.stringify(draft) };
-        } finally { context.setCompletionActivity?.(null); }
-      },
-    }),
+    } : {}),
     correct: (text) => { requestRevision(text); context.requestRender(); },
-    commit: async (_draft, { verified }) => {
+    commit: async () => {
       const response = lastResponse!;
       let assertCompletionCurrent: (() => void) | undefined;
       if (!contractSession) {
         const decisionPolicy = decisionModelPolicyState();
         if (decisionPolicy.operation === 'no-decision-model') response.decisionPolicy = decisionPolicy;
-        // The draft stands as it is when the check ran out of drafts or time; the person is told it is not verified.
-        if (verified === false) completionGuard.acceptUnverified(checkInput(), { signal, assertCurrent: assertActiveTurn });
+        // The answer stands as it is, under the ordinary publication fences (the turn, the transcript, the exact text).
+        completionGuard.acceptUnverified(checkInput(), { signal, assertCurrent: assertActiveTurn });
         assertCompletionCurrent = completionGuard.beginFinalization(response);
         hostInstructions.clear('correction');
       }
@@ -1137,6 +1143,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         ...(lastAnsweredBy ? { answeredBy: lastAnsweredBy } : {}),
         memoryRecordIds: [...turnMemoryRecordIds],
       });
+      if (!contractSession && delegatedWorkEnded) readDelegatedClaims(response.content);
       return 'end';
     },
     // Delegation is a step inside the turn: after a round that started agents,
@@ -1148,7 +1155,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
       // activity is set, so the throbber names the agents it waits for.
       context.requestRender();
       try {
-        return await waitForResponseDelegates(context.conversation, context.agentManager, { signal: delegateSignal, assertCurrent: assertActiveTurn }, [], context.canWaitForDelegate,
+        const ended = await waitForResponseDelegates(context.conversation, context.agentManager, { signal: delegateSignal, assertCurrent: assertActiveTurn }, [], context.canWaitForDelegate,
           notify => {
             const bus = context.runtimeBus;
             if (!bus) return undefined;
@@ -1158,6 +1165,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
             const stopRunning = bus.on<Extract<AgentEvent, { type: 'AGENT_RUNNING' }>>('AGENT_RUNNING', () => notify());
             return () => { stopStatus(); stopRunning(); };
           });
+        if (ended) delegatedWorkEnded = true;
+        return ended;
       } finally {
         context.requestRender();
       }
@@ -1197,7 +1206,7 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   }, {
     speaker: 'owner',
     budget: {},
-    completion: { maxRejectedDrafts: MAX_REJECTED_DRAFTS, deadlineMs: COMPLETION_CHECK_DEADLINE_MS },
+    completion: { maxRejectedDrafts: 0 },
     delegates: 'await-events',
     sink: {
       delta: (text) => {
@@ -1206,18 +1215,6 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
         // Opened at the first text, after the request was built, so the placeholder is never sent to the provider.
         if (!streamBlockOpen) { context.conversation.startStreamingBlock(); streamBlockOpen = true; }
         context.conversation.updateStreamingBlock(streamedText);
-      },
-      draftWithdrawn: (_draft, reason) => {
-        context.conversation.releaseHeldReply();
-        // Readers of the stream drop the draft they were shown; the next request streams its replacement.
-        if (streamEnabled && context.runtimeBus) {
-          emitDraftWithdrawn(context.runtimeBus, context.emitterContext(context.turnId), { turnId: context.turnId, reason });
-        }
-        context.requestRender();
-      },
-      notVerified: (note) => {
-        context.conversation.addNotice(`Not verified: ${note}, so the answer above is shown as it stands and its claims are unchecked.`, { level: 'warning', kind: 'operational' });
-        context.requestRender();
       },
       notice: (text, level) => {
         context.conversation.addNotice(text, { level, kind: 'system' });

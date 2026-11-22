@@ -26,8 +26,30 @@ export const TABLE = 'decisions';
  * MIGRATIONS is brought forward in place; any other version is refused rather
  * than misread.
  */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 export const NOTES_TABLE = 'decision_notes';
+/**
+ * Each distinct question set once, keyed by the SHA-256 of its JSON. A
+ * battery asks the same instructions and criteria on every call, so a decision
+ * row names its questions by that key instead of carrying them: the row holds
+ * the context, answers, timing and lineage, and its questions are read back
+ * through the key.
+ */
+export const QUESTIONS_TABLE = 'decision_questions';
+/** Small facts about the file itself: `carried_from_bytes`, the file's size when it was carried forward to version 6. */
+export const META_TABLE = 'decision_log_meta';
+
+const QUESTIONS_SCHEMA = `
+CREATE TABLE ${QUESTIONS_TABLE} (
+  hash TEXT PRIMARY KEY,
+  questions TEXT NOT NULL
+);
+CREATE INDEX ${TABLE}_questions_hash ON ${TABLE} (questions_hash);
+CREATE TABLE ${META_TABLE} (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+`;
 
 const NOTES_SCHEMA = `
 CREATE TABLE ${NOTES_TABLE} (
@@ -65,6 +87,8 @@ function declaration(role: ColumnRole): string {
 export const COLUMNS = {
   id: KEY,
   entry: written(true),
+  /** The key of the row's questions in the questions table; null on a row written before version 6 that still carries them in `entry`. */
+  questions_hash: written(false),
   at: derived('at'),
   status: derived('status'),
   battery: derived('context', 'battery'),
@@ -86,6 +110,11 @@ const MIGRATIONS: Readonly<Record<number, string>> = {
     `INSERT INTO ${NOTES_TABLE} (decision_id, kind, payload, at)
      SELECT id, '${kind}', ${kind}, NULL FROM ${TABLE} WHERE status = 'answered' AND ${kind} IS NOT NULL;`).join('\n'),
   4: 'SELECT 1;',
+  // Rows written before keep their questions in `entry` until the log's background pass moves them to the
+  // questions table (SqliteDecisionLog.carryForward); the size the file had now is kept for the notice that
+  // says how much space came back.
+  5: `ALTER TABLE ${TABLE} ADD COLUMN questions_hash ${declaration(written(false))};${QUESTIONS_SCHEMA}
+    INSERT INTO ${META_TABLE} (key, value) SELECT 'carried_from_bytes', CAST(page_count * page_size AS TEXT) FROM pragma_page_count(), pragma_page_size();`,
 };
 
 const SCHEMA = `
@@ -96,6 +125,7 @@ CREATE INDEX ${TABLE}_battery_at ON ${TABLE} (battery, at);
 CREATE INDEX ${TABLE}_site_at ON ${TABLE} (site, at);
 CREATE INDEX ${TABLE}_at ON ${TABLE} (at);
 ${NOTES_SCHEMA}
+${QUESTIONS_SCHEMA}
 `;
 
 /** A value bound into a statement. */
@@ -131,6 +161,10 @@ export function openLog(path: string): Database {
   // wait for one another instead of discarding an otherwise valid judgment.
   try {
     db.exec('PRAGMA busy_timeout = 1000;');
+    // A new file frees the pages pruning empties a batch at a time (PRAGMA incremental_vacuum), so space comes
+    // back without a whole-file rewrite. It takes effect only before the first table exists; on an older file it
+    // waits for the one-time rewrite after its rows are carried forward (SqliteDecisionLog.finishCarryForward).
+    db.exec('PRAGMA auto_vacuum = INCREMENTAL;');
     // This connection writes batched notes and pruning unsynced; entries go
     // through the synced writer (openSyncedWriter, sqlite.ts).
     db.exec('PRAGMA synchronous = NORMAL;');

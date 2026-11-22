@@ -334,6 +334,14 @@ export class NotificationFeed {
         this.emitChange();
         return true;
     }
+    /**
+     * The condition an entry was about has ended (a keyed notice withdrawn):
+     * the entry its event key names is removed. Returns whether one existed.
+     */
+    withdrawEvent(eventKey: string): boolean {
+        const key = this.eventEntries.get(eventKey);
+        return key === undefined ? false : this.dismiss(key);
+    }
     private forgetEvents(entryKey: string): void {
         this.groupDetails.delete(entryKey);
         this.groupMembers.delete(entryKey);

@@ -24,12 +24,12 @@ A read is settled by code with no decision-model request: a read of files inside
 | `read` | Read text, structured files, and media-aware inputs | per-file extraction, image handling, global extraction defaults; one response is capped at `output.max_tokens` (25,000 by default) and clipped files are listed in `summary.truncated` with the line to continue from; standard output leaves out each file's `resolvedPath` and `readObservation` (which lines were actually returned), which travel on the result's host-only `hostEvidence.reads` for evidence collection and are never shown to the model; `verbose` keeps them in the text |
 | `write` | Write files with project/cache/undo integration | modes `fail_if_exists`, `overwrite`, `backup` (newest 5 copies per file in `.goodvibes/.backups/`), `restore` (puts the newest backup back); `transaction.mode` atomic, partial or none; a file auto-heal rewrote is listed under `healed` at every verbosity |
 | `edit` | Apply targeted edits | exact, fuzzy, regex, notebook operations, validation, rollback; an edit to a file that changed since it was last read is refused until the file is read again |
-| `find` | Search the workspace | files, content, symbols, references, structural AST search; files mode lists paths relative to the reported `root`; the queries of one call share its size ceiling (`output.max_tokens`, or about 25,000 tokens for the whole call and at most 10,000 per query), so every query's page arrives whole and continues with `next_offset`; content mode reads each file once and skips files over 8 MiB, saying how many; symbols come from the tree-sitter parser (a language without a grammar uses line patterns and says so); references are the language server's answer when one is attached, an empty answer included, limited to `path`; a query still running at `timeout_ms` (60 s by default) reports `timed_out`; the product's worktree directory `.goodvibes/.worktrees` is skipped by default (by path, not by name) unless the task runs inside it, and the result's `warnings` say what was skipped and that `path: '.goodvibes/.worktrees'` includes it |
+| `find` | Search the workspace | files, content, symbols, references, structural AST search; files mode lists paths relative to the reported `root`; the queries of one call share its size ceiling (`output.max_tokens`, or about 25,000 tokens for the whole call and at most 10,000 per query), so every query's page arrives whole and continues with `next_offset`; content mode reads each file once and skips files over 8 MiB, saying how many; symbols come from the tree-sitter parser (a language without a grammar uses line patterns and says so); references are the language server's answer when one is attached, an empty answer included, limited to `path`; a search runs until it is done or cancelled; `timeout_ms`, when given, is a budget: a query still scanning then stops and returns what it found so far, and its `warnings` say how far it got; content, symbols, structural and references searches leave out what the project's `.gitignore` and `.ignore` files exclude (nested ones where they live, root rules from the repository root), never enter an ignored folder, and say how much they left out, unless `path` or `glob` names the ignored place; the product's state folder `.goodvibes` is never walked into (hidden files included) unless `path` names a place inside it, so a task running inside one of its worktrees searches that worktree |
 | `exec` | Run shell commands through the process manager | retries, timeouts, expectations, pre-command file ops, AST guard |
 | `fetch` | Fetch HTTP resources | raw/text/markdown/structured extraction, rate limits, sanitization, trusted hosts; a call where every URL failed or every response was an HTTP error (`summary.http_errors`) is an unsuccessful call, and the per-URL results are still returned |
 | `analyze` | Analyze code and changes | impact, dependencies, dead code, security, diff, preview, upgrade, surface; output over `output.max_tokens` (25,000 tokens by default) is cut with a note saying how much was kept |
 | `inspect` | Inspect project shape | project, API, database, components, layout, accessibility, scaffold (a plan by default; with `dryRun: false` it creates new files only, through the write tool, so the call is asked about and recorded as a write and can be undone, and an agent without `write` is refused); `output.max_tokens` caps the response (25,000 tokens by default) |
-| `agent` | Spawn and manage agents | spawn, batch-spawn for independent roots, status, cancel, list, templates, get, budget, plan, wait, message, contracts, contract-history, cohorts |
+| `agent` | Spawn and manage agents | spawn, batch-spawn for independent roots, status, cancel, list, templates, get, budget, plan, wait, message, contracts, contract-history, activity, cohorts |
 | `goodvibes_context` | Inspect the current GoodVibes harness safely | runtime summary, redacted config reads/schema, integrations, tool catalog, Cloudflare status/token requirements |
 | `goodvibes_settings` | Change GoodVibes settings through the config manager | set, reset with explicit confirmation; rejects raw credential persistence |
 | `profile` | Record what the owner says about themselves into the owner profile | registered only when profile collaborators are provided; write authority is bound per turn by the composition root, never supplied by the model |
@@ -309,10 +309,31 @@ The `agent` tool can spawn individual agents, spawn batches of independent
 root work, group agents into cohorts, send messages, wait for completion,
 inspect budgets and plans, and inspect contracts.
 
+- **Who may start agents.** What the owner said in the conversation decides,
+  not only his latest message: an instruction to use agents stands until a
+  later message about agents changes it. Plain words are read without any
+  model request: when the owner asked for agents (fan out, a set of agents,
+  use or assign agents, delegate) and did not later forbid or limit them, the
+  agents start; when he forbade them in plain words (do not use agents, do it
+  yourself), the call is refused with his words quoted in full and what would
+  be accepted. Only when his words do not settle it (he said nothing about
+  agents, a message both asks and restricts, or the call starts more agents
+  than a number he named) is the decision model asked, once per state of the
+  conversation; its answer is "go" or the one thing to change. When the
+  decision model cannot answer, the permission mode decides: yolo and
+  just-vibes start the agents; ask-me and jev-decides put the agents and their
+  tasks to the owner in the ordinary approval prompt, and his answer stands
+  for the rest of the conversation. A call identical to one refused earlier in
+  the same turn is not sent again: the model is given the refusal again in
+  full and the owner sees one `[Blocked]` line.
 - **`spawn` and `batch-spawn`** start a contract through the contract runner
-  unless `outsideContract` is set. The ask is `authoritativeTask` when given,
-  otherwise the parent turn's text; the spawned tasks become the contract's
-  proposed units, which the planner weighs when it writes the plan. The result
+  unless `outsideContract` is set. The contract's ask is the work as the owner
+  asked for it (his latest message that asked for agents, else the first thing
+  he asked in the conversation), followed by the planned tasks; the spawned
+  tasks become the contract's proposed units, which the planner weighs when it
+  writes the plan. A plan the planner returns unchanged after it was sent back
+  is not checked again, and when the decision model cannot check a plan the
+  plan goes ahead unchecked (unless Decision Model Only is chosen). The result
   JSON carries `contractStarted: true`, the contract id and the owner agent id.
   A contract's planner chooses each unit's tools and write scope, so a call
   that sets `tools`, `restrictTools`, `writeScope` or `executionIntent`
@@ -332,6 +353,15 @@ inspect budgets and plans, and inspect contracts.
 - **`contracts`** lists the session's contracts with their status and units.
 - **`contract-history`** shows one contract's events: plan, checks, nudges,
   escalations and outcome.
+- **`activity`** answers "what did my agents and contracts do" in one call,
+  from the product's records and across a restart of the app: each contract of
+  the session with its state and units, and each agent it or the session
+  started with its state, the files it read (whole or by line range), the
+  files it changed, the commands it ran and its last report.
+- An agent id this process no longer runs (agents do not survive a restart;
+  their contracts do) is answered by `status`, `get` and `wait` with what the
+  agent was and what its contract is now; the acting modes refuse with the
+  same fact.
 
 A batch is not the way to add reviewer, tester or fixer agents for one
 deliverable. Jev checks every unit's work against its criteria while it runs

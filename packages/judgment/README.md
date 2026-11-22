@@ -63,11 +63,12 @@ const run = await battery.run(port, 'Question: ...\nReply: ...', { site: 'exampl
 ```
 
 A decision that a person or a tool call waits on goes through `judge`: one
-request with a deadline, an optional cache and a fallback, so it never halts the
-work. `settle` turns the banded readings into a value, or `undefined` when it
-cannot act on them; `fallback` gives the value when the model is off, does not
-answer within the deadline (the port's `decisionDeadlineMs`, else 1500 ms), is
-unavailable, or is unsure. A cache hit, policy off and a skipped target cost no
+request, an optional cache and a fallback, so it never halts the work. The
+request ends when the decision server answers, errors or the connection fails;
+a caller with a real limit of its own passes `deadlineMs`. `settle` turns the
+banded readings into a value, or `undefined` when it cannot act on them;
+`fallback` gives the value when the model is off, does not answer within a
+deadline the caller set, is unavailable, or is unsure. A cache hit, policy off and a skipped target cost no
 request. The answer, its readings and the action are written to the decision log
 in one write.
 

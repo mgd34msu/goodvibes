@@ -1,4 +1,4 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 import { nativeContractSourceData } from './native-source.js';
 import { agentBriefFidelity } from '../agents/brief-fidelity.js';
 import { hasDerivedAcceptanceChecks } from './owned-source.js';
@@ -391,7 +391,6 @@ function concurrencyLimited(port: JudgmentPort, limit: number): JudgmentPort {
     },
     ...(port.recorder === undefined ? {} : { recorder: port.recorder }),
     ...(port.health === undefined ? {} : { health: port.health.bind(port) }),
-    ...(port.decisionDeadlineMs === undefined ? {} : { decisionDeadlineMs: port.decisionDeadlineMs }),
     ...(port.revision === undefined ? {} : { revision: port.revision.bind(port) }),
   };
 }
@@ -406,7 +405,8 @@ const NO_USAGE: PlanCheckUsage = Object.freeze({ calls: 0, inputTokens: 0, outpu
  * verdict marked `unchecked`.
  */
 export function runPlanChecks(plan: ContractPlan, ask: string, shape: RequestShape, options: PlanCheckOptions = {}): Promise<PlanVerdict> {
-  return decisionOrClassic(() => runPlanChecksWithModel(plan, ask, shape, options),
+  // A plan the decision model could not check stands on its code checks, as with none in use.
+  return judgedOrNot('contract.plan-checks', () => runPlanChecksWithModel(plan, ask, shape, options),
     (): PlanVerdict => ({ problems: [], dispositions: new Map<string, CriterionDispositionRuling>(), reports: [], decisionIds: [], usage: NO_USAGE, unchecked: true }));
 }
 
@@ -452,7 +452,7 @@ export function runUnitShapeChecks(
   plan: ContractPlan,
   options: PlanCheckOptions = {},
 ): Promise<{ readonly problems: readonly PlanProblem[]; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
-  return decisionOrClassic(() => runUnitShapeChecksWithModel(plan, options), () => ({ problems: [], decisionIds: [], usage: NO_USAGE }));
+  return judgedOrNot('contract.plan-checks.unit-shape', () => runUnitShapeChecksWithModel(plan, options), () => ({ problems: [], decisionIds: [], usage: NO_USAGE }));
 }
 
 async function runUnitShapeChecksWithModel(
@@ -477,7 +477,7 @@ export function readCriterionDispositions(
   shape: RequestShape,
   options: PlanCheckOptions = {},
 ): Promise<{ readonly dispositions: ReadonlyMap<string, CriterionDispositionRuling>; readonly decisionIds: readonly string[]; readonly usage: PlanCheckUsage }> {
-  return decisionOrClassic(() => readCriterionDispositionsWithModel(plan, ask, shape, options), () => ({ dispositions: new Map<string, CriterionDispositionRuling>(), decisionIds: [], usage: NO_USAGE }));
+  return judgedOrNot('contract.plan-checks.dispositions', () => readCriterionDispositionsWithModel(plan, ask, shape, options), () => ({ dispositions: new Map<string, CriterionDispositionRuling>(), decisionIds: [], usage: NO_USAGE }));
 }
 
 async function readCriterionDispositionsWithModel(

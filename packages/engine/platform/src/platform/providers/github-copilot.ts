@@ -5,7 +5,7 @@ import type { ChatRequest, ChatResponse, LLMProvider, ProviderModelSource, Provi
 import { OpenAICompatProvider } from './openai-compat.js';
 import { AnthropicCompatProvider } from './anthropic-compat.js';
 import { buildStandardProviderAuthRoutes, summarizeProviderAuth } from './runtime-metadata.js';
-import { runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
+import { listingHttpError, runLiveModelRefresh, type LiveModelDiscoveryResult, type ProviderModelRefreshOptions } from './live-model-discovery.js';
 import { toProviderError } from '../utils/error-display.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 
@@ -135,7 +135,7 @@ async function fetchCopilotModels(options: GitHubCopilotProviderOptions, session
   try {
     sessions.assertCurrent(owner); signal.throwIfAborted();
     if (!res.ok) {
-      throw new Error(`GitHub Copilot /models (${url}) returned ${res.status} ${res.statusText}`);
+      throw listingHttpError(`GitHub Copilot /models (${url}) returned ${res.status} ${res.statusText}`, res.status);
     }
     const body = await res.json() as CopilotModelsResponse;
     sessions.assertCurrent(owner); signal.throwIfAborted();

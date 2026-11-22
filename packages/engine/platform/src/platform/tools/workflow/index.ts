@@ -1,8 +1,6 @@
 import { isNativeConversationTurn, NATIVE_TURN_EXECUTION_REFUSAL } from '../../core/native-turn-scope.js';
 import { readDelegationRequest } from '../../core/delegation-request-context.js';
-import { delegationPlanHolds, delegationPlanKey } from '../../agents/delegation-plan-holds.js';
-import { assertAgentBriefFidelity, DelegationPlanHeldError } from '../../agents/brief-fidelity.js';
-import { readCompletionRepairContext } from '../../core/completion-repair-context.js';
+import { decideDelegation, delegationRefusalResult, type DelegationOwnerAsk } from '../../agents/delegation-authority.js';
 import { assertCurrentToolInvocation } from '../registry.js';
 import type { Tool, ToolExecuteOptions } from '../../types/tools.js';
 import { AutomationCommands, type AutomationCommandExit } from '../../workflow/automation-commands.js';
@@ -11,7 +9,7 @@ import { shellSplit } from '../../utils/shell-split.js';
 import { requireStopped } from '../../utils/owned-work.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import { workflowSchema } from './schema.js';
-import { summarizeError } from '../../utils/error-display.js';
+import { describeErrorInFull, summarizeError } from '../../utils/error-display.js';
 import { logger } from '../../utils/logger.js';
 
 // ---------------------------------------------------------------------------
@@ -644,6 +642,8 @@ export interface WorkflowContractStarter {
   readonly projectRoot: string;
   /** The conversation session a contract started here belongs to, read on each call. */
   readonly resolveSessionId: () => string;
+  /** Puts a delegation nothing settled to the owner (agents/delegation-authority.ts); absent: nobody can be asked from here. */
+  readonly delegationAsk?: DelegationOwnerAsk | undefined;
 }
 
 export function createWorkflowTool(services: WorkflowServices, contracts: WorkflowContractStarter): Tool {
@@ -672,11 +672,6 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
           if (input.definition === CONTRACT_WORKFLOW_DEFINITION) {
             if (isNativeConversationTurn()) return { success: false, error: NATIVE_TURN_EXECUTION_REFUSAL };
             const sessionId = contracts.resolveSessionId(), source = readDelegationRequest();
-            const holds = delegationPlanHolds(contracts.contractRunner);
-            const held = source ? holds.get(delegationPlanKey(sessionId, source.request))
-              : [...holds.values()].find(plan => plan.sessionId === sessionId);
-            if (held) return { success: false, error: 'Delegation remains held. Repair and revalidate the pending agent plan before starting a replacement contract.',
-              output: JSON.stringify({ recovery: { kind: 'revise-delegation', ...held, requiredMode: held.mode } }) };
             const task = input.task, projectRoot = contracts.projectRoot, runner = contracts.contractRunner;
             const signal = source?.signal && options?.signal ? AbortSignal.any([source.signal, options.signal]) : source?.signal ?? options?.signal;
             // Still wanted: the call's signal, the registry's one invocation check,
@@ -691,22 +686,17 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
               }
             };
             assertCurrent();
+            // A contract started from a conversation's turn answers to what its owner said, as the agent tool's do.
             if (source) {
-              const repairContext = readCompletionRepairContext();
-              try {
-                await assertAgentBriefFidelity({ request: source.request, assignments: [{ task }],
-                  ...(repairContext ? { repairContext } : {}) }, { signal, assertCurrent });
-              } catch (error) {
-                if (!(error instanceof DelegationPlanHeldError)) throw error;
-                return { success: false, error: error.message, output: JSON.stringify({ recovery: {
-                  kind: 'revise-delegation', request: source.request, assignments: [{ task }], fixes: error.fixes,
-                  requiredMode: 'start', definition: CONTRACT_WORKFLOW_DEFINITION,
-                  instruction: 'Repair these exact conflicts and resubmit this workflow contract proposal for Jev revalidation against the original request.' } }) };
-              }
+              const verdict = await decideDelegation(runner, { sessionId, ownerMessages: source.ownerMessages, tasks: [task] },
+                { ask: contracts.delegationAsk, signal, assertCurrent });
+              if (!verdict.start) return delegationRefusalResult(verdict.refusal);
             }
             assertCurrent();
+            const request = source?.request.trim();
             const started = await runner.start({
-              ask: task,
+              // The work as the owner asked for it, then what this contract is to do: never his latest message on its own.
+              ask: request ? `${request}\n\nPlanned for the agents:\n- ${task}` : task,
               sessionId,
               origin: 'agent-tool',
               projectRoot,
@@ -854,7 +844,7 @@ export function createWorkflowTool(services: WorkflowServices, contracts: Workfl
       } catch (err) {
         return {
           success: false,
-          error: summarizeError(err),
+          error: describeErrorInFull(err),
         };
       }
     },

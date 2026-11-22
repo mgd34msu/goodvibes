@@ -344,8 +344,8 @@ which questions it needs: whether it gives card details (only when it uses card
 words, such as card, CVV, security code or expiry, beside a short number or a
 month/year pair), its answer to a work proposal or permission
 ask (only when one is pending on that conversation for that sender), and
-whether it asks for work (only on a gated surface). They are asked together,
-with the decision deadline. A card number is refused by its checksum without
+whether it asks for work (only on a gated surface). They are asked together
+in one request, which ends when the decision model answers or fails. A card number is refused by its checksum without
 any reading; an unsure reading refuses nothing, so a message with an ordinary
 number is answered. A message whose work intent is unsure gets a conversational
 reply rather than a request to send it again; only a confident work reading

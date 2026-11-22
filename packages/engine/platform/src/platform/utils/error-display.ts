@@ -1,5 +1,5 @@
 import { buildSummary, cleanMessage, extractErrorMessage, extractStringField, extractStructuredMessage } from './native-error-summary.js';
-export { summarizeError } from './native-error-summary.js';
+export { summarizeError, describeErrorInFull } from './native-error-summary.js';
 import {
   categoryDependsOnWording,
   categoryForCode,

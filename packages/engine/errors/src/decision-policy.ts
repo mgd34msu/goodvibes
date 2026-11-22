@@ -116,12 +116,16 @@ export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: () 
   });
 }
 
-/** The one line a failing set model is reported with: the model, what failed, what the work does, and the next step. */
+/**
+ * The one sentence a failing set model is reported with: the model, what
+ * failed, what the work does until it answers again, and the next step.
+ */
 export function decisionModelFailingLine(failure: Pick<DecisionModelFailureState, 'model' | 'what' | 'nextStep'>, policy: DecisionModelPolicy): string {
   const then = policy === 'Decision Model Only'
-    ? 'work that needs it stops (you chose Decision Model Only for "When the decision model is missing or fails"; Hybrid would continue without it)'
-    : 'continuing without it';
-  return `The decision model ${failure.model} is unavailable (${failure.what}); ${then}. Next: ${failure.nextStep}`;
+    ? 'so work that needs it stops until it answers again (you chose Decision Model Only for "When the decision model is missing or fails"; Hybrid would continue without it)'
+    : 'so work continues without it until it answers again';
+  const step = failure.nextStep.trim().replace(/\.$/, '');
+  return `The decision model ${failure.model} is not answering (${failure.what}), ${then}; to fix it, ${step.charAt(0).toLowerCase()}${step.slice(1)}.`;
 }
 
 /** Whether a decision model is in use and, if not, why: the standing indication status, doctor and headless output carry. */

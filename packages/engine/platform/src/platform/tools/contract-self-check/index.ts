@@ -7,7 +7,7 @@ import type { Tool, ToolDefinition, ToolResult } from '../../types/tools.js';
 import type { ContractRunner } from '../../contract/runner.js';
 import { describeUnitSelfCheck, UNIT_SELF_CHECK_TOOL } from '../../contract/self-check.js';
 import { callingAgentId } from '../../agents/calling-agent.js';
-import { summarizeError } from '../../utils/error-display.js';
+import { describeErrorInFull } from '../../utils/error-display.js';
 
 const SCHEMA: Record<string, unknown> = { type: 'object', properties: {}, additionalProperties: false };
 
@@ -33,7 +33,7 @@ export function createContractSelfCheckTool(runner: Pick<ContractRunner, 'list'>
       const result = describeUnitSelfCheck(runner.list({ includeTerminal: false }), agentId);
       return result.found ? { success: true, output: JSON.stringify(result.selfCheck) } : { success: false, error: result.reason };
     } catch (error) {
-      return { success: false, error: `${UNIT_SELF_CHECK_TOOL} failed: ${summarizeError(error)}` };
+      return { success: false, error: `${UNIT_SELF_CHECK_TOOL} failed: ${describeErrorInFull(error)}` };
     }
   }
 

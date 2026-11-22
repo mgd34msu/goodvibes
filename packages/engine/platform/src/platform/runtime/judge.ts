@@ -50,8 +50,9 @@ function installedPort(site: string): { readonly port: JudgmentPort } | { readon
 }
 
 /**
- * Asks one battery about one state with a deadline (the caller's, else
- * `judgment.decisionDeadlineMs`), an optional cache and a fallback. Resolves
+ * Asks one battery about one state, with a deadline only when the caller sets
+ * one (the request otherwise ends when the decision server answers, errors or
+ * the connection fails), an optional cache and a fallback. Resolves
  * with the value and where it came from; rejects only when the caller's
  * signal is aborted or `settle` throws.
  */

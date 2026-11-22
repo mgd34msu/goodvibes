@@ -39,8 +39,6 @@ export interface JudgmentSettings {
   backend?: JudgmentBackendSettings;
   /** Timeout per judgment attempt in milliseconds. */
   timeoutMs: number;
-  /** Deadline for a decision a person or tool call waits on; missing on older installations. */
-  decisionDeadlineMs?: number;
   /** Ordered compatible endpoints. An explicit empty list disables inherited fallbacks. */
   fallbacks: readonly JudgmentFallbackSettings[];
 }

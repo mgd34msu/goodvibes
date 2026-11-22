@@ -10,6 +10,7 @@ import type { ContractRunner } from '../contract/runner.js';
 import type { AgentManager } from '../tools/agent/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
+import { decisionModelFailure } from './decision-policy.js';
 import { finishWorkstreamLabel, rememberWorkstreamLabel, workstreamLabel } from '../channels/workstream-labels.js';
 
 export interface HostRuntimeMessageRouter {
@@ -174,8 +175,17 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
       requestRender();
     }));
   };
+  /** A notice: something that needs the owner or tells them what became of work they asked for. */
   const contractLine = (message: string, runtimeEvent: RuntimeEventProvenance): void => {
     withRouter(getSystemMessageRouter, (router) => router.contract(`[Contract] ${message}`, 'high', runtimeEvent));
+  };
+  /**
+   * Progress of a contract in flight (its start, its states, checks, nudges,
+   * gates, stalls): the agents view (F2) shows the contract's current state on
+   * its own row, so the line goes to the activity log, never to the notices.
+   */
+  const contractProgress = (message: string): void => {
+    logger.info(`[Contract] ${message}`);
   };
   /** The cohort check for a contract that ended: any cohort one of its unit agents belongs to. */
   const checkContractCohorts = (contract: ReturnType<typeof contractRunner.get>): void => {
@@ -191,33 +201,50 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
     // channel. The words themselves come from the record at each ending.
     // Remembering twice is a no-op.
     rememberWorkstreamLabel(payload.contractId, payload.ask);
-    // Operator feed: the id belongs here, where it is used for correlation.
-    contractLine(`${payload.contractId} started: ${payload.ask}`, payload);
+    // Activity log: the id belongs here, where it is used for correlation.
+    contractProgress(`${payload.contractId} started: ${payload.ask}`);
   });
 
   onContract('CONTRACT_STATUS_CHANGED', (payload) => {
-    contractLine(`${payload.contractId} ${payload.from} -> ${payload.to}`, payload);
+    contractProgress(`${payload.contractId} ${payload.from} -> ${payload.to}`);
   });
 
+  // Contracts whose owner was already told the decision model could not judge some of the work.
+  const notJudgedTold = new Set<string>();
   onContract('CONTRACT_CHECKED', (payload) => {
     // A turn-end check that only records history is not worth a line.
     if (payload.result === 'recorded') return;
+    if (payload.decisionIds.length === 0) {
+      const contract = contractRunner.get(payload.contractId);
+      const checks = payload.scope === 'unit'
+        ? contract?.units.flatMap((unit) => [unit, ...(unit.attemptUnits ?? [])]).find((unit) => unit.id === payload.targetId)?.checks
+        : payload.scope === 'group' ? contract?.groups.find((group) => group.id === payload.targetId)?.checks : contract?.checks;
+      const notJudged = checks?.find((check) => check.id === payload.checkId)?.notJudged;
+      if (notJudged !== undefined) {
+        // One line per contract, not one per check; a failing set model was already named by its own notice.
+        if (!notJudgedTold.has(payload.contractId) && decisionModelFailure() === undefined) {
+          contractLine(`${payload.contractId}: the decision model could not judge part of this work (${notJudged}); that work is kept as delivered and the contract goes on. Its result lists what was not judged.`, payload);
+        }
+        notJudgedTold.add(payload.contractId);
+        return;
+      }
+    }
     const met = payload.criteria.filter((criterion) => criterion.verdict === 'met').length;
     const icon = payload.result === 'pass' ? '\u2713' : '\u2717';
-    contractLine(`${icon} Check ${payload.checkId} of ${payload.scope} ${payload.targetId}: ${met}/${payload.criteria.length} criteria met, ${payload.result}`, payload);
+    contractProgress(`${icon} Check ${payload.checkId} of ${payload.scope} ${payload.targetId}: ${met}/${payload.criteria.length} criteria met, ${payload.result}`);
   });
 
   onContract('CONTRACT_NUDGED', (payload) => {
     const criteria = payload.criterionIds.length > 0 ? ` on ${payload.criterionIds.join(', ')}` : '';
-    contractLine(`Nudged unit ${payload.unitId} (${payload.kinds.join(', ')})${criteria}`, payload);
+    contractProgress(`Nudged unit ${payload.unitId} (${payload.kinds.join(', ')})${criteria}`);
   });
 
   onContract('CONTRACT_CRITERION_REGRESSED', (payload) => {
-    contractLine(`Criterion ${payload.criterionId} of unit ${payload.unitId} regressed (met at ${payload.metAtCheckId})`, payload);
+    contractProgress(`Criterion ${payload.criterionId} of unit ${payload.unitId} regressed (met at ${payload.metAtCheckId})`);
   });
 
   onContract('CONTRACT_STALLED', (payload) => {
-    contractLine(`${payload.scope} ${payload.targetId} stalled, routed to ${payload.route}: ${payload.reason}`, payload);
+    contractProgress(`${payload.scope} ${payload.targetId} stalled, routed to ${payload.route}: ${payload.reason}`);
   });
 
   onContract('CONTRACT_ESCALATED', (payload) => {
@@ -225,8 +252,12 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   });
 
   onContract('CONTRACT_GATE_RESULT', (payload) => {
-    const icon = payload.passed ? '\u2713' : '\u2717';
-    contractLine(`  ${icon} Gate: ${payload.gate} ${payload.skipped ? 'skipped' : payload.passed ? 'passed' : 'FAILED'}`, payload);
+    // A skipped gate is not a failure: it is drawn without a mark, with why it did not run.
+    if (payload.skipped) {
+      contractProgress(`  - Gate: ${payload.gate} ${payload.reason === 'dependencies-missing' ? 'could not run here: the project\'s dependencies are not installed where the work is' : 'skipped: it does not apply to this project'}`);
+      return;
+    }
+    contractProgress(`  ${payload.passed ? '\u2713' : '\u2717'} Gate: ${payload.gate} ${payload.passed ? 'passed' : 'FAILED'}`);
   });
 
   onContract('CONTRACT_COMMITTED', (payload) => {
@@ -235,7 +266,9 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   });
 
   onContract('CONTRACT_PASSED', (payload) => {
-    contractLine(`\u2713 ${payload.contractId} PASSED: ${payload.criteriaMet} of ${payload.criteriaJudged} criteria met, ${payload.nudges} corrections`, payload);
+    notJudgedTold.delete(payload.contractId);
+    // A routine success: the answer its follow-up brings reports it, so it is not a notice.
+    contractProgress(`\u2713 ${payload.contractId} PASSED: ${payload.criteriaMet} of ${payload.criteriaJudged} criteria met, ${payload.nudges} corrections`);
     const contract = contractRunner.get(payload.contractId);
     queueConversationFollowUp?.(forTurn(contractEndFollowUp(payload, contract), contractTurn(agentManager, contract)));
     finishWorkstreamLabel(payload.contractId);
@@ -243,6 +276,7 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   });
 
   onContract('CONTRACT_FAILED', (payload) => {
+    notJudgedTold.delete(payload.contractId);
     contractLine(`\u2717 ${payload.contractId} FAILED: ${payload.reason}`, payload);
     const contract = contractRunner.get(payload.contractId);
     queueConversationFollowUp?.(forTurn(contractEndFollowUp(payload, contract), contractTurn(agentManager, contract)));
@@ -251,7 +285,9 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
   });
 
   onContract('CONTRACT_CANCELLED', (payload) => {
-    contractLine(`${payload.contractId} cancelled: ${payload.reason} (${payload.filesModified} files modified)`, payload);
+    notJudgedTold.delete(payload.contractId);
+    // Stopped by the owner or by the turn that owned it; the follow-up reports it, so it is not a notice.
+    contractProgress(`${payload.contractId} cancelled: ${payload.reason} (${payload.filesModified} files modified)`);
     const contract = contractRunner.get(payload.contractId);
     queueConversationFollowUp?.(forTurn(contractEndFollowUp(payload, contract), contractTurn(agentManager, contract)));
     finishWorkstreamLabel(payload.contractId);
@@ -333,9 +369,7 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
     const record = agentManager.getStatus(payload.agentId);
     if (record) {
       const facts = agentLineFacts(record, payload.agentId, voice);
-      withRouter(getSystemMessageRouter, (router) => {
-        router.low(voice.completedLine(facts), payload);
-      });
+      logger.info(voice.completedLine(facts));
       const followUp = agentEndFollowUp(record, payload.agentId, undefined, voice);
       if (followUp) queueConversationFollowUp?.(forTurn(followUp, agentManager.requestTurnOf(payload.agentId)));
     }
@@ -350,16 +384,15 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
       // A spent turn budget is stamped on the record at the source
       // (failureReason 'max_turns' plus the applied limit and what set it): an
       // expected, nameable outcome, worded as a budget line, not as a failure.
+      // An agent's end is not a notice: the turn or follow-up that waits for it
+      // gives the model its result and the answer reports it, and the agents
+      // view shows the agent's state. The line goes to the activity log.
       if (record.failureReason === 'max_turns' && record.turnBudget) {
         const budget = { limit: record.turnBudget.limit, source: turnBudgetSourceLabel(record.turnBudget.source) };
-        withRouter(getSystemMessageRouter, (router) => {
-          router.low(voice.budgetLine(facts, budget), payload);
-        });
+        logger.info(voice.budgetLine(facts, budget));
       } else {
         const postLine = (envelope: string | null): void => {
-          withRouter(getSystemMessageRouter, (router) => {
-            router.low(voice.failedLine(facts, payload.error, envelope), payload);
-          });
+          logger.info(voice.failedLine(facts, payload.error, envelope));
         };
         const toolRegistry = options.toolRegistry;
         if (toolRegistry) {

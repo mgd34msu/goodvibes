@@ -158,14 +158,13 @@ needs you for the end. Both are shorthand for `--config permissions.mode=...`
 and neither persists. Authentication, scopes and other deterministic checks
 remain in force. See [CLI flags](cli-flags.md#--yolo).
 
-Composer input and `--prompt` reach the conversation model directly. Actionable
-work then uses [completion verification](../../../packages/engine/docs/runtime-orchestration.md#completion-verification)
-on the final answer. The answer streams as it is written and is checked after
-it is shown; a draft the check sends back is withdrawn while the model receives
-specific repair findings. After two such drafts, or when the check does not
-finish within 30 seconds, the answer stands with a "Not verified" note that
-says why. Ordinary conversation and status questions can finish while earlier
-work remains pending.
+Composer input and `--prompt` reach the conversation model directly. The answer
+streams as it is written and stands as soon as it ends; it is not held for a
+check. Only an answer that followed work the turn delegated (agents or a
+contract) gets one [reading of its claims](../../../packages/engine/docs/runtime-orchestration.md#completion-verification)
+afterwards: when the decision model finds that it says work was done that the
+agents or the contract did not do or finish, one line says so; when it finds
+nothing, or cannot answer, nothing is said.
 
 ## Launch and resume
 

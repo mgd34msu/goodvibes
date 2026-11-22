@@ -165,6 +165,7 @@ const CHECK_SCHEMA = objectSchema({
   problems: arraySchema(enumSchema(NUDGE_KINDS)),
   qualityProblems: arraySchema(enumSchema(QUALITY_ITEMS)),
   decisionIds: STRING_LIST_SCHEMA,
+  notJudged: STRING_SCHEMA,
   evidenceDigest: STRING_SCHEMA,
   reviewedFiles: arraySchema({ anyOf: [
     objectSchema({ path: STRING_SCHEMA, sha256: STRING_SCHEMA }, ['path', 'sha256']),

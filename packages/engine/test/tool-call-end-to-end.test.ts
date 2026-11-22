@@ -119,7 +119,7 @@ async function turn(app: Awaited<ReturnType<typeof composeApp>>, calls: ToolCall
       workingDirectory: app.workingDir,
       onToolSettled: onSettled,
     }, 'turn-1', batch),
-  }, { speaker: 'owner', budget: {}, completion: { maxRejectedDrafts: 0, deadlineMs: 1000 }, delegates: 'return', sink: { delta: () => {} } });
+  }, { speaker: 'owner', budget: {}, completion: { maxRejectedDrafts: 0 }, delegates: 'return', sink: { delta: () => {} } });
   return { outcome, results: new Map(results.map((result) => [result.callId, result])) };
 }
 

@@ -9,8 +9,8 @@
  * pending on this conversation for this sender, a gated surface), and asks
  * them together: at most one request per message, none when nothing applies.
  *
- * The request has the decision deadline and a fallback, so a slow or missing
- * model never holds a message: an unsure or missing answer is `unsure`, and
+ * The request ends when the decision model answers or fails and has a
+ * fallback, so a missing model never holds a message: an unsure or missing answer is `unsure`, and
  * each caller says what `unsure` means for it (a conversational reply, an
  * answer left pending, a message not refused).
  */

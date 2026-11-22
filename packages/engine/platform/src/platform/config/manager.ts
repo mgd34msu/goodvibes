@@ -37,9 +37,10 @@ import {
   writeRawDotPath,
 } from './settings-io.js';
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
-import { CARRIED_TO_DAEMON_TIER_KEYS, isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
+import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
+import { RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, describeSettingsCarryForward, type SettingsCarryForward } from './settings-carry-forward.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
-import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, persistDaemonKey, readDaemonTierFile } from './daemon-config-tier.js';
+import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
 import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
 import { describeKeySource, type ConfigKeyTier, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
@@ -54,7 +55,7 @@ import { admitEffects } from '../security/effect-authority.js';
 import { HostSettings, type HostBooleanSettingHandle, type HostManagedSettingLocks, type HostSetting, type HostSettingValue, type HostSettingValues } from './host-settings.js';
 import { HostSettingsReadError, hostSettingsFileExists, readHostSettingValues, readHostSettingsFile, recoverHostSettingsWriteFailure } from './manager-host-settings.js';
 import { ConfigRuntimeState, captureRuntimeValue } from './manager-runtime-state.js';
-import { announceIngestionNotice } from './settings-ingestion.js';
+import { announceIngestionNotice, describeIngestionNotice } from './settings-ingestion.js';
 import { SETTINGS_FLOOR_MARKER_KEY } from './settings-reader-floor.js';
 import { isProjectRestrictedKey, restrictProjectLayer } from './project-layer-restrictions.js';
 import { admitSettingValue, credentialValueRefusal, stricterProjectValueRefusal, type SettingAdmissionContext } from './write-admission.js';
@@ -475,6 +476,9 @@ export class ConfigManager {
   /** Settings the last load could not ingest. See ./settings-ingestion.ts. */
   private ingestionNotices: SettingsIngestionNotice[] = [];
   private readonly ingestionNoticeListeners = new Set<(notice: SettingsIngestionNotice) => void>();
+  /** The announce-once settings lines this process said first (migrationReceipt), and who hears them. */
+  readonly #settingsAnnouncements: Array<{ readonly id: string; readonly text: string }> = [];
+  readonly #settingsAnnouncementListeners = new Set<(announcement: { readonly id: string; readonly text: string }) => void>();
 
   private readonly nativeDataWriter: import('../runtime/native-reader-compatibility.js').NativeDataWriteOwner | undefined;
 
@@ -2339,6 +2343,21 @@ export class ConfigManager {
     this.ingestionNoticeListeners.add(listener);
     return () => { this.ingestionNoticeListeners.delete(listener); };
   }
+  /**
+   * The lines this process's settings loads said for the first time on this
+   * machine: a setting skipped or held, settings carried forward. Each is an
+   * announce-once receipt this manager recorded, so a later start (or another
+   * program reading the same file) does not say it again. The listener is
+   * called at once for those already said and then for each new one; the
+   * returned function ends the subscription.
+   */
+  onSettingsAnnouncement(listener: (announcement: { readonly id: string; readonly text: string }) => void): () => void {
+    for (const announcement of this.#settingsAnnouncements) {
+      try { listener(announcement); } catch (error) { drainOwned(error); }
+    }
+    this.#settingsAnnouncementListeners.add(listener);
+    return () => { this.#settingsAnnouncementListeners.delete(listener); };
+  }
   private recordIngestionNotice(notice: SettingsIngestionNotice): void {
     this.ingestionNotices.push(notice);
     for (const listener of this.ingestionNoticeListeners) {
@@ -2377,6 +2396,7 @@ export class ConfigManager {
         };
         announceIngestionNotice(notice);
         this.recordIngestionNotice(notice);
+        this.migrationReceipt(`host-setting:${file}:${key}`, describeIngestionNotice(notice));
       }
     }
     return ingested;
@@ -2402,7 +2422,7 @@ export class ConfigManager {
       if (this.hostSettings.active ? hostSettingsFileExists(this.configPath) : existsSync(this.configPath)) {
         try {
           const document = JSON.parse(readFileSync(this.configPath, 'utf-8')) as Record<string, unknown>;
-          this.#carryToDaemonTier(document);
+          this.#carryForward(document);
           this.#dropCopiedConnectedHost(document);
           this.#fileBaselines.set(this.configPath, structuredClone(document));
           const migrated = this.ingest(document, this.configPath);
@@ -2419,7 +2439,11 @@ export class ConfigManager {
           this.#fileBaselines.set(this.projectConfigPath, structuredClone(document));
           const ingested = this.ingest(document, this.projectConfigPath);
           const restricted = restrictProjectLayer(ingested, staged.nonRuntime, this.projectConfigPath, this.hostSettings);
-          for (const notice of restricted.notices) { announceIngestionNotice(notice); this.recordIngestionNotice(notice); }
+          for (const notice of restricted.notices) {
+            announceIngestionNotice(notice);
+            this.recordIngestionNotice(notice);
+            this.migrationReceipt(`project-restriction:${notice.file}:${notice.key}:${notice.reason}`, describeIngestionNotice(notice));
+          }
           const migrated = restricted.layer;
           staged.nonRuntime = sanitizeConfigShape(deepMerge(staged.nonRuntime, migrated) as GoodVibesConfig);
           staged.recordLayer(migrated, 'project');
@@ -2481,49 +2505,42 @@ export class ConfigManager {
   }
 
   /**
-   * Carry a daemon-owned key an earlier release kept in this surface's own
-   * settings file (CARRIED_TO_DAEMON_TIER_KEYS) into this machine's daemon
-   * settings file: moved when the daemon's file does not set it, dropped when it
-   * does (that value is in effect), then removed from `document` and the surface
-   * file, and the owner told once. Only the owner's own settings file, never a
-   * project's; nothing while the daemon this process works with is on another
-   * machine. A failed write leaves both files as they were and says so in the log.
+   * Carry forward what an earlier release left in this manager's own settings
+   * file (settings-carry-forward.ts): a key only the daemon's file sets goes to
+   * this machine's daemon file (moved when that file does not set it, dropped
+   * when it does), a key this release no longer has is removed, the file is
+   * written once and the owner told once. Only the owner's own settings file,
+   * never a project's; daemon keys stay put while the daemon this process works
+   * with is on another machine (they are left out with a notice instead). A
+   * failed write leaves the files as they were and says so in the log.
    */
-  #carryToDaemonTier(document: Record<string, unknown>): void {
-    if (this.daemonTierPath === null || this.#daemonIsRemote()) return;
-    const held = CARRIED_TO_DAEMON_TIER_KEYS
-      .map((key) => ({ key, found: readDotPath(document, key) }))
-      .filter((entry) => entry.found.present);
-    if (held.length === 0) return;
+  #carryForward(document: Record<string, unknown>): void {
+    const daemonFile = this.daemonTierPath !== null && !this.daemonTierOwner && this.daemonTierPath !== this.configPath && !this.#daemonIsRemote()
+      ? this.daemonTierPath : null;
     // A read-only reader moves nothing: the manager that owns these files
-    // carries the keys and says so once. Left in, the reader would report a
-    // value that is about to be moved, not dropped, as ignored.
+    // carries the keys and says so once. Left in, the reader would report keys
+    // that are about to be moved or removed as ignored.
     if (this.readOnly) {
-      for (const { key } of held) deleteRawDotPath(document, key);
+      const stale = [...(daemonFile === null ? [] : collectDaemonOwnedEntries(document).map(({ key }) => key)),
+        ...RETIRED_SETTING_KEYS.filter((key) => readDotPath(document, key).present)];
+      for (const key of stale) deleteRawDotPath(document, key);
       return;
     }
-    const lines: string[] = [];
+    const remaining = structuredClone(document);
+    let result: SettingsCarryForward;
     try {
-      const tier = readDaemonTierFile(this.daemonTierPath);
-      for (const { key, found } of held) {
-        if (readDotPath(tier, key).present) {
-          lines.push(`${key}: the daemon's own value is kept; the copy in ${this.configPath} was removed`);
-        } else {
-          persistDaemonKey(this.daemonTierPath, key, found.value);
-          lines.push(`${key} (${JSON.stringify(found.value)}) moved from ${this.configPath} to the daemon's settings (${this.daemonTierPath})`);
-        }
-      }
-      const remaining = structuredClone(document);
-      for (const { key } of held) deleteRawDotPath(remaining, key);
+      result = carrySettingsForward(remaining, daemonFile);
+      if (!carriedAnything(result)) return;
       writeJsonFileAtomic(this.configPath, remaining, { durable: true });
-      for (const { key } of held) deleteRawDotPath(document, key);
     } catch (error) {
-      logger.warn('A setting that is now the daemon\'s could not be moved to the daemon\'s settings; it is left where it is', { file: this.configPath, error: summarizeError(error) });
+      logger.warn('Settings an earlier version left could not be carried forward; they are left where they are', { file: this.configPath, error: summarizeError(error) });
       return;
     }
-    logger.info('Settings that are now the daemon\'s were moved to its settings file', { moved: lines });
-    this.migrationReceipt(`carried-to-daemon:${this.configPath}:${held.map(({ key }) => key).join(',')}`,
-      `Now kept by the daemon for every app on this machine: ${lines.join('; ')}.`);
+    for (const key of Object.keys(document)) delete document[key];
+    Object.assign(document, remaining);
+    logger.info('Settings an earlier version left were carried forward', { file: this.configPath, ...result });
+    this.migrationReceipt(`carried-forward:${this.configPath}:${[...result.moved, ...result.superseded, ...result.removed].join(',')}`,
+      describeSettingsCarryForward(this.configPath, daemonFile, result));
   }
 
   /**
@@ -2610,10 +2627,19 @@ export class ConfigManager {
   private requireWritable(): void {
     if (this.readOnly) throw new PreparedMutationRefusal('read-only', 'ConfigManager is read-only.');
   }
-  /** File a receipt against this config's own announce-once store. */
+  /**
+   * File a receipt against this config's own announce-once store; when this
+   * call is the first to make it, it is also one of this process's settings
+   * announcements (onSettingsAnnouncement).
+   */
   private migrationReceipt(id: string, text: string): void {
     if (this.readOnly) return;
-    new FeatureAnnouncementStore(featureAnnouncementsPath(this)).record(id, text);
+    if (!new FeatureAnnouncementStore(featureAnnouncementsPath(this)).record(id, text)) return;
+    const announcement = Object.freeze({ id, text });
+    this.#settingsAnnouncements.push(announcement);
+    for (const listener of this.#settingsAnnouncementListeners) {
+      try { listener(announcement); } catch (error) { drainOwned(error); }
+    }
   }
 
   /** A surface's own settings are read from the project file (repository content) only where declared for projects. */

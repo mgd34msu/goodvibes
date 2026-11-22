@@ -1,4 +1,4 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 /**
  * One check of a unit:
  * evidence in, Jev readings, an outcome out.
@@ -296,15 +296,21 @@ function nudgedCriteria(findings: Findings, kinds: readonly NudgeKind[]): string
 /** What a criterion reading says when no decision model read the work. */
 export const UNCHECKED_RATIONALE = 'Not independently checked: no decision model is in use, so the work is accepted as produced; gates and claim verification still apply.';
 
+/** What a criterion reading says when the set decision model could not judge the work. */
+export function notJudgedRationale(reason: string): string {
+  return `Not judged: the decision model could not judge this check (${reason}), so the work is kept as delivered; gates and claim verification still apply.`;
+}
+
 /**
  * Runs one check: asks Jev, maps readings to verdicts, and decides the result
  * with the regression and stall rules. The unit is not changed; the runner
  * applies the outcome with {@link applyUnitCheck}. With no decision model in
- * use the check is decided in code ({@link runUnitCheckWithoutModel}); under
- * Decision Model Only a failing model fails the check as before.
+ * use, or when the set one cannot judge this check, the check is decided in
+ * code ({@link runUnitCheckWithoutModel}) and says why: a check that could not
+ * be judged never fails the unit or its contract.
  */
 export function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
-  return decisionOrClassic(() => runUnitCheckWithModel(input), () => runUnitCheckWithoutModel(input));
+  return judgedOrNot(CHECK_SITES.judge, () => runUnitCheckWithModel(input), (notJudged) => runUnitCheckWithoutModel(input, notJudged));
 }
 
 /**
@@ -312,10 +318,11 @@ export function runUnitCheck(input: UnitCheckInput): Promise<UnitCheckOutcome> {
  * failing gate or an unverified claim nudges, a required check without current
  * execution evidence asks for it (then the owner), and otherwise the unit
  * passes. Its criteria and goal are accepted as produced at `confirm`, never at
- * act, each reading saying it was not independently checked; nothing is
+ * act, each reading saying it was not independently checked, or, with
+ * `notJudged`, why the set decision model could not judge it; nothing is
  * requested. A mid-run check only records what code found.
  */
-function runUnitCheckWithoutModel(input: UnitCheckInput): UnitCheckOutcome {
+function runUnitCheckWithoutModel(input: UnitCheckInput, notJudged?: string): UnitCheckOutcome {
   const { unit, settings } = input;
   const usage = emptyJudgmentUsage();
   if (input.signal?.aborted === true || unit.status === 'cancelled') return { discarded: true, usage };
@@ -351,6 +358,7 @@ function runUnitCheckWithoutModel(input: UnitCheckInput): UnitCheckOutcome {
     problems: midRun ? [] : kinds,
     qualityProblems: [],
     decisionIds: [],
+    ...(notJudged === undefined ? {} : { notJudged }),
   };
   let result: CheckResult = chosen;
   let stall: StallReason | undefined;
@@ -371,7 +379,7 @@ function runUnitCheckWithoutModel(input: UnitCheckInput): UnitCheckOutcome {
       + unverified.map(gate => `- ${gate.gate}: ${unverifiedGateAdvice(gate)}`).join('\n') };
   }
   const readings = new Map([...verdicts].map(([id, verdict]): [string, CriterionReading] => [id,
-    { checkId, at: input.now, probabilityUnmet: 0.5, verdict, outcome: 'confirm', decisionId: undefined, rationale: UNCHECKED_RATIONALE }]));
+    { checkId, at: input.now, probabilityUnmet: 0.5, verdict, outcome: 'confirm', decisionId: undefined, rationale: notJudged === undefined ? UNCHECKED_RATIONALE : notJudgedRationale(notJudged) }]));
   return {
     discarded: false,
     check,
@@ -675,8 +683,8 @@ export async function readUnmetSeverities(input: {
   /** Caller-owned accounting remains available even when this batch throws. */
   readonly usage?: JudgmentUsage | undefined;
 }): Promise<{ readonly severities: ReadonlyMap<string, SeverityReading>; readonly usage: JudgmentUsage }> {
-  // With no decision model in use the severities stay unknown (unassessed); nothing is asked.
-  return decisionOrClassic(() => readUnmetSeveritiesWithModel(input),
+  // With no decision model in use, or one that cannot read them, the severities stay unknown (unassessed).
+  return judgedOrNot(CHECK_SITES.severity, () => readUnmetSeveritiesWithModel(input),
     () => ({ severities: new Map<string, SeverityReading>(), usage: input.usage ?? emptyJudgmentUsage() }));
 }
 

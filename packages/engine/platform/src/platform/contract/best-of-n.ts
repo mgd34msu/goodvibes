@@ -1,4 +1,4 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 /**
  * Best-of-N by candidate selection (docs/design/contract-runner.md section
  * 6.2). Replaces the provider-backed attempt judge that parsed a model's
@@ -198,7 +198,8 @@ export function readBestOfN(
   candidates: readonly Candidate[],
   options: { readonly usage: JudgmentUsage; readonly native?: { contract: Contract; services: NativeContractServices | undefined } | undefined; readonly signal?: AbortSignal | undefined; readonly selector?: Selector | undefined },
 ): Promise<Selection> {
-  return decisionOrClassic(() => {
+  // Attempts the decision model could not compare are left for the owner to pick, as with none in use.
+  return judgedOrNot(BEST_OF_N_SITE, () => {
     const selector = options.selector ?? bestOfN;
     const port = meteredPort(options.native === undefined ? judgmentPort(BEST_OF_N_SITE) : nativeContractPort(options.native.contract, options.native.services, judgmentPort(BEST_OF_N_SITE), options.signal), options.usage);
     return selector.select(port, context, candidates, { site: BEST_OF_N_SITE, ...(options.signal === undefined ? {} : { signal: options.signal }) });

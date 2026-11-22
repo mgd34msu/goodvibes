@@ -53,7 +53,7 @@ export const JUDGMENT_FAILURE_REASONS = {
   'endpoint-status': 'The decision endpoint answered with an error status; retry in a moment.',
   unreachable: 'The decision endpoint could not be reached; check that it is running and its address is right, then retry.',
   'endpoint-timeout': 'The decision endpoint did not answer in time; retry in a moment.',
-  'deadline-missed': 'The decision model did not answer in time; retry, or raise "Longest a waiting decision may take" in Settings.',
+  'deadline-missed': 'The decision model did not answer within the time the caller allowed; retry in a moment.',
   'targets-slow': 'The decision models missed their deadline repeatedly and are skipped for a minute; retry after that.',
   'rate-limited': 'The decision models are rate limited; retry after the wait they asked for.',
 } as const;

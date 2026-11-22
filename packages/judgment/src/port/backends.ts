@@ -33,6 +33,15 @@ export function sharedContextForm(endpoint: JudgmentEndpoint): SharedContextForm
   return SHARED_CONTEXT_FORMS[judgmentAdapter(endpoint)];
 }
 
+/**
+ * Whether a request body of `bytes` with `questions` questions fits the
+ * Cloudflare run endpoint's context: four tokens a byte at most, plus room for
+ * rendering and each question's template, within 64k tokens.
+ */
+export function cloudflareContextFits(bytes: number, questions: number): boolean {
+  return bytes * 4 + 4096 + questions * 512 <= 65_536;
+}
+
 /** Capabilities are deployment facts. They never authorize dropping evidence.
  * `bytes` is the UTF-8 size of the request body this target would be sent. */
 export function validateBackendInput(endpoint: JudgmentEndpoint, model: string, request: Pick<SystemOneRequest<Questions>, 'questions'>, bytes: number): void {
@@ -53,7 +62,7 @@ export function validateBackendInput(endpoint: JudgmentEndpoint, model: string, 
     // whole serialized request using bytes (not the English chars/3 estimate),
     // with additional room for rendering and per-question template tokens.
     // Text/JSON only: no media token accounting is implied by this adapter.
-    if (bytes * 4 + 4096 + questions.length * 512 > 65_536) {
+    if (!cloudflareContextFits(bytes, questions.length)) {
       throw new JudgmentError('invalid-request', 'the complete input exceeds the conservative Cloudflare context budget; partition the evidence', { reason: 'target-capability' });
     }
   }

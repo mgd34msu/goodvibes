@@ -214,7 +214,7 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
   // owner's remembered rules, and the decision model with its decision log in this user's home.
   // An ask goes nowhere: the handler answers "no" without prompting, and the result is reported
   // as ASK. Nothing is remembered, run or changed. A judgment it needs is a real request to the
-  // decision model, bounded by judgment.decisionDeadlineMs like any permission decision.
+  // decision model, which ends when the model answers or fails, like any permission decision.
   const featureFlags = createFeatureFlagManager();
   featureFlags.loadFromConfig({ flags: deriveFeatureStates(config) });
   const policyEngineOn = featureFlags.isEnabled('permissions-policy-engine');

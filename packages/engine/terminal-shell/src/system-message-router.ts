@@ -1,4 +1,4 @@
-import type { RuntimeEventProvenance } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
+import { runtimeEventOfNotice, type RuntimeEventProvenance } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import type { NoticeLevel, NoticeMeta } from '@goodvibes/engine/platform/platform/core';
 import {
@@ -133,6 +133,17 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
       this.bufferProviderReplay(message);
       return;
     }
+    // A low-priority line that is only information (progress, a routine
+    // success, bookkeeping) is not a notice: nothing in it needs the person, so
+    // it goes to the activity feed where the host has one, else the activity
+    // log, and never to the conversation or the count of notices. A low line
+    // that declares a warning or an error (its writer's level or its runtime
+    // event's) is still a notice.
+    if (priority === 'low' && this.lowLevel(message, runtimeEvent, level) === 'info') {
+      if (this.feed) this.feed.push(message, priority, activityKindFor(message, kind, runtimeEvent));
+      else logger.info(message, { activity: activityKindFor(message, kind, runtimeEvent) });
+      return;
+    }
     const target = this.getTargetForKind(kind);
     const panel = this.feed ?? this.presentation.targetPanel ?? null;
     const delivery = resolveSystemMessageDelivery(target, panel !== null);
@@ -148,6 +159,11 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
       else if (this.presentation.typedConversation) this.conversation.addTypedSystemMessage(message, kind, runtimeEvent);
       else this.conversation.addEventNotice(message, runtimeEvent);
     }
+  }
+  /** The level a low line declares: its writer's, else its runtime event's, else its leading tag's; success counts as information. */
+  private lowLevel(message: string, runtimeEvent: RuntimeEventProvenance | undefined, level: NoticeLevel | undefined): 'info' | 'warning' | 'error' {
+    const declared = level ?? (runtimeEvent ? runtimeEventOfNotice(message, runtimeEvent)?.level : undefined) ?? declaredNoticeLevel(message);
+    return declared === 'error' || declared === 'warning' ? declared : 'info';
   }
   /** A high-priority line shows on the main screen unless the person chose its target; then only an error or a warning does. */
   private mustShow(message: string, kind: SystemMessageKind, level: NoticeLevel | undefined): boolean {
@@ -213,7 +229,7 @@ export class TerminalSystemMessageRouter<Feed extends SystemMessageActivityFeed 
   userReceipt(message: string, level?: NoticeLevel | undefined): void {
     this.addDeclared(message, 'high', classifySystemMessageKind(message), level);
   }
-  /** Low-priority shortcut, activity feed only. */
+  /** Low-priority shortcut: an information line goes to the activity feed or log only; a warning or error line is a notice. */
   low(message: string, runtimeEvent?: RuntimeEventProvenance | undefined, level?: NoticeLevel | undefined): void {
     this.routeSystemMessage(message, 'low', runtimeEvent, level);
   }

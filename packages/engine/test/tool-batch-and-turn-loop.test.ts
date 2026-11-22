@@ -122,7 +122,7 @@ describe('the tool-batch executor', () => {
 
 describe('the turn loop', () => {
   const policy = (over: Partial<TurnPolicy> = {}): TurnPolicy => ({
-    speaker: 'owner', budget: {}, completion: { maxRejectedDrafts: 2, deadlineMs: 1000 }, delegates: 'return',
+    speaker: 'owner', budget: {}, completion: { maxRejectedDrafts: 2 }, delegates: 'return',
     sink: { delta: () => {} }, ...over,
   });
   function context(responses: TurnModelResponse[], extra: Partial<TurnContext> = {}) {

@@ -20,6 +20,7 @@
  */
 import type { SessionBranches, SessionManager } from '@goodvibes/engine/platform/platform/sessions';
 import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
+import type { ContractView, ResumeReport, ResumeStep } from '@goodvibes/engine/platform/platform/contract';
 import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { ToolEvent, TurnEvent } from '@goodvibes/engine/platform/events';
 import {
@@ -356,4 +357,101 @@ export function keepHeadlessSessionRecoverable(input: {
       closeSessionHere(surface, started);
     },
   };
+}
+
+/** One contract the start-up resume took up again, said to the person and to the model. */
+export interface ContractRecoveryLine {
+  readonly contractId: string;
+  /** The session that started the contract; its model is told the line as a fact. */
+  readonly sessionId: string;
+  readonly text: string;
+  readonly level: 'info' | 'warning';
+}
+
+const RESUMED_STEP: Readonly<Record<ResumeStep, string>> = {
+  start: 'from its start',
+  shape: 'by reading the request again',
+  plan: 'by planning again from the start (a plan is not kept half-made)',
+  run: 'with the units that had not finished; each gets a fresh agent with its brief and previous checks',
+  judge: 'with its final check',
+  commit: 'with its commit',
+  'await-owner': 'waiting on your reply to its open question',
+};
+
+/** "2 of 5 units finished (u1 Audit routing, u3 Audit auth)", or that none had. */
+function finishedUnits(contract: ContractView): string {
+  const units = contract.units.filter((unit) => unit.attemptOf === undefined);
+  const passed = units.filter((unit) => unit.status === 'passed');
+  if (units.length === 0) return 'it had no units yet (it stopped before its plan was accepted)';
+  const named = passed.slice(0, 8).map((unit) => `${unit.id} ${unit.title}`).join(', ');
+  return `${passed.length} of ${units.length} unit(s) had finished${passed.length > 0 ? ` (${named}${passed.length > 8 ? ', ...' : ''}); their results are kept in the contract` : ''}`;
+}
+
+/**
+ * What a restart did with each contract that was running when the app stopped, one line each: found on disk
+ * and continuing (with the step it takes up and what had finished), waiting for a slot, or stopped (with why,
+ * what had finished, and the one way to go on). The line is the same for the person and for the model, so
+ * neither has to work out from files what happened. `get` reads the contract as it is now, after the resume
+ * took it up; a contract the resume reaped or that failed while it was taken up reads as stopped.
+ */
+export function describeContractRecovery(report: ResumeReport, get: (contractId: string) => ContractView | null): ContractRecoveryLine[] {
+  const lines: ContractRecoveryLine[] = [];
+  const say = (contractId: string, continuing: string | null, reaped?: string): void => {
+    const contract = get(contractId);
+    if (contract === null) return;
+    const title = (contract.goal || contract.ask).replace(/\s+/g, ' ').trim();
+    const named = `Contract ${contract.id}${title ? ` ("${title.length > 80 ? `${title.slice(0, 79)}...` : title}")` : ''}`;
+    const ended = contract.status === 'failed' || contract.status === 'cancelled' || contract.status === 'passed' || reaped !== undefined;
+    if (!ended && continuing !== null) {
+      lines.push({ contractId, sessionId: contract.sessionId, level: 'info',
+        text: `[Contracts] ${named} was running when the app stopped. It was found on disk and continues ${continuing}; ${finishedUnits(contract)}. /agents shows it.` });
+      return;
+    }
+    if (contract.status === 'passed') {
+      lines.push({ contractId, sessionId: contract.sessionId, level: 'info', text: `[Contracts] ${named} was running when the app stopped; it finished after the restart. /agents shows its result.` });
+      return;
+    }
+    const why = reaped ?? contract.error ?? contract.statusLine ?? 'it could not continue';
+    lines.push({ contractId, sessionId: contract.sessionId, level: 'warning',
+      text: `[Contracts] ${named} was running when the app stopped and did not continue after the restart: ${why}. ${finishedUnits(contract)}. `
+        + 'Its agents did not survive the restart, so their ids are no longer live; agent mode=activity reads what each one read, changed and reported. '
+        + 'To go on: ask for the work that had not finished again; it starts as a new contract.' });
+  };
+  for (const { contractId, step } of report.resumed) say(contractId, RESUMED_STEP[step]);
+  for (const contractId of report.queued) say(contractId, 'as soon as a contract slot is free');
+  for (const { contractId, reason } of report.reaped) say(contractId, null, reason);
+  return lines;
+}
+
+/**
+ * Says what the start-up resume did with each contract that was running when the app stopped: one line to the
+ * person when the resume reports, and the same lines to the model of the session that started each contract,
+ * with that session's next request (the host channel, once). Held until then, so a session restored from its
+ * crash snapshot after the report still gets them. Returns the unsubscribe. Cost: none on a start with nothing
+ * to resume; one array scan per submitted turn while a line waits.
+ */
+export function wireContractRecoveryNotices(input: {
+  readonly recovery: Promise<ResumeReport | { readonly failed: string }>;
+  readonly get: (contractId: string) => ContractView | null;
+  readonly say: (text: string, level: 'info' | 'warning') => void;
+  readonly bus: Pick<RuntimeEventBus, 'on'>;
+  readonly sessionId: () => string | undefined;
+  readonly hostInstructions: () => { set(key: 'replay', text: string, options: { readonly once: boolean; readonly append: boolean }): void };
+}): () => void {
+  let waiting: ContractRecoveryLine[] = [];
+  void input.recovery.then((report) => {
+    if ('failed' in report) return;
+    for (const line of describeContractRecovery(report, input.get)) {
+      input.say(line.text, line.level);
+      waiting.push(line);
+    }
+  }, () => { /* a failed resume is reported by resumeContracts itself */ });
+  return input.bus.on<TurnEvent>('TURN_SUBMITTED', () => {
+    if (waiting.length === 0) return;
+    const sessionId = input.sessionId();
+    const due = waiting.filter((line) => line.sessionId === sessionId);
+    if (due.length === 0) return;
+    waiting = waiting.filter((line) => line.sessionId !== sessionId);
+    input.hostInstructions().set('replay', due.map((line) => line.text).join('\n'), { once: true, append: true });
+  });
 }

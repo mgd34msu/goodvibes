@@ -446,6 +446,12 @@ export function registerAllTools(
     hookDispatcher?: import('../hooks/index.js').HookDispatcher | undefined;
     /** Approval for model-requested hook changes; the host wires it to the permission manager. Without it hooks can be listed, not changed. */
     hookChangeGate?: import('./state/index.js').HookChangeGate | undefined;
+    /**
+     * Puts a delegation nothing the owner said settles, and the decision model
+     * could not read, to the owner (PermissionManager.askDelegation). Without it
+     * such a delegation starts once the gate admitted the call.
+     */
+    delegationAsk?: import('../agents/delegation-authority.js').DelegationOwnerAsk | undefined;
   },
 ): { fileCache: FileStateCache; projectIndex: ProjectIndex; /** Flushes and stops the session key-value store; call at shutdown. */ dispose: () => Promise<void> } {
   const fileCache = deps?.fileCache ?? new FileStateCache();
@@ -685,6 +691,7 @@ export function registerAllTools(
       surfaceRoot: deps.surfaceRoot,
       readAccessFilter: deps.readAccessFilter,
       resolveSessionId: resolveContractSessionId,
+      ...(deps.delegationAsk ? { delegationAsk: deps.delegationAsk } : {}),
       ...(deps.providerRegistry ? { getSelectedModel: () => deps.providerRegistry!.getCurrentModel() } : {}),
     }),
   );
@@ -735,6 +742,7 @@ export function registerAllTools(
       contractRunner: deps.contractRunner,
       projectRoot: deps.projectRoot,
       resolveSessionId: resolveContractSessionId,
+      ...(deps.delegationAsk ? { delegationAsk: deps.delegationAsk } : {}),
     }),
   );
   const fetchConfigManager = deps.configManager;

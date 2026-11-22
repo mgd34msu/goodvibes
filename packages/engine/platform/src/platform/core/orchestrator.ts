@@ -1,6 +1,5 @@
 import type { AutonomousToolSource } from '../permissions/autonomous.js';
-import { assertAgentBriefFidelity, DelegationPlanHeldError } from '../agents/brief-fidelity.js';
-import { readCompletionRepairContext } from './completion-repair-context.js';
+import { decideDelegation } from '../agents/delegation-authority.js';
 import { readDelegationRequest } from './delegation-request-context.js';
 import { revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
 import { admitNativeConversationTurn, failNativeConversationTurn, NativeConversationTurnAdmissionError, readNativeConversationTurnStatus, settleNativeConversationTurn, startNativeConversationTurn, validateNativeConversationTurn, type NativeConversationTurnAdmission } from './native-turn-admission.js';
@@ -38,7 +37,6 @@ import {
   type TurnFlagSources,
 } from './orchestrator-turn-flags.js';
 import { appendPlanModeInstruction } from '../permissions/plan-mode-instructions.js';
-import { describePermissionModeInForce } from '../permissions/decision-model-readiness.js';
 import type { AcpManager } from '../acp/manager.js';
 import type { SubagentTask } from '../acp/protocol.js';
 import { estimateConversationTokens } from './context-compaction.js';
@@ -292,6 +290,9 @@ export interface OrchestratorOptions {
   };
 }
 
+/** The key of the one notice a failing set decision model is said with; withdrawn when it answers again. */
+const DECISION_MODEL_FAILING_NOTICE = 'decision-model-failing';
+
 /**
  * Orchestrator - Manages LLM turn lifecycle with full tool-use loop.
  * Supports multi-turn agent loops: call LLM -> execute tools -> send results -> repeat.
@@ -331,7 +332,7 @@ export class Orchestrator {
   private abortRequestedAt: number | undefined;
   private disposed = false;
   /** What this conversation was last told about the decision model (see tellDecisionModelUse). */
-  private decisionModelTold: { readonly failingSince?: number; readonly noneInUse?: boolean } = {};
+  private decisionModelTold: { readonly failingSince?: number } = {};
   /** Per-tool-call abort registry (per-call cancel; see orchestrator-live-turn.ts). */
   private readonly toolCallAborts = new ToolCallAbortRegistry();
   /** Monotonic id source for queued-message ids. */
@@ -580,7 +581,7 @@ export class Orchestrator {
       },
       execute: async (args, options): Promise<{ success: boolean; output: string }> => {
         if (isNativeConversationTurn() && !isClassicOperation()) return { success: false, output: NATIVE_TURN_EXECUTION_REFUSAL };
-        if (this.toolRegistry.has('agent')) return { success: false, output: 'Use the agent tool and revalidate any held delegation plan. Legacy ACP delegation cannot replace that plan.' };
+        if (this.toolRegistry.has('agent')) return { success: false, output: 'Not run: this host has the agent tool; start agents with it (mode=spawn or batch-spawn).' };
         if (!this.acpManager) {
           return { success: false, output: 'ACP manager not initialized' };
         }
@@ -612,17 +613,11 @@ export class Orchestrator {
         };
 
         assertCurrent();
-        try { await assertAgentBriefFidelity({ request: source.request, assignments: [{ task: task.description,
-          ...(task.context ? { context: task.context } : {}), tools: task.tools }], ...(readCompletionRepairContext() ? { repairContext: readCompletionRepairContext()! } : {}) },
-          { signal: options?.signal ?? source.signal, assertCurrent }); }
-        catch (error) {
-          if (!(error instanceof DelegationPlanHeldError)) throw error;
-          assertCurrent();
-          return { success: false, output: JSON.stringify({ recovery: { kind: 'revise-delegation',
-            request: source.request, assignments: [{ task: task.description, context: task.context, tools: task.tools }],
-            fixes: error.fixes, instruction: 'Repair these exact requirement conflicts and resubmit the proposal for Jev revalidation.' } }) };
-        }
+        // The same rule as the agent tool: what the owner said in this conversation decides.
+        const verdict = await decideDelegation(this, { sessionId: session, ownerMessages: source.ownerMessages, tasks: [task.description] },
+          { signal: options?.signal ?? source.signal, assertCurrent });
         assertCurrent();
+        if (!verdict.start) return { success: false, output: verdict.refusal.reason };
         const id = await acp.spawn(task);
         return {
           success: true,
@@ -1096,10 +1091,10 @@ export class Orchestrator {
   }
 
   /**
-   * Tells this conversation when no decision model is in use: once when none
-   * is set or the owner chose none, once when a set model starts failing
-   * (naming it, what failed and the next step), and once when it answers
-   * again. A model that stays down is not repeated every turn.
+   * A set decision model that fails is said once per outage, in one sentence
+   * naming it, what failed and the next step; the notice is withdrawn when the
+   * model answers again. With none set, or the owner's choice of none, nothing
+   * is said: every decision takes its fallback.
    */
   private tellDecisionModelUse(): void {
     const use = decisionModelUse();
@@ -1107,19 +1102,12 @@ export class Orchestrator {
     if (use.failure !== undefined) {
       if (told.failingSince === use.failure.since) return;
       this.decisionModelTold = { failingSince: use.failure.since };
-      // The first failure also changes the mode in force: jev-decides asks the owner until the model answers again.
-      const inForce = describePermissionModeInForce(requireConfigManager(this.coreServices));
-      const flipped = inForce.chosen === 'jev-decides' && inForce.mode === 'ask-me'
-        ? ' Until it answers again, GoodVibes asks you about every call Jev would decide.' : '';
-      this.conversation.addNotice(`[Decision model] ${use.line}${flipped}`, { level: 'error', kind: 'operational' });
+      // While it fails, the status bar's mode segment also says jev-decides asks the owner.
+      this.conversation.addNotice(`[Decision model] ${use.line}`, { level: 'error', kind: 'operational', key: DECISION_MODEL_FAILING_NOTICE });
     } else if (told.failingSince !== undefined) {
       this.decisionModelTold = {};
-      const inForce = describePermissionModeInForce(requireConfigManager(this.coreServices));
-      const restored = inForce.chosen === 'jev-decides' && inForce.mode === 'jev-decides' ? ' Jev decides again.' : '';
-      this.conversation.addNotice(`[Decision model] The decision model is answering again.${restored}`, { level: 'info', kind: 'operational' });
-    } else if (!use.inUse && use.reason !== 'unavailable' && !told.noneInUse) {
-      this.decisionModelTold = { noneInUse: true };
-      this.conversation.addNotice(`[Decision model] ${use.line}`, { level: 'info', kind: 'operational' });
+      // It answers again: the failure is over, so its notice is taken back.
+      this.conversation.withdrawNotice(DECISION_MODEL_FAILING_NOTICE);
     } else return;
     this.requestRender();
   }

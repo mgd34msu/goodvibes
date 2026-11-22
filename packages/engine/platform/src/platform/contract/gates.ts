@@ -21,7 +21,7 @@ import { logger } from '../utils/logger.js';
 import { declaredPackageManager, isDeclaredPackageManager, PACKAGE_MANAGER_LOCKFILES, type DeclaredPackageManager } from '../utils/project-test-runner.js';
 import { CONTRACT_CONFIG_DEFAULTS, getContractGates, getContractGateTimeoutMs, getEnabledContractGates, type ContractConfigReader } from './config.js';
 import { emitContractEvent } from './events.js';
-import { captureGateInput, type GateSourceInputIdentity } from './gate-input.js';
+import { captureGateInput, linkProjectDependencies, type GateSourceInputIdentity } from './gate-input.js';
 import { bunTestCommand, junitCompletion, protocolCompletion, type GateCompletion } from './gate-receipts.js';
 import type { ContractCheckedGate, GateResultOutcome } from '../../events/contract.js';
 
@@ -145,9 +145,13 @@ export function gateSourceKey(root: string, scope?: readonly string[]): string {
   return JSON.stringify([root, scope ?? null]);
 }
 
-/** Required unknown checks cannot be promoted by a semantic reading. */
+/**
+ * Required unknown checks cannot be promoted by a semantic reading. A check
+ * that could not run where the work is (the project's dependencies are not
+ * installed there) is not the work's to supply, so it asks nothing of it.
+ */
 export function unverifiedGates(results: readonly QualityGateResult[] | undefined): QualityGateResult[] {
-  return (results ?? []).filter(result => result.required === true && gateOutcome(result) === 'unverified');
+  return (results ?? []).filter(result => result.required === true && gateOutcome(result) === 'unverified' && result.reason !== 'dependencies-missing');
 }
 
 /** What the nudge tells a worker about a required gate that has no current evidence, including how to supply it when that is possible. */
@@ -339,7 +343,47 @@ export interface RunContractGatesOptions {
    * (a shared tree the owner keeps working in). Absent: the whole tree.
    */
   readonly scope?: readonly string[] | undefined;
+  /**
+   * The paths the work being checked changed, relative to `cwd`. Given, only
+   * the gates that check one of them run ({@link gateChecks}), and none when
+   * nothing changed: work that changed no source has nothing to typecheck or
+   * lint. Absent: every enabled gate runs.
+   */
+  readonly changedPaths?: readonly string[] | undefined;
   readonly onResult?: ((results: readonly QualityGateResult[], result: QualityGateResult) => void) | undefined;
+}
+
+const SCRIPT_SOURCE = /\.(?:[cm]?[jt]sx?|vue|svelte|astro)$/i;
+const TYPECHECK_CONFIG = /(?:^|\/)(?:tsconfig[^/]*\.json|jsconfig[^/]*\.json|package\.json)$/i;
+const LINT_CONFIG = /(?:^|\/)(?:\.?eslint[^/]*|package\.json)$/i;
+
+/**
+ * Whether a gate checks any of `paths`: `typecheck` a script source or a
+ * TypeScript or package configuration, `lint` a script source or an ESLint or
+ * package configuration, every other gate (tests, a build, the owner's own)
+ * any changed file.
+ */
+export function gateChecks(gate: Pick<QualityGate, 'name'>, paths: readonly string[]): boolean {
+  if (gate.name === 'typecheck') return paths.some((path) => SCRIPT_SOURCE.test(path) || TYPECHECK_CONFIG.test(path));
+  if (gate.name === 'lint') return paths.some((path) => SCRIPT_SOURCE.test(path) || LINT_CONFIG.test(path));
+  return paths.length > 0;
+}
+
+/** Contracts already told that a gate could not run where the work is, by gate: said once per contract. */
+const toldCannotRun = new Map<string, Set<string>>();
+
+/** True the first time a contract's gate could not run for want of the project's dependencies. */
+function firstCannotRun(contractId: string, gate: string): boolean {
+  let told = toldCannotRun.get(contractId);
+  if (told === undefined) {
+    told = new Set();
+    toldCannotRun.set(contractId, told);
+    // Kept for the contracts of this process only: the oldest are forgotten first.
+    if (toldCannotRun.size > 256) toldCannotRun.delete(toldCannotRun.keys().next().value!);
+  }
+  if (told.has(gate)) return false;
+  told.add(gate);
+  return true;
 }
 
 /**
@@ -351,15 +395,21 @@ export interface RunContractGatesOptions {
  * on a failed assertion. Every result is emitted as CONTRACT_GATE_RESULT.
  */
 export async function runContractGates(options: RunContractGatesOptions): Promise<QualityGateResult[]> {
-  const gates = getEnabledContractGates(options.configManager).map(gate => Object.freeze({ ...gate }));
+  const enabled = getEnabledContractGates(options.configManager);
+  const changed = options.changedPaths;
+  const gates = enabled.filter(gate => changed === undefined || gateChecks(gate, changed)).map(gate => Object.freeze({ ...gate }));
   if (gates.length === 0) return [];
   const timeoutMs = getContractGateTimeoutMs(options.configManager);
-  const definitionBefore = gateDefinitionId(gates);
+  // The definition is every enabled gate's, whichever of them this work needs, so a result stays comparable with the setting.
+  const definitionBefore = gateDefinitionId(enabled);
+  // A worktree has no installed dependencies of its own: the project's are linked in where git ignores them, as the project runs its scripts.
+  const dependencies = linkProjectDependencies(options.cwd);
   let before: GateInputIdentity | undefined;
   try { before = { ...captureGateInput(options.cwd, undefined, options.scope), definition: definitionBefore }; }
   catch { /* No source identity: every result is unverified below. */ }
   const results: QualityGateResult[] = [];
   const emitResult = (result: QualityGateResult): void => {
+    if (result.reason === 'dependencies-missing' && !firstCannotRun(options.contractId, result.gate)) return;
     emitContractEvent(options.runtimeBus, options.sessionId, {
       type: 'CONTRACT_GATE_RESULT', contractId: options.contractId, targetId: options.targetId,
       ...gateEventSummary(result), durationMs: result.durationMs,
@@ -370,11 +420,15 @@ export async function runContractGates(options: RunContractGatesOptions): Promis
     options.signal?.throwIfAborted();
     const startedAt = Date.now();
     const skipReason = before ? getSkippedGateReason(gate.name, options.cwd, { ...before.packageScripts }, gate.command) : null;
+    const cannotRun = skipReason === null && dependencies.missing
+      ? `Could not run here: the project's dependencies (node_modules) are not installed in ${options.cwd} or in the checkout it was made from; install them to run this check. This says nothing about the work.`
+      : null;
     const result: QualityGateResult = { gate: gate.name, passed: false, outcome: 'unverified', required: requiredGate(gate),
-      output: skipReason ?? '', durationMs: 0, skipped: skipReason !== null,
+      output: skipReason ?? cannotRun ?? '', durationMs: 0, skipped: skipReason !== null || cannotRun !== null,
       ...(before ? {} : { reason: 'source-identity-unavailable' }),
     };
     if (skipReason !== null) result.reason = 'not-applicable';
+    else if (cannotRun !== null) result.reason = 'dependencies-missing';
     else if (before) {
       const directory = mkdtempSync(join(tmpdir(), 'goodvibes-gate-'));
       const report = join(directory, 'result.xml');

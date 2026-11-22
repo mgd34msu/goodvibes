@@ -8,7 +8,7 @@ import { type ConfigSettingDefinition, intRange } from './schema-shared.js';
 import type { JudgmentSettings } from './schema-types-judgment.js';
 import type { ConfigSettingRow } from './schema-types.js';
 import { validJudgmentFallbackSettings, validJudgmentCredentialName } from './judgment-fallback-settings.js';
-import { DEFAULT_DECISION_DEADLINE_MS, MAX_DECISION_DEADLINE_MS, captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes/judgment/decisions';
+import { captureJudgmentBackendSettings, validEndpointURL } from '@goodvibes/judgment/decisions';
 import { captureJudgmentVolumeMonitorControl } from '../observe/judgment-volume-monitor.js';
 
 export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
@@ -21,7 +21,6 @@ export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
     model: '',
     backend: {},
     timeoutMs: 30_000,
-    decisionDeadlineMs: DEFAULT_DECISION_DEADLINE_MS,
     fallbacks: [],
   },
 };
@@ -97,12 +96,5 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     type: 'number',
     description: 'Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner',
     ...intRange(0, 2_147_483_647),
-  },
-  {
-    key: 'judgment.decisionDeadlineMs',
-    label: 'Longest a waiting decision may take (ms)',
-    type: 'number',
-    description: 'How long a decision that a person or a tool call waits on may take, in milliseconds, before it takes its fallback (for example asking you, or the safe default). A decision target that misses this deadline three times in a row is skipped for a minute, so the next decisions take their fallback at once',
-    ...intRange(1, MAX_DECISION_DEADLINE_MS),
   },
 ];

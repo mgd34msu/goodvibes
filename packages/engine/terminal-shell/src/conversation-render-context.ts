@@ -37,6 +37,13 @@ export interface ConversationRenderContext {
      */
     readonly systemNotices?: 'elsewhere' | undefined;
     /**
+     * Whether the user-role message at an index was put there by the host for
+     * the model (delegated results, runtime observations), not typed by the
+     * person: it is never drawn as the person's prompt. Absent: every user
+     * message is the person's.
+     */
+    readonly isRuntimeMessage?: ((index: number) => boolean) | undefined;
+    /**
      * Live facts the work tree draws that the transcript does not carry: call
      * and turn timings, spawned agents' lanes, the call a permission prompt is
      * holding. Undefined draws the work tree without them (no times, no agent

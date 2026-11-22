@@ -33,7 +33,7 @@ export const atRestConfigSettings: ConfigSettingRow[] = [
     label: 'Delete logs and transcripts older than (days)',
     type: 'number',
     description:
-      'Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.',
+      'Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). The decision log keeps readings for the same number of days, removing older ones shortly after start and once a day (a reading carrying an owner correction or outcome is kept). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.',
     ...intRange(1, 365),
   },
   {

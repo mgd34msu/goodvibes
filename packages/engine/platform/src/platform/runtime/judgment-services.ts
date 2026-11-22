@@ -322,6 +322,8 @@ export function composeJudgment(input: JudgmentServicesInput): JudgmentServices 
     onCarriedForward: (result) => {
       const text = describeDecisionLogCarriedForward(result);
       logger.info(text, { stateRoot: input.stateRoot, ...result });
+      // A small log gives back next to nothing ("0.0 MB came back"): that is not news for the owner, only the log line.
+      if (result.fromBytes - result.toBytes < 1024 * 1024) { carriedForward.resolve(undefined); return; }
       // The daemon says it through its receipts; a terminal app reads `decisionLogCarriedForward`.
       noteCarriedForwardChange(text);
       carriedForward.resolve(text);

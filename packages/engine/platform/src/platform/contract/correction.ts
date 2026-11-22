@@ -1,4 +1,4 @@
-import { decisionOrClassic } from '../runtime/decision-policy.js';
+import { judgedOrNot } from './judged-or-not.js';
 import { selectBaselineExecutionRoot } from './tree-baseline.js';
 import { bindContractInputAuthority } from './input-authority.js';
 import { bindContractActionSource, bindContractPlanConsumer } from '../tools/agent/contract-binding.js';
@@ -178,11 +178,14 @@ export function createCorrection(context: StepContext, escalations: Pick<Escalat
   async function readRoute(run: ContractRun, state: Record<string, unknown>): Promise<StallRouteRead> {
     const usage = emptyJudgmentUsage();
     try {
-      return await decisionOrClassic<StallRouteRead>(async () => {
+      // A route the decision model cannot read (it refused the request, or failed) takes the no-model route, never ends the contract.
+      return await judgedOrNot<StallRouteRead>(STALL_ROUTE_SITE, async () => {
         const read = await readOwned(run, run.id, 'correction routing', () => stallRoute.run(meteredPort(nativeContractPort(run.contract, context.native, judgmentPort(STALL_ROUTE_SITE), run.abort.signal), usage), state as Parameters<typeof stallRoute.run>[1], { site: STALL_ROUTE_SITE, signal: run.abort.signal }));
         const reading = read.readings.route;
         return { route: reading.choice, act: reading.outcome === 'act', decisionId: read.result.decisionId, recordAction: (action: string) => read.recordAction(action) };
-      }, () => ({ route: 'split' as const, act: true, decisionId: undefined, note: 'no decision model is in use, so a planned fix is the route', recordAction: () => {} }));
+      }, (notJudged) => ({ route: 'split' as const, act: true, decisionId: undefined,
+        note: notJudged === undefined ? 'no decision model is in use, so a planned fix is the route' : `the decision model could not read the route (${notJudged}), so a planned fix is the route`,
+        recordAction: () => {} }));
     } finally {
       addJudgmentUsage(run.contract.judgmentUsage, usage);
     }

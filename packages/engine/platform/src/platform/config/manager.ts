@@ -40,7 +40,7 @@ import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } 
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
 import { RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, describeSettingsCarryForward, type SettingsCarryForward } from './settings-carry-forward.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
-import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, readDaemonTierFile } from './daemon-config-tier.js';
+import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
 import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
 import { describeKeySource, type ConfigKeyTier, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
@@ -2450,6 +2450,7 @@ export class ConfigManager {
         } catch (error) { throw this.loadFailure('Project', this.projectConfigPath, error); }
       }
       this.loadSharedTier(staged);
+      this.#carryDaemonTierForward();
       this.loadDaemonTier(staged);
       if (this.hostLoadValues) this.hostSettings.apply(staged.nonRuntime, this.hostLoadValues);
       const hostDefaultOrigins = this.hostLoadSources ? this.updateHostSources(staged, this.hostLoadSources) : new Set<string>();
@@ -2547,13 +2548,41 @@ export class ConfigManager {
       describeSettingsCarryForward(this.configPath, daemonFile, result, keptAs));
   }
 
-  /** Copies this manager's settings file to `<file>.before-<version>` (a free name), keeping its mode; returns the copy's path. */
-  #keepFileBeforeCarryForward(): string {
-    const base = `${this.configPath}.before-${VERSION}`;
+  /** Copies a settings file (this manager's own by default) to `<file>.before-<version>` (a free name), keeping its mode; returns the copy's path. */
+  #keepFileBeforeCarryForward(file: string = this.configPath): string {
+    const base = `${file}.before-${VERSION}`;
     let target = base;
     for (let n = 2; existsSync(target); n++) target = `${base}.${n}`;
-    copyFileSync(this.configPath, target, fsConstants.COPYFILE_EXCL);
+    copyFileSync(file, target, fsConstants.COPYFILE_EXCL);
     return target;
+  }
+
+  /**
+   * The daemon's own settings file is a tier of the daemon's manager, not its
+   * `configPath`, so #carryForward never reads it. A key this release no longer
+   * has (`judgment.decisionDeadlineMs` and the rest of RETIRED_SETTING_KEYS) is
+   * taken out of it here by the manager that owns it, once: the file as it was
+   * is kept beside it and the owner told once. A failure leaves the file as it
+   * was and says so in the log.
+   */
+  #carryDaemonTierForward(): void {
+    const file = this.daemonTierPath;
+    if (file === null || this.readOnly || !this.daemonTierOwner || file === this.configPath || !existsSync(file)) return;
+    let removed: string[];
+    let keptAs: string;
+    try {
+      const tier = readDaemonTierFile(file);
+      removed = RETIRED_SETTING_KEYS.filter((key) => readDotPath(tier, key).present);
+      if (removed.length === 0) return;
+      keptAs = this.#keepFileBeforeCarryForward(file);
+      for (const key of removed) removeDaemonKey(file, key);
+    } catch (error) {
+      logger.warn('Settings an earlier version left in the daemon\'s settings could not be carried forward; they are left where they are', { file, error: summarizeError(error) });
+      return;
+    }
+    logger.info('Settings an earlier version left were carried forward', { file, keptAs, removed });
+    this.migrationReceipt(`carried-forward:${file}:${removed.join(',')}`,
+      describeSettingsCarryForward(file, null, { moved: [], superseded: [], removed }, keptAs));
   }
 
   /**
@@ -2574,7 +2603,11 @@ export class ConfigManager {
       return;
     }
     try {
-      const stored = this.ingest(readDaemonTierFile(this.daemonTierPath), this.daemonTierPath);
+      // A key this release no longer has is the daemon's to carry out of its file (#carryDaemonTierForward):
+      // another program reading the file before the daemon has done so leaves it out without a notice.
+      const raw = readDaemonTierFile(this.daemonTierPath);
+      for (const key of RETIRED_SETTING_KEYS) if (readDotPath(raw, key).present) deleteRawDotPath(raw, key);
+      const stored = this.ingest(raw, this.daemonTierPath);
       const applied = overlayDaemonTierFrom(stored, (key, value) => {
         const { parent, field } = resolveOrCreateDaemonPath(staged.nonRuntime as unknown as Record<string, unknown>, key);
         parent[field] = value;

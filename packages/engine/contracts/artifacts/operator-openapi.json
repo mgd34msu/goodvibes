@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "GoodVibes Operator API",
-    "version": "3.4.2",
+    "version": "3.4.3",
     "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 650 cataloged methods: 535 with dedicated REST bindings, 115 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
@@ -45822,6 +45822,9 @@
                                     "type": "string"
                                   }
                                 },
+                                "notJudged": {
+                                  "type": "string"
+                                },
                                 "evidenceDigest": {
                                   "type": "string"
                                 },
@@ -46714,6 +46717,9 @@
                                   "items": {
                                     "type": "string"
                                   }
+                                },
+                                "notJudged": {
+                                  "type": "string"
                                 },
                                 "evidenceDigest": {
                                   "type": "string"
@@ -48023,6 +48029,9 @@
                                           "type": "string"
                                         }
                                       },
+                                      "notJudged": {
+                                        "type": "string"
+                                      },
                                       "evidenceDigest": {
                                         "type": "string"
                                       },
@@ -49327,6 +49336,9 @@
                             "items": {
                               "type": "string"
                             }
+                          },
+                          "notJudged": {
+                            "type": "string"
                           },
                           "evidenceDigest": {
                             "type": "string"
@@ -53956,6 +53968,9 @@
                                           "type": "string"
                                         }
                                       },
+                                      "notJudged": {
+                                        "type": "string"
+                                      },
                                       "evidenceDigest": {
                                         "type": "string"
                                       },
@@ -54848,6 +54863,9 @@
                                         "items": {
                                           "type": "string"
                                         }
+                                      },
+                                      "notJudged": {
+                                        "type": "string"
                                       },
                                       "evidenceDigest": {
                                         "type": "string"
@@ -56157,6 +56175,9 @@
                                                 "type": "string"
                                               }
                                             },
+                                            "notJudged": {
+                                              "type": "string"
+                                            },
                                             "evidenceDigest": {
                                               "type": "string"
                                             },
@@ -57461,6 +57482,9 @@
                                   "items": {
                                     "type": "string"
                                   }
+                                },
+                                "notJudged": {
+                                  "type": "string"
                                 },
                                 "evidenceDigest": {
                                   "type": "string"
@@ -62086,6 +62110,9 @@
                                         "type": "string"
                                       }
                                     },
+                                    "notJudged": {
+                                      "type": "string"
+                                    },
                                     "evidenceDigest": {
                                       "type": "string"
                                     },
@@ -62978,6 +63005,9 @@
                                       "items": {
                                         "type": "string"
                                       }
+                                    },
+                                    "notJudged": {
+                                      "type": "string"
                                     },
                                     "evidenceDigest": {
                                       "type": "string"
@@ -64287,6 +64317,9 @@
                                               "type": "string"
                                             }
                                           },
+                                          "notJudged": {
+                                            "type": "string"
+                                          },
                                           "evidenceDigest": {
                                             "type": "string"
                                           },
@@ -65591,6 +65624,9 @@
                                 "items": {
                                   "type": "string"
                                 }
+                              },
+                              "notJudged": {
+                                "type": "string"
                               },
                               "evidenceDigest": {
                                 "type": "string"

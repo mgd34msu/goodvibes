@@ -453,6 +453,11 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     services.settleHomeHousekeeping(adopted);
     if (adopted) retryRoutineMove();
   };
+  // Moving the owner's routines changes where they run, so it is a notice; one left unmoved is a warning.
+  const showRoutineMove = (lines: readonly string[]): void => {
+    systemMessageRouter.high(lines.join('\n'), lines.some((line) => line.startsWith('Not moved yet')) ? 'warning' : undefined);
+    requestRender();
+  };
   // Routines a start-up move left running nowhere (the daemon could not be
   // reached then) are moved once a daemon is adopted or comes back.
   const retryRoutineMove = (): void => {
@@ -460,8 +465,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     void retryTerminalRoutineMove({ configManager, automationManager: services.automationManager, homeDirectory: services.homeDirectory })
       .then((lines) => {
         if (lines.length === 0) return;
-        systemMessageRouter.low(lines.join('\n'));
-        requestRender();
+        showRoutineMove(lines);
       })
       .catch((error: unknown) => logger.warn('Moving terminal routines to the daemon failed', { error: summarizeError(error) }));
   };
@@ -733,10 +737,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         // task; moving before it answers would report routines as not running.
         await externalServicesStarted;
         const lines = await startTerminalRoutines({ configManager, automationManager: services.automationManager, homeDirectory: services.homeDirectory });
-        if (lines.length > 0) {
-          systemMessageRouter.low(lines.join('\n'));
-          requestRender();
-        }
+        if (lines.length > 0) showRoutineMove(lines);
       },
       onError: (error) => {
         const message = summarizeError(error);

@@ -6,7 +6,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
   "product": {
     "id": "goodvibes",
     "surface": "operator",
-    "version": "3.4.2"
+    "version": "3.4.3"
   },
   "auth": {
     "modes": [
@@ -50674,6 +50674,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "type": "string"
                               }
                             },
+                            "notJudged": {
+                              "type": "string"
+                            },
                             "evidenceDigest": {
                               "type": "string"
                             },
@@ -51566,6 +51569,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "items": {
                                 "type": "string"
                               }
+                            },
+                            "notJudged": {
+                              "type": "string"
                             },
                             "evidenceDigest": {
                               "type": "string"
@@ -52875,6 +52881,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "type": "string"
                                     }
                                   },
+                                  "notJudged": {
+                                    "type": "string"
+                                  },
                                   "evidenceDigest": {
                                     "type": "string"
                                   },
@@ -54179,6 +54188,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "notJudged": {
+                        "type": "string"
                       },
                       "evidenceDigest": {
                         "type": "string"
@@ -58813,6 +58825,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "type": "string"
                           }
                         },
+                        "notJudged": {
+                          "type": "string"
+                        },
                         "evidenceDigest": {
                           "type": "string"
                         },
@@ -59705,6 +59720,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "notJudged": {
+                          "type": "string"
                         },
                         "evidenceDigest": {
                           "type": "string"
@@ -61014,6 +61032,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "type": "string"
                                 }
                               },
+                              "notJudged": {
+                                "type": "string"
+                              },
                               "evidenceDigest": {
                                 "type": "string"
                               },
@@ -62318,6 +62339,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "notJudged": {
+                    "type": "string"
                   },
                   "evidenceDigest": {
                     "type": "string"
@@ -66932,6 +66956,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                   "type": "string"
                                 }
                               },
+                              "notJudged": {
+                                "type": "string"
+                              },
                               "evidenceDigest": {
                                 "type": "string"
                               },
@@ -67824,6 +67851,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "items": {
                                   "type": "string"
                                 }
+                              },
+                              "notJudged": {
+                                "type": "string"
                               },
                               "evidenceDigest": {
                                 "type": "string"
@@ -69133,6 +69163,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                         "type": "string"
                                       }
                                     },
+                                    "notJudged": {
+                                      "type": "string"
+                                    },
                                     "evidenceDigest": {
                                       "type": "string"
                                     },
@@ -70437,6 +70470,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "notJudged": {
+                          "type": "string"
                         },
                         "evidenceDigest": {
                           "type": "string"
@@ -75334,6 +75370,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                 "type": "string"
                               }
                             },
+                            "notJudged": {
+                              "type": "string"
+                            },
                             "evidenceDigest": {
                               "type": "string"
                             },
@@ -76226,6 +76265,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                               "items": {
                                 "type": "string"
                               }
+                            },
+                            "notJudged": {
+                              "type": "string"
                             },
                             "evidenceDigest": {
                               "type": "string"
@@ -77535,6 +77577,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                                       "type": "string"
                                     }
                                   },
+                                  "notJudged": {
+                                    "type": "string"
+                                  },
                                   "evidenceDigest": {
                                     "type": "string"
                                   },
@@ -78839,6 +78884,9 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "notJudged": {
+                        "type": "string"
                       },
                       "evidenceDigest": {
                         "type": "string"

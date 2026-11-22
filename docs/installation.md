@@ -12,7 +12,7 @@ Missing assets or mismatched checksums stop installation before replacing progra
 To pin the complete suite:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.2 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.3 sh
 ```
 
 The installer uses POSIX shell, curl or wget, tar, and sha256sum or shasum.

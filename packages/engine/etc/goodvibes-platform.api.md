@@ -828,7 +828,7 @@ export const CONTRACT_COMMIT_STATUSES: readonly ["committed", "applied", "skippe
 export const CONTRACT_EVENT_FIELD_SPECS: { readonly [T in ContractEventType]: readonly FieldSpec[]; };
 
 // @public
-export const CONTRACT_EVENT_TYPES: readonly ["CONTRACT_CREATED", "CONTRACT_STATUS_CHANGED", "CONTRACT_SHAPED", "CONTRACT_PLANNED", "CONTRACT_PLAN_CHECKED", "CONTRACT_GROUP_STATUS_CHANGED", "CONTRACT_UNIT_STATUS_CHANGED", "CONTRACT_UNIT_SPAWNED", "CONTRACT_CHECKED", "CONTRACT_NUDGED", "CONTRACT_NUDGE_CONSUMED", "CONTRACT_CRITERION_REGRESSED", "CONTRACT_STALLED", "CONTRACT_FIX_PLANNED", "CONTRACT_ESCALATED", "CONTRACT_OWNER_REPLIED", "CONTRACT_GATE_RESULT", "CONTRACT_UNIT_SILENT", "CONTRACT_MERGE_CONFLICT", "CONTRACT_ATTEMPTS_SELECTED", "CONTRACT_COMMITTED", "CONTRACT_PASSED", "CONTRACT_FAILED", "CONTRACT_CANCELLED", "CONTRACT_SPAWN_GUARD_TRIGGERED"];
+export const CONTRACT_EVENT_TYPES: readonly ["CONTRACT_CREATED", "CONTRACT_STATUS_CHANGED", "CONTRACT_SHAPED", "CONTRACT_PLANNED", "CONTRACT_PLAN_CHECKED", "CONTRACT_GROUP_STATUS_CHANGED", "CONTRACT_UNIT_STATUS_CHANGED", "CONTRACT_UNIT_SPAWNED", "CONTRACT_CHECKED", "CONTRACT_NUDGED", "CONTRACT_NUDGE_CONSUMED", "CONTRACT_CRITERION_REGRESSED", "CONTRACT_STALLED", "CONTRACT_FIX_PLANNED", "CONTRACT_ESCALATED", "CONTRACT_OWNER_REPLIED", "CONTRACT_WAITING", "CONTRACT_GATE_RESULT", "CONTRACT_UNIT_SILENT", "CONTRACT_MERGE_CONFLICT", "CONTRACT_ATTEMPTS_SELECTED", "CONTRACT_COMMITTED", "CONTRACT_PASSED", "CONTRACT_FAILED", "CONTRACT_CANCELLED", "CONTRACT_SPAWN_GUARD_TRIGGERED"];
 
 // @public
 export const CONTRACT_EVENT_VALIDATORS: { readonly [T in ContractEventType]: (v: unknown) => ContractResult; };
@@ -1117,6 +1117,16 @@ export type ContractEvent = (
     reading: OwnerReplyReading;
     outcome: ContractOutcome;
     action: OwnerReplyAction;
+}
+/**
+* The contract cannot go on yet and waits, keeping its status: `reason` says
+* what it waits for, why, and how it goes on (no model can be routed to plan
+* it; it plans on its own once one can). Said once per wait.
+*/
+| {
+    type: 'CONTRACT_WAITING';
+    contractId: string;
+    reason: string;
 }
 /**
 * One gate command from the `contract.gates` setting ran against a target:
@@ -2229,7 +2239,7 @@ export { forSession as forSessionRuntime }
 // @public (undocumented)
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
-    readonly productVersion: "3.4.2";
+    readonly productVersion: "3.4.3";
     readonly operatorMethodCount: 650;
     readonly operatorEventCount: 37;
     readonly peerEndpointCount: 6;
@@ -16335,6 +16345,7 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
+                    notJudged?: string;
                     evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
@@ -16492,6 +16503,7 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
+                    notJudged?: string;
                     evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
@@ -16736,6 +16748,7 @@ export interface OperatorMethodOutputMap {
                         problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                         qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                         decisionIds: readonly string[];
+                        notJudged?: string;
                         evidenceDigest?: string;
                         reviewedFiles?: readonly ({
                             path: string;
@@ -16962,6 +16975,7 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
+                notJudged?: string;
                 evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
@@ -17739,6 +17753,7 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
+                notJudged?: string;
                 evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
@@ -17896,6 +17911,7 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
+                notJudged?: string;
                 evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
@@ -18140,6 +18156,7 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
+                    notJudged?: string;
                     evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
@@ -18366,6 +18383,7 @@ export interface OperatorMethodOutputMap {
             problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
             qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
             decisionIds: readonly string[];
+            notJudged?: string;
             evidenceDigest?: string;
             reviewedFiles?: readonly ({
                 path: string;
@@ -19141,6 +19159,7 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
+                    notJudged?: string;
                     evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
@@ -19298,6 +19317,7 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
+                    notJudged?: string;
                     evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
@@ -19542,6 +19562,7 @@ export interface OperatorMethodOutputMap {
                         problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                         qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                         decisionIds: readonly string[];
+                        notJudged?: string;
                         evidenceDigest?: string;
                         reviewedFiles?: readonly ({
                             path: string;
@@ -19768,6 +19789,7 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
+                notJudged?: string;
                 evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;
@@ -20561,6 +20583,7 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
+                    notJudged?: string;
                     evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
@@ -20718,6 +20741,7 @@ export interface OperatorMethodOutputMap {
                     problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                     qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                     decisionIds: readonly string[];
+                    notJudged?: string;
                     evidenceDigest?: string;
                     reviewedFiles?: readonly ({
                         path: string;
@@ -20962,6 +20986,7 @@ export interface OperatorMethodOutputMap {
                         problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                         qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                         decisionIds: readonly string[];
+                        notJudged?: string;
                         evidenceDigest?: string;
                         reviewedFiles?: readonly ({
                             path: string;
@@ -21188,6 +21213,7 @@ export interface OperatorMethodOutputMap {
                 problems?: readonly ("claims" | "gate" | "quality" | "regression" | "unmet" | "unshown")[];
                 qualityProblems?: readonly ("breaks_existing" | "hidden_failure" | "out_of_scope" | "placeholder" | "tests_weakened" | "unsupported_claims")[];
                 decisionIds: readonly string[];
+                notJudged?: string;
                 evidenceDigest?: string;
                 reviewedFiles?: readonly ({
                     path: string;

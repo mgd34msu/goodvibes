@@ -1004,9 +1004,13 @@ export function waitForTaskRecovery(milliseconds: number, signal?: AbortSignal):
 
 /**
  * Delegates whose final results a turn already handed the model, per
- * conversation. Their completion events carry nothing new, so the replay
- * queue drops them instead of announcing the same fact a second time.
+ * conversation. Their final state is in the conversation already, so a later
+ * wait does not hand it again.
  */
+const handedFinalResults = new WeakMap<ConversationManager, Set<string>>();
+
+const stillWorking = (status: string): boolean => status === 'pending' || status === 'running';
+
 /**
  * Delegation is a step inside a turn. The turn waits for its delegates to end
  * (or to stop on a question for the owner), woken by the agents' own completion
@@ -1018,7 +1022,10 @@ export function waitForTaskRecovery(milliseconds: number, signal?: AbortSignal):
 export async function waitForResponseDelegates(conversation: ConversationManager,
   manager: Parameters<typeof collectResponseDelegates>[1] & Partial<Pick<AgentManager, 'join'>>, options: JudgmentReadingOptions = {}, knownAgentIds: readonly string[] = [],
   canWait: (agentId: string) => boolean = () => true, wake?: (notify: () => void) => (() => void) | undefined): Promise<boolean> {
-  let delegates = collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds);
+  // A delegate whose final state an earlier wait handed over is not handed again.
+  const handed = handedFinalResults.get(conversation);
+  const unhanded = (list: ReturnType<typeof collectResponseDelegates>) => list.filter(agent => stillWorking(agent.status) || !handed?.has(agent.id));
+  let delegates = unhanded(collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds));
   if (!delegates.length) return false;
   const ids = new Set(delegates.map(agent => agent.id));
   const waiting = () => manager.list().filter(agent => ids.has(agent.id) && (agent.status === 'pending' || agent.status === 'running') && canWait(agent.id));
@@ -1038,7 +1045,10 @@ export async function waitForResponseDelegates(conversation: ConversationManager
     });
   }
   options.signal?.throwIfAborted(); options.assertCurrent?.();
-  delegates = collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds);
+  delegates = unhanded(collectResponseDelegates(conversation, { list: () => manager.list() }, knownAgentIds));
+  const handedNow = handed ?? new Set<string>();
+  for (const agent of delegates) if (!stillWorking(agent.status)) handedNow.add(agent.id);
+  handedFinalResults.set(conversation, handedNow);
   const evidence = '[Delegated work state] ' + JSON.stringify(delegates.map(({ evidence: _evidence, ...agent }) => agent))
     + '\nReview these results against the original request. Recover failed or incomplete work, consolidate findings, and produce every requested deliverable. Delegation itself does not complete the task.';
   // The model reads the results; the person reads its answer, and the agents view shows each delegate's state.

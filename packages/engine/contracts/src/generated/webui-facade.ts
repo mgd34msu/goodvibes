@@ -9,7 +9,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * webui keeps its ergonomic wrappers (route interpolation, per-family typed
  * call sites) hand-written on top of these generated primitives.
  *
- * Contract product version: 3.4.2
+ * Contract product version: 3.4.3
  * Methods: 650 total, 535 REST-routed, 115 ws-only invoke.
  */
 
@@ -11684,6 +11684,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -11860,6 +11861,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -12129,6 +12131,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     "decisionIds": [
                       "sample"
                     ],
+                    "notJudged": "sample",
                     "evidenceDigest": "sample",
                     "reviewedFiles": [
                       {
@@ -12367,6 +12370,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "decisionIds": [
               "sample"
             ],
+            "notJudged": "sample",
             "evidenceDigest": "sample",
             "reviewedFiles": [
               {
@@ -12908,6 +12912,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "decisionIds": [
                 "sample"
               ],
+              "notJudged": "sample",
               "evidenceDigest": "sample",
               "reviewedFiles": [
                 {
@@ -13084,6 +13089,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "decisionIds": [
                 "sample"
               ],
+              "notJudged": "sample",
               "evidenceDigest": "sample",
               "reviewedFiles": [
                 {
@@ -13353,6 +13359,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "decisionIds": [
                     "sample"
                   ],
+                  "notJudged": "sample",
                   "evidenceDigest": "sample",
                   "reviewedFiles": [
                     {
@@ -13591,6 +13598,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "decisionIds": [
             "sample"
           ],
+          "notJudged": "sample",
           "evidenceDigest": "sample",
           "reviewedFiles": [
             {
@@ -14131,6 +14139,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "decisionIds": [
                     "sample"
                   ],
+                  "notJudged": "sample",
                   "evidenceDigest": "sample",
                   "reviewedFiles": [
                     {
@@ -14307,6 +14316,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                   "decisionIds": [
                     "sample"
                   ],
+                  "notJudged": "sample",
                   "evidenceDigest": "sample",
                   "reviewedFiles": [
                     {
@@ -14576,6 +14586,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                       "decisionIds": [
                         "sample"
                       ],
+                      "notJudged": "sample",
                       "evidenceDigest": "sample",
                       "reviewedFiles": [
                         {
@@ -14814,6 +14825,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "decisionIds": [
                 "sample"
               ],
+              "notJudged": "sample",
               "evidenceDigest": "sample",
               "reviewedFiles": [
                 {
@@ -15390,6 +15402,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -15566,6 +15579,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -15835,6 +15849,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                     "decisionIds": [
                       "sample"
                     ],
+                    "notJudged": "sample",
                     "evidenceDigest": "sample",
                     "reviewedFiles": [
                       {
@@ -16073,6 +16088,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "decisionIds": [
               "sample"
             ],
+            "notJudged": "sample",
             "evidenceDigest": "sample",
             "reviewedFiles": [
               {

@@ -6,7 +6,7 @@ Every GoodVibes client (the terminal app, Agent, the web UI, `goodvibes-daemon` 
 
 | Term | Meaning |
 | --- | --- |
-| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.2. |
+| method | One operation of the operator API, named by an id such as `sessions.create`. There are 650 in 3.4.3. |
 | REST route | The HTTP method and path a method is bound to, such as `POST /api/sessions`. |
 | invoke-only method | A method with no REST route. It is called through `POST /api/control-plane/methods/<id>/invoke` or a WebSocket `call` frame. |
 | access | Each method is `public` (no credential), `authenticated` (any valid credential holding its scopes) or `admin` (an admin credential). |
@@ -787,7 +787,7 @@ All `config.*` and `credentials.*` methods are admin methods: a non-admin, whate
 
 | Method | Route | Scope | Does |
 | --- | --- | --- | --- |
-| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.2: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
+| `config.get` | `GET /config` | `read:config` | Every setting with its current value, as one nested object grouped by the parts of the key (60 top-level groups in 3.4.3: `{"display":{...},"provider":{...},...,"controlPlane":{"enabled":false,"gateway":true,"hostMode":"local",...}}`), not a list of keys. There is no way to ask for one key: `?key=` is ignored and the whole object is returned; read `controlPlane.port` as `.controlPlane.port`. Credential-bearing values that are not a `goodvibes://secrets/` reference read `[redacted]`. |
 | `credentials.get` | `GET /config/credentials[?key=<config key>]` | `read:config` | `{"available":true,"credentials":[...]}`: whether each credential is configured and usable, never the secret. `503` `CREDENTIAL_STORE_UNAVAILABLE` when no secret store is wired. |
 | `config.set` | `POST /config` `{"key":"<config key>","value":<JSON>}` | `write:config` | Write one value. |
 | `config.setMany` | `POST /config/many` `{"entries":[{"key":"...","value":...},...]}` | `write:config` | Write several values as one update: every entry is checked before anything is written. |
@@ -856,7 +856,7 @@ The daemon reads these fields: `task` (required, a non-empty string), `model` (a
 {"acknowledged":true,"agentId":"agent-65854493","status":"pending","task":"say hi","model":null,"tools":["read","write","edit","find","exec","analyze","inspect","fetch","registry"]}
 ```
 
-`status` is the agent's state when it was started; `model` is `null` when none was named and the daemon's current model is used. An agent that cannot run fails within milliseconds; in testing, with no usable model, `GET /task/agent-65854493` answered `"status":"failed"` with `error` `no route for the planner: The session's model openrouter/free is not available for this work ...`.
+`status` is the agent's state when it was started; `model` is `null` when none was named and the daemon's current model is used. When no usable model serves the work, the agent's contract does not fail: it waits in `planning` and the agent stays running, and the contract's status line says why: `Contract <id> is waiting: no model can be routed to plan it (The session's model openrouter/free is not available for this work ...). It plans on its own as soon as a provider that serves this work is available: signed in, configured, or answering again. Cancel the contract to stop it.` It plans as soon as a provider serves the work; cancel the task to stop it.
 
 ### Form 2: a task in a shared session
 
@@ -972,7 +972,7 @@ Event names:
 
 The catalog name, SSE name, domain and access of each event are in "Event streams a client subscribes to" in the reference. Runtime events carry `sessionId` at the top level; `session-update` frames carry it as `payload.sessionId` (or `payload.id` for `session-created`), and `hosted-session-update` frames as `session.id`. A client that keeps one session's events must check all three places.
 
-The domains (28 in 3.4.2) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
+The domains (28 in 3.4.3) are listed with every runtime event, its fields and its domain under "Runtime events by domain" in the reference, and `GET /api/control-plane/events/catalog` returns them from the daemon. A name that is not a domain is refused (below).
 
 How the daemon decides what a stream carries:
 
@@ -1121,7 +1121,7 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes/engine` (version 3.4.2) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version 3.4.3) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
 How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
@@ -1132,8 +1132,8 @@ npm view @goodvibes/engine versions --json
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes/engine@3.4.2
-npm install @goodvibes/engine@3.4.2
+bun add @goodvibes/engine@3.4.3
+npm install @goodvibes/engine@3.4.3
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -1141,7 +1141,7 @@ When it is not, use it from a source checkout of the same version, inside that c
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes
-git checkout v3.4.2
+git checkout v3.4.3
 bun install
 bun run build                 # produces the dist/ directories the package's exports name
 mkdir -p products/my-client

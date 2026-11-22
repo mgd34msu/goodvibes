@@ -50387,6 +50387,9 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                         "type": "string"
                       }
                     },
+                    "notJudged": {
+                      "type": "string"
+                    },
                     "evidenceDigest": {
                       "type": "string"
                     },
@@ -51279,6 +51282,9 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "notJudged": {
+                      "type": "string"
                     },
                     "evidenceDigest": {
                       "type": "string"
@@ -52588,6 +52594,9 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                               "type": "string"
                             }
                           },
+                          "notJudged": {
+                            "type": "string"
+                          },
                           "evidenceDigest": {
                             "type": "string"
                           },
@@ -53892,6 +53901,9 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                 "items": {
                   "type": "string"
                 }
+              },
+              "notJudged": {
+                "type": "string"
               },
               "evidenceDigest": {
                 "type": "string"
@@ -58511,6 +58523,9 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                     "type": "string"
                   }
                 },
+                "notJudged": {
+                  "type": "string"
+                },
                 "evidenceDigest": {
                   "type": "string"
                 },
@@ -59403,6 +59418,9 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                   "items": {
                     "type": "string"
                   }
+                },
+                "notJudged": {
+                  "type": "string"
                 },
                 "evidenceDigest": {
                   "type": "string"
@@ -60712,6 +60730,9 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                           "type": "string"
                         }
                       },
+                      "notJudged": {
+                        "type": "string"
+                      },
                       "evidenceDigest": {
                         "type": "string"
                       },
@@ -62016,6 +62037,9 @@ One contract with its whole tree, running or ended. The captured input's per-fil
             "items": {
               "type": "string"
             }
+          },
+          "notJudged": {
+            "type": "string"
           },
           "evidenceDigest": {
             "type": "string"
@@ -66624,6 +66648,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                           "type": "string"
                         }
                       },
+                      "notJudged": {
+                        "type": "string"
+                      },
                       "evidenceDigest": {
                         "type": "string"
                       },
@@ -67516,6 +67543,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "notJudged": {
+                        "type": "string"
                       },
                       "evidenceDigest": {
                         "type": "string"
@@ -68825,6 +68855,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                                 "type": "string"
                               }
                             },
+                            "notJudged": {
+                              "type": "string"
+                            },
                             "evidenceDigest": {
                               "type": "string"
                             },
@@ -70129,6 +70162,9 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                   "items": {
                     "type": "string"
                   }
+                },
+                "notJudged": {
+                  "type": "string"
                 },
                 "evidenceDigest": {
                   "type": "string"
@@ -74960,6 +74996,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                         "type": "string"
                       }
                     },
+                    "notJudged": {
+                      "type": "string"
+                    },
                     "evidenceDigest": {
                       "type": "string"
                     },
@@ -75852,6 +75891,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                       "items": {
                         "type": "string"
                       }
+                    },
+                    "notJudged": {
+                      "type": "string"
                     },
                     "evidenceDigest": {
                       "type": "string"
@@ -77161,6 +77203,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                               "type": "string"
                             }
                           },
+                          "notJudged": {
+                            "type": "string"
+                          },
                           "evidenceDigest": {
                             "type": "string"
                           },
@@ -78465,6 +78510,9 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                 "items": {
                   "type": "string"
                 }
+              },
+              "notJudged": {
+                "type": "string"
               },
               "evidenceDigest": {
                 "type": "string"

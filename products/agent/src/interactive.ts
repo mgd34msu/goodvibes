@@ -638,6 +638,10 @@ async function main(prepared: PreparedShellCliRuntime) {
       spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions),
     dispatchNativeTurn: (state, spokenOutput, turnOptions) => dispatchNativeTurn(state, spokenOutput, turnOptions),
     isBusy: () => orchestrator.isBusy,
+    announcements: {
+      record: (id) => ctx.services.featureAnnouncementStore.record(id),
+      forget: (selects) => { ctx.services.featureAnnouncementStore.forgetMatching(selects); },
+    },
     messages: {
       high: (message, level) => systemMessageRouter.high(message, level),
       userAction: (message) => systemMessageRouter.userAction(message),

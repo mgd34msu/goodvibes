@@ -94,6 +94,10 @@ export function emitContractOwnerReplied(bus: RuntimeEventBus, ctx: EmitterConte
   emitContract(bus, ctx, 'CONTRACT_OWNER_REPLIED', data);
 }
 
+export function emitContractWaiting(bus: RuntimeEventBus, ctx: EmitterContext, data: ContractEventData<'CONTRACT_WAITING'>): void {
+  emitContract(bus, ctx, 'CONTRACT_WAITING', data);
+}
+
 export function emitContractGateResult(bus: RuntimeEventBus, ctx: EmitterContext, data: ContractEventData<'CONTRACT_GATE_RESULT'>): void {
   emitContract(bus, ctx, 'CONTRACT_GATE_RESULT', data);
 }

@@ -4,6 +4,7 @@ import { assertCapturedInputPathContext } from '../../contract/input-authority.j
 import { DirectoryWalk, type WalkDirOptions } from '../../utils/walk-dir.js';
 import { isAbsolute, relative } from 'node:path';
 import { lstat, stat } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import type { FilesQuery, FindDiagnostics, OutputOptions } from './shared.js';
 import {
   addDiscoveryCutWarning,
@@ -79,14 +80,24 @@ async function scanFilesQuery(
   const relativeBase = relative(projectRoot, basePath);
   const outside = relativeBase === '..' || relativeBase.startsWith('../') || isAbsolute(relativeBase);
   const ignoreRoot = outside ? basePath : projectRoot;
-  // In a captured view this filter also validates original-owner authority
-  // before the synchronous matcher opens .gitignore.
+  // In a captured view (a contract's read view) this filter also validates
+  // original-owner authority before the synchronous matcher opens an ignore
+  // file. Only ignore files that exist are asked about (a project rarely has
+  // both); one the view may not read is left out and the result says so,
+  // rather than failing the whole search.
   const rootIgnoreFiles = directoryIgnoreFiles(ignoreRoot);
+  let appliedIgnoreFiles = rootIgnoreFiles;
   if (respectGitignore && capturedReadAccess) {
-    for (const file of rootIgnoreFiles) if (!await capturedReadAccess(file)) throw new Error('root ignore-file read is access-restricted');
+    const readable: string[] = [];
+    for (const file of rootIgnoreFiles) {
+      if (!existsSync(file)) continue;
+      if (await capturedReadAccess(file)) readable.push(file);
+      else addFindWarning(diagnostics, `The ignore rules in '${file}' were not applied: this view may not read that file, so files it leaves out can be listed.`);
+    }
+    appliedIgnoreFiles = readable;
   }
   const gitignoreMatcher = respectGitignore
-    ? buildIgnoreFileMatcher(rootIgnoreFiles, diagnostics)
+    ? buildIgnoreFileMatcher(appliedIgnoreFiles, diagnostics)
     : null;
   // A listing without hidden entries or followed links comes from the
   // project's held file list, which a repeated query checks by directory

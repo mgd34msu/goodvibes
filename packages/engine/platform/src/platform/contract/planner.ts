@@ -23,13 +23,15 @@ import { assertContractInputView, contractInputPath } from './input-snapshot.js'
 import type { ReadAccessFilter } from '../tools/shared/read-access.js';
 import { ownerEvidenceForModel, type OwnerEvidenceReader } from './owner-evidence.js';
 
-import { decisionModelPolicyState, JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
+import { JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
 import { JudgmentError } from '@goodvibes/judgment';
 import type { ContractEvent } from '../../events/contract.js';
 import type { DecompositionBounds, DecompositionRunner, DecompositionRunResult } from '../core/plan-decomposition.js';
 import { emptyWorkItemUsage } from '../orchestration/types.js';
 import { createRepoMapTool } from '../tools/repo-map/index.js';
 import { summarizeError } from '../utils/error-display.js';
+import { NoRouteError } from '../routing/route-planner.js';
+import { isWaitingForPlannerRoute, plannerRouteWaitLine } from './planner-route-wait.js';
 import { delegationForbidden, readRequestShape, REQUEST_SHAPE_SITE, saysYesAtAct, writingUnclear } from './batteries/request-shape.js';
 import { readContractConfig, type ContractConfig, type ContractConfigReader } from './config.js';
 import { nativeContractRoute, decideNativeContract, nativeContractPort, nativeDecisionState, nativeSpent, spendNative, type NativeContractServices } from './native-decisions.js';
@@ -87,6 +89,12 @@ export interface ContractPlannerDeps {
   readonly now?: (() => number) | undefined;
   /** Backs off before a retry; defaults to a timer. The runner passes its own wait so one clock serves every back-off. */
   readonly wait?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
+  /**
+   * Resolves the next time what a route is chosen from changes (providers,
+   * models, provider health). With it, a contract no model can be routed to
+   * plan waits for that and plans then; without it, planning fails.
+   */
+  readonly routingChanged?: ((signal: AbortSignal) => Promise<void>) | undefined;
 }
 
 export interface PlanContractInput {
@@ -552,15 +560,9 @@ async function checkPlanText(context: PlanningContext, output: string, repair: n
   }
   deps.emit({ type: 'CONTRACT_PLAN_CHECKED', contractId: contract.id, check: 'structure', passed: codeProblems.length === 0, problems: codeProblems, decisionIds: [] });
   if (codeProblems.length > 0) return { plan, text, problems: codeProblems, verdict: undefined };
-  let verdict: PlanVerdict;
-  try {
-    verdict = await runPlanChecks(plan, contract.ask, shape, { signal, nativeSource: contract.nativeSource, originalSource: contract.originalSource, native: { contract, services: deps.native }, cache: context.planChecks });
-  } catch (error) {
-    // The decision model could not answer (over its limit, failed, too slow): the plan goes ahead
-    // unchecked, as when no decision model is in use, unless the owner chose Decision Model Only.
-    if (isAbort(error, signal) || judgmentFailureReason(error) === undefined || decisionModelPolicyState().policy === 'Decision Model Only') throw error;
-    verdict = { problems: [], dispositions: new Map(), reports: [], decisionIds: [], usage: { calls: 0, inputTokens: 0, outputTokens: 0 }, unchecked: true };
-  }
+  // A decision model that cannot read the plan (over its limit, failing, Decision Model Only
+  // included) is the plan checks' own fallback: the plan goes ahead marked unchecked.
+  const verdict: PlanVerdict = await runPlanChecks(plan, contract.ask, shape, { signal, nativeSource: contract.nativeSource, originalSource: contract.originalSource, native: { contract, services: deps.native }, cache: context.planChecks });
   context.addJudgmentUsage(verdict.usage);
   for (const entry of verdict.reports) {
     deps.emit({ type: 'CONTRACT_PLAN_CHECKED', contractId: contract.id, check: entry.check, passed: entry.passed, problems: entry.problems, decisionIds: entry.decisionIds });
@@ -642,16 +644,38 @@ export async function planContract(contract: Contract, deps: ContractPlannerDeps
   const authority = snapshot === undefined ? undefined : await createContractInputAuthority(contract, workingDirectory, { signal, snapshot });
   context.move('planning');
 
-  let route: UnitRoute;
-  try {
-    route = await nativeContractRoute(deps.routeSelector, contract, deps.native, { purpose: 'planner', contract }, signal);
-  } catch (error) {
-    if (isAbort(error, signal)) return { kind: 'cancelled' };
-    // The route planner reads the work through Jev: an outage is the judgment's, not the planning's.
-    const unavailable = judgmentFailureReason(error);
-    if (unavailable !== undefined) return context.fail('judgment-unavailable', `no route for the planner: ${unavailable}`);
-    return context.fail('planning', `no route for the planner: ${summarizeError(error)}`);
+  let route: UnitRoute | undefined;
+  let waitingForRoute = false;
+  while (route === undefined) {
+    // Listening starts before the route is read, so a change while it is read is not missed.
+    const attempt = new AbortController();
+    const changed = deps.routingChanged?.(signal === undefined ? attempt.signal : AbortSignal.any([signal, attempt.signal]));
+    changed?.catch(() => { /* stopped with its attempt, or cancelled with the planning */ });
+    try {
+      route = await nativeContractRoute(deps.routeSelector, contract, deps.native, { purpose: 'planner', contract }, signal);
+    } catch (error) {
+      if (isAbort(error, signal)) { attempt.abort(); return { kind: 'cancelled' }; }
+      // The route planner reads the work through Jev: an outage is the judgment's, not the planning's.
+      const unavailable = judgmentFailureReason(error);
+      if (unavailable !== undefined) { attempt.abort(); return context.fail('judgment-unavailable', `no route for the planner: ${unavailable}`); }
+      if (!(error instanceof NoRouteError) || changed === undefined) { attempt.abort(); return context.fail('planning', `no route for the planner: ${summarizeError(error)}`); }
+      // No provider serves the planner now: the contract keeps its state and waits, said once.
+      if (!waitingForRoute) {
+        waitingForRoute = true;
+        const line = plannerRouteWaitLine(contract.id, error.message);
+        contract.statusLine = line;
+        context.decide('queued', `waiting for a model route for the planner: ${error.message}`);
+        deps.emit({ type: 'CONTRACT_WAITING', contractId: contract.id, reason: line });
+      }
+      try { await changed; } catch (waitError) {
+        if (isAbort(waitError, signal) || signal?.aborted === true) return { kind: 'cancelled' };
+        throw waitError;
+      }
+      continue;
+    }
+    attempt.abort();
   }
+  if (waitingForRoute && isWaitingForPlannerRoute(contract)) contract.statusLine = undefined;
   context.decide('spawned', `planner route: ${route.reason}`, [], route);
   // Both the original path and the unique generation must pass the existing read boundary.
   // Snapshot membership is only provenance; a source-path denial is not erased by copying.
@@ -913,7 +937,7 @@ export async function acceptEscalatedPlan(
 // ── The contract tree ─────────────────────────────────────────────────────────
 
 /** How a plan was accepted when no decision model read it. */
-const PLAN_UNCHECKED_REASON = 'the code plan checks passed; the semantic plan checks did not run because no decision model is in use, so the plan is not independently checked';
+const PLAN_UNCHECKED_REASON = 'the code plan checks passed; the semantic plan checks did not run because no decision model is in use or it could not read the plan, so the plan is not independently checked';
 
 function plannedEvent(
   contractId: string,

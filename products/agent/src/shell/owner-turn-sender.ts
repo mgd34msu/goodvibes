@@ -38,6 +38,14 @@ export interface OwnerTurnSenderDeps {
   readonly dispatchNativeTurn: (state: NativeConversationIntakeState, spokenOutput: boolean, turnOptions: OrchestratorUserInputOptions | undefined) => Promise<void>;
   /** True while a turn runs here; a held message waits for it. */
   readonly isBusy: () => boolean;
+  /**
+   * The machine's announce-once record: `record` is true only for the first
+   * call with an id on this machine; `forget` makes the ids it selects new again.
+   */
+  readonly announcements: {
+    readonly record: (id: string) => boolean;
+    readonly forget: (selects: (id: string) => boolean) => void;
+  };
   readonly messages: {
     readonly high: (message: string, level?: NoticeLevel) => void;
     readonly userAction: (message: string) => void;
@@ -91,11 +99,19 @@ export interface OwnerTurnSender {
 
 const HELD_OWNER_INPUT_LIMIT = 16;
 const HELD_OWNER_RETRY_MS = 5_000;
+/** Announce-once ids of "messages run in this process because <reason>": one per reason. */
+const LOCAL_TURN_ANNOUNCEMENT = 'local-turns:';
 
 export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSender {
   const { messages } = deps;
-  /** The reason last shown for running turns in this process; cleared once the host takes a message. */
+  /** The reason last given for running turns in this process; cleared once the host takes a message. */
   let localTurnReason: string | undefined;
+  /** The host took a message: a later reason to run here is said again, on this machine too. */
+  const hostTookMessage = (): void => {
+    if (localTurnReason === undefined) return;
+    localTurnReason = undefined;
+    deps.announcements.forget((id) => id.startsWith(LOCAL_TURN_ANNOUNCEMENT));
+  };
   /** Inputs whose intake answer never came: kept, shown as "may have been sent", not sent again by this sender. */
   const uncertainInputs = createHeldInputs();
   const UNCERTAIN_SESSION = 'agent-owner';
@@ -135,12 +151,15 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
       return false;
     };
     // The host cannot take this message and nothing was sent for it: the turn runs here (the
-    // documented behaviour of hostedSessions.routeConversationTurns). The reason is shown once
-    // while it stays the same, not before every message.
+    // documented behaviour of hostedSessions.routeConversationTurns), and it works. Why is a
+    // standing fact of this machine (no host set up, no host token), so it is said once on this
+    // machine and goes to the activity feed after that; it is said again once a host took a
+    // message and then could not.
     const runLocal = (reason: string): Promise<void> => {
       if (reason !== localTurnReason) {
         localTurnReason = reason;
-        messages.userAction(reason);
+        if (deps.announcements.record(`${LOCAL_TURN_ANNOUNCEMENT}${reason}`)) messages.userAction(reason);
+        else messages.activity(reason);
         deps.render();
       }
       // The held output now goes with this turn; a later failure does not bring it back.
@@ -174,7 +193,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
         }
         if (routed) {
           shell?.release();
-          localTurnReason = undefined;
+          hostTookMessage();
           // The connected host runs the turn: its completion carries the answer this process never sees as turn events.
           const answered = how.answered;
           if (answered) {
@@ -201,7 +220,7 @@ export function createOwnerTurnSender(deps: OwnerTurnSenderDeps): OwnerTurnSende
           runLocal,
         });
         // The host answered for this message: a later fallback states its reason again.
-        if (state?.result) localTurnReason = undefined;
+        if (state?.result) hostTookMessage();
         // Refused (another input still being admitted or unresolved, input not acceptable): nothing was sent.
         if (state?.notSent || state?.status === 'pending' || state?.status === 'unavailable' || state?.status === 'invalid') return refused();
         // Handed to the intake with no answer: it may have been recorded. Not taken (it is kept) and not

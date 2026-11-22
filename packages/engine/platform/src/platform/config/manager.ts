@@ -3,7 +3,7 @@ import { POSTAL_PARTS, PostalAddressHeldError, type ProfilePostalReader, type Po
 import { DurablePolicyEpochOwner } from './durable-policy-epoch.js';
 import { PreparedSettingsTarget, settingsFileIdentity } from './prepared-target.js';
 import { createHash } from 'node:crypto';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, copyFileSync, constants as fsConstants } from 'fs';
 import { join } from 'path';
 import { isDeepStrictEqual } from 'node:util';
 import { VERSION } from '../version.js';
@@ -2528,9 +2528,13 @@ export class ConfigManager {
     }
     const remaining = structuredClone(document);
     let result: SettingsCarryForward;
+    let keptAs: string;
     try {
       result = carrySettingsForward(remaining, daemonFile);
       if (!carriedAnything(result)) return;
+      // The file as the earlier version left it is kept beside it (same permissions), so a value
+      // taken out (a retired key, a copy the daemon's file overrides) is never lost.
+      keptAs = this.#keepFileBeforeCarryForward();
       writeJsonFileAtomic(this.configPath, remaining, { durable: true });
     } catch (error) {
       logger.warn('Settings an earlier version left could not be carried forward; they are left where they are', { file: this.configPath, error: summarizeError(error) });
@@ -2538,9 +2542,18 @@ export class ConfigManager {
     }
     for (const key of Object.keys(document)) delete document[key];
     Object.assign(document, remaining);
-    logger.info('Settings an earlier version left were carried forward', { file: this.configPath, ...result });
+    logger.info('Settings an earlier version left were carried forward', { file: this.configPath, keptAs, ...result });
     this.migrationReceipt(`carried-forward:${this.configPath}:${[...result.moved, ...result.superseded, ...result.removed].join(',')}`,
-      describeSettingsCarryForward(this.configPath, daemonFile, result));
+      describeSettingsCarryForward(this.configPath, daemonFile, result, keptAs));
+  }
+
+  /** Copies this manager's settings file to `<file>.before-<version>` (a free name), keeping its mode; returns the copy's path. */
+  #keepFileBeforeCarryForward(): string {
+    const base = `${this.configPath}.before-${VERSION}`;
+    let target = base;
+    for (let n = 2; existsSync(target); n++) target = `${base}.${n}`;
+    copyFileSync(this.configPath, target, fsConstants.COPYFILE_EXCL);
+    return target;
   }
 
   /**

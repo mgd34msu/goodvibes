@@ -33,6 +33,7 @@ import {
   emitContractUnitSilent,
   emitContractUnitSpawned,
   emitContractUnitStatusChanged,
+  emitContractWaiting,
   type ContractEventData,
 } from '../runtime/emitters/contract.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
@@ -69,6 +70,7 @@ const EMITTERS: { readonly [T in ContractEventType]: Emitter<T> } = {
   CONTRACT_FIX_PLANNED: emitContractFixPlanned,
   CONTRACT_ESCALATED: emitContractEscalated,
   CONTRACT_OWNER_REPLIED: emitContractOwnerReplied,
+  CONTRACT_WAITING: emitContractWaiting,
   CONTRACT_GATE_RESULT: emitContractGateResult,
   CONTRACT_UNIT_SILENT: emitContractUnitSilent,
   CONTRACT_MERGE_CONFLICT: emitContractMergeConflict,

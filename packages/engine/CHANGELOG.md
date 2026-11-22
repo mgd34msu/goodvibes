@@ -1,5 +1,67 @@
 # Changelog
 
+## [3.4.3] - 2026-11-21
+
+The full write-up is in
+[docs/releases/3.4.3.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.3/docs/releases/3.4.3.md).
+
+### Upgrading from 3.4.2
+
+- Settings an earlier version left in a program's own settings file are
+  carried forward once: daemon keys (such as `service.*`) move to the daemon's
+  settings file, keys this release no longer has are taken out, the file as it
+  was is kept as `<file>.before-3.4.3`, and one line says what moved.
+- The start-up sweep removes the worktrees of contracts that ended and hold
+  nothing of their own, and says so once.
+- The decision log is carried forward to a smaller form in the background, 500
+  rows at a time; a line says how much space came back once it is rewritten.
+  3.4.2 after a rollback keeps the new file aside as
+  `decisions.sqlite.unrecognized-1` and starts a new log.
+- Removed settings: `judgment.decisionDeadlineMs` and keys earlier releases
+  had and this one does not read (listed in the release notes).
+
+### Added
+
+- The `agent` tool's `activity` mode: what each contract and agent of the
+  session read, changed, ran and reported, across a restart of the app.
+- After a crash, a contract that was running is found on disk and reported to
+  you and to its session's model.
+- `CONTRACT_WAITING`: a contract no model can be routed to plan waits, says
+  why once, and plans when a provider serves the work.
+
+### Changed
+
+- When you ask for agents, they start. Plain code reads what you said about
+  agents across the conversation; only an unclear case asks the decision model,
+  once; when it cannot answer, `yolo` and `just-vibes` start, `ask-me` and
+  `jev-decides` ask you once, `Decision Model Only` refuses. A refusal quotes
+  your words in full; a refused plan is no longer held.
+- A decision model that cannot answer no longer ends a contract: the check is
+  decided by code, the unit is recorded as not judged, the work is kept and
+  the contract goes on.
+- Requests to the decision model are sized to what each target accepts and
+  split by question when larger.
+- Contract gates run only for what a unit changed; in a worktree the project's
+  dependencies are linked in.
+- Notices only when something needs you; contract and agent progress shows on
+  the work's row, in F2 and in the activity log. No "Not verified" line after
+  ordinary answers.
+- The decision deadline is removed; a decision ends when the server answers,
+  errors or the connection fails. `judgment.timeoutMs` stays, to notice an
+  attempt that never gets an answer.
+- The decision log stores each question set once and gives space back.
+- `find` honours ignore files, has no fixed time limit and returns partial
+  results marked as such.
+
+### Fixed
+
+- A provider is no longer held out of routing because its model list could
+  not be read.
+- Worktrees are released when their contract ends, however it ends.
+- A compaction no longer keeps a copy of the whole conversation each time.
+- A failed automatic compaction is said once.
+- The Agent says why a message runs in its own process once per machine.
+
 ## [3.4.2] - 2026-11-21
 
 The full write-up is in

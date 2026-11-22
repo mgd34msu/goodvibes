@@ -60,7 +60,7 @@ interface TurnConfigManager {
 
 /** Minimal system message router surface required by turn-event wiring. */
 interface TurnSystemMessageRouter {
-  high(message: string): void;
+  high(message: string, level?: 'info' | 'warning' | 'error'): void;
   low(message: string): void;
   routeSystemMessage(message: string, level: string): void;
 }
@@ -593,7 +593,9 @@ export function wireTurnEventHandlers(options: WireTurnEventHandlersOptions): Wi
         try {
           const payload = envelope.payload;
           if (payload.type !== 'COMPACTION_RECEIPT') return;
-          systemMessageRouter.high(buildCompactionReceiptBlock(payload));
+          // A compaction that did not apply says so here, once, at its level; nothing else repeats it.
+          systemMessageRouter.high(buildCompactionReceiptBlock(payload),
+            payload.outcome === 'failed' ? 'error' : payload.outcome === 'kept-original' ? 'warning' : undefined);
           render();
         } catch (err) {
           logger.debug('turn-event-wiring: compaction-receipt render error', { error: String(err) });

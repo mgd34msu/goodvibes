@@ -37,10 +37,20 @@ function failedReceipt(trigger: 'auto' | 'manual', strategy: string, detail: str
   };
 }
 
-/** Emit the receipt for a thrown compaction, the guard's kept-original receipt or a failed one. */
-function emitCompactionFailureReceipt(deps: EmitterContextFactoryLike, turnId: string, err: unknown, trigger: 'auto' | 'manual', strategy: string): void {
-  if (err instanceof CompactionQualityError) emitReceipt(deps, turnId, err.receipt);
-  else emitReceipt(deps, turnId, failedReceipt(trigger, strategy, summarizeError(err)));
+/**
+ * Says once that a compaction did not apply: the receipt (the guard's
+ * kept-original one, or a failed one) with what happens now and what to do in
+ * its detail. Without a runtime bus to carry the receipt, the same sentence is
+ * the conversation's notice instead.
+ */
+function reportCompactionFailure(
+  deps: EmitterContextFactoryLike & { readonly conversation: Pick<ConversationManager, 'addNotice'> },
+  turnId: string, err: unknown, trigger: 'auto' | 'manual', strategy: string, next: string, level: 'warning' | 'error',
+): void {
+  const receipt = err instanceof CompactionQualityError ? err.receipt : failedReceipt(trigger, strategy, summarizeError(err));
+  const detail = [receipt.detail?.trim(), next].filter((part): part is string => part !== undefined && part.length > 0).join('. ');
+  if (deps.runtimeBus) emitReceipt(deps, turnId, { ...receipt, detail });
+  else deps.conversation.addNotice(`Auto-compact did not apply: ${detail}`, { level });
 }
 
 type HookDispatcherLike = {
@@ -361,13 +371,12 @@ export async function checkContextWindowPreflight(
       }
       const msg = compactErr instanceof Error ? compactErr.message : String(compactErr);
       logger.error('Orchestrator: pre-flight compact failed', { error: msg });
-      emitCompactionFailureReceipt(deps, turnId, compactErr, 'auto', 'structured');
       failedPreflightCompaction.set(deps.conversation, deps.conversation.workRevision);
       // A failed compaction ends the turn only when the request cannot be sent as it is.
-      deps.conversation.addNotice(fits
-        ? `Auto-compact failed: ${msg}. The request is sent as it is, since it still fits the model's context window; compaction is not tried again until the conversation changes. To free room, run /compact, start a fresh conversation with /clear, or set "Shorten the conversation when context is this full" to 0 in /settings open to turn auto-compact off.`
-        : `Auto-compact failed: ${msg}. The request does not fit the model's context window, so it was not sent. Run /compact, start a fresh conversation with /clear, or switch to a model with a larger window with /model.`,
-      { level: fits ? 'warning' : 'error' });
+      reportCompactionFailure(deps, turnId, compactErr, 'auto', 'structured', fits
+        ? 'The request is sent as it is, since it still fits the model\'s context window; compaction is not tried again until the conversation changes. To free room, run /compact, start a fresh conversation with /clear, or set "Shorten the conversation when context is this full" to 0 in /settings open to turn auto-compact off.'
+        : 'The request does not fit the model\'s context window, so it was not sent. Run /compact, start a fresh conversation with /clear, or switch to a model with a larger window with /model.',
+      fits ? 'warning' : 'error');
       if (deps.hookDispatcher) {
         deps.hookDispatcher.fire({
           path: 'Fail:compact:preflight',
@@ -636,8 +645,7 @@ export async function handlePostTurnContextMaintenance(
           deps.signal?.throwIfAborted();
           const msg = summarizeError(err);
           logger.error('Orchestrator: small-window auto-compact failed', { error: msg });
-          emitCompactionFailureReceipt(deps, turnId, err, 'auto', 'small-window');
-          deps.conversation.addNotice(`Auto-compact failed: ${msg}. Use /compact to retry manually.`, { level: 'error' });
+          reportCompactionFailure(deps, turnId, err, 'auto', 'small-window', 'Use /compact to retry manually', 'error');
           deps.requestRender();
         }
       } else if (!skipAutoCompact) {
@@ -707,8 +715,7 @@ export async function handlePostTurnContextMaintenance(
           if (err instanceof NothingToCompactError) { logger.info('Auto-compaction had nothing to gain', { reason: err.message }); deps.requestRender(); return; }
           const msg = summarizeError(err);
           logger.error('Orchestrator: auto-compact failed', { error: msg });
-          emitCompactionFailureReceipt(deps, turnId, err, 'auto', 'structured');
-          deps.conversation.addNotice(`Auto-compact failed: ${msg}. Use /compact to retry manually.`, { level: 'error' });
+          reportCompactionFailure(deps, turnId, err, 'auto', 'structured', 'Use /compact to retry manually', 'error');
           deps.requestRender();
           if (deps.hookDispatcher) {
             deps.hookDispatcher.fire({
@@ -745,8 +752,7 @@ export async function handlePostTurnContextMaintenance(
       // Nothing to gain by compacting is not a failure: an automatic compaction says nothing.
       if (compactErr instanceof NothingToCompactError) { logger.info('Auto-compaction had nothing to gain', { reason: compactErr.message }); deps.requestRender(); return; }
       logger.error('Auto-compact failed', { error: String(compactErr) });
-      emitCompactionFailureReceipt(deps, turnId, compactErr, 'auto', 'structured');
-      deps.conversation.addNotice(`[Compact] Auto-compaction failed: ${String(compactErr)}`, { level: 'error' });
+      reportCompactionFailure(deps, turnId, compactErr, 'auto', 'structured', 'Use /compact to retry manually', 'error');
       deps.requestRender();
     }
   } else if (

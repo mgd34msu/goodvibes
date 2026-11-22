@@ -3,7 +3,7 @@
   "product": {
     "id": "goodvibes",
     "surface": "operator",
-    "version": "3.4.2"
+    "version": "3.4.3"
   },
   "auth": {
     "modes": [
@@ -50671,6 +50671,9 @@
                                 "type": "string"
                               }
                             },
+                            "notJudged": {
+                              "type": "string"
+                            },
                             "evidenceDigest": {
                               "type": "string"
                             },
@@ -51563,6 +51566,9 @@
                               "items": {
                                 "type": "string"
                               }
+                            },
+                            "notJudged": {
+                              "type": "string"
                             },
                             "evidenceDigest": {
                               "type": "string"
@@ -52872,6 +52878,9 @@
                                       "type": "string"
                                     }
                                   },
+                                  "notJudged": {
+                                    "type": "string"
+                                  },
                                   "evidenceDigest": {
                                     "type": "string"
                                   },
@@ -54176,6 +54185,9 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "notJudged": {
+                        "type": "string"
                       },
                       "evidenceDigest": {
                         "type": "string"
@@ -58810,6 +58822,9 @@
                             "type": "string"
                           }
                         },
+                        "notJudged": {
+                          "type": "string"
+                        },
                         "evidenceDigest": {
                           "type": "string"
                         },
@@ -59702,6 +59717,9 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "notJudged": {
+                          "type": "string"
                         },
                         "evidenceDigest": {
                           "type": "string"
@@ -61011,6 +61029,9 @@
                                   "type": "string"
                                 }
                               },
+                              "notJudged": {
+                                "type": "string"
+                              },
                               "evidenceDigest": {
                                 "type": "string"
                               },
@@ -62315,6 +62336,9 @@
                     "items": {
                       "type": "string"
                     }
+                  },
+                  "notJudged": {
+                    "type": "string"
                   },
                   "evidenceDigest": {
                     "type": "string"
@@ -66929,6 +66953,9 @@
                                   "type": "string"
                                 }
                               },
+                              "notJudged": {
+                                "type": "string"
+                              },
                               "evidenceDigest": {
                                 "type": "string"
                               },
@@ -67821,6 +67848,9 @@
                                 "items": {
                                   "type": "string"
                                 }
+                              },
+                              "notJudged": {
+                                "type": "string"
                               },
                               "evidenceDigest": {
                                 "type": "string"
@@ -69130,6 +69160,9 @@
                                         "type": "string"
                                       }
                                     },
+                                    "notJudged": {
+                                      "type": "string"
+                                    },
                                     "evidenceDigest": {
                                       "type": "string"
                                     },
@@ -70434,6 +70467,9 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "notJudged": {
+                          "type": "string"
                         },
                         "evidenceDigest": {
                           "type": "string"
@@ -75331,6 +75367,9 @@
                                 "type": "string"
                               }
                             },
+                            "notJudged": {
+                              "type": "string"
+                            },
                             "evidenceDigest": {
                               "type": "string"
                             },
@@ -76223,6 +76262,9 @@
                               "items": {
                                 "type": "string"
                               }
+                            },
+                            "notJudged": {
+                              "type": "string"
                             },
                             "evidenceDigest": {
                               "type": "string"
@@ -77532,6 +77574,9 @@
                                       "type": "string"
                                     }
                                   },
+                                  "notJudged": {
+                                    "type": "string"
+                                  },
                                   "evidenceDigest": {
                                     "type": "string"
                                   },
@@ -78836,6 +78881,9 @@
                         "items": {
                           "type": "string"
                         }
+                      },
+                      "notJudged": {
+                        "type": "string"
                       },
                       "evidenceDigest": {
                         "type": "string"

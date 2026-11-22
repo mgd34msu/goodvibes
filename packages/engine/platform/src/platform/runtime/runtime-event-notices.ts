@@ -77,6 +77,7 @@ const NOTICES: { readonly [T in NoticeEventType]: NoticeRow } = {
   CONTRACT_FIX_PLANNED: null,
   CONTRACT_ESCALATED: warning('Owner decision needed'),
   CONTRACT_OWNER_REPLIED: null,
+  CONTRACT_WAITING: warning('Workstream waiting'),
   CONTRACT_GATE_RESULT: { byVariant: GATE_NOTICES },
   CONTRACT_UNIT_SILENT: null,
   CONTRACT_MERGE_CONFLICT: null,

@@ -36,7 +36,7 @@ The connected host is the daemon the Agent talks to.
 
 Without a reachable daemon, or without a credential for it, the Agent still works for:
 
-- Chatting interactively. Each message runs in the Agent's own process, and one line says why, for example `No connected host is set up for this terminal, so messages run in this process.` (shown once while the reason stays the same).
+- Chatting interactively. Each message runs in the Agent's own process, and one line says why, for example `No connected host is set up for this terminal, so messages run in this process.` (said once on this machine for each reason; after that it goes to the activity feed only, and it is said again once a host has taken a message and later cannot).
 - Its tools that act on this machine: files, shell commands, the browser, MCP servers, plugins.
 - `goodvibes-agent memory`: with no credential found (or no daemon answering, when the daemon is on this machine) it reads and writes the shared memory store file on this machine, `~/.goodvibes/shared/memory.sqlite`. (A daemon on another machine that does not answer: reads use this machine's file, and a write is refused with `The connected host <url> did not answer; nothing was stored. ...`.)
 - Personas, Agent skills, routines (except promotion), notes, VIBE.md, profiles, sessions and settings.
@@ -588,7 +588,7 @@ Both need the connected host; without it they print the reason and exit `1`.
 ```text
 $ goodvibes-agent compat
 GoodVibes Agent compatibility
-  package 3.4.2
+  package 3.4.3
   connected host http://127.0.0.1:3421 (unreachable)
   host compatible no
   operator token missing (/home/me/.goodvibes/daemon/operator-tokens.json)

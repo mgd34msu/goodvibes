@@ -3358,6 +3358,14 @@ The `contracts` domain carries one named event per step of a contract. Each fiel
 | `action` | enum: `amended`, `approved`, `asked-again`, `refused`, `stopped` | yes |
 | `occurrenceId` | string | optional |
 
+### `CONTRACT_WAITING`
+
+| Field | Type | Required |
+|-------|------|----------|
+| `contractId` | string | yes |
+| `reason` | string | yes |
+| `occurrenceId` | string | optional |
+
 ### `CONTRACT_GATE_RESULT`
 
 | Field | Type | Required |

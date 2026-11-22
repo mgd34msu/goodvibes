@@ -67,6 +67,8 @@ function describeEvent(event: ContractEvent): string {
       return [`asks the owner (${event.escalationId}, ${event.reason}, ${event.scope} ${event.targetId}):`, ...questionLines(event.question, '  ')].join('\n');
     case 'CONTRACT_OWNER_REPLIED':
       return `reply to ${event.escalationId} read as ${event.reading} (${event.outcome}): ${event.action}`;
+    case 'CONTRACT_WAITING':
+      return `waiting: ${oneLine(event.reason, 400)}`;
     case 'CONTRACT_GATE_RESULT':
       return `gate ${event.gate} on ${event.targetId}: ${event.outcome ?? (event.skipped ? 'unverified (skipped)' : event.passed ? 'passed' : 'failed')}${event.reason ? `: ${event.reason}` : ''} (${event.durationMs} ms)`;
     case 'CONTRACT_UNIT_SILENT':

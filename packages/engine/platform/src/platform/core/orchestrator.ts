@@ -46,6 +46,7 @@ import { OrchestratorFollowUpRuntime } from './orchestrator-follow-up-runtime.js
 import { ToolCallAbortRegistry, listQueuedMessages, editQueuedMessage, deleteQueuedMessage } from './orchestrator-live-turn.js';
 import { AgentManager } from '../tools/agent/index.js';
 import type { ContractIntake, ContractRunner } from '../contract/index.js';
+import { isWaitingForPlannerRoute } from '../contract/planner-route-wait.js';
 import { randomUUID } from 'node:crypto';
 import { TurnSubmissionOwner } from './turn-submission.js';
 import { CacheHitTracker } from '../providers/cache-strategy.js';
@@ -666,15 +667,16 @@ export class Orchestrator {
     // A batch holds the work of one turn (orchestrator-follow-up-runtime.ts takeBatch).
     const turnId = items[0]?.turnId;
     const request = turnId === undefined ? undefined : this.turnRequests.get(turnId);
+    // The model reads the outcomes with the recovery turn below, whose answer reports them to the
+    // person; when nothing is continued, the person is told what the work was in its own summaries.
     const outcomes = '[Background work evidence] ' + JSON.stringify(items.map(({ turnId: _turn, ...item }) => item));
-    // The person sees the outcomes; only the recovery turn below carries the instruction to the model.
-    this.conversation.addNotice(outcomes, { level: 'info', kind: 'operational' });
+    const what = items.map((item) => item.summary.replace(/[.\s]+$/, '')).join('; ');
     const present = request !== undefined && this.conversation.getMessageSnapshot().some((message) => message.role === 'user'
       && !message.cancelled && sameRequestContent(message.content, request));
     if (!present) {
       this.conversation.addNotice(turnId === undefined
-        ? '[Background work] This work was not started by a request in this conversation, so nothing was run again for it.'
-        : '[Background work] The request that started this work is no longer in the conversation (it was rewound, compacted or never here), so nothing was run again for it. Ask again if the work is still wanted.',
+        ? `[Background work] ${what}. This work was not started by a request in this conversation, so nothing was run again for it.`
+        : `[Background work] ${what}. The request that started this work is no longer in the conversation (it was rewound, compacted or never here), so nothing was run again for it. Ask again if the work is still wanted.`,
       { level: 'info', kind: 'operational' });
       this.requestRender();
       return;
@@ -682,7 +684,7 @@ export class Orchestrator {
     // Native execution still requires its owning host's live permit; a background
     // notice can never manufacture a fresh native grant.
     if (this.nativeConversationProjectId) {
-      this.conversation.addNotice('[Background work] This work was not continued automatically: this conversation\'s turns run only on its host\'s permit. Send the request again from the host to continue it.',
+      this.conversation.addNotice(`[Background work] ${what}. This work was not continued automatically: this conversation's turns run only on its host's permit. Send the request again from the host to continue it.`,
         { level: 'info', kind: 'operational' });
       this.requestRender();
       return;
@@ -1370,10 +1372,11 @@ export class Orchestrator {
       contractIntake: this.contractIntake,
       answersContractQuestion: this.contractAnswer,
       continuationEvidence,
-      // Asked when a delegate ends or a contract stops for its owner, not on a timer.
+      // Asked when a delegate ends, a contract stops for its owner or waits for a route, not on a timer.
       canWaitForDelegate: (id) => {
         const record = this.agentManager.list().find(agent => agent.id === id);
-        return !record?.contractId || !this.contractRunner.list({ sessionId }).some(contract => contract.id === record.contractId && contract.status === 'awaiting-owner');
+        return !record?.contractId || !this.contractRunner.list({ sessionId }).some(contract => contract.id === record.contractId
+          && (contract.status === 'awaiting-owner' || isWaitingForPlannerRoute(contract)));
       },
       getCompletedWork: () => completedContractEvidence(this.contractRunner, this.currentSessionId, configManager.getWorkingDirectory() ?? undefined),
       getCompletionRequirements: () => {

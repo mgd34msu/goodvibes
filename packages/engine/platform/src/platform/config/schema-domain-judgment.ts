@@ -94,7 +94,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     key: 'judgment.timeoutMs',
     label: 'Give up on the decision model after (ms)',
     type: 'number',
-    description: 'Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner',
+    description: 'How long one attempt at one decision target may go without its answer before that target is treated as not answering, so the next target or the decision\'s own fallback is used; 0 uses 30000 ms. It exists for a server that took the request and never answered, or a connection lost without a reset: the decision API sends its whole answer at once, so nothing else can tell such an attempt from a slow one. Decisions are sized to what the model accepts and answer in seconds; raise it for a slow local model. Cancellation stops the operation sooner',
     ...intRange(0, 2_147_483_647),
   },
 ];

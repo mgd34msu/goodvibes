@@ -8602,6 +8602,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -8778,6 +8779,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -9047,6 +9049,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "decisionIds": [
                       "sample"
                     ],
+                    "notJudged": "sample",
                     "evidenceDigest": "sample",
                     "reviewedFiles": [
                       {
@@ -9285,6 +9288,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "decisionIds": [
               "sample"
             ],
+            "notJudged": "sample",
             "evidenceDigest": "sample",
             "reviewedFiles": [
               {
@@ -9828,6 +9832,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "decisionIds": [
                 "sample"
               ],
+              "notJudged": "sample",
               "evidenceDigest": "sample",
               "reviewedFiles": [
                 {
@@ -10004,6 +10009,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "decisionIds": [
                 "sample"
               ],
+              "notJudged": "sample",
               "evidenceDigest": "sample",
               "reviewedFiles": [
                 {
@@ -10273,6 +10279,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "decisionIds": [
                     "sample"
                   ],
+                  "notJudged": "sample",
                   "evidenceDigest": "sample",
                   "reviewedFiles": [
                     {
@@ -10511,6 +10518,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "decisionIds": [
             "sample"
           ],
+          "notJudged": "sample",
           "evidenceDigest": "sample",
           "reviewedFiles": [
             {
@@ -11053,6 +11061,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "decisionIds": [
                     "sample"
                   ],
+                  "notJudged": "sample",
                   "evidenceDigest": "sample",
                   "reviewedFiles": [
                     {
@@ -11229,6 +11238,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                   "decisionIds": [
                     "sample"
                   ],
+                  "notJudged": "sample",
                   "evidenceDigest": "sample",
                   "reviewedFiles": [
                     {
@@ -11498,6 +11508,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                       "decisionIds": [
                         "sample"
                       ],
+                      "notJudged": "sample",
                       "evidenceDigest": "sample",
                       "reviewedFiles": [
                         {
@@ -11736,6 +11747,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "decisionIds": [
                 "sample"
               ],
+              "notJudged": "sample",
               "evidenceDigest": "sample",
               "reviewedFiles": [
                 {
@@ -12311,6 +12323,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -12487,6 +12500,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "decisionIds": [
                   "sample"
                 ],
+                "notJudged": "sample",
                 "evidenceDigest": "sample",
                 "reviewedFiles": [
                   {
@@ -12756,6 +12770,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                     "decisionIds": [
                       "sample"
                     ],
+                    "notJudged": "sample",
                     "evidenceDigest": "sample",
                     "reviewedFiles": [
                       {
@@ -12994,6 +13009,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "decisionIds": [
               "sample"
             ],
+            "notJudged": "sample",
             "evidenceDigest": "sample",
             "reviewedFiles": [
               {

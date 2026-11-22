@@ -27,6 +27,7 @@ import { ShellContextHold, ShellPassthrough } from '../../input/shell-passthroug
 import { installRemoteConversationRouting } from '../../shell/remote-conversation-wiring.ts';
 import { createOwnerTurnSender } from '../../shell/owner-turn-sender.ts';
 import { SessionManager } from '@goodvibes/engine/platform/platform/sessions';
+import { FeatureAnnouncementStore } from '@goodvibes/engine/platform/platform/runtime/feature-announcements';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../../config/surface.ts';
 
 const taken = (n: number): NativeConversationIntakeState => ({ status: 'recorded', message: 'Taken by the host.', request: { requestId: `r-${n}`, inputId: `i-${n}` } });
@@ -82,6 +83,10 @@ function agent() {
     runTurn: async (text) => { localTurns.push(text); },
     dispatchNativeTurn: async () => {},
     isBusy: () => false,
+    announcements: (() => {
+      const store = new FeatureAnnouncementStore(join(dir, 'feature-announcements.json'));
+      return { record: (id: string) => store.record(id), forget: (selects: (id: string) => boolean) => { store.forgetMatching(selects); } };
+    })(),
     messages: { high: () => {}, userAction: () => {}, activity: (line) => { activity.push(line); }, aboutInput: () => {} },
     render: () => {},
   });

@@ -590,6 +590,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     agentId: { kind: 'string', optional: true },
     occurrenceId: { kind: 'string', optional: true },
   },
+  CONTRACT_WAITING: {
+    contractId: { kind: 'string' },
+    reason: { kind: 'string' },
+    occurrenceId: { kind: 'string', optional: true },
+  },
   CONTROL_PLANE_AUTH_GRANTED: {
     clientId: { kind: 'string' },
     principalId: { kind: 'string' },

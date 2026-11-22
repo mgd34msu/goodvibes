@@ -245,6 +245,7 @@ function applyToContract(contract: ContractRecord, event: ContractEvent, timesta
     case 'CONTRACT_NUDGE_CONSUMED':
     case 'CONTRACT_CRITERION_REGRESSED':
     case 'CONTRACT_STALLED':
+    case 'CONTRACT_WAITING':
     case 'CONTRACT_FIX_PLANNED':
     case 'CONTRACT_UNIT_SILENT':
     case 'CONTRACT_MERGE_CONFLICT':

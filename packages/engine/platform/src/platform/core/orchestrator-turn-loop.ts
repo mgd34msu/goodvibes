@@ -1159,11 +1159,12 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           notify => {
             const bus = context.runtimeBus;
             if (!bus) return undefined;
-            // A queued agent starting and a contract stopping on a question for
-            // the owner are the two changes no join can announce.
+            // A queued agent starting, a contract stopping on a question for the
+            // owner and a contract waiting for a route are the changes no join can announce.
             const stopStatus = bus.on<Extract<ContractEvent, { type: 'CONTRACT_STATUS_CHANGED' }>>('CONTRACT_STATUS_CHANGED', ({ payload }) => { if (payload.to === 'awaiting-owner') notify(); });
+            const stopWaiting = bus.on<Extract<ContractEvent, { type: 'CONTRACT_WAITING' }>>('CONTRACT_WAITING', () => notify());
             const stopRunning = bus.on<Extract<AgentEvent, { type: 'AGENT_RUNNING' }>>('AGENT_RUNNING', () => notify());
-            return () => { stopStatus(); stopRunning(); };
+            return () => { stopStatus(); stopWaiting(); stopRunning(); };
           });
         if (ended) delegatedWorkEnded = true;
         return ended;

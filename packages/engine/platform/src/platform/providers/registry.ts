@@ -18,7 +18,7 @@ import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitProvidersChanged, emitProviderWarning, emitModelChanged } from '../runtime/emitters/index.js';
 import { loadCustomProviders, watchCustomProviders, type CustomProviderFileSkip } from './custom-loader.js';
 import { builtinProviderNames } from './provider-names.js';
-import { clearProviderHealth, readProviderHealth, type ProviderHealthEntry } from './provider-health.js';
+import { clearProviderHealth, nextProviderHealthChange, readProviderHealth, type ProviderHealthEntry } from './provider-health.js';
 import {
   buildSyntheticCanonicalModels, getCatalogCachePath, getCatalogModelDefinitionsFrom, getCatalogTmpPath, modelCapabilityFactsFromCatalog,
   getCostFromPricingCatalog, getSyntheticBackendModelIds, getSyntheticModelDefinitions, getSyntheticModelInfo,
@@ -428,6 +428,34 @@ export class ProviderRegistry {
   private _invalidateModelRegistry(): void {
     this._cachedModelRegistry = null;
     this._modelRegistryRevision++;
+    for (const wake of [...this._registryChangeWaiters]) wake();
+  }
+
+  /** Callers of routingChanged waiting on the next change of the model registry. */
+  private readonly _registryChangeWaiters = new Set<() => void>();
+
+  /**
+   * Resolves the next time something a route is chosen from changes: the
+   * models or providers registered (a key, a sign-in, a provider file, a model
+   * list read again) or a provider's recorded health (a call that failed or
+   * succeeded, a hold that ended). Rejects with the signal's reason when it
+   * aborts first. What waits for a route that did not exist reads again then.
+   */
+  routingChanged(signal?: AbortSignal): Promise<void> {
+    return new Promise<void>((resolve, reject) => {
+      if (signal?.aborted) { reject(signal.reason); return; }
+      const stopHealth = new AbortController();
+      const finish = (): void => {
+        this._registryChangeWaiters.delete(wake);
+        signal?.removeEventListener('abort', aborted);
+        stopHealth.abort();
+      };
+      const wake = (): void => { finish(); resolve(); };
+      const aborted = (): void => { finish(); reject(signal!.reason); };
+      this._registryChangeWaiters.add(wake);
+      signal?.addEventListener('abort', aborted, { once: true });
+      nextProviderHealthChange(stopHealth.signal).then(wake, () => { /* stopped: this wait already ended */ });
+    });
   }
 
   private getModelRegistry(): ModelDefinition[] {

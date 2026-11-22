@@ -161,6 +161,12 @@ export interface ContractRunnerDeps {
   readonly worktrees?: Pick<WorktreeRegistry, 'releaseEnded'> | undefined;
   /** Waits `ms` or until `signal` aborts; defaults to a timer. A test injects its own so no real time passes. */
   readonly wait?: ((ms: number, signal: AbortSignal) => Promise<void>) | undefined;
+  /**
+   * Resolves the next time what a route is chosen from changes (the provider
+   * registry's `routingChanged`). A contract no model can be routed to plan
+   * waits on it instead of failing.
+   */
+  readonly routingChanged?: ((signal: AbortSignal) => Promise<void>) | undefined;
 }
 
 export interface StartedContract {
@@ -883,7 +889,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
   // ── Starting ────────────────────────────────────────────────────────────────
 
   function ownerProgress(contract: Contract): string {
-    return `Contract ${contract.id}: ${contract.status}`;
+    // A contract that waits (a budget, the shared tree, a route for its planner) says what for.
+    return contract.statusLine ?? `Contract ${contract.id}: ${contract.status}`;
   }
 
   function captureStartInput(input: StartContractInput, captureModel = true): StartContractInput {
@@ -1485,11 +1492,16 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
       decompositionRunner: deps.decompositionRunner,
       routeSelector: deps.routeSelector,
       configManager: deps.configManager,
-      emit: (event) => run.emit(event),
+      emit: (event) => {
+        run.emit(event);
+        // A contract that waits says why on its owner's row too, where its session's model reads it.
+        if (event.type === 'CONTRACT_WAITING') updateOwnerProgress(run);
+      },
       ...(deps.repositoryMap === undefined ? {} : { repositoryMap: deps.repositoryMap }),
       readAccessFilter: deps.readAccessFilter,
       now,
       ...(deps.wait === undefined ? {} : { wait: deps.wait }),
+      ...(deps.routingChanged === undefined ? {} : { routingChanged: deps.routingChanged }),
     };
   }
 

@@ -109,11 +109,12 @@ function shortPath(file: string): string {
   return home && (file === home || file.startsWith(`${home}/`)) ? `~${file.slice(home.length)}` : file;
 }
 
-/** The one line the owner is told, naming every key and where it went. */
-export function describeSettingsCarryForward(file: string, daemonFile: string | null, result: SettingsCarryForward): string {
+/** The one line the owner is told, naming every key, where it went and where the file as it was is kept. */
+export function describeSettingsCarryForward(file: string, daemonFile: string | null, result: SettingsCarryForward, keptAs?: string): string {
   const parts: string[] = [];
   if (result.moved.length > 0) parts.push(`moved to the daemon's settings (${daemonFile === null ? 'its own file' : shortPath(daemonFile)}): ${result.moved.join(', ')}`);
   if (result.superseded.length > 0) parts.push(`removed because the daemon's settings already set them: ${result.superseded.join(', ')}`);
   if (result.removed.length > 0) parts.push(`removed because this version no longer has them: ${result.removed.join(', ')}`);
-  return `Settings an earlier version left in ${shortPath(file)} were carried forward; ${parts.join('; ')}.`;
+  const kept = keptAs === undefined ? '' : ` The file as it was is kept as ${shortPath(keptAs)}.`;
+  return `Settings an earlier version left in ${shortPath(file)} were carried forward; ${parts.join('; ')}.${kept}`;
 }

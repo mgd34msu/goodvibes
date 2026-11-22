@@ -62,8 +62,6 @@ const REPEAT_REVIEW_THRESHOLD = 3;
 const REPEAT_REFUSE_THRESHOLD = 5;
 /** Calls kept for the repeat rules. */
 const REPEAT_HISTORY_WINDOW = 20;
-/** How long a reading of repeated calls may take; past it no warning is given and the exact-repeat stop still holds. */
-export const REPEAT_READING_DEADLINE_MS = 10_000;
 
 /** Where the turn's visible output goes, as it happens. */
 export interface TurnSink {
@@ -177,9 +175,9 @@ export interface TurnContext {
   /**
    * Whether repeated calls look stuck; undefined when no reading settled.
    * Asked only when every run of the repeated call returned the same thing,
-   * with only that call's runs, beside the next request (never ahead of it)
-   * and within `REPEAT_READING_DEADLINE_MS`. Absent: only the exact-repeat
-   * stop applies.
+   * with only that call's runs, beside the next request (never ahead of it);
+   * it ends when the decision model answers or fails, or the turn ends.
+   * Absent: only the exact-repeat stop applies.
    */
   judgeRepeat?(history: readonly TurnCallObservation[], signature: string, signal: AbortSignal): Promise<{ readonly stuck: boolean } | undefined>;
   /** A held draft (a contract unit's answer the contract keeps open) takes another round instead of a check; true when held. */
@@ -627,17 +625,15 @@ function applyStopRules(ctx: TurnContext, turnSignal: AbortSignal, sink: TurnSin
   const firstKey = outcomeKey(runs[0]!);
   if (runs.some((entry) => outcomeKey(entry) !== firstKey)) return undefined;
   const toolName = worst.slice(0, worst.indexOf('::'));
-  const deadline = AbortSignal.timeout(REPEAT_READING_DEADLINE_MS);
-  const signal = AbortSignal.any([turnSignal, deadline]);
   repeatReading.pending = true;
-  void judgeRepeat(runs, worst, signal)
+  void judgeRepeat(runs, worst, turnSignal)
     .then((reading) => {
-      if (!reading?.stuck || turnSignal.aborted || deadline.aborted) return;
+      if (!reading?.stuck || turnSignal.aborted) return;
       tell(count >= REPEAT_REFUSE_THRESHOLD
         ? `You are repeating the same tool call. ${toolName} has been called ${count} times with identical arguments and no meaningful progress in the results. Do NOT call ${toolName} with these arguments again. Identify what you were trying to accomplish and take a different action.`
         : `You have already executed this exact call (${toolName}) ${count} times with identical arguments. The results from your previous calls are already in your conversation history. Review them and proceed to the next step.`);
     })
-    .catch(() => { /* An unsure, late or failed reading gives no warning; the exact-repeat stop still holds. */ })
+    .catch(() => { /* An unsure or failed reading gives no warning; the exact-repeat stop still holds. */ })
     .finally(() => { repeatReading.pending = false; });
   return undefined;
 }

@@ -301,6 +301,7 @@ export function composeContractRunner(options: ContractRunnerCompositionOptions)
   }, options.providerRegistry.benchmarks, () => options.providerRegistry.ready());
   const runner = createContractRunner({
     providersReady: () => options.providerRegistry.ready(),
+    routingChanged: (signal) => options.providerRegistry.routingChanged(signal),
     judgmentLog: options.judgmentLog,
     readOwnerEvidence: options.surfaceRoot || options.ownerConversationMessages
       ? createOwnerReadEvidenceReader({

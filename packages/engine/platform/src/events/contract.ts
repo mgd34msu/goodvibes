@@ -434,6 +434,12 @@ export type ContractEvent = (
    */
   | { type: 'CONTRACT_OWNER_REPLIED'; contractId: string; escalationId: string; reading: OwnerReplyReading; outcome: ContractOutcome; action: OwnerReplyAction }
   /**
+   * The contract cannot go on yet and waits, keeping its status: `reason` says
+   * what it waits for, why, and how it goes on (no model can be routed to plan
+   * it; it plans on its own once one can). Said once per wait.
+   */
+  | { type: 'CONTRACT_WAITING'; contractId: string; reason: string }
+  /**
    * One gate command from the `contract.gates` setting ran against a target:
    * whether it passed or was skipped, how long it took, its outcome, whether it
    * is required, and why when it did not pass.
@@ -523,6 +529,7 @@ export const CONTRACT_EVENT_TYPES = [
   'CONTRACT_FIX_PLANNED',
   'CONTRACT_ESCALATED',
   'CONTRACT_OWNER_REPLIED',
+  'CONTRACT_WAITING',
   'CONTRACT_GATE_RESULT',
   'CONTRACT_UNIT_SILENT',
   'CONTRACT_MERGE_CONFLICT',

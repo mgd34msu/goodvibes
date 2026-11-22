@@ -3958,6 +3958,9 @@
                     "type": "string"
                   }
                 },
+                "notJudged": {
+                  "type": "string"
+                },
                 "evidenceDigest": {
                   "type": "string"
                 },
@@ -4850,6 +4853,9 @@
                   "items": {
                     "type": "string"
                   }
+                },
+                "notJudged": {
+                  "type": "string"
                 },
                 "evidenceDigest": {
                   "type": "string"
@@ -6159,6 +6165,9 @@
                           "type": "string"
                         }
                       },
+                      "notJudged": {
+                        "type": "string"
+                      },
                       "evidenceDigest": {
                         "type": "string"
                       },
@@ -7463,6 +7472,9 @@
             "items": {
               "type": "string"
             }
+          },
+          "notJudged": {
+            "type": "string"
           },
           "evidenceDigest": {
             "type": "string"

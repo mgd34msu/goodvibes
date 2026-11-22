@@ -49,7 +49,7 @@ const FORBIDS = [
   new RegExp(String.raw`\b(?:do|handle|review|fix|write|check|read|audit|finish)\s+(?:it|this|that|them|these|those|everything|all of it|the rest|the [\w-]+(?:\s[\w-]+)?)\s+(?:all\s+)?(?:by\s+)?yourself\b`, 'i'),
 ];
 /** A negative or restricting word in a sentence that speaks about agents: not plain enough for code. */
-const RESTRICTS = /\b(?:no|not|never|without|stop|before|unless|any|instead of|rather than|yourself|only one|just one|at most|no more than|fewer|less)\b|n't\b/i;
+const RESTRICTS = /\b(?:no|not|never|without|stop|before|unless|instead of|rather than|yourself|only one|just one|at most|no more than|fewer|less)\b|\bany\b|n't\b/i;
 const ASKS = [
   /\bfan(?:ning)?[- ]out\b/i,
   /\bdelegat(?:e|ing)\b/i,

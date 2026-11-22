@@ -11,6 +11,7 @@ import type { AgentManager } from '../tools/agent/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { logger } from '../utils/logger.js';
 import { decisionModelFailure } from './decision-policy.js';
+import { isWaitingForPlannerRoute } from '../contract/planner-route-wait.js';
 import { finishWorkstreamLabel, rememberWorkstreamLabel, workstreamLabel } from '../channels/workstream-labels.js';
 
 export interface HostRuntimeMessageRouter {
@@ -251,6 +252,15 @@ export function registerContractRuntimeEvents(options: ContractRuntimeEventBridg
     contractLine(`${payload.contractId} needs the owner: ${payload.question}`, payload);
   });
 
+  // A contract that cannot go on yet (no model can be routed to plan it): what, why and how it goes on, once.
+  onContract('CONTRACT_WAITING', (payload) => {
+    contractLine(payload.reason, payload);
+  });
+  // One that began waiting before this conversation was wired (a contract resumed at start) is said now.
+  for (const contract of contractRunner.list()) {
+    if (isWaitingForPlannerRoute(contract) && contract.statusLine !== undefined) contractLine(contract.statusLine, { type: 'CONTRACT_WAITING' });
+  }
+
   onContract('CONTRACT_GATE_RESULT', (payload) => {
     // A skipped gate is not a failure: it is drawn without a mark, with why it did not run.
     if (payload.skipped) {
@@ -430,7 +440,9 @@ export function registerHostRuntimeEvents(options: HostRuntimeEventBridgeOptions
     // silent revert is never silent.
     unsubs.push(runtimeBus.on<Extract<CompactionEvent, { type: 'COMPACTION_RECEIPT' }>>('COMPACTION_RECEIPT', ({ payload }) => {
       withRouter(getSystemMessageRouter, (router) => {
-        router.high(`[Compaction] ${formatCompactionReceipt(payload)}`);
+        // A compaction that did not apply says so here, once, at its level; nothing else repeats it.
+        router.high(`[Compaction] ${formatCompactionReceipt(payload)}`,
+          payload.outcome === 'failed' ? 'error' : payload.outcome === 'kept-original' ? 'warning' : undefined);
       });
       requestRender();
     }));

@@ -1226,7 +1226,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Delete logs and transcripts older than (days)",
     "type": "number",
     "default": 30,
-    "description": "Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.",
+    "description": "Age cap (days) for the append-only files: per-agent transcript journals, the execution ledger, the activity log, crash logs and crash-recovery snapshots. Files older than this are pruned at start and every six hours (the journal also prunes on each new agent session; the ledger on each export). The decision log keeps readings for the same number of days, removing older ones shortly after start and once a day (a reading carrying an owner correction or outcome is kept). Saved conversations are never pruned by it. Generous by default; bounded so the files cannot grow without limit.",
     "validationHint": "integer in [1, 365]"
   },
   {
@@ -4819,16 +4819,8 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Give up on the decision model after (ms)",
     "type": "number",
     "default": 30000,
-    "description": "Finite timeout per judgment target in milliseconds; legacy 0 uses the default 30000 ms. Cancellation may stop the operation sooner",
+    "description": "How long one attempt at one decision target may go without its answer before that target is treated as not answering, so the next target or the decision's own fallback is used; 0 uses 30000 ms. It exists for a server that took the request and never answered, or a connection lost without a reset: the decision API sends its whole answer at once, so nothing else can tell such an attempt from a slow one. Decisions are sized to what the model accepts and answer in seconds; raise it for a slow local model. Cancellation stops the operation sooner",
     "validationHint": "integer in [0, 2147483647]"
-  },
-  {
-    "key": "judgment.decisionDeadlineMs",
-    "label": "Longest a waiting decision may take (ms)",
-    "type": "number",
-    "default": 1500,
-    "description": "How long a decision that a person or a tool call waits on may take, in milliseconds, before it takes its fallback (for example asking you, or the safe default). A decision target that misses this deadline three times in a row is skipped for a minute, so the next decisions take their fallback at once",
-    "validationHint": "integer in [1, 120000]"
   },
   {
     "key": "fetch.sanitizeMode",

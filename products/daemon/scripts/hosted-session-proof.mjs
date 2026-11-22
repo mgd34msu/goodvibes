@@ -14,19 +14,16 @@ async function until(check, label, milliseconds = 20_000) {
     assert(Date.now() < deadline, `${label}: deadline exceeded`); await pause(); }
 }
 const writeJson = (path, value) => writeFileSync(path, JSON.stringify(value));
-// Decision-model requests the five turns of this proof may make. A ceiling, not
-// an exact count: fewer requests pass, more fail. Each listed question set sits
-// at or just above what a clean run makes (5 in all: completion applicability 2,
-// completion review 2, provider failure reading 1). A question set not listed
-// here may be asked once; one asked on every successful turn shows up twice and
-// fails until it is listed.
+// Decision-model requests the five turns of this proof may make. An ordinary
+// answer is shown as it ends with no completion check, so the original steer
+// and the streamed turn ask nothing, and neither do the cancelled and shut-down
+// turns. A clean run makes 1 request in all: the provider failure reading of
+// the failed turn. A question set not listed here may not be asked at all.
 const judgmentRequestCeilings = new Map([
-  ['turn:completion_required', 2],
-  ['turn:false_blocker:unanswered:unfinished:unnecessary_permission:unsupported', 2],
-  ['turn:before_response:billing:category:connection_failure:context_exceeded:provider_unusable:rate_limited:transient_network', 2],
+  ['turn:before_response:billing:category:connection_failure:context_exceeded:provider_unusable:rate_limited:transient_network', 1],
 ]);
-const unlistedQuestionSetCeiling = 1;
-const totalJudgmentRequestCeiling = 7;
+const unlistedQuestionSetCeiling = 0;
+const totalJudgmentRequestCeiling = 1;
 async function listen(server) {
   await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve); });
   return server.address().port;
@@ -245,9 +242,9 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     assert.equal(deltas.map(event => event.content ?? '').join(''), marker, 'Streamed text must be the answer as the model wrote it');
     assert.equal(complete.response, marker, 'The checked terminal event must deliver the complete answer');
     assert.equal(turnEvents().filter(event => event.type === 'TURN_COMPLETED' && event.turnId === complete.turnId).length, 1);
-    assert(judgmentRequests.some(request => Object.hasOwn(request.body.questions, 'unfinished')), 'The compiled turn must reach completion review');
-    assert(judgmentRequests.length > 0, 'production SystemOne configuration must reach the synthetic peer');
-    assert(judgmentRequests.every(request => request.path === '/v1/systemone' && request.authorization === 'Bearer synthetic-system-one-key' && request.body.model === 'jev-latest'));
+    // An ordinary answer is shown as it ends, with no completion check: neither
+    // the original steer nor this turn asks the decision model.
+    assert.equal(judgmentRequests.length, 0, 'An ordinary turn must not ask the decision model');
     async function send(text) {
       const response = await request(`/api/sessions/${sessionId}/follow-up`, { body: text });
       assert.equal(response.status, 202, JSON.stringify(response));
@@ -301,11 +298,13 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     const repeatedQuestionGroups = [...identities.values()].filter(({ count }) => count > 2).map(({ identity, count, request }) => {
       return { identity, count, questions: Object.keys(request.body.questions).sort(), stateKeys: Object.keys(request.body.state ?? {}).sort() };
     });
-    // Identical activity text on separate native turns is a separate use.
-    // Aggregate wire identity counts cannot establish duplicate work. Bind
-    // completion checks to the two successful turns this proof actually ran.
-    assert.equal(judgmentRequests.filter(request => Object.hasOwn(request.body.questions, 'unfinished')).length, 2,
-      'Each successful original turn must receive one completion review');
+    // The failed turn's provider failure reading is the request that proves the
+    // production configuration reaches the decision model (path, key and model
+    // are checked above on every request). Ordinary, cancelled and shut-down
+    // turns ask nothing, so it is the only question set a clean run asks.
+    const failureReadings = judgmentRequests.filter(request => Object.hasOwn(request.body.questions, 'before_response'));
+    assert(failureReadings.length > 0, 'The failed turn must reach the decision model with the production configuration');
+    assert.equal(failureReadings.length, judgmentRequests.length, 'Only the failed turn may ask the decision model');
     for (const [group, count] of questionGroups) {
       const ceiling = judgmentRequestCeilings.get(group) ?? unlistedQuestionSetCeiling;
       assert(count <= ceiling, `Decision-model question set ${group} was asked ${count} times; at most ${ceiling} expected`);

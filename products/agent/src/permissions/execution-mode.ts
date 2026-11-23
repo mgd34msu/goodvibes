@@ -65,7 +65,7 @@ export function describeExecutionModeWords(
   if (hostWords?.inForce !== undefined) return hostWords;
   return {
     chosen: gatePresetLabel(inForce.chosen),
-    inForce: inForce.mode === 'ask-me' ? 'you, for now' : `${gatePresetLabel(inForce.mode)}, for now`,
+    inForce: inForce.mode === 'ask-me' ? 'asking you, for now' : `${gatePresetLabel(inForce.mode)}, for now`,
     chosenShort: `you chose ${gatePresetLabel(inForce.chosen)}`,
   };
 }

@@ -31,7 +31,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<{ reado
     };
   }
   return {
-    output: json ? JSON.stringify({ ok: true, link: outcome.link, tokenName: outcome.tokenName, tokenId: outcome.tokenId }, null, 2) : outcome.text,
+    output: json ? JSON.stringify({ ok: true, link: outcome.link, tokenName: outcome.tokenName, tokenId: outcome.tokenId, forThisMachine: outcome.forThisMachine }, null, 2) : outcome.text,
     exitCode: 0,
   };
 }

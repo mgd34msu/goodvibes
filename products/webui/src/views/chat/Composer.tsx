@@ -12,10 +12,9 @@ import {
   useState,
   MouseEvent as ReactMouseEvent,
 } from 'react';
-import { ArrowUp, ChevronDown, Check, Paperclip, Plus, X } from 'lucide-react';
-import { Menu, MenuItem, MenuMeta, MenuSeparator } from '../../components/ui/Menu';
+import { ArrowUp, Paperclip, Plus, X } from 'lucide-react';
 import { formatError } from '../../lib/errors';
-import { ModelOption, ProviderOption } from '../../lib/provider-models';
+import { ModelPicker, type ModelPickerProps } from './ModelPicker';
 import { dragHasFiles, filesFromDrop, imageFilesFromPaste, isImageFile, previewUrl } from './composer-attachments';
 import { MicButton } from '../../components/voice/MicButton';
 import { VoiceSettings } from '../../components/voice/VoiceSettings';
@@ -45,12 +44,8 @@ export interface ComposerProps {
   turnError: string;
   renameSessionError: unknown;
   selectModelError: unknown;
-  providerOptions: ProviderOption[];
-  selectedProviderId: string;
-  providerModelOptions: ModelOption[];
-  selectedModelRegistryKey: string;
-  selectModelPending: boolean;
-  modelChangesDisabled?: boolean;
+  /** The model control: provider, then model, then effort, in one menu. */
+  modelPicker: ModelPickerProps;
   composerRef: RefObject<HTMLTextAreaElement | null>;
   fileInputRef: RefObject<HTMLInputElement | null>;
   onDraftChange: (value: string) => void;
@@ -77,19 +72,6 @@ export interface ComposerProps {
   onSendHeldAsText?: () => void;
   onFileSelection: (event: ChangeEvent<HTMLInputElement>) => void;
   onRemoveAttachedFile: (index: number) => void;
-  onProviderChange: (providerId: string) => void;
-  onModelChange: (registryKey: string) => void;
-  /**
-   * Reasoning-effort levels the CURRENT model actually accepts (from its
-   * models.list entry). Empty = the daemon reports none, no control renders.
-   */
-  effortLevels?: readonly string[];
-  /** The effective effort on the current model, '' for provider default. */
-  currentEffort?: string;
-  /** Remembered request; can differ when the current model caps it. */
-  requestedEffort?: string;
-  effortPending?: boolean;
-  onEffortChange?: (effort: string) => void;
   /**
    * Optional list of slash-command hints shown when the user types "/" at the
    * start of the composer. Defaults to empty, no menu.
@@ -155,138 +137,6 @@ function AttachmentChip({ file, index, onRemove }: AttachmentChipProps) {
   );
 }
 
-// ─── Model and effort menu ────────────────────────────────────────────────────
-
-interface ModelMenuProps {
-  providerOptions: ProviderOption[];
-  selectedProviderId: string;
-  providerModelOptions: ModelOption[];
-  selectedModelRegistryKey: string;
-  selectModelPending: boolean;
-  modelChangesDisabled?: boolean;
-  onProviderChange: (providerId: string) => void;
-  onModelChange: (registryKey: string) => void;
-  effortLevels: readonly string[];
-  currentEffort: string;
-  requestedEffort: string;
-  effortPending: boolean;
-  onEffortChange?: (effort: string) => void;
-}
-
-function effortWord(level: string): string {
-  if (!level) return 'Default';
-  if (/^x+high$/i.test(level)) return `${level.slice(0, level.length - 4).toUpperCase()}-high`;
-  return level.charAt(0).toUpperCase() + level.slice(1);
-}
-
-function Selected({ on }: { on: boolean }) {
-  return on
-    ? <><Check size={16} aria-hidden className="composer-model-check" /><span className="gv-sr-only"> (selected)</span></>
-    : <span className="composer-model-check composer-model-check--off" aria-hidden />;
-}
-
-/**
- * The model and effort, read as text in the control row ("Claude Opus 4.8 High"),
- * opening one kit menu: the selected provider's models, the effort ladder the
- * current model accepts, and the other providers to switch to.
- */
-function ModelMenu({
-  providerOptions,
-  selectedProviderId,
-  providerModelOptions,
-  selectedModelRegistryKey,
-  selectModelPending,
-  modelChangesDisabled = false,
-  onProviderChange,
-  onModelChange,
-  effortLevels,
-  currentEffort,
-  requestedEffort,
-  effortPending,
-  onEffortChange,
-}: ModelMenuProps) {
-  const selectedModel = providerModelOptions.find((m) => m.registryKey === selectedModelRegistryKey);
-  const modelLabel = selectModelPending
-    ? 'Switching…'
-    : selectedModel?.label ?? (providerModelOptions.length ? 'Choose a model' : 'No models');
-  const byCategory = selectedModel?.providerId === 'decision-router';
-  const showEffort = !byCategory && effortLevels.length > 1 && Boolean(onEffortChange);
-  const capped = requestedEffort !== currentEffort && requestedEffort !== '';
-  const effortLabel = byCategory ? 'by category' : showEffort
-    ? capped ? `${effortWord(currentEffort)} (requested ${effortWord(requestedEffort)})`
-      : currentEffort ? effortWord(currentEffort) : ''
-    : '';
-  const selectedProvider = providerOptions.find((provider) => provider.id === selectedProviderId);
-
-  return (
-    <Menu
-      label="Model and effort"
-      placement="top-end"
-      width={280}
-      className="composer-model-menu"
-      trigger={(props) => (
-        <button
-          {...props}
-          type="button"
-          className="composer-model-btn"
-          aria-label={`Model: ${modelLabel}${effortLabel ? `, effort ${effortLabel}` : ''}`}
-          data-pending={selectModelPending || effortPending ? 'true' : undefined}
-          disabled={!providerOptions.length || modelChangesDisabled}
-        >
-          <span className="composer-model-label">{modelLabel}</span>
-          {effortLabel && <span className="composer-model-effort">{effortLabel}</span>}
-          <ChevronDown size={14} aria-hidden />
-        </button>
-      )}
-    >
-      <MenuMeta>For this chat only. The default for new chats is set in Settings.</MenuMeta>
-      <MenuMeta>{selectedProvider?.label ?? 'Models'}</MenuMeta>
-      {providerModelOptions.length === 0 && <MenuMeta>No models from this provider.</MenuMeta>}
-      {providerModelOptions.map((model) => (
-        <MenuItem
-          key={model.registryKey}
-          icon={<Selected on={model.registryKey === selectedModelRegistryKey} />}
-          onSelect={() => onModelChange(model.registryKey)}
-        >
-          {model.label}
-        </MenuItem>
-      ))}
-      {showEffort && onEffortChange && (
-        <>
-          <MenuSeparator />
-          <MenuMeta>Effort</MenuMeta>
-          {['', ...effortLevels].map((level) => (
-            <MenuItem
-              key={level || 'default'}
-              icon={<Selected on={level === currentEffort} />}
-              disabled={effortPending}
-              onSelect={() => onEffortChange(level)}
-            >
-              {effortWord(level)}
-            </MenuItem>
-          ))}
-        </>
-      )}
-      {providerOptions.length > 1 && (
-        <>
-          <MenuSeparator />
-          <MenuMeta>Provider</MenuMeta>
-          {providerOptions.map((provider) => (
-            <MenuItem
-              key={provider.id}
-              icon={<Selected on={provider.id === selectedProviderId} />}
-              keepOpen
-              onSelect={() => onProviderChange(provider.id)}
-            >
-              {provider.label}
-            </MenuItem>
-          ))}
-        </>
-      )}
-    </Menu>
-  );
-}
-
 // ─── Slash-command menu ───────────────────────────────────────────────────────
 
 interface SlashMenuProps {
@@ -344,12 +194,7 @@ export function Composer({
   turnError,
   renameSessionError,
   selectModelError,
-  providerOptions,
-  selectedProviderId,
-  providerModelOptions,
-  selectedModelRegistryKey,
-  selectModelPending,
-  modelChangesDisabled = false,
+  modelPicker,
   composerRef,
   fileInputRef,
   onDraftChange,
@@ -361,13 +206,6 @@ export function Composer({
   onSendHeldAsText,
   onFileSelection,
   onRemoveAttachedFile,
-  onProviderChange,
-  onModelChange,
-  effortLevels = [],
-  currentEffort = '',
-  requestedEffort = currentEffort,
-  effortPending = false,
-  onEffortChange,
   slashCommands = [],
   onFilesAdded,
 }: ComposerProps) {
@@ -649,21 +487,7 @@ export function Composer({
           </button>
 
           <div className="composer-toolbar__end">
-            <ModelMenu
-              providerOptions={providerOptions}
-              selectedProviderId={selectedProviderId}
-              providerModelOptions={providerModelOptions}
-              selectedModelRegistryKey={selectedModelRegistryKey}
-              selectModelPending={selectModelPending}
-              modelChangesDisabled={modelChangesDisabled}
-              onProviderChange={onProviderChange}
-              onModelChange={onModelChange}
-              effortLevels={effortLevels}
-              currentEffort={currentEffort}
-              requestedEffort={requestedEffort}
-              effortPending={effortPending || isSendPending}
-              onEffortChange={onEffortChange}
-            />
+            <ModelPicker {...modelPicker} />
             <MicButton onTranscript={handleTranscript} disabled={isSendPending} />
             <VoiceSettings />
             {queueing && (

@@ -19670,13 +19670,14 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Read the list of models again",
           "word": "refresh",
           "line": "/model refresh",
-          "sentence": "Asks every provider you have set up for its models again, and says for each how many it has or why its list could not be read.",
+          "sentence": "Asks every provider you have set up for its models again, here and on the daemon, and says for each how many it has or why its list could not be read.",
           "done": "",
           "touches": "another-machine",
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "It refreshes the lists this terminal app reads its models from."
+            "method": "models.refresh",
+            "fields": {}
           },
           "inputs": []
         },

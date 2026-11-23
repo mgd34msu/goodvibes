@@ -6,7 +6,7 @@
 
 It talks to many model providers (OpenAI, Anthropic, Gemini, Bedrock, Copilot, OpenRouter and other OpenAI-compatible gateways, plus local servers like Ollama and LM Studio that `/scan` finds on your machine and LAN), keeps its settings, sessions, and secrets on your own machine, and shows you the token count and running cost of every turn. Background work opens in large modals over the conversation: running agents, changed files and diffs, tokens and cost.
 
-<img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in a cyan-to-magenta gradient, the version v3.4.5 and tagline beneath it, the model rtfake:rt-1 with 28 tools, the working directory, and the hint Ctrl+P commands, ? help, F2 agents. Below the empty composer the status bar reads Asks: you, for now · you chose Jev decides, shift+tab, 1 notice, then context 0%, branch main, changed and model rt-1." width="900">
+<img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in a cyan-to-magenta gradient, the version v3.4.6 and tagline beneath it, the model rtfake:rt-1 with 28 tools, the working directory, and the hint Ctrl+P commands, ? help, F2 agents. Below the empty composer the status bar reads Permissions: asking you, for now · you chose Jev decides, shift+tab, 1 notice, then context 0%, branch main, changed and model rt-1." width="900">
 
 ## Install and start
 
@@ -24,7 +24,7 @@ Then run `goodvibes` in a project directory. When no model is ready, the first r
 
 ### The conversation loop
 
-<img src="docs/assets/conversation.png" alt="One conversation turn in the terminal. The user asks to explain the frost-date table and how to extend it. The reply block, headed rt-1 · 1 tool, says Reading the table first, shows the folded tool line Reading files src/frost-dates.ts with a green checkmark, then answers in markdown: a syntax-highlighted TypeScript line defining LAST_FROST, two bullets, and the question Want me to add zones 5b to 7a? The status bar below the composer reads Asks: you, for now · you chose Jev decides." width="900">
+<img src="docs/assets/conversation.png" alt="One conversation turn in the terminal. The user asks to explain the frost-date table and how to extend it. The reply block, headed rt-1 · 1 tool, says Reading the table first, shows the folded tool line Reading files src/frost-dates.ts with a green checkmark, then answers in markdown: a syntax-highlighted TypeScript line defining LAST_FROST, two bullets, and the question Want me to add zones 5b to 7a? The status bar below the composer reads Permissions: asking you, for now · you chose Jev decides." width="900">
 
 Tool calls stream inline as the model makes them, then their results fold into a collapsible group so a long working session stays readable. Expand any group to see what actually came back. Assistant messages render markdown, syntax-highlighted code, and inline diffs, and any block can be collapsed, bookmarked, copied, or saved to a file.
 

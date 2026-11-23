@@ -9,8 +9,8 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * webui keeps its ergonomic wrappers (route interpolation, per-family typed
  * call sites) hand-written on top of these generated primitives.
  *
- * Contract product version: 3.4.5
- * Methods: 650 total, 535 REST-routed, 115 ws-only invoke.
+ * Contract product version: 3.4.6
+ * Methods: 651 total, 536 REST-routed, 115 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -1640,6 +1640,10 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
     "method": "GET",
     "path": "/api/models"
   },
+  "models.refresh": {
+    "method": "POST",
+    "path": "/api/models/refresh"
+  },
   "providers.get": {
     "method": "GET",
     "path": "/api/providers/{providerId}"
@@ -2778,6 +2782,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "models.current.get": "rest",
   "models.current.set": "rest",
   "models.list": "rest",
+  "models.refresh": "rest",
   "providers.get": "rest",
   "providers.list": "rest",
   "providers.usage.get": "rest",
@@ -28150,9 +28155,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 ],
                 "source": "catalog",
                 "effectiveByRequested": {}
-              }
+              },
+              "textWork": "text"
             }
-          ]
+          ],
+          "modelList": {
+            "source": "live",
+            "listedAt": 0,
+            "error": "sample"
+          }
         }
       ],
       "currentModel": {
@@ -28160,7 +28171,37 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "provider": "sample",
         "id": "sample"
       },
+      "pinned": [
+        "sample"
+      ],
+      "recent": [
+        "sample"
+      ],
       "secretsResolutionSkipped": false
+    }
+  },
+  "models.refresh": {
+    "input": {
+      "providerId": "sample"
+    },
+    "output": {
+      "providers": [
+        {
+          "providerId": "sample",
+          "label": "sample",
+          "models": 0,
+          "source": "live",
+          "added": [
+            "sample"
+          ],
+          "removed": [
+            "sample"
+          ],
+          "listedAt": 0,
+          "error": "sample",
+          "notAsked": false
+        }
+      ]
     }
   },
   "providers.get": {

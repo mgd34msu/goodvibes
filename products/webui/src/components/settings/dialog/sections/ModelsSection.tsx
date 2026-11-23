@@ -14,7 +14,8 @@
  */
 import { modelOptionsSourceOf, useProviderModelOptions, type ModelOptionsSource } from '../../../../lib/use-provider-model-options';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { copyText, selectContents } from '../../../../lib/copy-text';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../../../../lib/goodvibes';
@@ -72,19 +73,27 @@ export function priceLabel(model: unknown): string {
  */
 function CopyCommandButton({ label, command }: { label: string; command: string }) {
   const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
+  const commandRef = useRef<HTMLElement>(null);
+  // Not copied: the command is shown and selected, so one key press copies it.
+  useEffect(() => { if (copied === 'failed' && commandRef.current) selectContents(commandRef.current); }, [copied]);
   return (
-    <Button
-      size="sm"
-      variant="outline"
-      title={`Copies ${command} to run in the terminal app`}
-      aria-label={`${label}: copy ${command} to run in the terminal app`}
-      onClick={() => {
-        if (!navigator.clipboard) { setCopied('failed'); return; }
-        navigator.clipboard.writeText(command).then(() => setCopied('yes'), () => setCopied('failed'));
-      }}
-    >
-      {copied === 'yes' ? 'Copied: run it in the terminal' : copied === 'failed' ? `Run ${command} in the terminal` : label}
-    </Button>
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        title={`Copies ${command} to run in the terminal app`}
+        aria-label={`${label}: copy ${command} to run in the terminal app`}
+        onClick={() => { void copyText(command).then((outcome) => setCopied(outcome === 'copied' ? 'yes' : 'failed')); }}
+      >
+        {copied === 'yes' ? 'Copied: run it in the terminal' : label}
+      </Button>
+      {/* Not copied (the browser keeps the clipboard from a page on plain http): the command, selected for the person to copy. */}
+      {copied === 'failed' && (
+        <span role="status">
+          {' '}Selected, press Ctrl+C (Cmd+C on a Mac) to copy it, then run it in the terminal: <code ref={commandRef}>{command}</code>
+        </span>
+      )}
+    </>
   );
 }
 

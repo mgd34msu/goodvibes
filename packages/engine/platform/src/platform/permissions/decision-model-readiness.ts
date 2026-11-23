@@ -129,14 +129,14 @@ export function describePermissionModeInForce(
  * When the mode in force is the chosen one, a surface shows `chosen`. When it
  * differs, it leads with what is in force and puts the choice second:
  * `inForce`, then `chosenWhen`, then `because` only when it reports a failure
- * (`failure`): "you, for now · Jev decides once a decision model is set". Where that
- * does not fit, `chosenShort` stands for `chosenWhen`: "you, for now · you
- * chose Jev decides".
+ * (`failure`): "asking you, for now · Jev decides once a decision model is set".
+ * Where that does not fit, `chosenShort` stands for `chosenWhen`: "asking you,
+ * for now · you chose Jev decides". Surfaces put "Permissions: " before it.
  */
 export interface ModeInForceWords {
   /** The chosen mode's label: "Jev decides". */
   readonly chosen: string;
-  /** What is in force when it differs from the chosen mode, written to lead ("Asks: you, for now"); absent when they are the same. */
+  /** What is in force when it differs from the chosen mode, written to lead ("Permissions: asking you, for now"); absent when they are the same. */
   readonly inForce?: string;
   /** The chosen mode and the condition it waits on: "Jev decides once a decision model is set"; absent when they are the same. */
   readonly chosenWhen?: string;
@@ -186,9 +186,9 @@ function chosenWhenWords(why: DecisionModelUnreadyReason): string {
 /**
  * The words in one line, in the order every surface shows them: the mode in
  * force first, the choice second, a failure last. "Jev decides" when the mode
- * in force is the chosen one; "you, for now · Jev decides once a decision
- * model is set"; "you, for now · Jev decides once the decision model answers
- * again · decision model unreachable".
+ * in force is the chosen one; "asking you, for now · Jev decides once a
+ * decision model is set"; "asking you, for now · Jev decides once the decision
+ * model answers again · decision model unreachable".
  */
 export function modeInForceLine(words: Pick<ModeInForceWords, 'chosen' | 'inForce' | 'chosenWhen' | 'because' | 'failure'>): string {
   if (words.inForce === undefined) return words.chosen;
@@ -288,7 +288,7 @@ export function describeModeInForceWords(
   }
   const choiceWords = ownChoice ? `you chose ${chosenLabel}` : `${chosenLabel} is the default here`;
   return {
-    chosen: chosenLabel, inForce: 'you, for now', chosenWhen: `${chosenLabel} ${chosenWhenWords(why)}`,
+    chosen: chosenLabel, inForce: 'asking you, for now', chosenWhen: `${chosenLabel} ${chosenWhenWords(why)}`,
     chosenShort, because: becauseWords(why),
     ...(why.kind === 'failing' ? { failure: true } : {}),
     sentence: `GoodVibes asks you for now: ${choiceWords}, but ${becauseSentence(why)}. ${asksBefore}`,

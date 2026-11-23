@@ -18,11 +18,11 @@ from the committed contract artifact and kept honest by a drift gate.
   by `scripts/generate-openapi-contract.ts` from the contract, so its counts
   cannot drift from the document.
   <!-- openapi-counts:start -->
-  Methods with a dedicated REST binding appear as path operations (535 operations, one per
+  Methods with a dedicated REST binding appear as path operations (536 operations, one per
   method's declared HTTP verb and path); methods without one are reachable only through the
-  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 536,
+  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 537,
   115 methods) and are listed on it under `x-invoke-only-methods`.
-  `x-operator-methods` is a flat index of all 650 cataloged methods, REST-bound
+  `x-operator-methods` is a flat index of all 651 cataloged methods, REST-bound
   or invoke-only, each with its category, access level, resolved REST route (or
   `null` for invoke-only), and schema coverage.
   <!-- openapi-counts:end -->

@@ -1,7 +1,8 @@
 import { createShellCoreActions } from '@goodvibes/engine/terminal-shell/shell-core-actions';
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { compactConversation, requireKeybindingsManager, requireProviderApi } from './runtime-services.ts';
+import { compactConversation, requireKeybindingsManager, requireProviderApi, requireShellPaths } from './runtime-services.ts';
+import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
 import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes/engine/terminal-shell/everyday-commands';
 import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes/engine/platform/platform/core';
@@ -25,7 +26,11 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const navigation = createShellNavigationCommands<CommandContext>();
 
   // `/model` and `/effort` are one description each, shared with the other terminal app.
-  registerModelCommands<CommandContext>(registry, { requireProviderApi, beforeSelection: (_ctx, _provider, complete) => complete() });
+  registerModelCommands<CommandContext>(registry, {
+    requireProviderApi,
+    beforeSelection: (_ctx, _provider, complete) => complete(),
+    daemon: (ctx) => createAgentDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
+  });
 
   registry.register(basicCommands.paste);
 

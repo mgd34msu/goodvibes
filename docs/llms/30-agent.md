@@ -189,7 +189,7 @@ Other notices are never drawn over the conversation: the status bar counts the u
 - Why a message was not sent and what to do, for example when the connected host refuses it because the workspace is not registered. The text stays in the composer.
 - The output of a `!` command: the command, its output and its exit status.
 
-The status bar is the terminal app's (see "Screen layout"): `Asks:` and the mode in force in words with the `shift+tab` key, the unread notices with `ctrl+n`, `context 34%`, `branch main, changed` and `model <name>`; a click on a segment opens its view, except the branch (the Agent has no changes view). The header names the program, its version and the session. A hosted session's mode is its host's: the segment shows it, and `Shift+Tab` sends the change to the host. The status bar keeps one short chip for the power state (`sleep disabled`, `sleep held` or `keep-awake refused`); the full note, and a warning such as the sleep-edge hooks being off, is a notice in `/notifications`, posted when it changes.
+The status bar is the terminal app's (see "Screen layout"): `Permissions:` and the mode in force in words with the `shift+tab` key, the unread notices with `ctrl+n`, `context 34%`, `branch main, changed` and `model <name>`; a click on a segment opens its view, except the branch (the Agent has no changes view). The header names the program, its version and the session. A hosted session's mode is its host's: the segment shows it, and `Shift+Tab` sends the change to the host. The status bar keeps one short chip for the power state (`sleep disabled`, `sleep held` or `keep-awake refused`); the full note, and a warning such as the sleep-edge hooks being off, is a notice in `/notifications`, posted when it changes.
 
 ### Keys
 
@@ -289,7 +289,7 @@ VIBE.md is managed with `/personas`: `vibe` (which files apply and which are blo
 | `/schedule` | The same description as the terminal app's, on the connected host's schedules: `list`, `add`, `run`, `pause`, `resume`, `change`, `remove`, `stop-run <run>` and `retry-run <run>` (see "Automation and host actions" below). |
 | `/calendar` | The same command as the terminal app's, on the Agent's own events, its calendar feeds and its calendar accounts; `change` and `status` (the daemon's calendar) are the terminal app's (see "Personal operations" below). |
 | `/payments` | Adds `address <billing|shipping>`. |
-| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`), "Pair something" (`pair device [--name <name>]` mints a named device token and shows its link and QR; `pair host [--apply]` pairs this Agent with its connected host, the same owner-checked flow as `/setup pair`), `host-status` and `unpair-host` (as `/setup pair` preview and `/setup unpair`), the relay through the connected host's relay verbs (`pair relay [--name <name>]`, `relay-status`, `relay-codes`, `relay-revoke <code>`, as `goodvibes-agent relay`), the devices waiting to pair as nodes (`requests`, `approve <request> [--replace]`, `reject <request>`, the owner's own act), and the paired phones (`nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture`). Channel setup and the shared token are the terminal app's and are refused here saying so. |
+| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`), "Pair something" (`pair device [--name <name>]` mints a named device token and shows its link and QR, or, when the host on this machine serves only this machine, its link and sign-in code for a browser here and no QR (see `goodvibes pair` in the terminal-app part); `pair host [--apply]` pairs this Agent with its connected host, the same owner-checked flow as `/setup pair`), `host-status` and `unpair-host` (as `/setup pair` preview and `/setup unpair`), the relay through the connected host's relay verbs (`pair relay [--name <name>]`, `relay-status`, `relay-codes`, `relay-revoke <code>`, as `goodvibes-agent relay`), the devices waiting to pair as nodes (`requests`, `approve <request> [--replace]`, `reject <request>`, the owner's own act), and the paired phones (`nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture`). Channel setup and the shared token are the terminal app's and are refused here saying so. |
 | `/intelligence` | The same description as the terminal app's: the lookups (`symbols`, `outline`, `definition`, `references`, `hover`) and `install`; `review` and `diagnostics` are the terminal app's and are refused here. |
 | `/voice` | The same description as the terminal app's (`speak`, `stop`, `on`, `off`, the local voice runtime, the wake word and the settings file); the runtime and the wake word are read and set up through the Agent's own voice service. |
 | `/undo`, `/redo`, `/retry` | The same descriptions as the terminal app's; `rewind` is refused, since the Agent does not go back to a turn; `/retry` re-sends the last message. |
@@ -588,7 +588,7 @@ Both need the connected host; without it they print the reason and exit `1`.
 ```text
 $ goodvibes-agent compat
 GoodVibes Agent compatibility
-  package 3.4.5
+  package 3.4.6
   connected host http://127.0.0.1:3421 (unreachable)
   host compatible no
   operator token missing (/home/me/.goodvibes/daemon/operator-tokens.json)

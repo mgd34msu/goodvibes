@@ -3,7 +3,7 @@ import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { availablePairingOffers, explicitPublicBaseUrl, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
 import { renderPairingBanner } from '../core/pairing-banner.js';
-import { localOnlyNotice } from '../daemon/pair-command.js';
+import { thisMachineSignIn } from '../daemon/pair-command.js';
 import { hasReadableWebuiBundle } from '../config/webui-bundle.js';
 
 export function renderDaemonStartupPairing(
@@ -35,7 +35,9 @@ export function renderDaemonStartupPairing(
   // the settings port; a daemon bound elsewhere is named by its port.
   const declaredPort = resolveRuntimeEndpointBinding(config, 'controlPlane').port;
   const reprint = bound.port === declaredPort ? 'goodvibes-daemon pair' : `goodvibes-daemon pair --port ${bound.port}`;
-  return [...renderPairingBanner({ version, origin, alternateOrigin, token,
-    offers: availablePairingOffers({ relayEnabled: config.get('relay.enabled') === true, stepUpAvailable: true }),
-  }).lines, `(print this again: ${reprint})`, ...localOnlyNotice(config, origin)].join('\n');
+  const offers = availablePairingOffers({ relayEnabled: config.get('relay.enabled') === true, stepUpAvailable: true });
+  // A link no phone could open is given for a browser on this machine, said so, with no QR.
+  const thisMachine = thisMachineSignIn(config, origin, token, offers);
+  if (thisMachine !== null) return [`GoodVibes daemon ${version}`, ...thisMachine.lines, `(print this again: ${reprint})`].join('\n');
+  return [...renderPairingBanner({ version, origin, alternateOrigin, token, offers }).lines, `(print this again: ${reprint})`].join('\n');
 }

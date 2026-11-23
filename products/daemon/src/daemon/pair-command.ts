@@ -41,15 +41,18 @@
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import {
   availablePairingOffers,
+  buildPairingHandoffLink,
   defaultPairingTokenName,
   formatPairingOffers,
   PAIRING_REACH_FIX,
   pairingReachFromSettings,
   pairingReadySteps,
+  pairingThisMachineLines,
   pairingUnreachableLines,
   resolvePairingWebOrigin,
   type OriginPosture,
   type PairingHandoffOfferKind,
+  type PairingReach,
 } from '@goodvibes/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
 import {
@@ -272,28 +275,28 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
 
   // Whether a phone can open this address, from the daemon's own bind (its
   // /api/health answer, or the settings) and its settings: no probe. When it
-  // cannot, no code is printed for a phone; the link still signs in a browser
-  // on this machine, so it is given for that, plainly labelled.
-  const reach = pairingReachFromSettings(input.configManager, origin.origin);
-  if (!reach.otherDevices) {
-    const local = renderPairingBanner({ version: input.version, origin: origin.origin, token, offers, includeQr: false });
+  // cannot, the link is given for a browser on this machine, said so, with no QR.
+  const thisMachine = thisMachineSignIn(input.configManager, origin.origin, token, offers);
+  if (thisMachine !== null) {
     if (flags.json) {
-      return failure(
-        `no pairing code was made: a phone could not open it yet (${reach.reason ?? 'the daemon serves only this machine'})`,
-        `${reach.fix ?? PAIRING_REACH_FIX}, then goodvibes-daemon pair`,
-        flags.json,
-      );
+      return {
+        exitCode: 0,
+        lines: [JSON.stringify({
+          ok: true,
+          data: {
+            origin: origin.origin,
+            deepLink: thisMachine.deepLink,
+            forThisMachine: true,
+            reason: thisMachine.reach.reason,
+            fix: thisMachine.reach.fix,
+            offers,
+            originFromPublicBaseUrl: origin.fromPublicBaseUrl,
+            source: answer.kind === 'serving' ? 'daemon' : 'files',
+          },
+        }, null, 2)],
+      };
     }
-    return {
-      exitCode: 1,
-      lines: [
-        ...pairingUnreachableLines(origin.origin, reach, 'goodvibes-daemon pair'),
-        '',
-        'A browser on this machine can still open the web app signed in with:',
-        `  ${local.deepLink}`,
-        ...(fromFiles.length > 0 ? ['', ...fromFiles] : []),
-      ],
-    };
+    return { exitCode: 0, lines: [...thisMachine.lines, ...(fromFiles.length > 0 ? ['', ...fromFiles] : [])] };
   }
 
   const banner = renderPairingBanner({
@@ -337,17 +340,33 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
 }
 
 /**
- * The line the start-up pairing block ends with when no phone could open its
- * link: why, and the one command that fixes it. Nothing when one could.
+ * The block `pair` and the start-up output print when no phone could open the
+ * link (the one decision, `pairingReachFromSettings`): that the link signs in
+ * a browser on this computer and why a phone cannot open it, the steps that
+ * let a phone reach it, then the link and the code to paste. No QR: a QR is
+ * for another device. Null when a phone could open it. `reach` is the daemon's
+ * answer when it gave one; otherwise it is decided from this machine's settings.
  */
-export function localOnlyNotice(config: Pick<ConfigManager, 'get'>, origin: string): readonly string[] {
-  const reach = pairingReachFromSettings(config, origin);
-  if (reach.otherDevices) return [];
-  return [
-    '',
-    `note: this link opens only on this machine: ${reach.reason ?? 'the daemon serves only this machine'}.`,
-    `To pair a phone: ${reach.fix ?? PAIRING_REACH_FIX}, then goodvibes-daemon pair`,
-  ];
+export function thisMachineSignIn(
+  config: Pick<ConfigManager, 'get'>,
+  origin: string,
+  token: string,
+  offers: readonly PairingHandoffOfferKind[],
+  answered?: PairingReach,
+): { readonly lines: readonly string[]; readonly deepLink: string; readonly reach: PairingReach } | null {
+  const reach = answered ?? pairingReachFromSettings(config, origin);
+  if (reach.otherDevices) return null;
+  const deepLink = buildPairingHandoffLink({ webOrigin: origin, token, offers });
+  return {
+    reach,
+    deepLink,
+    lines: [
+      ...pairingThisMachineLines(origin, reach, 'goodvibes-daemon pair'),
+      '',
+      `  ${deepLink}`,
+      `  Sign-in code: ${token}  (to paste on the web UI's sign-in page, under Other ways to sign in)`,
+    ],
+  };
 }
 
 /** The plan a minting `pair` prints before it will act, absent `-y`. Nothing is called yet. */
@@ -384,9 +403,13 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   // the daemon decides from its settings). No answer leaves the mint to say
   // what went wrong, as before.
   const posture = await callDaemonMethod<{ readonly posture: OriginPosture }>(target, 'pairing.posture.get', { input: {} }, input.fetchImpl);
+  // This machine's own daemon serving only this machine: the token is minted
+  // for a browser here, and printed as such, with no QR.
+  let forThisMachine: PairingReach | undefined;
   if (posture.ok) {
     const reach = posture.data.posture.reach;
-    if (reach !== undefined && !reach.otherDevices) {
+    if (reach !== undefined && !reach.otherDevices && local) forThisMachine = reach;
+    else if (reach !== undefined && !reach.otherDevices) {
       const pairAgain = local ? 'goodvibes-daemon pair -y' : `goodvibes-daemon pair --host ${target.baseUrl} -y`;
       if (flags.json) {
         return failure(
@@ -400,13 +423,33 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   }
 
   const outcome = await callDaemonMethod<PairingHandoffCreateResult>(
-    target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName() } }, input.fetchImpl,
+    target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName(), ...(forThisMachine !== undefined ? { forThisMachine: true } : {}) } }, input.fetchImpl,
   );
   if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json, outcome.code);
 
   const data = outcome.data;
   const offerKinds = data.offers.map((offer) => offer.kind).filter(isPairingOfferKind);
   const mintedLine = `minted a new per-device pairing token ("${data.token.name}") on the daemon at ${target.baseUrl}.`;
+
+  if (forThisMachine !== undefined && data.deepLink !== undefined) {
+    const origin = originFromDeepLink(data.deepLink);
+    const thisMachine = thisMachineSignIn(input.configManager, origin, data.token.token, offerKinds, forThisMachine);
+    if (thisMachine !== null) {
+      if (flags.json) {
+        return {
+          exitCode: 0,
+          lines: [JSON.stringify({
+            ok: true,
+            data: {
+              minted: true, target: target.baseUrl, tokenId: data.token.id, tokenName: data.token.name, token: data.token.token,
+              origin, deepLink: thisMachine.deepLink, forThisMachine: true, reason: thisMachine.reach.reason, fix: thisMachine.reach.fix, offers: offerKinds,
+            },
+          }, null, 2)],
+        };
+      }
+      return { exitCode: 0, lines: [mintedLine, '', ...thisMachine.lines] };
+    }
+  }
 
   if (data.deepLink === undefined) {
     // Honest degraded path: the mint itself succeeded, the token is real and

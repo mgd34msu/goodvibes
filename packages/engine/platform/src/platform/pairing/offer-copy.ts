@@ -98,6 +98,20 @@ export function pairingUnreachableLines(origin: string, reach: { readonly reason
   ];
 }
 
+/**
+ * What leads a sign-in link made for a browser on the daemon's own machine
+ * when a phone could not open a code: that the link is for this computer and
+ * why a phone cannot open it, then the list (the web UI is served; the one
+ * command that lets other devices reach it; pair again). The caller prints the
+ * link and the code to paste after it, and no QR: a QR is for another device.
+ */
+export function pairingThisMachineLines(origin: string, reach: { readonly reason?: string | undefined; readonly fix?: string | undefined }, pairCommand: string): string[] {
+  return [
+    `This link signs in a browser on this computer. A phone cannot open it: ${reach.reason ?? 'the daemon serves only this machine'}.`,
+    ...formatPairingSteps(pairingUnreachableSteps(origin, { fix: reach.fix }, `${pairCommand}, then scan the code it prints with the phone.`)),
+  ];
+}
+
 /** What `pair` prints when the daemon serves no web UI, so a code would open nothing. */
 export function pairingNoWebUiLines(pairCommand: string): string[] {
   return [

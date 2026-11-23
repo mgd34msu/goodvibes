@@ -16,7 +16,10 @@ and who can reach it. It needs no separate WebUI service.
 To use it from a phone or another computer, run
 `goodvibes-daemon webui enable --lan` so other devices on your network can
 reach it, then run `goodvibes pair` and open the QR code's link on the device
-or scan it with the sign-in page's camera scanner. Pairing, sign-in and every
+or scan it with the sign-in page's camera scanner. In a browser on the
+daemon's own machine, `goodvibes pair` before `--lan` prints a link and a
+sign-in code for that browser (no QR code, since a phone could not open it).
+Pairing, sign-in and every
 part of the app are described in the [operator guide](docs/operator-guide.md).
 Updates come with the rest of the suite; the development server below is for
 source work.

@@ -117,6 +117,7 @@ export {
   pairingNoWebUiLines,
   pairingPostureNotice,
   pairingReadySteps,
+  pairingThisMachineLines,
   pairingUnreachableLines,
   pairingUnreachableSteps,
   POSTURE_CAPABILITY_LABEL,

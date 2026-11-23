@@ -4,11 +4,13 @@ import { BookOpen, CalendarDays, Files, LayoutGrid, Mail } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getClientLifetime, isClientLifetimeCurrent } from '../lib/client-lifetime';
 import { client as platformClient } from '../lib/goodvibes';
+import { copyOutcomeMessage, copyText } from '../lib/copy-text';
 import { REASONING_EFFORT_SEVERITY } from '@goodvibes/engine/platform/browser/reasoning-effort';
 import { asRecord, bestId, bestTitle, firstString } from '../lib/object';
 import { queryKeys } from '../lib/queries';
 import { modelOptionsSourceOf, useProviderModelOptions } from '../lib/use-provider-model-options';
-import { providerOptionsFromResponse, reasoningOptionsForModel, sortProvidersConfiguredFirst } from '../lib/provider-models';
+import { modelOptionsForProvider, providerOptionsFromResponse, reasoningOptionsForModel, sortProvidersConfiguredFirst } from '../lib/provider-models';
+import { modelRefreshSentence, pickerProviderOf } from '../lib/model-picker-data';
 import { deriveProviderStatus } from '../lib/provider-status';
 import { shouldSteerComposerKey, shouldSubmitComposerKey } from '../lib/composer-keys';
 import { isSessionNotFoundError, formatError } from '../lib/errors';
@@ -138,7 +140,6 @@ export function ChatView({
   const [pendingUserMessageId, setPendingUserMessageId] = useState('');
   const [copiedMessageId, setCopiedMessageId] = useState('');
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
-  const [selectedProviderId, setSelectedProviderId] = useState('');
   // A new chat's own model and effort, picked in its composer before the first send.
   // The chat is created with them; the saved default for new chats stays as it is.
   // Held for the chat selection it was picked in, so another new chat starts from the default.
@@ -200,17 +201,31 @@ export function ChatView({
     () => allProviderOptions.filter((provider) => deriveProviderStatus(provider.value).configured || provider.id === currentProviderId),
     [allProviderOptions, currentProviderId],
   );
-  const selectedProvider = providerOptions.find((provider) => provider.id === selectedProviderId)?.value ?? providerOptions[0]?.value;
+  const currentProviderValue = allProviderOptions.find((provider) => provider.id === currentProviderId)?.value ?? providerOptions[0]?.value;
   const catalogProviders = useMemo(() => catalogProviderOptions.map(provider => provider.value), [catalogProviderOptions]);
-  const providerModels = useProviderModelOptions(selectedProvider, catalogProviders, modelOptionsSourceOf(providers, modelCatalog));
+  const modelListsSource = modelOptionsSourceOf(providers, modelCatalog);
+  const providerModels = useProviderModelOptions(currentProviderValue, catalogProviders, modelListsSource);
   const providerModelOptions = providerModels.models;
+  // Every provider's models, for the model menu (provider, then model, then effort).
+  const modelsByProvider = useMemo(
+    () => new Map(allProviderOptions.map((provider) => [provider.id, modelOptionsForProvider(provider.value, catalogProviders)] as const)),
+    [allProviderOptions, catalogProviders],
+  );
+  const pickerProviders = useMemo(
+    () => allProviderOptions.map((provider) => pickerProviderOf(provider, modelsByProvider.get(provider.id) ?? [])),
+    [allProviderOptions, modelsByProvider],
+  );
+  const favoriteModels = useMemo(() => {
+    const record = asRecord(modelCatalog.data);
+    const keys = (value: unknown) => Array.isArray(value) ? value.filter((key): key is string => typeof key === 'string') : [];
+    return { pinned: keys(record.pinned), recent: keys(record.recent) };
+  }, [modelCatalog.data]);
   // Existing chats retain their own route. A default-model change elsewhere
   // must not make this composer claim that its pinned session changed.
   const currentRegistryKey = sessionProvider && sessionModel
     ? (providerModelOptions.find(model => model.providerId === sessionProvider && model.rawModelId === sessionModel)
       ?? providerModelOptions.find(model => model.providerId === sessionProvider && model.registryKey === sessionModel))?.registryKey ?? ''
     : draftRoute?.registryKey || defaultRegistryKey;
-  const selectedModelRegistryKey = providerModelOptions.some((model) => model.registryKey === currentRegistryKey) ? currentRegistryKey : '';
   // The effort ladder for the CURRENT model, from its own models.list entry.
   // Null on daemons predating the field, no control renders.
   const effortOptions = useMemo(
@@ -229,14 +244,6 @@ export function ChatView({
     : requestedEffort;
 
   const activeSessionTitle = activeSessionId ? bestTitle(activeSession, activeSessionId) : 'New chat';
-
-  useEffect(() => {
-    if (selectedProviderId) return;
-    const preferredProviderId = currentProviderId || providerOptions[0]?.id || '';
-    if (preferredProviderId) setSelectedProviderId(preferredProviderId);
-  }, [currentProviderId, providerOptions, selectedProviderId]);
-
-  useEffect(() => { if (currentProviderId) setSelectedProviderId(currentProviderId); }, [selectedChat, currentProviderId]);
 
   useEffect(
     () => setSessionTitleDraft(activeSessionTitle === activeSessionId ? '' : activeSessionTitle),
@@ -273,20 +280,21 @@ export function ChatView({
       queryClient.invalidateQueries({ queryKey: ['companion-chat', activeSessionId] }),
     ]);
   };
-  const selectModel = useMutation({
-    mutationFn: async (registryKey: string) => {
-      if (!providerModels.hasCurrentModel(registryKey)) throw new Error('Model options changed. Choose a current model.');
-      const model = providerModelOptions.find(option => option.registryKey === registryKey);
+  // One pick from the model menu: the model and its effort (null: the provider default), in one change.
+  const selectRoute = useMutation({
+    mutationFn: async ({ registryKey, effort }: { registryKey: string; effort: string | null }) => {
+      if (modelListsSource.kind !== 'ready' || modelListsSource.refreshing) throw new Error('Model options changed. Choose a current model.');
+      const model = [...modelsByProvider.values()].flat().find(option => option.registryKey === registryKey);
       if (!model) throw new Error('The selected model is unavailable.');
-      if (activeSessionId) return applySessionRoute({ provider: model.providerId, model: model.rawModelId });
+      if (effort !== null && model.providerId === 'decision-router') throw new Error('Decision Router effort is configured by category.');
+      if (effort !== null && !isSessionEffort(effort)) throw new Error('This reasoning effort is not supported by chat sessions. Choose a supported level or the provider default.');
+      if (activeSessionId) return applySessionRoute({ provider: model.providerId, model: model.rawModelId, reasoningEffort: effort });
       // A new chat: the pick is this chat's, sent when the chat is created by its first message.
-      // The default for new chats (models.current) is changed only in Settings.
       routeSelectionCurrent(selectedChat, getClientLifetime());
-      // Effort levels differ by model, so a new model starts on its provider default.
-      setNewChatPick({ selection: selectedChat, route: { provider: model.providerId, model: model.rawModelId, registryKey } });
+      setNewChatPick({ selection: selectedChat, route: { provider: model.providerId, model: model.rawModelId, registryKey, reasoningEffort: effort } });
       return undefined;
     },
-    onError: () => { retryAfterModelRef.current = ''; setSelectedProviderId(currentProviderId); },
+    onError: () => { retryAfterModelRef.current = ''; },
     onSuccess: () => {
       const retry = retryAfterModelRef.current;
       retryAfterModelRef.current = '';
@@ -294,18 +302,24 @@ export function ChatView({
     },
   });
 
-  const selectEffort = useMutation({
-    mutationFn: async (effort: string) => {
-      if (currentProviderId === 'decision-router') throw new Error('Decision Router effort is configured by category.');
-      if (effort !== '' && !isSessionEffort(effort)) throw new Error('This reasoning effort is not supported by chat sessions. Choose a supported level or the provider default.');
-      const reasoningEffort = effort === '' ? null : effort;
-      if (activeSessionId) return applySessionRoute({ reasoningEffort });
-      // A new chat: held with its model pick (if any) and sent when the chat is created.
-      routeSelectionCurrent(selectedChat, getClientLifetime());
-      setNewChatPick({ selection: selectedChat, route: { ...draftRoute, reasoningEffort } });
-      return undefined;
+  // "Make this the default for new chats": this chat's model and effort become the saved default.
+  const defaultEffort = firstString(currentModelData, ['effort']) || firstString(asRecord(currentModel.data), ['effort']) || '';
+  const isDefaultRoute = currentRegistryKey !== '' && currentRegistryKey === defaultRegistryKey && requestedEffort === defaultEffort;
+  const makeDefault = useMutation({
+    mutationFn: () => platformClient.operator.models.current.set(currentRegistryKey, requestedEffort === '' ? null : requestedEffort),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['models', 'current'] }),
+        queryClient.invalidateQueries({ queryKey: ['models'] }),
+      ]);
     },
   });
+
+  const refreshModelLists = async (providerId?: string): Promise<string> => {
+    const answer = await platformClient.operator.models.refresh(providerId);
+    await queryClient.invalidateQueries({ queryKey: ['models'] });
+    return modelRefreshSentence(answer.providers);
+  };
 
   const invalidateChatState = useCallback(async (sessionId: string) => {
     await Promise.all([
@@ -693,14 +707,12 @@ export function ChatView({
     const id = bestId(message);
     const text = messageText(message);
     if (!text) return;
-    if (!navigator.clipboard) {
-      toast({ title: 'Copy failed', description: 'Clipboard API unavailable', tone: 'danger', durationMs: 3000 });
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      toast({ title: 'Copy failed', description: 'Could not write to clipboard', tone: 'danger', durationMs: 3000 });
+    // The message's own text on the page, selected when the browser lets nothing be copied.
+    const shown = [...document.querySelectorAll('[data-message-id]')].find((node) => node.getAttribute('data-message-id') === id)?.querySelector('.message-bubble') ?? null;
+    const outcome = await copyText(text, shown);
+    const notice = copyOutcomeMessage(outcome);
+    if (notice) {
+      toast({ title: outcome === 'selected' ? 'Selected' : 'Copy failed', description: notice, tone: outcome === 'selected' ? 'info' : 'danger', durationMs: 6000 });
       return;
     }
     setCopiedMessageId(id);
@@ -972,13 +984,21 @@ export function ChatView({
           sendError={send.error}
           turnError={turnError}
           renameSessionError={renameSession.error}
-          selectModelError={selectModel.error ?? selectEffort.error}
-          providerOptions={providerOptions}
-          selectedProviderId={selectedProviderId}
-          providerModelOptions={providerModelOptions}
-          selectedModelRegistryKey={selectedModelRegistryKey}
-          selectModelPending={selectModel.isPending}
-          modelChangesDisabled={isStreaming || send.isPending}
+          selectModelError={selectRoute.error ?? makeDefault.error}
+          modelPicker={{
+            providers: pickerProviders,
+            pinned: favoriteModels.pinned,
+            recent: favoriteModels.recent,
+            current: { registryKey: currentRegistryKey, effort: currentEffort, requestedEffort },
+            isDefault: isDefaultRoute,
+            pending: selectRoute.isPending,
+            disabled: providerOptions.length === 0 || isStreaming || send.isPending,
+            onPick: (registryKey, effort) => selectRoute.mutate({ registryKey, effort }),
+            onMakeDefault: () => makeDefault.mutate(),
+            makeDefaultPending: makeDefault.isPending,
+            onOpenSettings: () => onOpenSettings?.('models'),
+            onRefresh: refreshModelLists,
+          }}
           composerRef={composerRef}
           fileInputRef={fileInputRef}
           slashCommands={SLASH_COMMANDS}
@@ -988,13 +1008,6 @@ export function ChatView({
           onFileSelection={handleFileSelection}
           onFilesAdded={addAttachedFiles}
           onRemoveAttachedFile={removeAttachedFile}
-          onProviderChange={setSelectedProviderId}
-          onModelChange={(registryKey) => selectModel.mutate(registryKey)}
-          effortLevels={effortOptions?.levels ?? []}
-          currentEffort={currentEffort}
-          requestedEffort={requestedEffort}
-          effortPending={selectEffort.isPending}
-          onEffortChange={(effort) => selectEffort.mutate(effort)}
         />
         {/* Starters are for an empty composer: once something is typed (a slash command
             among them, whose menu opens where they sit) they step aside. */}

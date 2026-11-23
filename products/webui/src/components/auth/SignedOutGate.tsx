@@ -250,7 +250,8 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
         </div>
         <h1>Sign in to GoodVibes</h1>
         <p className="signed-out-lede">
-          Run <code>goodvibes pair</code> on your computer and scan the code.
+          Run <code>goodvibes pair</code> on the computer running GoodVibes, then scan the code it shows, or
+          open the link it prints in a browser on that computer.
         </p>
 
         {pairingError != null && (
@@ -429,12 +430,18 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
             <Disclosure summary="Where do I find a code?">
               <ul className="signed-out-help">
                 <li>
-                  Run <code>goodvibes pair</code> on your computer. It shows the code, and a QR
-                  code that signs you in when you scan it.
+                  Run <code>goodvibes pair</code> on the computer running GoodVibes. When a phone
+                  can reach GoodVibes, it shows a QR code that signs you in when you scan it, and
+                  its link.
                 </li>
                 <li>
-                  On the computer running GoodVibes, <code>goodvibes-daemon pair</code> prints
-                  the link and QR again.
+                  When GoodVibes serves only that computer, <code>goodvibes pair</code> prints a
+                  link and a sign-in code for a browser on that computer, and the command that
+                  lets a phone reach it.
+                </li>
+                <li>
+                  <code>goodvibes-daemon pair</code>, on that computer, prints the daemon&rsquo;s
+                  own sign-in link the same way.
                 </li>
               </ul>
             </Disclosure>

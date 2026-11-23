@@ -6,7 +6,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
   "product": {
     "id": "goodvibes",
     "surface": "operator",
-    "version": "3.4.5"
+    "version": "3.4.6"
   },
   "auth": {
     "modes": [
@@ -141365,7 +141365,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "models.list",
         "title": "Model Catalog",
-        "description": "Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open, so a locally served model that appeared since the last read shows up on the next one. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell \"not configured\" from \"not checked\". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all.",
+        "description": "Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open: a provider's list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell \"not configured\" from \"not checked\". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal's does.",
         "category": "providers",
         "source": "builtin",
         "access": "authenticated",
@@ -141548,15 +141548,47 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                             "source"
                           ],
                           "additionalProperties": false
+                        },
+                        "textWork": {
+                          "type": "string",
+                          "enum": [
+                            "text",
+                            "other",
+                            "unknown"
+                          ]
                         }
                       },
                       "required": [
                         "id",
                         "registryKey",
-                        "provider"
+                        "provider",
+                        "textWork"
                       ],
                       "additionalProperties": false
                     }
+                  },
+                  "modelList": {
+                    "type": "object",
+                    "properties": {
+                      "source": {
+                        "type": "string",
+                        "enum": [
+                          "live",
+                          "cache",
+                          "catalog"
+                        ]
+                      },
+                      "listedAt": {
+                        "type": "number"
+                      },
+                      "error": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "source"
+                    ],
+                    "additionalProperties": false
                   }
                 },
                 "required": [
@@ -141564,7 +141596,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                   "label",
                   "configured",
                   "envVars",
-                  "models"
+                  "models",
+                  "modelList"
                 ],
                 "additionalProperties": false
               }
@@ -141596,6 +141629,18 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
                 }
               ]
             },
+            "pinned": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "recent": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
             "secretsResolutionSkipped": {
               "type": "boolean"
             }
@@ -141603,11 +141648,109 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
           "required": [
             "providers",
             "currentModel",
+            "pinned",
+            "recent",
             "secretsResolutionSkipped"
           ],
           "additionalProperties": false
         },
         "effect": "read",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true
+      },
+      {
+        "id": "models.refresh",
+        "title": "Read the Model Lists Again",
+        "description": "Read the model lists from the providers now, past each stored list: every provider, or the one named by `providerId`; the shared model catalog is checked with them. Answers each provider that has a listing of its own: how many models it lists now, `source` (`live` when it answered; `cache` or `catalog` when it did not), the models `added` and `removed`, `listedAt`, `error` when its list could not be read, and `notAsked` when it has no key or sign-in to list with yet. A list that changed is announced as a providers change, so every client reads it again. An unknown `providerId` is refused with PROVIDER_NOT_FOUND. It sends requests to the providers with the owner's credentials, so it needs an admin.",
+        "category": "providers",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:providers"
+        ],
+        "http": {
+          "method": "POST",
+          "path": "/api/models/refresh"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "providerId": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "providers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "providerId": {
+                    "type": "string"
+                  },
+                  "label": {
+                    "type": "string"
+                  },
+                  "models": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "live",
+                      "cache",
+                      "catalog"
+                    ]
+                  },
+                  "added": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "removed": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "listedAt": {
+                    "type": "number"
+                  },
+                  "error": {
+                    "type": "string"
+                  },
+                  "notAsked": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "providerId",
+                  "label",
+                  "models",
+                  "source",
+                  "added",
+                  "removed"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "providers"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
         "invokable": true,
         "repeat": "safe",
         "idempotent": true
@@ -159480,7 +159623,7 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       {
         "id": "sessions.permissionMode.get",
         "title": "Get Session Permission Mode",
-        "description": "Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, \"Jev decides\"); when the mode in force differs, `inForce` (what is in force, written to lead: \"you, for now\"), `chosenWhen` (the chosen mode and the condition it waits on: \"Jev decides once a decision model is set\"), `chosenShort` (the choice in a few words, for where `chosenWhen` does not fit: \"you chose Jev decides\", or \"default: Jev decides\" while it is only the shipped default), `because` (\"no decision model set\", \"decision model unreachable\") and `failure` (true when `because` reports the decision model failing or out of reach, not a choice); a surface shows `inForce · chosenWhen`, then `because` when `failure` is true. Then `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL.",
+        "description": "Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, \"Jev decides\"); when the mode in force differs, `inForce` (what is in force, written to lead after \"Permissions: \": \"asking you, for now\"), `chosenWhen` (the chosen mode and the condition it waits on: \"Jev decides once a decision model is set\"), `chosenShort` (the choice in a few words, for where `chosenWhen` does not fit: \"you chose Jev decides\", or \"default: Jev decides\" while it is only the shipped default), `because` (\"no decision model set\", \"decision model unreachable\") and `failure` (true when `because` reports the decision model failing or out of reach, not a choice); a surface shows `inForce · chosenWhen`, then `because` when `failure` is true. Then `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL.",
         "category": "sessions",
         "source": "builtin",
         "access": "authenticated",
@@ -195462,10 +195605,10 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       }
     ],
     "schemaCoverage": {
-      "methods": 650,
-      "typedInputs": 645,
+      "methods": 651,
+      "typedInputs": 646,
       "genericInputs": 5,
-      "typedOutputs": 648,
+      "typedOutputs": 649,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -195474,8 +195617,8 @@ export const OPERATOR_CONTRACT: OperatorContractManifest = freezeGeneratedOperat
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 650,
-      "validated": 643,
+      "methods": 651,
+      "validated": 644,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

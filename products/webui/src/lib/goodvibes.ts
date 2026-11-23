@@ -8,6 +8,7 @@ import type { BrowserKnowledgeMethodId } from '@goodvibes/engine/platform/browse
 import { WEBUI_METHOD_ROUTES } from '@goodvibes/engine/contracts/generated/webui-facade';
 import { getClientLifetime, heldBearerSync, invalidateClientLifetime, isClientLifetimeCurrent, readSignedInIdentity, tokenStore } from './client-lifetime';
 import { clearHeldInputs } from './held-input';
+import { randomUuid } from './uuid';
 export { hasSignInSync, tokenStore } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes/engine/contracts';
 import { getActiveRoute, routedFetch } from './relay-connection';
@@ -611,7 +612,7 @@ export class IntentKey {
 const KEEPS_INTENT_KEY: ReadonlySet<string> = new Set(['IDEMPOTENCY_KEY_IN_FLIGHT', 'IDEMPOTENCY_OUTCOME_UNKNOWN']);
 
 function newIntentKey(): string {
-  return `webui:${crypto.randomUUID()}`;
+  return `webui:${randomUuid()}`;
 }
 
 /**
@@ -1400,6 +1401,8 @@ export const client = {
     // nests above.
     models: {
       list: () => invokeOperator('models.list'),
+      // Read the model lists again from the providers now (one provider, or every one).
+      refresh: (providerId?: string) => invokeOperator('models.refresh', providerId ? { providerId } : {}),
       current: {
         get: () => invokeOperator('models.current.get'),
         // null CLEARS the persisted effort back to the provider default; omission leaves it untouched.
@@ -1948,8 +1951,14 @@ export const client = {
         revokeShared: () => invokeGatewayMethod('pairing.tokens.revokeShared', {}),
       },
       handoff: {
-        create: (name: string, offers?: readonly string[]) =>
-          invokeGatewayMethod('pairing.handoff.create', offers && offers.length > 0 ? { name, offers } : { name }),
+        // forThisMachine: a code for a browser on the daemon's own machine, asked for
+        // when the daemon answers that a phone could not open one.
+        create: (name: string, offers?: readonly string[], forThisMachine = false) =>
+          invokeGatewayMethod('pairing.handoff.create', {
+            name,
+            ...(offers && offers.length > 0 ? { offers } : {}),
+            ...(forThisMachine ? { forThisMachine: true } : {}),
+          }),
         // The owner's own browser, signed in with the shared operator token, pairs ITSELF
         // onto its own token through the owner's pairing flow: the token it gets is an
         // owner device (origin owner-pairing). pairing.tokens.migrate is a script's path

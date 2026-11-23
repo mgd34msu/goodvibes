@@ -2,7 +2,8 @@ import { createShellCoreActions } from '@goodvibes/engine/terminal-shell/shell-c
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
-import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi } from './runtime-services.ts';
+import { CompactBusyError, compactConversation, requireKeybindingsManager, requireProviderApi, requireShellPaths } from './runtime-services.ts';
+import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 import {
   buildCompactionPreview,
   buildCompactionAfterNotice,
@@ -30,7 +31,11 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   const navigation = createShellNavigationCommands<CommandContext>();
 
   // `/model` and `/effort` are one description each, shared with the other terminal app; a missing key is asked for before a switch lands.
-  registerModelCommands<CommandContext>(registry, { requireProviderApi, beforeSelection: ensureProviderKeyThenSelect });
+  registerModelCommands<CommandContext>(registry, {
+    requireProviderApi,
+    beforeSelection: ensureProviderKeyThenSelect,
+    daemon: (ctx) => createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
+  });
 
   registry.register(basicCommands.paste);
 

@@ -3,7 +3,7 @@
  * (ux A7.5): Ask me, Jev decides, Just vibes, YOLO, each with its one plain
  * description (GATE_PRESETS[...].summary). Under the chosen card, when the mode
  * in force differs, the daemon's words for it as the terminal's status bar
- * shows them (`Asks: you, for now · Jev decides with a decision model`,
+ * shows them (`Permissions: asking you, for now · Jev decides once a decision model is set`,
  * lib/mode-in-force.ts). Picking a card sets the
  * daemon-wide mode with sessions.permissionMode.set (a looser mode set from a
  * token minted for automation waits for the owner; OwnerApprovalNotices says so).
@@ -28,7 +28,7 @@ export function PermissionModeCards() {
   const chosen = reading.data?.chosenMode ?? '';
   const words = reading.data?.words;
   // The terminal's status-bar words: what is in force first, the choice second, a failure last.
-  const inForceLine = words?.inForce ? `Asks: ${modeInForceLine(words)}` : null;
+  const inForceLine = words?.inForce ? `Permissions: ${modeInForceLine(words)}` : null;
 
   if (reading.isPending) return <SkeletonBlock variant="text" lines={4} />;
 

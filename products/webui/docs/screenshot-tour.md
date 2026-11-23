@@ -18,7 +18,7 @@ attachments, and starting points for the other places. A starting point that
 needs mail or a calendar is shown only when that account is connected. Recent
 chats are listed in the sidebar, newest first.
 
-![A new chat greeting Sam, the composer with Sample Model 1 picked, two starting points (What's running, What do you remember about), five recent chats in the sidebar, and the header chip reading Asks: you, for now · Jev decides once decision models are on](assets/screenshots/new-chat.png)
+![A new chat greeting Sam, the composer with Sample Model 1 picked, two starting points (What's running, What do you remember about), five recent chats in the sidebar, and the header chip reading Permissions: asking you, for now · Jev decides once decision models are on](assets/screenshots/new-chat.png)
 
 ## A conversation
 
@@ -88,7 +88,7 @@ items that need you beside Work. A long chat title is cut short beside the
 header chip; a banner says when something in another chat waits for you; each
 message shows Copy with its word and keeps the rest under More.
 
-<img src="assets/screenshots/phone-conversation.png" alt="Phone conversation: the title cut short beside the Asks: you, for now chip, a banner saying 6 things wait for you elsewhere with Open its chat, and Copy and More under each message" width="260">
+<img src="assets/screenshots/phone-conversation.png" alt="Phone conversation: the title cut short beside the Permissions: asking you, for now chip, a banner saying 6 things wait for you elsewhere with Open its chat, and Copy and More under each message" width="260">
 <img src="assets/screenshots/phone-drawer.png" alt="Phone with the navigation drawer open: New chat, Search, Work with 6 waiting, Library, Personal, five recent chats and the account" width="260">
 
 ## GoodVibes Neon

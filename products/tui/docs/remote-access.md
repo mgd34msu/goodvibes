@@ -55,10 +55,12 @@ computes, so it is stated where you pair a device and never repeated as a nag.
   that it can; otherwise `controlPlane.enabled` decides), with numbered steps
   when not. `goodvibes pair`, the pairing screen and the web UI's `Pair a new
   device` ask it before minting and, when no other device could open the
-  code, mint nothing and show the next step instead:
-  `goodvibes-daemon webui enable --lan`, run in a terminal on the daemon's
-  machine. `pairing.handoff.create` itself refuses such a code
-  (`PAIRING_CODE_UNREACHABLE`).
+  code, make it for a browser on the daemon's own machine instead: `This link
+  signs in a browser on this computer. A phone cannot open it: <why>.`, the
+  steps ending in `goodvibes-daemon webui enable --lan` (run in a terminal on
+  the daemon's machine), then the link and the sign-in code to paste, and no
+  QR code. `pairing.handoff.create` refuses a code for a phone there
+  (`PAIRING_CODE_UNREACHABLE`) and makes one only with `forThisMachine: true`.
 - **The full progressive-web-app feature set needs TLS, and TLS on a home
   network is your responsibility.** The daemon never mints certificates and
   never provisions its own CA. It will not conjure one for `192.168.1.20`.

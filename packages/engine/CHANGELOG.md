@@ -1,5 +1,37 @@
 # Changelog
 
+## [3.4.6] - 2026-11-22
+
+The full write-up is in
+[docs/releases/3.4.6.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.6/docs/releases/3.4.6.md).
+
+### Upgrading from 3.4.5
+
+- `models.list` answers carry `modelList` per provider, `textWork` per model,
+  and `pinned` and `recent`; a 3.4.5 client refuses them, so run every program
+  on 3.4.6. New method `models.refresh` (`POST /api/models/refresh`).
+
+### Fixed
+
+- On a daemon only its own machine can reach (the default), every pair surface
+  gives a sign-in link and code for a browser on that machine again
+  (`forThisMachine`), with no QR code, instead of no code at all.
+- The web app no longer breaks on a plain-http network address
+  (`crypto.randomUUID is not a function`); copy buttons fall back where the
+  browser keeps the clipboard from the page.
+- Model lists: a changed list is announced to every client; the shared model
+  catalog is checked again when it is a day old; the web app re-reads lists on
+  that announcement; `/model refresh` reads the daemon's lists too; the model
+  picker's `Ctrl+R` runs `/model refresh` (it ran a command that does not exist).
+
+### Changed
+
+- The web composer's model control is one menu: provider, model, effort, with
+  a filter across every provider, "Refresh models" and "Make this the default
+  for new chats".
+- The status bar and the web header chip say `Permissions:` before the mode in
+  force (`Permissions: asking you, for now · ...`).
+
 ## [3.4.5] - 2026-11-22
 
 The full write-up is in

@@ -250,20 +250,207 @@
   color: var(--text-2);
 }
 
-.composer-model-menu {
-  max-height: min(440px, calc(100vh - 120px));
+/* The model menu: provider, then model, then effort, with one filter box (views/chat/ModelPicker.tsx). */
+.model-picker {
+  display: flex;
+  flex-direction: column;
+  width: 380px;
+  max-width: calc(100vw - 16px);
+  max-height: min(520px, calc(100vh - 120px));
+  padding: 6px;
+}
+
+.model-picker--sheet {
+  width: 100%;
+  max-width: none;
+  max-height: min(80vh, 640px);
+  padding: 0 4px 8px;
+}
+
+.model-picker__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 6px;
+}
+
+.model-picker__back {
+  display: inline-grid;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  color: var(--text-2);
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+}
+
+.model-picker__back:hover {
+  color: var(--text);
+  background: var(--surface-2);
+}
+
+.model-picker__title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.model-picker__step {
+  color: var(--text-3);
+  font-size: var(--text-meta);
+}
+
+.model-picker__name {
+  overflow: hidden;
+  color: var(--text);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker__filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 4px 6px;
+  padding: 0 10px;
+  color: var(--text-3);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+}
+
+.model-picker__input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  color: var(--text);
+  background: transparent;
+  border: 0;
+  outline: none;
+  font: var(--weight-regular) var(--text-sm) / 1 var(--font-ui);
+}
+
+.model-picker__input::placeholder {
+  color: var(--text-3);
+}
+
+.model-picker__list {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
-.composer-model-check {
+.model-picker__group {
+  padding: 8px 10px 4px;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  font-weight: var(--weight-medium);
+}
+
+.model-picker__note {
+  padding: 6px 10px;
+  color: var(--text-2);
+  font-size: var(--text-meta);
+}
+
+.model-picker__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 4px 8px;
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: var(--text-sm);
+}
+
+.model-picker__row[data-active="true"] {
+  background: var(--surface-2);
+}
+
+.model-picker__row[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.model-picker__check {
+  display: inline-grid;
   flex: none;
   width: 16px;
-  height: 16px;
+  place-items: center;
   color: var(--accent);
 }
 
-.composer-model-check--off {
-  display: inline-block;
+.model-picker__label {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker__hint {
+  flex: none;
+  max-width: 50%;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-picker__chevron {
+  flex: none;
+  color: var(--text-3);
+}
+
+.model-picker__status {
+  margin: 6px 4px 0;
+  padding: 6px 8px;
+  color: var(--text-2);
+  background: var(--surface);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-meta);
+}
+
+.model-picker__foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  padding: 6px 8px 2px;
+  border-top: 1px solid var(--line);
+}
+
+.model-picker__scope {
+  color: var(--text-3);
+  font-size: var(--text-meta);
+}
+
+.model-picker__default {
+  align-self: flex-start;
+  padding: 4px 0;
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  font: var(--weight-medium) var(--text-sm) / 1.2 var(--font-ui);
+}
+
+.model-picker__default:disabled {
+  color: var(--text-3);
+}
+
+@media (max-width: 899px) {
+  .model-picker__row {
+    min-height: 44px;
+  }
 }
 
 /* Round send: grey until there is something to send, light when ready. */

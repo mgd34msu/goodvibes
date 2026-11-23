@@ -32,7 +32,7 @@ import { type BackToBottomState } from './back-to-bottom.ts';
  * throbber; while the output is scrolled back, 2 more: an empty row and the
  * back-to-bottom pill. The composer holds only input (its placeholder, even
  * while the keyboard is in the work tree). The status line (status-line.ts)
- * opens with the mode in force in words (`Asks: Jev decides`, and why when it
+ * opens with the mode in force in words (`Permissions: Jev decides`, and why when it
  * differs) and its `shift+tab` key, then the chips that are never dropped for
  * lack of room: "! YOLO" in the error color while everything is
  * auto-approved, the live microphone and the power chip ("sleep disabled" /
@@ -74,11 +74,11 @@ export interface ShellFooterBuildOptions {
   readonly modelLabel?: string;
   /** The working tree differs from HEAD: `branch main, changed`. */
   readonly branchChanged?: boolean;
-  /** The mode in force in words (ModeInForceWords): the status bar's `Asks:` segment. */
+  /** The mode in force in words (ModeInForceWords): the status bar's `Permissions:` segment. */
   readonly modeWords?: { readonly chosen: string; readonly inForce?: string; readonly chosenWhen?: string; readonly chosenShort?: string; readonly because?: string; readonly failure?: boolean } | null;
   /** The key that changes the mode, as bound ("shift+tab"). */
   readonly modeKey?: string;
-  /** The mode just changed: the `Asks:` segment flashes. */
+  /** The mode just changed: the `Permissions:` segment flashes. */
   readonly modeFlash?: boolean;
   /** Notices not yet seen in the notifications view: `2 notices`; none at zero. */
   readonly unreadNotices?: number;

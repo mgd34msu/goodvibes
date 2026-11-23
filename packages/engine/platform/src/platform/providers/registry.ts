@@ -54,7 +54,18 @@ import { buildModelRegistry, diffCustomModels, findModelDefinition, findModelDef
 import { assertProviderCredentialAuthority } from './credential-authority-contract.js';
 import { resolveModelReference } from './model-id-resolution.js';
 import { ConfiguredModelFollower } from './registry-configured-model.js';
-import { LiveModelListings, type LentModelListings, type LiveModelDiscoveryResult } from './live-model-discovery.js';
+import { LiveModelListings, type LentModelListings, type LiveModelDiscoveryResult, type LiveModelDiscoverySource } from './live-model-discovery.js';
+import { TTL_24H_MS } from './json-ttl-cache.js';
+
+/** One provider's model list as it stands (ProviderRegistry.modelListReading). */
+export interface ProviderModelListReading {
+  /** `live`: read from the provider; `cache`: its last stored list; `catalog`: the shared model catalog. */
+  readonly source: LiveModelDiscoverySource;
+  /** When the list was read (epoch ms); absent when it never was. */
+  readonly listedAt?: number | undefined;
+  /** Why the last reading from the provider failed, when it did. */
+  readonly error?: string | undefined;
+}
 import { applyProviderNativeModelBaseline, removeProviderNativeModels, StartupModelDiscovery, sweepLiveModelDiscovery } from './registry-live-model-discovery.js';
 import type {
   ModelDefinition, ProviderCatalogOptions, ProviderRegistryOptions, RuntimeProviderRegistration, TokenLimits,
@@ -109,6 +120,12 @@ export class ProviderRegistry {
   private discoveredServers: readonly DiscoveredServer[] = [];
   private runtimeProviderNames: Set<string> = new Set();
   private liveModelDiscoveryTail: Promise<void> = Promise.resolve();
+  /** Each provider's last model-list reading (live, its stored list, or none yet), by provider name. */
+  private readonly modelListReadings = new Map<string, ProviderModelListReading>();
+  /** When the shared model catalog was last checked (read from its source or found unchanged); 0 before initCatalog. */
+  private catalogCheckedAt = 0;
+  /** Set by initCatalog: only a host that loads the catalog checks it again when it is due. */
+  private catalogManaged = false;
   /**
    * Providers the custom-provider loader put in `providers`, by name. A reload
    * that no longer lists a name removes it.
@@ -407,6 +424,7 @@ export class ProviderRegistry {
     this.catalogModels = [...models];
     installCatalogModelFacts(this.catalogModels);
     this.pricingCatalog = { fetchedAt, models: this.catalogModels };
+    this.catalogCheckedAt = Math.max(this.catalogCheckedAt, fetchedAt);
     this.syntheticCanonicalModels = buildSyntheticCanonicalModels(this.catalogModels, this.catalogProviderUsable);
     this.capabilityRegistry.setModelFactsSource(modelCapabilityFactsFromCatalog(this.catalogModels));
     this._invalidateModelRegistry();
@@ -547,13 +565,79 @@ export class ProviderRegistry {
           ...(this.hostModelListings ? { borrowFrom: this.hostModelListings.listings } : { recordTo: this.ownModelListings }),
         },
       );
+      const idsOf = (models: readonly ModelDefinition[], provider: string): string => models.filter((model) => model.provider === provider).map((model) => model.id).sort().join('\n');
+      const before = this.providerNativeModels;
       this.providerNativeModels = providerNativeModels;
+      for (const report of reports) {
+        this.modelListReadings.set(report.providerId, {
+          source: report.source,
+          ...(report.listedAt !== undefined ? { listedAt: report.listedAt } : {}),
+          ...(report.error !== undefined ? { error: report.error } : {}),
+        });
+      }
       if (reports.length > 0) { this._invalidateModelRegistry(); }
+      // A list that changed (read from the provider, or from a list another program on this machine stored) is announced, so every client reads the one list again.
+      const changed = reports.map((report) => report.providerId)
+        .filter((provider) => idsOf(before, provider) !== idsOf(providerNativeModels, provider));
+      if (this.runtimeBus && changed.length > 0) {
+        emitProvidersChanged(this.runtimeBus, { sessionId: 'system', traceId: `providers:models:${Date.now()}`, source: 'provider-registry' }, { added: [], removed: [], updated: changed });
+      }
       return reports;
     };
+    // The shared catalog (the list of a provider with no listing of its own) is
+    // checked at the same moments when its last check is older than its lifetime.
+    if (!options.force) this.refreshCatalogWhenDue();
     const result = this.liveModelDiscoveryTail.then(run, run);
     this.liveModelDiscoveryTail = result.then(() => undefined, () => undefined);
     const reports = await result;
+    return reports;
+  }
+
+  /** Check the shared model catalog in the background when its last check is older than its lifetime (24 hours). */
+  private refreshCatalogWhenDue(): void {
+    if (!this.catalogManaged || Date.now() - this.catalogCheckedAt <= TTL_24H_MS) return;
+    void this.refreshCatalog().catch((error: unknown) => {
+      logger.warn('[model-catalog] Background refresh failed', { error: summarizeError(error) });
+    });
+  }
+
+  /**
+   * One provider's model list as it stands: where it came from, when it was
+   * read, and why the last reading failed. A provider with no listing of its
+   * own is listed from the shared catalog, read when the catalog was.
+   */
+  modelListReading(providerId: string): ProviderModelListReading {
+    const reading = this.modelListReadings.get(providerId);
+    if (reading && reading.source !== 'catalog') return reading;
+    const catalogRead = this.catalogCheckedAt > 0 ? { listedAt: this.catalogCheckedAt } : {};
+    return { source: 'catalog', ...catalogRead, ...(reading?.error !== undefined ? { error: reading.error } : {}) };
+  }
+
+  /**
+   * The models the person pinned and the ten used most recently (registry
+   * keys, newest first), as the terminal's picker orders them: pinned first,
+   * then recent, then the rest.
+   */
+  async favoriteModels(): Promise<{ readonly pinned: string[]; readonly recent: string[] }> {
+    const data = await this.favoritesStore.load();
+    return {
+      pinned: data.pinned.map((entry) => entry.registryKey),
+      recent: [...data.history].sort((a, b) => b.lastUsed.localeCompare(a.lastUsed)).slice(0, 10).map((entry) => entry.registryKey),
+    };
+  }
+
+  /**
+   * Read every provider's model list (or one provider's) from the provider now,
+   * past each stored list, and the shared catalog with them; the person asked.
+   * Resolves with one report per provider that has a listing of its own.
+   */
+  async refreshModelLists(providerId?: string): Promise<Array<{ providerId: string } & LiveModelDiscoveryResult>> {
+    const catalog = this.catalogManaged
+      ? this.refreshCatalog().then(() => undefined, (error: unknown) => summarizeError(error))
+      : Promise.resolve(undefined);
+    const reports = await this.refreshLiveModelDiscovery(providerId, { force: true });
+    const catalogError = await catalog;
+    if (catalogError !== undefined) logger.warn('[model-catalog] Refresh asked for failed', { error: catalogError });
     return reports;
   }
 
@@ -1562,6 +1646,7 @@ export class ProviderRegistry {
   }
 
   initCatalog(options: ProviderCatalogOptions = {}): void {
+    this.catalogManaged = true;
     initProviderCatalog(this._catalogLifecycleCtx(options.contextWindowEnrichment ?? 'background'));
   }
 
@@ -1594,7 +1679,13 @@ export class ProviderRegistry {
   }
 
   async refreshCatalog(options: ProviderCatalogOptions = {}): Promise<void> {
+    const revision = this._modelRegistryRevision;
     await refreshProviderCatalog(this._catalogLifecycleCtx(options.contextWindowEnrichment ?? 'background'));
+    // Checked now, whether the catalog changed or was found the same.
+    this.catalogCheckedAt = Date.now();
+    if (this.runtimeBus && this._modelRegistryRevision !== revision) {
+      emitProvidersChanged(this.runtimeBus, { sessionId: 'system', traceId: `providers:catalog:${Date.now()}`, source: 'provider-registry' }, { added: [], removed: [], updated: [] });
+    }
   }
 
   private _catalogLifecycleCtx(contextWindowEnrichment: 'background' | 'none' = 'background') {

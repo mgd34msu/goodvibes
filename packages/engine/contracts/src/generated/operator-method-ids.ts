@@ -380,6 +380,7 @@ export const OPERATOR_METHOD_IDS = [
   "models.current.get",
   "models.current.set",
   "models.list",
+  "models.refresh",
   "multimodal.analyze",
   "multimodal.packet",
   "multimodal.providers.list",

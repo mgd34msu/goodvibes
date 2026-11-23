@@ -224,9 +224,9 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
         else if (token.logicalName === 'r') {
           const context = state.commandContext;
           if (context) {
-            void runPickedCommand(context.executeCommand, 'refresh-models', [], (message) => {
+            void runPickedCommand(context.executeCommand, 'model', ['refresh'], (message) => {
               if (context.print) context.print(message);
-              else logger.warn('model picker: refresh-models was not run', { message });
+              else logger.warn('model picker: /model refresh was not run', { message });
               state.requestRender();
             });
           }

@@ -16,6 +16,7 @@ import {
   pairingNoWebUiLines,
   pairingPostureNotice,
   pairingReadySteps,
+  pairingThisMachineLines,
   pairingUnreachableLines,
   renderQrToString,
   type OriginPosture,
@@ -34,7 +35,8 @@ interface PairingHandoffCreateResult {
 }
 
 export type AgentDevicePairingOutcome =
-  | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly text: string }
+  /** `forThisMachine`: the link opens only in a browser on the host's machine (a phone could not open it). */
+  | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly forThisMachine: boolean; readonly text: string }
   /** `text`, when present, is the whole answer as the numbered list `pair` prints. */
   | { readonly ok: false; readonly error: string; readonly next: string; readonly text?: string };
 
@@ -58,30 +60,46 @@ function refusalCode(error: unknown): string | undefined {
 /**
  * Before any token is minted: the host's own answer about the address a code
  * would carry (`pairing.posture.get`, which reads and mints nothing) says
- * whether a phone could open it; the host decides from its own settings. No
- * answer leaves the mint to report what went wrong, as before.
+ * whether a phone could open it; the host decides from its own settings.
+ * `refused` when the host serves no web UI, or only its own machine and that
+ * is not this one; `thisMachine` (the lines that lead the link) when only a
+ * browser on the host's machine, this one, could open it;
+ * null when a phone could, or the host gave no answer (the mint then reports
+ * what went wrong, as before).
  */
-async function pairingRefusal(verbs: DaemonVerbCaller, pairCommand: string): Promise<Extract<AgentDevicePairingOutcome, { ok: false }> | null> {
+async function pairingReadiness(
+  verbs: DaemonVerbCaller,
+  pairCommand: string,
+  hostOnThisMachine: boolean,
+): Promise<{ readonly refused: Extract<AgentDevicePairingOutcome, { ok: false }> } | { readonly thisMachine: readonly string[] } | null> {
   let posture: OriginPosture;
   try {
     posture = (await verbs.invoke<{ readonly posture: OriginPosture }>('pairing.posture.get', {})).posture;
   } catch (error) {
     if (refusalCode(error) !== 'ORIGIN_UNKNOWN') return null;
     return {
-      ok: false,
-      error: 'No pairing code was made: the connected host serves no web UI, so a code would open nothing.',
-      next: `On the host: goodvibes-daemon webui enable --lan, then ${pairCommand}.`,
-      text: pairingNoWebUiLines(pairCommand).join('\n'),
+      refused: {
+        ok: false,
+        error: 'No pairing code was made: the connected host serves no web UI, so a code would open nothing.',
+        next: `On the host: goodvibes-daemon webui enable --lan, then ${pairCommand}.`,
+        text: pairingNoWebUiLines(pairCommand).join('\n'),
+      },
     };
   }
   const reach = posture.reach;
   if (reach === undefined || reach.otherDevices) return null;
-  return {
-    ok: false,
-    error: `No pairing code was made: a phone could not open it yet${reach.reason ? ` (${reach.reason})` : ''}.`,
-    next: `On the host: ${reach.fix ?? 'make the web UI reachable from your network'}, then ${pairCommand}.`,
-    text: pairingUnreachableLines(posture.origin, reach, pairCommand).join('\n'),
-  };
+  // A host on another machine: a link only its own machine opens is no use here.
+  if (!hostOnThisMachine) {
+    return {
+      refused: {
+        ok: false,
+        error: `No pairing code was made: a phone could not open it yet${reach.reason ? ` (${reach.reason})` : ''}.`,
+        next: `On the host: ${reach.fix ?? 'make the web UI reachable from your network'}, then ${pairCommand}.`,
+        text: pairingUnreachableLines(posture.origin, reach, pairCommand).join('\n'),
+      },
+    };
+  }
+  return { thisMachine: pairingThisMachineLines(posture.origin, reach, pairCommand) };
 }
 
 /** One request to the connected host: mint a device token and render its link, QR and posture. */
@@ -93,14 +111,17 @@ export async function mintAgentDevicePairing(
   if (!reach.available) {
     return { ok: false, error: `No device was paired: ${reach.reason}.`, next: 'Start or connect the GoodVibes host, then pair again.' };
   }
-  // A code a phone could not open is never made.
-  const refused = await pairingRefusal(verbs, options.pairCommand ?? 'goodvibes-agent pair');
-  if (refused !== null) return refused;
+  // A code a phone could not open is never made for a phone: when only the
+  // host's machine can open it, the code is made for a browser there, said so, with no QR.
+  const readiness = await pairingReadiness(verbs, options.pairCommand ?? 'goodvibes-agent pair', reach.thisMachine !== false);
+  if (readiness !== null && 'refused' in readiness) return readiness.refused;
+  const thisMachine = readiness?.thisMachine;
   let result: PairingHandoffCreateResult;
   try {
     result = await verbs.invoke<PairingHandoffCreateResult>('pairing.handoff.create', {
       name: options.name?.trim() || defaultPairingTokenName(),
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
+      ...(thisMachine ? { forThisMachine: true } : {}),
     });
   } catch (error) {
     return {
@@ -118,6 +139,8 @@ export async function mintAgentDevicePairing(
       `  pairing fragment: ${result.fragment}`,
       '  Set web.publicBaseUrl on the host, revoke this token in the host\'s device list, then pair again for a scannable link.',
     );
+  } else if (thisMachine) {
+    lines.push(...thisMachine, '', `  ${link}`, `  Sign-in code: ${result.token.token}  (to paste on the web UI's sign-in page, under Other ways to sign in)`);
   } else {
     // What is done and what is next, as one list; the code and its details follow.
     lines.push('Pair a phone', ...pairingReadySteps(result.posture?.origin ?? originOf(link), offerKinds));
@@ -132,5 +155,5 @@ export async function mintAgentDevicePairing(
   if (capabilities.length > 0) lines.push('', 'This device will get:', ...capabilities);
   const notice = pairingPostureNotice(result.posture);
   if (notice) lines.push('', notice);
-  return { ok: true, tokenName: result.token.name, tokenId: result.token.id, link, text: lines.join('\n') };
+  return { ok: true, tokenName: result.token.name, tokenId: result.token.id, link, forThisMachine: thisMachine !== undefined, text: lines.join('\n') };
 }

@@ -494,6 +494,18 @@
 .shell-header--phone .shell-header__indicators {
   flex: none;
   overflow: visible;
+  margin-right: 0;
+}
+
+/* The phone row holds the menu, the title, the mode chip and two buttons within
+ * 390 px: tighter gaps, so the chip's whole words never push a button off the edge. */
+.shell-header--phone {
+  gap: 4px;
+}
+
+.shell-header--phone .status-strip__segment {
+  gap: 4px;
+  padding: 0 7px;
 }
 
 /* A chat waiting on an answer: its title and its `asking you` chip take the

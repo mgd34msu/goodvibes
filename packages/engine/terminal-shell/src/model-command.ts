@@ -17,6 +17,7 @@ import {
   toEffortModel,
 } from '@goodvibes/engine/platform/platform/providers/reasoning-effort-surface';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
@@ -35,6 +36,35 @@ export interface ModelCommandServices<Ctx extends ModelCommandContext> {
   readonly requireProviderApi: (ctx: Ctx) => ProviderApi;
   /** Runs `complete` once the provider is ready to use (the terminal app asks for a missing key first). It always runs `complete` exactly once. */
   readonly beforeSelection: (ctx: Ctx, providerId: string, complete: () => void) => void;
+  /**
+   * The daemon this app works with, asked to read its own lists again with
+   * `/model refresh` (the lists the web UI and every other program show).
+   */
+  readonly daemon?: ((ctx: Ctx) => DaemonVerbCaller) | undefined;
+}
+
+/** One provider's line in `models.refresh`'s answer. */
+interface DaemonRefreshReport {
+  readonly providerId: string;
+  readonly models: number;
+  readonly source: string;
+  readonly error?: string | undefined;
+  readonly notAsked?: boolean | undefined;
+}
+
+/** Ask the daemon to read its model lists again; a line saying what it answered, or null when no daemon runs. */
+async function refreshDaemonModelLists(ctx: ModelCommandContext): Promise<string | null> {
+  const verbs = services().daemon?.(ctx);
+  if (!verbs || !verbs.probe().available) return null;
+  try {
+    const answer = await verbs.invoke<{ readonly providers: readonly DaemonRefreshReport[] }>('models.refresh', {});
+    const read = answer.providers.filter((report) => report.source === 'live').length;
+    const failed = answer.providers.filter((report) => report.error !== undefined);
+    return `The daemon read its lists again too (what the web UI and the other programs show): ${read} provider${read === 1 ? '' : 's'} answered`
+      + `${failed.length > 0 ? `; could not read ${failed.map((report) => `${report.providerId} (${report.error})`).join(', ')}` : ''}.`;
+  } catch (error) {
+    return `The daemon's lists were not read again: ${summarizeError(error)}.`;
+  }
 }
 
 let installed: ModelCommandServices<ModelCommandContext> | undefined;
@@ -155,6 +185,8 @@ async function refreshModels(ctx: ModelCommandContext, api: ProviderApi): Promis
   await step('model catalog', async () => { const catalog = await api.refreshCatalog(); return `Model catalog: ${catalog.modelCount} models from ${catalog.providerCount} providers.`; });
   await step('benchmarks', async () => { const count = await api.refreshBenchmarks(); return `Benchmarks: ${count > 0 ? `${count} model records` : 'refreshed'}.`; });
   await step('token limits', async () => `Token limits: ${await api.refreshModelLimits()} models updated.`);
+  const daemonLine = await refreshDaemonModelLists(ctx);
+  if (daemonLine !== null) notes.push(daemonLine);
 
   const all = await api.listModels();
   const byProvider = new Map(reports.map((report) => [report.providerId, report]));
@@ -238,8 +270,8 @@ export const MODEL_COMMAND: CommandDescription<ModelCommandContext> = {
     },
     doAction<ModelCommandContext>({
       id: 'refresh', label: 'Read the list of models again', word: 'refresh', touches: 'another-machine',
-      sentence: 'Asks every provider you have set up for its models again, and says for each how many it has or why its list could not be read.',
-      operator: { terminalOnly: 'It refreshes the lists this terminal app reads its models from.' },
+      sentence: 'Asks every provider you have set up for its models again, here and on the daemon, and says for each how many it has or why its list could not be read.',
+      operator: { method: 'models.refresh', fields: {} },
       async run(_values, ctx) {
         const text = await refreshModels(ctx, services().requireProviderApi(ctx));
         ctx.renderRequest?.();

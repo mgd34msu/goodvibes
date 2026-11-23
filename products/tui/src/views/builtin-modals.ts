@@ -6,7 +6,7 @@ import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-
 import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
-import { pairingNoWebUiLines, pairingOriginUsesStableHost, pairingReachFromSettings, pairingUnreachableLines, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
+import { pairingNoWebUiLines, pairingOriginUsesStableHost, pairingReachFromSettings, pairingThisMachineLines, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
@@ -208,16 +208,19 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
   const configManager = deps.configManager;
   // Derived live from the settings (a user-set web.publicBaseUrl wins).
   const webOrigin = resolvePairingWebOrigin(configManager);
-  // No code is minted that a phone could not open: the same decision and the
-  // same steps `goodvibes pair` gives, from the settings, with no probe.
+  // No code is minted for a phone that a phone could not open: the same
+  // decision and the same steps `goodvibes pair` gives, from the settings, with
+  // no probe. When only this machine can open it, the code is for a browser here.
   if (webOrigin === null) return { kind: 'unreachable', lines: pairingNoWebUiLines('/devices pair device') };
   const reach = pairingReachFromSettings(configManager, webOrigin.origin);
-  if (!reach.otherDevices) return { kind: 'unreachable', lines: pairingUnreachableLines(webOrigin.origin, reach, '/devices pair device') };
+  const thisMachineOnly = reach.otherDevices ? undefined : pairingThisMachineLines(webOrigin.origin, reach, '/devices pair device');
   const url = webOrigin.alternateOrigin ? `${webOrigin.origin}  (or ${webOrigin.alternateOrigin})` : webOrigin.origin;
   const held = request.held;
   // Reopening shows the same offer while nobody has used it and it has not
   // expired: no new credential, no write. Otherwise the new offer replaces it.
-  if (!request.fresh && held?.tokenId !== undefined && held.url === url && ui.platform.pairingTokens.isOpenOffer(held.tokenId)) return held;
+  if (!request.fresh && held?.tokenId !== undefined && held.url === url && ui.platform.pairingTokens.isOpenOffer(held.tokenId)) {
+    return { ...held, thisMachineOnly };
+  }
   const offers = availablePairingOffers({
     relayEnabled: configManager.get('relay.enabled') === true,
     // The TUI composition always wires a step-up service ⇒ the passkey offer is
@@ -242,6 +245,7 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
     offers: handoff.offers,
     posture: handoff.posture,
     tokenId: handoff.token.id,
+    thisMachineOnly,
   };
 }
 

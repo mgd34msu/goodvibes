@@ -2,9 +2,9 @@
  * status-line.ts, the one row directly under the composer: the status bar.
  *
  * Left, in order:
- *   - `Asks:` (faint) and the mode in force (ModeInForceWords): the chosen
+ *   - `Permissions:` (faint) and the mode in force (ModeInForceWords): the chosen
  *     mode's label (`Jev decides`) when it is in force; when it is not, what
- *     is (`you, for now`, warning), then the choice and when it takes effect
+ *     is (`asking you, for now`, warning), then the choice and when it takes effect
  *     (` · Jev decides once a decision model is set`), then a failure
  *     (` · decision model unreachable`, faint); then the key that changes it
  *     as a keycap (` shift+tab `). Never dropped. After a change it flashes
@@ -38,8 +38,8 @@
  * word (`branch main`), the context goes, the branch goes; a failure
  * (`decision model unreachable`, `decision model failing`) shortens
  * (`unreachable`); the background summary (unless it holds focus), the model,
- * the notices, the mode's keycap; last a failure goes. `Asks:` with the mode
- * in force (`you, for now`) and the choice, the kept chips and the esc hint
+ * the notices, the mode's keycap; last a failure goes. `Permissions:` with the mode
+ * in force (`asking you, for now`) and the choice, the kept chips and the esc hint
  * always stay. A segment given up
  * before a later step freed the room comes back when it fits (the model, then
  * the context, the branch, the cost, the menu keycap, the choice's whole words).
@@ -235,9 +235,9 @@ function asksWordRuns(asks: StatusAsks, form: AsksForm): Run[] {
         : { text, fg, bold };
     if (flash && asks.flashMessage) return [paint(asks.flashMessage, t.text, true)];
     if (!asks.inForce)
-        return [paint('Asks: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
+        return [paint('Permissions: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
     // The mode in force leads; the choice follows; a failure comes last.
-    const runs: Run[] = [paint('Asks: ', t.textFaint), paint(asks.inForce, t.warning, true)];
+    const runs: Run[] = [paint('Permissions: ', t.textFaint), paint(asks.inForce, t.warning, true)];
     const choice = form.choice === 'full' ? asks.chosenWhen ?? asks.chosen : asks.chosenShort ?? asks.chosen;
     runs.push(paint(' · ', t.textFaint), paint(choice, t.textMuted, false));
     // Only a failure is drawn here: a reason that states a choice is what the choice's own words say.

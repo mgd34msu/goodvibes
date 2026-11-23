@@ -50,11 +50,17 @@ export interface PairingModalConnectionInfo {
   readonly posture?: OriginPosture | undefined;
   /** The minted token's id, so the next request can reuse or replace this offer. */
   readonly tokenId?: string | undefined;
+  /**
+   * Present when a phone could not open the link (the daemon serves only this
+   * machine): the lines that say the link is for a browser on this computer,
+   * why, and the steps that let a phone reach it. No QR is drawn then.
+   */
+  readonly thisMachineOnly?: readonly string[] | undefined;
 }
 /**
- * No code was made because a phone could not open it (the daemon serves only
- * this machine, or no web UI): the numbered steps that say so and end in the
- * command that fixes it, from the platform's pairing copy.
+ * No code was made because there is nothing to open (the daemon serves no web
+ * UI): the numbered steps that say so and end in the command that fixes it,
+ * from the platform's pairing copy.
  */
 export interface PairingModalUnreachable {
   readonly kind: 'unreachable';
@@ -236,8 +242,7 @@ class PairingModalSurface implements ConfigModalSurface {
   buildView(): ConfigModalView {
     const info = this.ensureInfo();
     if (this.unreachable) {
-      // No code is shown: a phone could not open it. The steps end in the command
-      // that fixes it; the Tailscale serve below is the other way to make it reachable.
+      // No code is shown: there is no web UI to open. The steps end in the command that fixes it.
       const rows: ConfigModalRow[] = this.unreachable.lines.map((line, i) => infoRow(`step:${i}`, line, i === 0 ? { fg: MODAL_TONES.reasoning } : {}));
       this.appendTailscaleRows(rows);
       const hints: string[] = [];
@@ -250,13 +255,20 @@ class PairingModalSurface implements ConfigModalSurface {
           ? `Device pairing is unavailable: ${this.infoError}`
           : 'Device pairing is unavailable: this session has no pairing token store.', tabs: [{ id: 'pairing', label: 'Pairing', rows: [] }] };
     }
-    const { url, token, tokenName, deepLink, offers, posture } = info;
+    const { url, token, tokenName, deepLink, offers, posture, thisMachineOnly } = info;
     const displayToken = this.revealed ? token : SECRET_MASK;
     // The deep link carries the one-time token, so it is masked with the token.
     const displayLink = this.revealed ? deepLink : SECRET_MASK;
 
     const rows: ConfigModalRow[] = [];
-    rows.push(infoRow('intro', 'Scan with the GoodVibes web app to pair this device; it opens already signed in.', { fg: MODAL_TONES.dim }));
+    if (thisMachineOnly) {
+      // A phone could not open this link: it is for a browser on this computer,
+      // and the steps say how a phone gets one. The Tailscale serve below is the other way.
+      thisMachineOnly.forEach((line, i) => rows.push(infoRow(`step:${i}`, line, i === 0 ? { fg: MODAL_TONES.reasoning } : {})));
+      rows.push(infoRow('intro', `Press ${actionKeyText('v')} to show the link and the sign-in code, then open the link in a browser here, or paste the code on its sign-in page.`, { fg: MODAL_TONES.dim }));
+    } else {
+      rows.push(infoRow('intro', 'Scan with the GoodVibes web app to pair this device; it opens already signed in.', { fg: MODAL_TONES.dim }));
+    }
     rows.push(infoRow('url', `Web app   ${url}`));
     rows.push(infoRow('name', `Device    ${tokenName}`));
     rows.push(infoRow('token', `Token     ${displayToken}`, { fg: MODAL_TONES.reasoning }));
@@ -290,8 +302,11 @@ class PairingModalSurface implements ConfigModalSurface {
     // ASCII QR of the deep link, a camera scan opens the web app already
     // carrying the one-time token. No raw JSON blob is ever encoded. The
     // multi-line preformatted string is split into one non-selectable row per row.
-    const qr = renderQrToString(generateQrMatrix(deepLink));
-    qr.split('\n').forEach((line, i) => rows.push(infoRow(`qr:${i}`, line, { fg: MODAL_TONES.qrDark, bg: MODAL_TONES.qrLight })));
+    // None for a link only this computer opens: a QR is for another device.
+    if (!thisMachineOnly) {
+      const qr = renderQrToString(generateQrMatrix(deepLink));
+      qr.split('\n').forEach((line, i) => rows.push(infoRow(`qr:${i}`, line, { fg: MODAL_TONES.qrDark, bg: MODAL_TONES.qrLight })));
+    }
 
     const hints = [this.revealed ? 'v hide token' : 'v reveal token'];
     if (this.tailscale?.available && !this.serving) hints.push('t serve over tailscale');
@@ -352,7 +367,8 @@ class PairingModalSurface implements ConfigModalSurface {
       const previous = this.info;
       this.info = undefined;
       this.revealed = false;
-      if (this.ensureInfo(true) === null) {
+      const fresh = this.ensureInfo(true);
+      if (fresh === null) {
         // A refused mint (e.g. the device cap) keeps the token already on screen rather than blanking a working QR.
         this.info = previous ?? null;
         ctx.setStatus(this.infoError ? `Could not mint a device token: ${this.infoError}` : 'Could not mint a device token.');
@@ -360,7 +376,7 @@ class PairingModalSurface implements ConfigModalSurface {
         return;
       }
       this.requestRender();
-      ctx.setStatus('New device token and QR shown. The previous one no longer works unless a device already paired with it; paired devices are listed by /devices, and in the web UI under Settings, Devices and pairing.');
+      ctx.setStatus(`New device token${fresh.thisMachineOnly ? '' : ' and QR'} shown. The previous one no longer works unless a device already paired with it; paired devices are listed by /devices, and in the web UI under Settings, Devices and pairing.`);
       return;
     }
   }

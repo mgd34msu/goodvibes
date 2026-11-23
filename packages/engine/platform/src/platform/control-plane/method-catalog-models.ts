@@ -59,7 +59,8 @@ const PROVIDER_MODEL_ENTRY_SCHEMA = objectSchema({
   label: STRING_SCHEMA,
   contextWindow: NUMBER_SCHEMA,
   reasoningOptions: MODEL_REASONING_OPTIONS_SCHEMA,
-}, ['id', 'registryKey', 'provider']);
+  textWork: { type: 'string', enum: ['text', 'other', 'unknown'] },
+}, ['id', 'registryKey', 'provider', 'textWork']);
 
 /** One way a provider can be authenticated, and whether it currently is. */
 const PROVIDER_AUTH_ROUTE_SCHEMA = objectSchema({
@@ -76,6 +77,16 @@ const PROVIDER_AUTH_ROUTE_SCHEMA = objectSchema({
   repairHints: arraySchema(STRING_SCHEMA),
 }, ['route', 'label', 'configured']);
 
+/** Where a provider's model list came from: the provider now, its last stored list, or the shared catalog. */
+const MODEL_LIST_SOURCE_SCHEMA: Record<string, unknown> = { type: 'string', enum: ['live', 'cache', 'catalog'] };
+
+/** One provider's model list as it stands: its source, when it was read, why its last reading failed. */
+const MODEL_LIST_READING_SCHEMA = objectSchema({
+  source: MODEL_LIST_SOURCE_SCHEMA,
+  listedAt: NUMBER_SCHEMA,
+  error: STRING_SCHEMA,
+}, ['source']);
+
 const PROVIDER_MODEL_PROVIDER_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   label: STRING_SCHEMA,
@@ -84,7 +95,20 @@ const PROVIDER_MODEL_PROVIDER_SCHEMA = objectSchema({
   envVars: arraySchema(STRING_SCHEMA),
   routes: arraySchema(PROVIDER_AUTH_ROUTE_SCHEMA),
   models: arraySchema(PROVIDER_MODEL_ENTRY_SCHEMA),
-}, ['id', 'label', 'configured', 'envVars', 'models']);
+  modelList: MODEL_LIST_READING_SCHEMA,
+}, ['id', 'label', 'configured', 'envVars', 'models', 'modelList']);
+
+const MODEL_LIST_REFRESH_REPORT_SCHEMA = objectSchema({
+  providerId: STRING_SCHEMA,
+  label: STRING_SCHEMA,
+  models: NUMBER_SCHEMA,
+  source: MODEL_LIST_SOURCE_SCHEMA,
+  added: arraySchema(STRING_SCHEMA),
+  removed: arraySchema(STRING_SCHEMA),
+  listedAt: NUMBER_SCHEMA,
+  error: STRING_SCHEMA,
+  notAsked: BOOLEAN_SCHEMA,
+}, ['providerId', 'label', 'models', 'source', 'added', 'removed']);
 
 const CURRENT_MODEL_SCHEMA = objectSchema({
   model: { anyOf: [PROVIDER_MODEL_REF_SCHEMA, { type: 'null' }] },
@@ -98,7 +122,7 @@ export const builtinGatewayModelMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'models.list',
     title: 'Model Catalog',
-    description: 'Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal\'s model picker triggers on open, so a locally served model that appeared since the last read shows up on the next one. `currentModel` is the daemon\'s current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all.',
+    description: 'Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal\'s model picker triggers on open: a provider\'s list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon\'s current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal\'s does.',
     category: 'providers',
     effects: ['providers.read'],
     http: { method: 'GET', path: '/api/models' },
@@ -106,8 +130,10 @@ export const builtinGatewayModelMethodDescriptors: readonly GatewayMethodDescrip
     outputSchema: objectSchema({
       providers: arraySchema(PROVIDER_MODEL_PROVIDER_SCHEMA),
       currentModel: { anyOf: [PROVIDER_MODEL_REF_SCHEMA, { type: 'null' }] },
+      pinned: arraySchema(STRING_SCHEMA),
+      recent: arraySchema(STRING_SCHEMA),
       secretsResolutionSkipped: BOOLEAN_SCHEMA,
-    }, ['providers', 'currentModel', 'secretsResolutionSkipped']),
+    }, ['providers', 'currentModel', 'pinned', 'recent', 'secretsResolutionSkipped']),
   }),
   methodDescriptor({
     id: 'models.current.get',
@@ -137,5 +163,16 @@ export const builtinGatewayModelMethodDescriptors: readonly GatewayMethodDescrip
       effort: { anyOf: [STRING_SCHEMA, { type: 'null' }] },
       persisted: BOOLEAN_SCHEMA,
     }, ['model', 'configured', 'persisted']),
+  }),
+  methodDescriptor({
+    id: 'models.refresh',
+    repeat: 'safe',
+    title: 'Read the Model Lists Again',
+    description: 'Read the model lists from the providers now, past each stored list: every provider, or the one named by `providerId`; the shared model catalog is checked with them. Answers each provider that has a listing of its own: how many models it lists now, `source` (`live` when it answered; `cache` or `catalog` when it did not), the models `added` and `removed`, `listedAt`, `error` when its list could not be read, and `notAsked` when it has no key or sign-in to list with yet. A list that changed is announced as a providers change, so every client reads it again. An unknown `providerId` is refused with PROVIDER_NOT_FOUND. It sends requests to the providers with the owner\'s credentials, so it needs an admin.',
+    category: 'providers',
+    effects: ['providers.administer'],
+    http: { method: 'POST', path: '/api/models/refresh' },
+    inputSchema: objectSchema({ providerId: STRING_SCHEMA }, []),
+    outputSchema: objectSchema({ providers: arraySchema(MODEL_LIST_REFRESH_REPORT_SCHEMA) }, ['providers']),
   }),
 ];

@@ -36,12 +36,12 @@ export interface SharedShellFooterOptions {
   readonly branchChanged?: boolean | undefined;
   /**
    * The mode in force in words (ModeInForceWords' chosen, inForce, chosenWhen,
-   * because, failure): the status bar's `Asks:` segment. Absent: no mode segment.
+   * because, failure): the status bar's `Permissions:` segment. Absent: no mode segment.
    */
   readonly modeWords?: ({ readonly chosen: string; readonly inForce?: string | undefined; readonly chosenWhen?: string | undefined; readonly chosenShort?: string | undefined; readonly because?: string | undefined; readonly failure?: boolean | undefined } | null) | undefined;
   /** The key that changes the mode, as bound ("shift+tab"). */
   readonly modeKey?: string | undefined;
-  /** The mode just changed: the `Asks:` segment flashes (session-permission-mode.ts). */
+  /** The mode just changed: the `Permissions:` segment flashes (session-permission-mode.ts). */
   readonly modeFlash?: boolean | undefined;
   /** Notices not yet seen in the notifications view: `2 notices`; none at zero. */
   readonly unreadNotices?: number | undefined;

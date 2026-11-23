@@ -48,9 +48,10 @@ const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   [APPROVAL_UPDATE_WIRE_EVENT]: [queryKeys.approvals, queryKeys.permissionRules],
   // A question posted, answered (from any surface), withdrawn or delivered, and Jev's decisions.
   [OWNER_INBOX_UPDATE_WIRE_EVENT]: [queryKeys.ownerInbox],
-  // MODEL_CHANGED and provider metadata ride `providers`; a model change can also
-  // replace a session's context window, so mounted context usage is re-read too.
-  providers: [queryKeys.providers, queryKeys.sessions, ['daemon-health', 'model']],
+  // MODEL_CHANGED, provider metadata and a provider's model list read again ride
+  // `providers`; a model change can also replace a session's context window, so
+  // mounted context usage is re-read too.
+  providers: [queryKeys.providers, ['models'], queryKeys.sessions, ['daemon-health', 'model']],
   knowledge: [['knowledge']],
   'control-plane': [queryKeys.control],
   // Fleet node lifecycle deltas revalidate the snapshot and archive, at most once per

@@ -90,9 +90,9 @@ goodvibes-daemon
 What it prints on a normal start (the exact host and port follow your settings):
 
 ```text
-goodvibes-daemon 3.4.5 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
-goodvibes-daemon 3.4.5 bound: host="127.0.0.1" port=3421
-goodvibes-daemon 3.4.5 host started (ready)
+goodvibes-daemon 3.4.6 starting: tree-home="/home/alex" daemon-home="/home/alex/.goodvibes/daemon" intended-host="127.0.0.1" intended-port=3421
+goodvibes-daemon 3.4.6 bound: host="127.0.0.1" port=3421
+goodvibes-daemon 3.4.6 host started (ready)
 ```
 
 When standard output is an interactive terminal, the daemon also prints the device pairing block once, after `bound`. When standard output is not a terminal (a service, a redirect to a file), it never prints the pairing block, because the block contains a credential. Run `goodvibes-daemon pair` to see it at any time.
@@ -105,9 +105,21 @@ The pairing block is only a link when the daemon serves the web UI (`controlPlan
 | `Device pairing link unavailable: the configured WebUI bundle has no readable app shell.` | The web UI is switched on, but the bundle directory has no readable `index.html`. | Point it at a built bundle: `goodvibes-daemon webui enable --bundle-dir <dir>`. |
 | `Device pairing link unavailable: the configured WebUI URL is not a usable HTTP(S) origin.` | The address the link would use is not an `http://` or `https://` origin (it carries a user name, a query or fragment, or names `0.0.0.0`). | Correct `web.publicBaseUrl` (`goodvibes-daemon config set web.publicBaseUrl https://<name>`), or unset it. |
 
-After the block it prints `(print this again: goodvibes-daemon pair)`, or `goodvibes-daemon pair --port <n>` when the daemon was started on a port other than the one in its settings. When no other device could open the link (the address is this machine's loopback, or `controlPlane.enabled` is off and `web.publicBaseUrl` does not name the address), it then says `note: this link opens only on this machine: <why>.` and `To pair a phone: goodvibes-daemon webui enable --lan, then goodvibes-daemon pair`.
+After the block it prints `(print this again: goodvibes-daemon pair)`, or `goodvibes-daemon pair --port <n>` when the daemon was started on a port other than the one in its settings. When no other device could open the link (the address is this machine's loopback, or `controlPlane.enabled` is off and `web.publicBaseUrl` does not name the address), the block is the sign-in for a browser on this machine instead, with no QR code:
 
-`goodvibes-daemon pair` (local form) decides the same from the daemon's settings and the address it reports it is bound to, with no request on the network. When no other device could open the link, it prints no QR code and exits `1`: `No pairing code was made: a phone could not open it yet.`, the numbered steps (`1. done` the web UI address, `2. next` the one command that fixes it with why, `3. then` `goodvibes-daemon pair` again), and then `A browser on this machine can still open the web app signed in with:` and the link. With `--json` that case is `{"ok":false,"error":"no pairing code was made: a phone could not open it yet (<why>)","fix":"goodvibes-daemon webui enable --lan, then goodvibes-daemon pair"}`. When one could, the block is led by the numbered steps `Pair a phone` prints (`1. done  The daemon serves the web UI at <origin>, open to other devices.`, `2. next  Scan the code below ...`, `3. then  In the web app, accept or decline each offer: ...`).
+```
+GoodVibes daemon 3.4.6
+This link signs in a browser on this computer. A phone cannot open it: the daemon serves only this machine: http://127.0.0.1:3421 is this machine's own address, which another device cannot open.
+  1. done  The daemon serves the web UI at http://127.0.0.1:3421.
+  2. next  goodvibes-daemon webui enable --lan
+  3. then  goodvibes-daemon pair, then scan the code it prints with the phone.
+
+  http://127.0.0.1:3421/#pair=<token>&offers=...
+  Sign-in code: <token>  (to paste on the web UI's sign-in page, under Other ways to sign in)
+(print this again: goodvibes-daemon pair)
+```
+
+`goodvibes-daemon pair` (local form) decides the same from the daemon's settings and the address it reports it is bound to, with no request on the network. When no other device could open the link, it prints the same sign-in for a browser on this machine (the lines above from `This link signs in ...`, no QR code) and exits `0`. With `--json` that case is `{"ok":true,"data":{"origin":...,"deepLink":...,"forThisMachine":true,"reason":"<why>","fix":"goodvibes-daemon webui enable --lan",...}}`. When one could, the block is led by the numbered steps `Pair a phone` prints (`1. done  The daemon serves the web UI at <origin>, open to other devices.`, `2. next  Scan the code below ...`, `3. then  In the web app, accept or decline each offer: ...`).
 
 To have the daemon start at boot and restart after a crash, install it as a service: `goodvibes-daemon install-service`. That is described in "Installing, running as a service, updating and removing GoodVibes".
 
@@ -246,7 +258,7 @@ goodvibes-daemon status
 
 ```text
 goodvibes daemon on this machine
-  version:  3.4.5
+  version:  3.4.6
   state:    running
   health:   healthy
   bound:    http://127.0.0.1:3421
@@ -299,7 +311,7 @@ It reprints the existing operator token in the link; it does not mint a new one.
 Example output for a daemon served over plain HTTP on the local network (QR code shortened):
 
 ```text
-GoodVibes daemon 3.4.5: scan to pair a device (opens the web app signed in):
+GoodVibes daemon 3.4.6: scan to pair a device (opens the web app signed in):
 
   http://desktop.local:3421
 
@@ -372,7 +384,7 @@ goodvibes-daemon mcp serve --categories all --allow-write --allow-destructive
 | `--allow-destructive` | Also serve the methods the contract marks dangerous. |
 | `--host`, `--port`, `--token` | As for `status`. |
 
-With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.4.5 that is 25 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 25 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`. At start it reads the target daemon's method list (`control.methods.list`) once and offers only methods that daemon serves; a daemon on another release that lacks some of them adds `; <n> left out because that daemon does not serve them` to that line. A daemon that does not answer the list is refused at start: `goodvibes-daemon mcp serve: the daemon at <url> did not list its methods (<reason>); check that it is running this release or a recent one: goodvibes-daemon status`.
+With no flags it serves the agent slice: the sessions, tasks, contracts and approvals methods that read, plus creating a session, sending it a message and steering it. Creating a session, sending a message and steering are admin methods: with a scoped device token as `--token`, those tools are listed but the daemon refuses each call with `403` `ADMIN_REQUIRED`, which the MCP client receives as a failed tool call. Give `mcp serve` an admin credential (a device token minted without a scope list) if those tools must work. In 3.4.6 that is 25 tools; the command prints the count on standard error when it starts, for example `goodvibes-daemon mcp serve: serving 25 tools (sessions, tasks, contracts, approvals; reads and the session lifecycle); --allow-write and --categories serve more`. At start it reads the target daemon's method list (`control.methods.list`) once and offers only methods that daemon serves; a daemon on another release that lacks some of them adds `; <n> left out because that daemon does not serve them` to that line. A daemon that does not answer the list is refused at start: `goodvibes-daemon mcp serve: the daemon at <url> did not list its methods (<reason>); check that it is running this release or a recent one: goodvibes-daemon status`.
 
 Standard output carries only protocol frames; every message for a person goes to standard error. When the daemon is not running, or the token is missing or refused, it prints one line on standard error and exits `1` before writing any frame. It exits `0` when the client closes standard input. A client cancellation (`notifications/cancelled`) stops the request to the daemon.
 
@@ -432,7 +444,7 @@ goodvibes-daemon update --check
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.4.5
+  version:  3.4.6
   updates:  off: update.auto is not true, so this daemon will not update itself
   receipts: none written
 ```
@@ -503,7 +515,7 @@ goodvibes-daemon completion fish > ~/.config/fish/completions/goodvibes-daemon.f
 
 `check-install-reader <installed-executable>` is run by the release installer: it checks whether this release can read an installation's saved data without loading settings or changing files. `--describe` lists the readers compiled in. A person does not need to run it.
 
-`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.4.5`.
+`help [command] [--json]` prints help. `version` (and `-v`, `--version`) prints `goodvibes-daemon 3.4.6`.
 
 ## Network exposure
 
@@ -583,7 +595,7 @@ lsof -nP -iTCP:3421 -sTCP:LISTEN         # macOS, also Linux
 
 Binding decides who can connect; `controlPlane.enabled` decides whether a connection from another machine is served. A request from another machine to a daemon with `controlPlane.enabled` `false` gets `403` with code `CONTROL_PLANE_LOCAL_ONLY` and the body `{"error":"This daemon serves only its own machine","code":"CONTROL_PLANE_LOCAL_ONLY","state":"controlPlane.enabled is off, so a request from <address> is not served","next":[...],"status":403}`. Either answer proves the bind; no answer within a few seconds means the address is not bound or a firewall drops it.
 
-`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.4.5 bound: host="0.0.0.0" port=3421`, is right for that start.
+`goodvibes-daemon status` prints the listener the daemon holds on its `bound:` line, and a second line when that differs from the settings. Do not use these as proof of the bind: `goodvibes-daemon webui enable` or `webui status` (they print what the settings will give), `goodvibes-daemon pair` (its link comes from the settings) and `detached-daemon.json` (the address of the last start). The line the daemon prints when it starts, `goodvibes-daemon 3.4.6 bound: host="0.0.0.0" port=3421`, is right for that start.
 
 ### How a running daemon moves to a new address
 
@@ -596,7 +608,7 @@ A change of `controlPlane.hostMode`, `controlPlane.host` or `controlPlane.port` 
 
 A daemon started with `--host` or `--port` keeps that binding for its whole run.
 
-Plain HTTP on a private network is a supported posture. The connection is not encrypted on that network, and browsers withhold three features from a page that is not a secure context (HTTPS, or `localhost`): installing the app and its service worker, push notifications, and the microphone. `pairing.posture.get` (see the next part) reports each of these as available or `needs https, available via tailscale`. A `100.64.0.0/10` address is accepted over HTTP only when a running Tailscale vouches for it or `GOODVIBES_TAILNET_ADDRESSES` lists it, because carrier-grade NAT uses the same range.
+Plain HTTP on a private network is a supported posture. The connection is not encrypted on that network, and browsers withhold three features from a page that is not a secure context (HTTPS, or `localhost`): installing the app and its service worker, push notifications, and the microphone. `pairing.posture.get` (see the next part) reports each of these as available or `needs https, available via tailscale`. The rest of the web app works there; its copy buttons copy without the clipboard API browsers keep from such a page, and when the browser refuses that too they select the text and say `Selected: press Ctrl+C (Cmd+C on a Mac) to copy it.`. A `100.64.0.0/10` address is accepted over HTTP only when a running Tailscale vouches for it or `GOODVIBES_TAILNET_ADDRESSES` lists it, because carrier-grade NAT uses the same range.
 
 ### TLS
 
@@ -748,7 +760,7 @@ The bundle itself is public: anyone who can reach the listener can load the page
 
 ### Signing in to the web UI
 
-The web UI shows "Sign in to GoodVibes" until it has a credential, with one sentence, `Run goodvibes pair on your computer and scan the code.`, and the button `Scan the code`. Four ways in:
+The web UI shows "Sign in to GoodVibes" until it has a credential, with one sentence, `Run goodvibes pair on the computer running GoodVibes, then scan the code it shows, or open the link it prints in a browser on that computer.`, and the button `Scan the code`. (On a daemon only its own machine can reach, the default, `goodvibes pair` prints a link and a sign-in code for a browser on that machine and no QR code.) Four ways in:
 
 1. Open a pairing link (`.../#pair=<token>`) or scan its QR code with the device's camera. The code travels in the URL fragment, which a browser never sends to a server, so it does not appear in any access log.
 2. Scan the QR code from inside the sign-in page (`Scan the code`). A code that names another daemon address than this page's is not sent here: the page says `That code is for GoodVibes at <origin>, and this page is at <origin>. It was not sent here` and offers `Open the daemon at <origin>`, which opens that daemon's page with the sign-in code in the URL fragment (a username and password are typed again there).
@@ -762,7 +774,7 @@ Where the credential lives:
 - Phone node (the web UI as a device node, `?view=phone`): its remote peer token is a credential of its own. Paired directly, `POST /api/browser-session/node` binds it to a separate HttpOnly, SameSite=Strict cookie, `goodvibes_node`, with `Path=/api/remote`: only the peer routes read it, and only as a peer token, while operator routes never do, so the node's narrower peer rights and the sign-in's rights stay apart. A peer request on that cookie must carry the daemon's own `Origin`. The page keeps only the node's id and name (`goodvibes.webui.phoneNode`), so a reload stays paired; unpairing calls `POST /api/browser-session/node/end`, which clears the cookie. Paired over the relay, the token is held in the page's memory and a reload pairs again.
 - Relay route: the relay tunnel builds every request in the page, so a sign-in made over the relay (a code, or a username and password through `POST /login`) is held in the page's memory only, and so is the relay pairing. Reloading the page forgets both: the page starts on the direct route, and when the daemon is reachable only through the relay it asks for the relay code and a sign-in again. A direct sign-in's cookie is not usable over the relay, so moving onto the relay also asks to sign in.
 
-`Other ways to sign in` also holds the relay code (`Not on the same network as your computer?`) and `Where do I find a code?`: `goodvibes pair` shows one, and the GoodVibes service prints one when it starts. A refused pairing link or pasted code shows `That code didn't work. It may have expired; run goodvibes pair again.`; a pasted code stays in the field to correct. The page reaches the daemon whatever the browser says about its own network: with no network beyond the machine (no interface but loopback), a daemon on loopback is still used, and "Can't reach the daemon" means the daemon itself did not answer; that screen names the address it is trying and, for the daemon's machine, `goodvibes-daemon status` (what the daemon is doing) and `goodvibes-daemon start-service` (starts the installed service). A daemon that answers the sign-in check with a server fault (any `5xx`) shows "The daemon could not answer" instead: the code is kept and the check is repeated every 5 seconds; only a refusal of the code (`401`) shows the sign-in page. A relay code (`gvrelay1.…`, see "The relay") only provides a route to the daemon; a sign-in code is still needed to sign in.
+`Other ways to sign in` also holds the relay code (`Not on the same network as your computer?`) and `Where do I find a code?`: `goodvibes pair` on the computer running GoodVibes shows one (a QR code and its link when a phone can reach GoodVibes; when GoodVibes serves only that computer, a link and a sign-in code for a browser on it, and the command that lets a phone reach it), and `goodvibes-daemon pair` prints the daemon's own sign-in link the same way. A refused pairing link or pasted code shows `That code didn't work. It may have expired; run goodvibes pair again.`; a pasted code stays in the field to correct. The page reaches the daemon whatever the browser says about its own network: with no network beyond the machine (no interface but loopback), a daemon on loopback is still used, and "Can't reach the daemon" means the daemon itself did not answer; that screen names the address it is trying and, for the daemon's machine, `goodvibes-daemon status` (what the daemon is doing) and `goodvibes-daemon start-service` (starts the installed service). A daemon that answers the sign-in check with a server fault (any `5xx`) shows "The daemon could not answer" instead: the code is kept and the check is repeated every 5 seconds; only a refusal of the code (`401`) shows the sign-in page. A relay code (`gvrelay1.…`, see "The relay") only provides a route to the daemon; a sign-in code is still needed to sign in.
 
 ### Views
 
@@ -770,7 +782,7 @@ The web UI has five destinations, chosen in the sidebar and reflected in the add
 
 | View | `?view=` | Tabs (`&tab=`) | What it shows |
 | --- | --- | --- | --- |
-| Chat | `chat` | none; `&session=<id>` opens one session | Conversations with the model: messages, tool activity (kept with each reply, so it shows after a reload), artifacts, queued messages (listed once, above the composer, until they are sent), search, a composer with attachments and voice. An approval the chat's own turn is waiting on is shown above the composer with Approve and Deny (one that needs an answer or a choice of edits opens in Work). The model menu lists the providers that are set up; a model or effort picked there is for that chat only (a new chat is created with it), and the model new chats start with is changed in Settings. While a reply runs, Send reads Queue and a Send now button interrupts. A message whose first word is `/` and a command name is held in the composer with "not a command here" (only `/new` runs there; a path such as `/etc/hosts` is sent). |
+| Chat | `chat` | none; `&session=<id>` opens one session | Conversations with the model: messages, tool activity (kept with each reply, so it shows after a reload), artifacts, queued messages (listed once, above the composer, until they are sent), search, a composer with attachments and voice. An approval the chat's own turn is waiting on is shown above the composer with Approve and Deny (one that needs an answer or a choice of edits opens in Work). The model control opens one menu in three steps: provider (connected ones first, the others under `Not connected` with `Connect in Settings` or `Copy /provider sign-in <id>`), that provider's models (Favorites, Recent, the rest, then `Not described by the catalog` with each `kind unknown`; image, speech and embedding models are not listed), then the model's effort when it has levels; a filter box searches every connected provider's models; arrows move, Right or Enter goes in, Left or Escape goes back. A pick is for that chat only (a new chat is created with it): the menu says `For this chat only. The default for new chats is set in Settings.` and offers `Make this the default for new chats` (`models.current.set` with the chat's model and effort). A provider's list read more than a day ago shows `List read <age>`; a failed reading `Could not read its list now`; `Refresh models` calls `models.refresh` and shows its answer. While a reply runs, Send reads Queue and a Send now button interrupts. A message whose first word is `/` and a command name is held in the composer with "not a command here" (only `/new` runs there; a path such as `/etc/hosts` is sent). |
 | Work | `work` | `all`, `sessions`, `agents`, `processes`, `checkpoints`, `plan` | Everything running or finished: hosted and shared sessions, agents, contracts and their units, approvals, owner questions, tasks, CI watches, background processes, checkpoints and rewind, the work plan, and steering of a running session. A hunk marked Reviewed in a session's changes keeps the mark only while its lines are exactly what was reviewed: after a refresh, changed content reads unreviewed. Messages saved in this browser under another pairing are shown only as a count (`Sign in as that pairing to recover them`); their text is not shown. |
 | Library | `library` | `memory`, `knowledge`, `review` | Memory records; what the knowledge base knows, by subject (each fact with `From <source> · <when>`; the sources it read; the graph's nodes, issues and wiki projections under Details), its map, packet and activity; items waiting for review. |
 | Personal | `personal` | `calendar`, `mail`, `occasions` | Calendar, mail and dates the owner cares about. In Mail, Mark read, Archive and Delete send the message's mailbox generation with its UID; a draft opened from Drafts and saved again replaces that draft (the folder keeps one copy); opening a reply or a draft while the composer holds unsaved writing asks first. |
@@ -792,7 +804,7 @@ The settings dialog opens from the account menu, or with `?settings=<section>` i
 | Voice | `voice` | Dictation, spoken replies, wake word. |
 | Notifications | `notifications`, `checkins` Check-ins | Push notifications, installing the app, occasion reminders; check-in settings. |
 | Memory | `memory` | Memory provenance and diagnostics. |
-| Permissions | `permissions` | The four modes (Ask me, Jev decides, Just vibes, YOLO) as cards, each with what it does; picking one sets `permissions.mode`. Under the chosen card, when it is not the mode in force, the header chip's own words (`Asks: you, for now · <the choice and when it takes effect>`). Under Advanced: approval rules, the MCP servers and tools screen, the permission evaluator and its simulation, the sandbox, tool policy. |
+| Permissions | `permissions` | The four modes (Ask me, Jev decides, Just vibes, YOLO) as cards, each with what it does; picking one sets `permissions.mode`. Under the chosen card, when it is not the mode in force, the header chip's own words (`Permissions: asking you, for now · <the choice and when it takes effect>`). Under Advanced: approval rules, the MCP servers and tools screen, the permission evaluator and its simulation, the sandbox, tool policy. |
 
 Every setting the daemon knows appears in exactly one section; a namespace no section lists appears under Advanced.
 
@@ -834,7 +846,7 @@ Preconditions: the daemon is running, it serves the web UI (`goodvibes-daemon we
    - `goodvibes pair --name "my phone"` (terminal app; mints a named device token on the connected daemon and prints its link and QR code);
    - `/devices pair device` inside either terminal app;
    - `goodvibes-daemon pair` (prints a link carrying the shared operator token).
-   Every one of them (`goodvibes pair`, the pairing screen `/devices pair device` opens in either terminal app, `goodvibes-agent pair`, `goodvibes-daemon pair` with or without `--host ... -y`, and the web UI's `Pair a new device`) first asks the daemon whether another device can open the code; the daemon decides from its settings (a loopback address cannot; `web.publicBaseUrl` is your statement that it can; otherwise `controlPlane.enabled` decides). When none could, no code is minted or shown, and the answer gives numbered steps ending in step 1's command, with why. The web UI says that command is run in a terminal on the daemon's machine: someone using the web UI on that same machine over `http://127.0.0.1` is exactly who meets this. The daemon enforces it too: `pairing.handoff.create` refuses with `409` `PAIRING_CODE_UNREACHABLE`.
+   Every one of them (`goodvibes pair`, the pairing screen `/devices pair device` opens in either terminal app, `goodvibes-agent pair`, `goodvibes-daemon pair` with or without `--host ... -y`, and the web UI's `Pair a new device`) first asks the daemon whether another device can open the code; the daemon decides from its settings (a loopback address cannot; `web.publicBaseUrl` is your statement that it can; otherwise `controlPlane.enabled` decides). When none could, no code for a phone is made and no QR code is drawn: the code is made for a browser on the daemon's own machine instead (`forThisMachine`), led by `This link signs in a browser on this computer. A phone cannot open it: <why>.` and the numbered steps ending in step 1's command, then the link and the sign-in code to paste. This is how a browser on the daemon's own machine signs in on the default setup (the daemon bound to `127.0.0.1`). The web UI's `Pair a new device` shows the steps and, below them, makes a sign-in link for another browser on the computer running GoodVibes; it says the command is run in a terminal on the daemon's machine. `goodvibes-daemon pair --host <h> -y` against a daemon on another machine, and `goodvibes-agent pair` or `goodvibes pair` connected to one, give the steps and no code (a link only that machine opens is no use here), exit `1`. The daemon enforces it too: `pairing.handoff.create` without `forThisMachine` refuses with `409` `PAIRING_CODE_UNREACHABLE`.
 3. Scan the QR code with the phone's camera, or open the link on the phone.
 4. The web UI opens signed in and lists the offers: notifications, relay, passkey. Each can be accepted or declined; declining one does not stop the pairing.
 5. Check the result. A code from `goodvibes pair` or `/devices pair device` gives the phone its own device token, and the phone appears in the web UI under Settings, Account, Devices and pairing. A link from `goodvibes-daemon pair` (local form) carries the shared operator token instead, so the phone is not listed as a device of its own and stops working when the shared token is revoked; prefer `goodvibes pair`.
@@ -851,7 +863,7 @@ The offers:
 
 ### Managing paired devices
 
-Paired devices are listed, renamed and revoked in the web UI (Settings, Account, Devices and pairing), where `Pair a new device` also pairs one: after a confirm naming the device it calls `pairing.handoff.create` with every offer, as `goodvibes pair` does, and shows the link and its QR code once, with `Show the sign-in code once` for a device that can only paste a code. The same is available through these API methods (all through `POST /api/control-plane/methods/<id>/invoke`, see the next part):
+Paired devices are listed, renamed and revoked in the web UI (Settings, Account, Devices and pairing), where `Pair a new device` also pairs one: after a confirm naming the device it calls `pairing.handoff.create` with every offer, as `goodvibes pair` does, and shows the link and its QR code once, with `Show the sign-in code once` for a device that can only paste a code. When no phone could open a code, the section shows why and the numbered steps, and its form (`Make a sign-in link`) makes the link for a browser on the computer running GoodVibes instead (`forThisMachine`), shown with the sign-in code and no QR code. The same is available through these API methods (all through `POST /api/control-plane/methods/<id>/invoke`, see the next part):
 
 | Method | Does |
 | --- | --- |
@@ -1000,7 +1012,7 @@ Three ways reach the daemon from outside the local network. None is on by defaul
 
 ### Tailscale
 
-Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup in 3.4.5:
+Tailscale gives the daemon an encrypted address and a real `https://` name on the owner's tailnet with no certificate handling. Manual setup in 3.4.6:
 
 1. Install Tailscale on the daemon's machine and the phone, and log both in (`tailscale up`).
 2. Serve the daemon's control-plane port over HTTPS on the tailnet:
@@ -1279,7 +1291,7 @@ Join failures:
 ```text
 $ goodvibes-daemon cluster groups
 GROUP       ID                  MACHINES  VERSION  SEEN
-home        gG9JJ1P6CHMSME4AK   1         3.4.5    8s ago
+home        gG9JJ1P6CHMSME4AK   1         3.4.6    8s ago
 ```
 
 With nothing heard it prints `no goodvibes groups are advertising themselves on this network`, with advice to check multicast or join by id, and exits `0`.
@@ -1307,7 +1319,7 @@ goodvibes-daemon cluster status --json
 ```text
 this machine is not in a group
 machine: machine 9b16a341 (9b16a341-3555-4d53-b094-4d32f8937dc8)
-version: 3.4.5
+version: 3.4.6
 
 sharing inbound work with your other machines is switched off here, turn it on with `config set cluster.enabled true`
 ```
@@ -1318,7 +1330,7 @@ A member's `status`:
 group:    home  [gG9JJ1P6CHMSME4AK]
 machine:  bravo (86462aea-850a-4eea-a537-0b0e1e549cf9)
 members:  3
-version:  3.4.5
+version:  3.4.6
 surfaces: none held by this machine right now
 
 group key: generation 0, rotates every 24h
@@ -1386,7 +1398,7 @@ The removed machine is told. A running one takes the removal with the change its
 ```text
 this machine is not in a group: another member told it the group removed it 2m ago
 machine: charlie (79584424-1e8b-48d1-b084-fb381beb3016)
-version: 3.4.5
+version: 3.4.6
 
 this machine was removed from the group "home" [gVSTYHAVRJB7QSPEN] by another member; to put it back, run `cluster key` on a machine in that group, then `cluster join --group gVSTYHAVRJB7QSPEN` here and give it that key
 ```

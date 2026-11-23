@@ -1698,7 +1698,7 @@ GoodVibes ships **96** built-in slash commands across **61** categories. Every c
 | --- | --- | --- | --- |
 | See your model and the others you can use | `/model list` | Shows the model in use, its backup models, and every model you can switch to, by provider. | None |
 | Switch model | `/model use <model>` | Your conversations will use <model> from the next message, until you change it. | None |
-| Read the list of models again | `/model refresh` | Asks every provider you have set up for its models again, and says for each how many it has or why its list could not be read. | None |
+| Read the list of models again | `/model refresh` | Asks every provider you have set up for its models again, here and on the daemon, and says for each how many it has or why its list could not be read. | None |
 | Add a backup model | `/model backup <model>` | When a turn fails on your model, it moves to <model> (after any backups already listed), until you change it. | None |
 | Remove a backup model | `/model drop-backup <backup model>` | A turn that fails will no longer move to <backup model>, until you change it. | None |
 

@@ -57,6 +57,11 @@ mistaken for hidden contracts.
   On a plain-HTTP LAN address the app says so and points at serving over HTTPS
   (for example `tailscale serve`). On iOS, push works only for the installed
   app, and the app says that too.
+- On a plain-HTTP network address the browser also keeps the clipboard API
+  from the page. Copy buttons copy another way; when the browser refuses that
+  too, they select the text and say "Selected: press Ctrl+C (Cmd+C on a Mac) to
+  copy it." The microphone (voice input) and the camera scanner need HTTPS too
+  and say so.
 
 ## Knowledge/Wiki
 

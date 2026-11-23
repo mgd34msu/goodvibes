@@ -11,7 +11,7 @@ import {
   PAIRING_HANDOFF_OFFER_KINDS,
   type PairingHandoffOfferKind,
 } from '@goodvibes/engine/platform/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingNoWebUiLines, pairingPostureNotice, pairingReadySteps, pairingUnreachableLines, type OriginPosture } from '@goodvibes/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingNoWebUiLines, pairingPostureNotice, pairingReadySteps, pairingThisMachineLines, pairingUnreachableLines, type OriginPosture } from '@goodvibes/engine/platform/platform/pairing';
 import { defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin, resolveWebUiOrigin, stableUrlHostForBindHost } from '@goodvibes/engine/platform/platform/pairing';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
@@ -140,35 +140,45 @@ function refusalCode(error: unknown): string | undefined {
 /**
  * Before any token is minted: the daemon's own answer about the address a
  * code would carry (`pairing.posture.get`, which reads and mints nothing)
- * says whether a phone could open it. `ready` when it could (or the daemon
- * gave no answer: the mint then reports that itself), otherwise the lines
- * that say why and the one command that fixes it.
+ * says whether a phone could open it. `phone` when it could (or the daemon
+ * gave no answer: the mint then reports that itself); `thisMachine` when only
+ * a browser on the daemon's machine could, with the lines that say so and the
+ * one command that lets a phone reach it; `none` when there is no web UI, or
+ * the daemon serves only its own machine and that is not this one.
  */
 async function pairingReadiness(
   daemonVerbs: DaemonVerbCaller,
   pairCommand: string,
-): Promise<{ readonly ready: true } | { readonly ready: false; readonly lines: readonly string[] }> {
+): Promise<{ readonly kind: 'phone' } | { readonly kind: 'thisMachine'; readonly lines: readonly string[] } | { readonly kind: 'none'; readonly lines: readonly string[] }> {
   let posture: OriginPosture;
   try {
     posture = (await daemonVerbs.invoke<{ readonly posture: OriginPosture }>('pairing.posture.get', {})).posture;
   } catch (error) {
-    if (refusalCode(error) === 'ORIGIN_UNKNOWN') return { ready: false, lines: pairingNoWebUiLines(pairCommand) };
-    return { ready: true };
+    if (refusalCode(error) === 'ORIGIN_UNKNOWN') return { kind: 'none', lines: pairingNoWebUiLines(pairCommand) };
+    return { kind: 'phone' };
   }
-  // The daemon decides from its own settings; a mint it would refuse is never asked for.
+  // The daemon decides from its own settings. A daemon on another machine that
+  // serves only its own machine gives nothing a browser here could open.
   const reach = posture.reach;
-  if (reach !== undefined && !reach.otherDevices) return { ready: false, lines: pairingUnreachableLines(posture.origin, reach, pairCommand) };
-  return { ready: true };
+  if (reach !== undefined && !reach.otherDevices) {
+    return daemonVerbs.probe().thisMachine === false
+      ? { kind: 'none', lines: pairingUnreachableLines(posture.origin, reach, pairCommand) }
+      : { kind: 'thisMachine', lines: pairingThisMachineLines(posture.origin, reach, pairCommand) };
+  }
+  return { kind: 'phone' };
 }
 
 export async function renderPairing(runtime: CliCommandRuntime): Promise<{ readonly output: string; readonly exitCode: number }> {
   // The daemon mints the token; this process only asks it and prints the answer,
   // so no runtime of the folder the command was typed in is built.
   const daemonVerbs = createDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
-  // A code a phone could not open is never made: the daemon says first whether
-  // another device can reach the address it would carry.
+  // A code a phone could not open is never made for a phone: the daemon says
+  // first whether another device can reach the address it would carry. When
+  // only this machine can, the code is made for a browser on this machine,
+  // said so, with no QR.
   const readiness = await pairingReadiness(daemonVerbs, 'goodvibes pair');
-  if (!readiness.ready) return { output: readiness.lines.join('\n'), exitCode: 1 };
+  if (readiness.kind === 'none') return { output: readiness.lines.join('\n'), exitCode: 1 };
+  const forThisMachine = readiness.kind === 'thisMachine';
   const output = await (async (): Promise<string> => {
     // The web origin derived live from the settings (a user-set web.publicBaseUrl
     // wins), so the printed link and the daemon's own handoff origin agree. The
@@ -186,20 +196,27 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<{ reado
     const result = await daemonVerbs.invoke<PairingHandoffCreateResult>('pairing.handoff.create', {
       name,
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
+      ...(forThisMachine ? { forThisMachine: true } : {}),
     });
     const link = result.deepLink ?? result.fragment;
-    const qr = renderQrToString(generateQrMatrix(link));
     const offerKinds = result.offers.map((o) => o.kind);
     // What is done and what is next, as one list; the code and its details follow.
-    const lines: string[] = [
-      'Pair a phone',
-      ...pairingReadySteps(result.posture?.origin ?? webOrigin?.origin ?? link, offerKinds),
-      '',
-      qr,
-      '',
-      `  ${link}`,
-      `  Token name: ${result.token.name}  (rename or revoke later with /devices in the terminal app, or in the web UI under Settings, Devices and pairing)`,
-    ];
+    const lines: string[] = readiness.kind === 'thisMachine'
+      ? [
+        ...readiness.lines,
+        '',
+        `  ${link}`,
+        `  Sign-in code: ${result.token.token}  (to paste on the web UI's sign-in page, under Other ways to sign in)`,
+      ]
+      : [
+        'Pair a phone',
+        ...pairingReadySteps(result.posture?.origin ?? webOrigin?.origin ?? link, offerKinds),
+        '',
+        renderQrToString(generateQrMatrix(link)),
+        '',
+        `  ${link}`,
+      ];
+    lines.push(`  Token name: ${result.token.name}  (rename or revoke later with /devices in the terminal app, or in the web UI under Settings, Devices and pairing)`);
     // A device that cannot resolve the name in the link (no mDNS, not on the
     // tailnet) can still use the routable address with the same one-time token.
     if (webOrigin?.alternateOrigin && link.startsWith(`${webOrigin.origin}/`)) {

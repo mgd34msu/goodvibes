@@ -551,8 +551,12 @@ the code carries. A loopback address cannot; an address equal to `web.publicBase
 other address can only with `controlPlane.enabled`. The daemon answers it in
 `pairing.posture.get` (`reach`) and enforces it in `pairing.handoff.create`, which refuses with
 `409 PAIRING_CODE_UNREACHABLE` unless the code is for a browser on the daemon's own machine
-(`forThisMachine: true`). When no other device could open it, nothing is minted, no QR is shown
-and the answer is numbered steps whose next step is `goodvibes-daemon webui enable --lan`.
+(`forThisMachine: true`). When no other device could open it, no QR is shown and no code is made
+for a phone: the code is made for a browser on the daemon's own machine (`forThisMachine`),
+led by `This link signs in a browser on this computer. A phone cannot open it: <why>.` and
+numbered steps whose next step is `goodvibes-daemon webui enable --lan`, then the link and the
+sign-in code (`pairingThisMachineLines`). A client reaching a daemon on another machine gets the
+steps and no code.
 
 ```bash
 # Local form: reprint the daemon's own pairing block.

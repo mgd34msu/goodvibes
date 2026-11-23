@@ -1,12 +1,12 @@
 /**
  * The mode chip at the right of the shell header (ux A7.4): when GoodVibes
  * asks, in the same words as the terminal's status bar
- * (lib/mode-in-force.ts). It leads with what is in force: `Asks: Jev decides`
- * when the chosen mode is in force, `Asks: you, for now · Jev decides with a
- * decision model` while it cannot be used (a failure such as `decision model
- * unreachable` last). On a phone, where even `Asks: you, for now · default:
- * Jev decides` cut the mode in force short (seen at 390 wide), it shows the
- * mode in force alone and the sheet opens with the whole line.
+ * (lib/mode-in-force.ts). It leads with what is in force: `Permissions: Jev
+ * decides` when the chosen mode is in force, `Permissions: asking you, for now
+ * · Jev decides once a decision model is set` while it cannot be used (a
+ * failure such as `decision model unreachable` last). On a phone, where the
+ * whole line would cut the mode in force short (seen at 390 wide), it shows
+ * the mode in force alone and the sheet opens with the whole line.
  * Tapping it opens the reading's sentence and
  * `Change`, which opens Settings > Permissions; on a phone that is a bottom
  * sheet (the kit Menu).
@@ -24,9 +24,9 @@ export function ModeChip({ onOpenSettings }: { onOpenSettings: (section: string)
   const words = reading.data?.words;
   if (!words) return null;
   const differs = words.inForce !== undefined;
-  const full = `Asks: ${modeInForceLine(words)}`;
+  const full = `Permissions: ${modeInForceLine(words)}`;
   // A phone header has room for the mode in force only; the choice is in the sheet it opens.
-  const short = `Asks: ${words.inForce ?? words.chosen}`;
+  const short = `Permissions: ${words.inForce ?? words.chosen}`;
   // A reason that is not drawn on the chip (it states a choice) is still read out.
   const accessible = differs && words.because && words.failure !== true ? `${full}: ${words.because}` : full;
   return (
@@ -66,7 +66,7 @@ export function ModeSheetItems({ onOpenSettings, withLabel = false }: { onOpenSe
   return (
     <>
       <MenuMeta>
-        {withLabel && <span className="mode-chip__sheet-label">Asks: {modeInForceLine(words)}</span>}
+        {withLabel && <span className="mode-chip__sheet-label">Permissions: {modeInForceLine(words)}</span>}
         <span className="mode-chip__sentence">{words.sentence}</span>
       </MenuMeta>
       {onOpenSettings && <MenuItem onSelect={() => onOpenSettings('permissions')}>Change</MenuItem>}

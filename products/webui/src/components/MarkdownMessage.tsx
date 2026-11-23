@@ -1,4 +1,4 @@
-import { createContext, isValidElement, memo, ReactNode, useContext, useMemo, useState } from 'react';
+import { createContext, isValidElement, memo, ReactNode, useContext, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -6,6 +6,7 @@ import { Check, Copy, TextWrap } from 'lucide-react';
 import { highlightCode, normalizeLanguage } from '../lib/highlight';
 import { useWebUiPreferences, writeWebUiPreference } from '../lib/ui-preferences';
 import { useOptionalToast } from '../lib/toast';
+import { copyOutcomeMessage, copyText } from '../lib/copy-text';
 import { IconButton } from './ui/IconButton';
 import '../styles/components/markdown.css';
 
@@ -51,6 +52,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
   const wrap = useContext(WrapContext);
   const [copied, setCopied] = useState(false);
   const toastCtx = useOptionalToast();
+  const blockRef = useRef<HTMLDivElement>(null);
   const language = languageFromCodeChild(children);
   const code = codeTextFromChildren(children);
   const visibleCode = code.endsWith('\n') ? code.slice(0, -1) : code;
@@ -60,14 +62,10 @@ function CodeBlock({ children }: { children: ReactNode }) {
 
   async function copyCode() {
     if (!code) return;
-    if (!navigator.clipboard) {
-      toastCtx?.toast({ title: 'Copy failed', description: 'Clipboard API unavailable', tone: 'danger', durationMs: 3000 });
-      return;
-    }
-    try {
-      await navigator.clipboard.writeText(code);
-    } catch {
-      toastCtx?.toast({ title: 'Copy failed', description: 'Could not write to clipboard', tone: 'danger', durationMs: 3000 });
+    const outcome = await copyText(code, blockRef.current?.querySelector('code') ?? null);
+    const message = copyOutcomeMessage(outcome);
+    if (message) {
+      toastCtx?.toast({ title: outcome === 'selected' ? 'Selected' : 'Copy failed', description: message, tone: outcome === 'selected' ? 'info' : 'danger', durationMs: 6000 });
       return;
     }
     setCopied(true);
@@ -75,7 +73,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className={['markdown-code-block', lineNumbers ? 'numbered' : '', wrap ? 'wrapped' : ''].filter(Boolean).join(' ')}>
+    <div ref={blockRef}className={['markdown-code-block', lineNumbers ? 'numbered' : '', wrap ? 'wrapped' : ''].filter(Boolean).join(' ')}>
       <div className="markdown-code-header">
         <div className="markdown-code-label">{displayLanguage || 'code'}</div>
         <IconButton

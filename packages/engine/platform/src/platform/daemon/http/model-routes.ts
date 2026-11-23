@@ -13,7 +13,7 @@ import { requestedEffortOverride } from '../../providers/reasoning-effort-surfac
  * caller, DaemonHttpRouter.handleRequest validates auth before dispatching).
  */
 
-import type { ProviderRegistry } from '../../providers/registry.js';
+import type { ProviderModelListReading, ProviderRegistry } from '../../providers/registry.js';
 import type { ConfigManager } from '../../config/manager.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
 import type { ProviderAuthRouteDescriptor } from '../../providers/interface.js';
@@ -21,6 +21,7 @@ import type { ConfiguredVia, ProviderConfiguredStatus } from '../../providers/co
 import { findModelDefinition } from '../../providers/registry-models.js';
 import { resolveModelReference } from '../../providers/model-id-resolution.js';
 import { providerDisplayLabel } from '../../providers/provider-labels.js';
+import { catalogTextWork, type CatalogTextWork } from '../../providers/model-catalog-facts.js';
 import {
   REASONING_EFFORT_SEVERITY,
   readReasoningEffortLevel,
@@ -56,6 +57,12 @@ export interface ProviderModelEntry {
   readonly contextWindow?: number | undefined;
   /** Absent when the model does not reason at all. */
   readonly reasoningOptions?: ModelReasoningOptions | undefined;
+  /**
+   * What the catalog says about holding a conversation (catalogTextWork):
+   * `text` reads and writes text, `other` does not (an image, speech or
+   * embedding model), `unknown` the catalog does not say.
+   */
+  readonly textWork: CatalogTextWork;
 }
 
 export type { ConfiguredVia } from '../../providers/configured-status.js';
@@ -68,11 +75,33 @@ export interface ModelRouteProviderRecord {
   readonly envVars: string[];
   readonly routes?: readonly ProviderAuthRouteDescriptor[] | undefined;
   readonly models: ProviderModelEntry[];
+  /** Where this provider's model list came from, when it was read, and why its last reading failed. */
+  readonly modelList: ProviderModelListReading;
+}
+
+/** One provider's answer to `models.refresh`. */
+export interface ModelListRefreshReport {
+  readonly providerId: string;
+  readonly label: string;
+  /** How many models the provider lists now. */
+  readonly models: number;
+  readonly source: ProviderModelListReading['source'];
+  readonly added: readonly string[];
+  readonly removed: readonly string[];
+  readonly listedAt?: number | undefined;
+  /** Why the provider's list could not be read now; the list shown is its last one, or the catalog's. */
+  readonly error?: string | undefined;
+  /** Not asked: it has no key or sign-in to list models with yet. */
+  readonly notAsked?: boolean | undefined;
 }
 
 export interface ListProviderModelsResponse {
   readonly providers: ModelRouteProviderRecord[];
   readonly currentModel: ProviderModelRef | null;
+  /** Registry keys of the models the person pinned. */
+  readonly pinned: readonly string[];
+  /** Registry keys of the ten models used most recently, newest first. */
+  readonly recent: readonly string[];
   /** Always false: the provider registry reads the secret stores for every listing. */
   readonly secretsResolutionSkipped: boolean;
 }
@@ -151,6 +180,7 @@ export const MODEL_ROUTES: readonly { readonly method: string; readonly path: st
   { method: 'GET', path: '/api/models', methodId: 'models.list' },
   { method: 'GET', path: '/api/models/current', methodId: 'models.current.get' },
   { method: 'PATCH', path: '/api/models/current', methodId: 'models.current.set' },
+  { method: 'POST', path: '/api/models/refresh', methodId: 'models.refresh' },
 ];
 
 export async function dispatchModelRoutes(
@@ -167,6 +197,8 @@ export async function dispatchModelRoutes(
       return handleListProviderModels(context);
     case 'models.current.get':
       return handleGetCurrentModel(context);
+    case 'models.refresh':
+      return handleRefreshModelLists(req, context);
     default:
       return handlePatchCurrentModel(req, context);
   }
@@ -209,6 +241,7 @@ async function handleListProviderModels(context: ModelRouteContext): Promise<Res
       provider: model.provider,
       label: model.displayName ?? model.id,
       contextWindow: model.contextWindow > 0 ? model.contextWindow : undefined,
+      textWork: catalogTextWork(model.provider, model.id),
       ...(reasoningSpec
         ? { reasoningOptions: {
           levels: [...reasoningSpec.values], source: reasoningSpec.source,
@@ -236,6 +269,7 @@ async function handleListProviderModels(context: ModelRouteContext): Promise<Res
       envVars: [...status.envVars],
       ...(status.routes ? { routes: status.routes } : {}),
       models,
+      modelList: providerRegistry.modelListReading(providerId),
     });
   }
 
@@ -247,12 +281,60 @@ async function handleListProviderModels(context: ModelRouteContext): Promise<Res
 
   const currentModel = (await buildCurrentModelResponse(providerRegistry, context.configManager, statuses)).model;
 
+  const favorites = await providerRegistry.favoriteModels();
   const body: ListProviderModelsResponse = {
     providers,
     currentModel,
+    pinned: favorites.pinned,
+    recent: favorites.recent,
     secretsResolutionSkipped: false,
   };
   return Response.json(body);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/models/refresh
+// ---------------------------------------------------------------------------
+
+/**
+ * Read the model lists again from the providers now (one provider, or every
+ * one), past each stored list, with the shared catalog; answers what each
+ * provider lists now, or why it could not be read. A changed list is
+ * announced to every client by the registry.
+ */
+async function handleRefreshModelLists(req: Request, context: ModelRouteContext): Promise<Response> {
+  const bodyOrErr = await context.parseJsonBody(req);
+  if (bodyOrErr instanceof Response) return bodyOrErr;
+  const rawProvider = (bodyOrErr as Record<string, unknown>)['providerId'];
+  if (rawProvider !== undefined && (typeof rawProvider !== 'string' || rawProvider.trim() === '')) {
+    return Response.json({ error: 'providerId must be a provider id', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  }
+  const providerId = typeof rawProvider === 'string' ? rawProvider.trim() : undefined;
+  const { providerRegistry } = context;
+  if (providerId !== undefined && !providerRegistry.listProviders().some((provider) => provider.name === providerId)) {
+    return Response.json({ error: `No provider named '${providerId}'`, code: 'PROVIDER_NOT_FOUND' }, { status: 404 });
+  }
+  // Added and removed are counted against the list every client was shown before this refresh.
+  const idsBy = (models: readonly { provider: string; id: string }[], provider: string) => new Set(models.filter((model) => model.provider === provider).map((model) => model.id));
+  const before = providerRegistry.listModels();
+  const reports = await providerRegistry.refreshModelLists(providerId);
+  const all = providerRegistry.listModels();
+  const results: ModelListRefreshReport[] = reports.map((report) => {
+    const was = idsBy(before, report.providerId);
+    const now = idsBy(all, report.providerId);
+    return {
+      providerId: report.providerId,
+      label: providerDisplayLabel(report.providerId),
+      models: now.size,
+      source: report.source,
+      added: [...now].filter((id) => !was.has(id)),
+      removed: [...was].filter((id) => !now.has(id)),
+      ...(report.listedAt !== undefined ? { listedAt: report.listedAt } : {}),
+      ...(report.error !== undefined ? { error: report.error } : {}),
+      ...(report.source !== 'live' && report.error === undefined && report.skippedReason === undefined ? { notAsked: true } : {}),
+    };
+  });
+  return Response.json({ providers: results });
 }
 
 // ---------------------------------------------------------------------------

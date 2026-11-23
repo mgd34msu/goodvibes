@@ -15,9 +15,10 @@
  * Requires PeekProvider and ToastProvider in the component tree.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Copy, Check, FileText } from 'lucide-react';
 import { highlightCode } from '../../lib/highlight';
+import { copyOutcomeMessage, copyText } from '../../lib/copy-text';
 import { usePeek } from '../../components/peek/PeekPanel';
 import { IconButton } from '../../components/ui/IconButton';
 import { useRightPanel } from '../../components/shell/ShellContext';
@@ -132,22 +133,19 @@ function ArtifactCodeBlock({ artifact, onCopy }: ArtifactCodeBlockProps) {
   const highlighted = highlightCode(visibleCode, lang);
   const displayLanguage = lang || highlighted.language;
   const { toast } = useToast();
+  const codeRef = useRef<HTMLElement>(null);
 
   function handleCopy(): void {
-    if (!navigator.clipboard) {
-      toast({ title: 'Copy failed', description: 'Clipboard API unavailable', tone: 'danger', durationMs: 3000 });
-      return;
-    }
-    navigator.clipboard.writeText(code).then(
-      () => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1300);
-        onCopy(code);
-      },
-      () => {
-        toast({ title: 'Copy failed', description: 'Could not write to clipboard', tone: 'danger', durationMs: 3000 });
-      },
-    );
+    void copyText(code, codeRef.current).then((outcome) => {
+      const message = copyOutcomeMessage(outcome);
+      if (message) {
+        toast({ title: outcome === 'selected' ? 'Selected' : 'Copy failed', description: message, tone: outcome === 'selected' ? 'info' : 'danger', durationMs: 6000 });
+        return;
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1300);
+      onCopy(code);
+    });
   }
 
   return (
@@ -164,7 +162,7 @@ function ArtifactCodeBlock({ artifact, onCopy }: ArtifactCodeBlockProps) {
         />
       </div>
       <pre className="artifact-code-pre">
-        <code dangerouslySetInnerHTML={{ __html: highlighted.html }} />
+        <code ref={codeRef} dangerouslySetInnerHTML={{ __html: highlighted.html }} />
       </pre>
     </div>
   );

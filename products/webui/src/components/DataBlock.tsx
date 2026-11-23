@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Copy, Check } from 'lucide-react';
 import { compactJson } from '../lib/object';
+import { copyOutcomeMessage, copyText } from '../lib/copy-text';
 import { MarkdownMessage } from './MarkdownMessage';
 import { Button } from './ui/Button';
 import { CodeFrame, DetailSection } from './data-view/DataView';
@@ -13,25 +14,21 @@ interface DataBlockProps {
   empty?: string;
 }
 
-/** Copy button for the JSON <pre> branch. */
-function DataBlockCopyButton({ text }: { text: string }) {
+/** Copy button for the JSON <pre> branch; `showing` is the element that shows the text. */
+function DataBlockCopyButton({ text, showing }: { text: string; showing: () => Element | null }) {
   const [copied, setCopied] = useState(false);
   const toastCtx = useOptionalToast();
 
   function handleCopy(): void {
-    if (!navigator.clipboard) {
-      toastCtx?.toast({ title: 'Copy failed', description: 'Clipboard API unavailable', tone: 'danger', durationMs: 3000 });
-      return;
-    }
-    navigator.clipboard.writeText(text).then(
-      () => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1300);
-      },
-      () => {
-        toastCtx?.toast({ title: 'Copy failed', description: 'Could not write to clipboard', tone: 'danger', durationMs: 3000 });
-      },
-    );
+    void copyText(text, showing()).then((outcome) => {
+      const message = copyOutcomeMessage(outcome);
+      if (message) {
+        toastCtx?.toast({ title: outcome === 'selected' ? 'Selected' : 'Copy failed', description: message, tone: outcome === 'selected' ? 'info' : 'danger', durationMs: 6000 });
+        return;
+      }
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1300);
+    });
   }
 
   return (
@@ -51,6 +48,7 @@ function DataBlockCopyButton({ text }: { text: string }) {
 
 export function DataBlock({ title, value, empty = 'No data' }: DataBlockProps) {
   const hasValue = value !== undefined && value !== null && !(Array.isArray(value) && value.length === 0);
+  const codeRef = useRef<HTMLDivElement>(null);
 
   return (
     <DetailSection title={title}>
@@ -58,8 +56,8 @@ export function DataBlock({ title, value, empty = 'No data' }: DataBlockProps) {
         ? typeof value === 'string'
           ? <div className="feedback-data-block__markdown"><MarkdownMessage content={value} /></div>
           : (
-            <div className="feedback-data-block__code">
-              <DataBlockCopyButton text={compactJson(value)} />
+            <div className="feedback-data-block__code" ref={codeRef}>
+              <DataBlockCopyButton text={compactJson(value)} showing={() => codeRef.current?.querySelector('pre') ?? null} />
               <CodeFrame>{compactJson(value)}</CodeFrame>
             </div>
           )

@@ -21,7 +21,7 @@ import { queryKeys } from './queries';
 export interface ModeInForceWords {
   /** The chosen mode's label: "Jev decides". */
   readonly chosen: string;
-  /** What is in force when it differs from the chosen mode: "you, for now". */
+  /** What is in force when it differs from the chosen mode: "asking you, for now". */
   readonly inForce?: string;
   /** The chosen mode and when it takes effect: "Jev decides with a decision model". */
   readonly chosenWhen?: string;
@@ -71,7 +71,7 @@ export function readModeInForceWords(value: unknown): ModeInForceWords | undefin
  * The words in one line, in the order the terminal's status bar draws them
  * (the engine's modeInForceLine, which cannot load in the browser): the mode in
  * force first, the choice second, a failure last. "Jev decides" when the chosen
- * mode is in force; "you, for now · Jev decides with a decision model".
+ * mode is in force; "asking you, for now · Jev decides once a decision model is set".
  */
 export function modeInForceLine(words: ModeInForceWords): string {
   if (words.inForce === undefined) return words.chosen;

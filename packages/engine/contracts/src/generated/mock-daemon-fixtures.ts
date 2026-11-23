@@ -24779,9 +24779,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 ],
                 "source": "catalog",
                 "effectiveByRequested": {}
-              }
+              },
+              "textWork": "text"
             }
-          ]
+          ],
+          "modelList": {
+            "source": "live",
+            "listedAt": 0,
+            "error": "sample"
+          }
         }
       ],
       "currentModel": {
@@ -24789,7 +24795,40 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "provider": "sample",
         "id": "sample"
       },
+      "pinned": [
+        "sample"
+      ],
+      "recent": [
+        "sample"
+      ],
       "secretsResolutionSkipped": false
+    }
+  },
+  "models.refresh": {
+    "methodId": "models.refresh",
+    "http": {
+      "method": "POST",
+      "path": "/api/models/refresh"
+    },
+    "status": 200,
+    "body": {
+      "providers": [
+        {
+          "providerId": "sample",
+          "label": "sample",
+          "models": 0,
+          "source": "live",
+          "added": [
+            "sample"
+          ],
+          "removed": [
+            "sample"
+          ],
+          "listedAt": 0,
+          "error": "sample",
+          "notAsked": false
+        }
+      ]
     }
   },
   "providers.get": {

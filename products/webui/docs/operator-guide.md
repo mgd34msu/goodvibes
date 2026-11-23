@@ -72,10 +72,16 @@ build has never heard of lands in Advanced instead of disappearing.
 
 ## Signing in and pairing
 
-The sign-in screen leads with scanning: "Run goodvibes pair on your computer
-and scan the code." Run `goodvibes pair` in the terminal (or open the desktop
-app's pairing panel) and either open the QR's link on the phone or press "Scan
-the code" for the in-page camera scanner. A scanned code feeds the same
+The sign-in screen leads with scanning: "Run goodvibes pair on the computer
+running GoodVibes, then scan the code it shows, or open the link it prints in a
+browser on that computer." Run `goodvibes pair` in the terminal (or open the
+desktop app's pairing panel) and either open the QR's link on the phone or press
+"Scan the code" for the in-page camera scanner. On a daemon only its own machine
+can reach (the default, bound to `127.0.0.1`), `goodvibes pair` draws no QR
+code: it prints `This link signs in a browser on this computer. A phone cannot
+open it: ...`, the steps that let a phone reach it (`goodvibes-daemon webui
+enable --lan`), the link and a sign-in code; open the link in a browser on that
+computer, or paste the code under "Other ways to sign in". A scanned code feeds the same
 validation path as a pasted one, and the one-time secret is stripped from the
 URL immediately so it never lingers in the address bar or history. Everything
 else is under "Other ways to sign in": pasting a sign-in code by hand, the relay
@@ -142,9 +148,30 @@ Supported chat behavior:
   unwritable is retried by the daemon on its own, and the chat accepts changes
   again once that works
 
-The model and effort control in the composer sets them for this chat only, an
-open chat at once and a new chat when its first message creates it. The model
-new chats start with is changed in Settings, Models and providers.
+The model control in the composer reads the chat's model and effort ("Alpha
+Chat 1 Medium"). One click opens one menu in three steps: the provider, then
+that provider's models, then the chosen model's effort (only for a model that
+has effort levels; the one in use is checked). Providers you are connected to
+come first; the others are listed under "Not connected" with the one action
+that connects them ("Connect in Settings", or "Copy /provider sign-in <id>"
+where only the terminal app can sign in). Within a provider: Favorites (pinned
+models), Recent, then the rest, and last, under "Not described by the
+catalog", models marked "kind unknown"; image, speech and embedding models are
+not listed. The filter box at the top searches every connected provider's
+models at once. Keys: arrows move, Right or Enter goes into the next step, Left
+or Escape goes back one step, typing filters. On a phone the same steps open in
+a bottom sheet.
+
+A pick is for this chat only, an open chat at once and a new chat when its first
+message creates it; the menu says so ("For this chat only. The default for new
+chats is set in Settings.") and offers "Make this the default for new chats",
+which saves the chat's model and effort as the default (also changed in
+Settings, Models and providers). When a provider's list was read more than a
+day ago the menu says when ("List read 3 days ago"), and when its last reading
+failed it says "Could not read its list now"; "Refresh models" reads the lists
+again from the providers (one provider in its step, every provider in the first
+step) and says what it found, for example "Microsoft Foundry: 2 models found (1
+new, 1 retired).".
 
 A new chat offers starters. "What's on my calendar" and "Check my mail" show only
 when that account answers a one-item read (the same reads Settings, Account shows

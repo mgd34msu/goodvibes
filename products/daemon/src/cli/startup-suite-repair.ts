@@ -1,10 +1,8 @@
 /** Repair a daemon-only historical upgrade before configuration can publish a
  * newer data floor that its still-old sibling programs cannot read. */
 import { defaultDownloadBaseUrl } from '@goodvibes/engine/platform/platform/daemon';
-import { dirname } from 'node:path';
-import { applySuiteUpdate, assertSuiteUpdateCurrent, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration, tidyInstalledWebuiDirectory,
+import { applySuiteUpdate, assertSuiteUpdateCurrent, installedSuiteNeedsRepair, retainSuiteUpdateConfiguration,
   type UpdateFetchLike } from '@goodvibes/engine/platform/platform/runtime/self-update';
-import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/transport';
 import { restartOntoUpdatedBinaryAsync } from '@goodvibes/engine/terminal-shell/service-io';
 import { resolveInstalledDaemonUpdateArtifact } from '../config/native-installation.js';
@@ -20,29 +18,6 @@ export interface StartupSuiteRepairOptions {
   readonly platform?: NodeJS.Platform;
   readonly arch?: string;
 }
-/**
- * Before the web UI is served: an installed web UI folder from before 3.4.7
- * (`webui/<version>`, updated in place under its first name) becomes
- * `webui/current` with one copy kept for rollback, and the release folders and
- * lock files earlier updates left are removed (tidyInstalledWebuiDirectory). Only
- * a native install's own folder is touched; a failure is reported and serving
- * goes on from the folder as configured.
- */
-export function tidyWebuiFolderAtStartup(config: Pick<ConfigManager, 'get' | 'setDaemonValues'>, print: (line: string) => void, execPath = process.execPath): void {
-  try {
-    const bundle = config.get('controlPlane.webui.bundleDir');
-    const result = tidyInstalledWebuiDirectory({
-      installRoot: dirname(execPath),
-      bundleDir: typeof bundle === 'string' ? bundle : undefined,
-      setBundleDir: (path) => config.setDaemonValues({ 'controlPlane.webui.bundleDir': path }),
-    });
-    for (const move of result.moved) print(`Web UI folder: moved ${move}.`);
-    if (result.removed.length > 0) print(`Web UI folder: removed what earlier updates left: ${result.removed.join(', ')}.`);
-  } catch (error) {
-    print(`Web UI folder: could not be tidied (${error instanceof Error ? error.message : String(error)}); it is served as configured.`);
-  }
-}
-
 /** Code-owned test ports; ordinary CLI callers cannot supply these through argv. */
 export interface StartupSuiteRepairPorts {
   readonly admit?: typeof resolveInstalledDaemonUpdateArtifact;

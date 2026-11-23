@@ -51,7 +51,7 @@ test('WebUI installation keeps other versions, owner-created directories and ali
   writeFileSync(join(webui, '3.0.0', 'index.html'), 'A still-served previous bundle'); writeFileSync(join(webui, 'custom', 'owner.txt'), 'Owner custom deployment');
   const outside = join(root, 'outside-webui'); mkdirSync(outside); writeFileSync(join(outside, 'outside.txt'), 'Foreign target'); symlinkSync(outside, join(webui, 'custom-link'));
   const result = run('webui'); expect(result.status, result.stderr).toBe(0);
-  expect(readFileSync(join(webui, 'current', 'index.html'), 'utf8')).toBe('New released WebUI');
+  expect(readFileSync(join(webui, '3.1.2', 'index.html'), 'utf8')).toBe('New released WebUI');
   expect(readFileSync(join(webui, '3.0.0', 'index.html'), 'utf8')).toBe('A still-served previous bundle');
   expect(readFileSync(join(webui, 'custom', 'owner.txt'), 'utf8')).toBe('Owner custom deployment'); expect(lstatSync(join(webui, 'custom-link')).isSymbolicLink()).toBe(true);
   expect(readFileSync(join(outside, 'outside.txt'), 'utf8')).toBe('Foreign target');

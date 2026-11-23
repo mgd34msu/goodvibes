@@ -949,7 +949,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.4.7\"; readonly operatorMethodCount: 651; readonly operatorEventCount: 37; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.4.8\"; readonly operatorMethodCount: 651; readonly operatorEventCount: 37; readonly peerEndpointCount: 6; }"
     },
     {
       "name": "FailureCategory",
@@ -4760,7 +4760,7 @@
     {
       "name": "FOUNDATION_METADATA",
       "kind": "const",
-      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.4.7\"; readonly operatorMethodCount: 651; readonly operatorEventCount: 37; readonly peerEndpointCount: 6; }"
+      "text": "FOUNDATION_METADATA: { readonly productId: \"goodvibes\"; readonly productVersion: \"3.4.8\"; readonly operatorMethodCount: 651; readonly operatorEventCount: 37; readonly peerEndpointCount: 6; }"
     },
     {
       "name": "GatewayEventTransport",
@@ -73982,11 +73982,6 @@
       "text": "export interface DownloadedUpdateFile { readonly file: string; readonly size: number; readonly sha256: string; }"
     },
     {
-      "name": "INSTALLED_WEBUI_FOLDER",
-      "kind": "const",
-      "text": "INSTALLED_WEBUI_FOLDER = \"current\""
-    },
-    {
       "name": "INSTALL_READER_CHECK_RESULT",
       "kind": "const",
       "text": "INSTALL_READER_CHECK_RESULT: Readonly<{ readonly schema: \"goodvibes.install.reader-check\"; readonly schemaVersion: 1; }> ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; };"
@@ -74314,17 +74309,6 @@
       "text": "export interface VerifiedUpdateStage { readonly [verifiedStageBrand]: true; }"
     },
     {
-      "name": "WebuiDirectoryTidyResult",
-      "kind": "interface",
-      "required": [
-        "bundleDir",
-        "kept",
-        "moved",
-        "removed"
-      ],
-      "text": "export interface WebuiDirectoryTidyResult { readonly bundleDir: string | undefined; readonly moved: readonly string[]; readonly removed: readonly string[]; readonly kept: readonly string[]; }"
-    },
-    {
       "name": "admitInstalledClientDataWriter",
       "kind": "function",
       "text": "export declare function admitInstalledClientDataWriter(options: InstalledClientDataOptions): NativeDataWriteOwner | undefined;"
@@ -74588,11 +74572,6 @@
       "name": "swapFileAtomically",
       "kind": "function",
       "text": "export declare function swapFileAtomically(targetPath: string, buffer: Buffer, options: { executable: boolean; io?: UpdateFileIo; platform?: NodeJS.Platform; }): void; ;; via Buffer = interface Buffer<TArrayBuffer extends ArrayBufferLike = ArrayBufferLike> extends Uint8Array<TArrayBuffer> { // see buffer.d.ts for implementation shared with all TypeScript versions slice(start?: number, end?: number): Buffer<ArrayBuffer>; subarray(start?: number, end?: number): Buffer<TArrayBuffer>; } ;; Platform = type Platform = | \"aix\" | \"android\" | \"darwin\" | \"freebsd\" | \"haiku\" | \"linux\" | \"openbsd\" | \"sunos\" | \"win32\" | \"cygwin\" | \"netbsd\";"
-    },
-    {
-      "name": "tidyInstalledWebuiDirectory",
-      "kind": "function",
-      "text": "export declare function tidyInstalledWebuiDirectory(options: { readonly installRoot: string; readonly bundleDir: string | undefined; readonly setBundleDir: (path: string) => void; }): WebuiDirectoryTidyResult;"
     },
     {
       "name": "verifiedUpdateStageMembers",

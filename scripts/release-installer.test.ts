@@ -90,7 +90,7 @@ test('a release installs every product from verified assets of the authorised re
     for (const ending of ['.bun', '.bun.json', '.bun.LICENSE.md']) expect(existsSync(join(bin, command + ending))).toBe(true);
   }
   expect(existsSync(join(bin, 'playwright-core/cli.js'))).toBe(true);
-  expect(existsSync(join(bin, 'webui/current/index.html'))).toBe(true);
+  expect(existsSync(join(bin, `webui/${version}/index.html`))).toBe(true);
   expect(existsSync(join(bin, 'lib/sqlite-vec-linux-x64/vec0.so'))).toBe(true);
   const urls = readFileSync(join(root, 'fetches'), 'utf8').trim().split('\n');
   expect(urls.every(url => url.startsWith(`https://github.com/mgd34msu/goodvibes/releases/download/v${version}/`))).toBe(true);

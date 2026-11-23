@@ -1,18 +1,18 @@
 # Changelog
 
-## [3.4.7] - 2026-11-22
+## [3.4.8] - 2026-11-22
 
 The full write-up is in
-[docs/releases/3.4.7.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.7/docs/releases/3.4.7.md).
+[docs/releases/3.4.8.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.8/docs/releases/3.4.8.md).
+3.4.7 was tagged but never published; 3.4.8 is 3.4.7 without its change to the
+installed web UI folder.
 
 ### Upgrading from 3.4.6
 
 - `models.list` answers carry `recommended` on the models of the Recommended
-  short list; a 3.4.6 client refuses them, so run every program on 3.4.7.
+  short list; a 3.4.6 client refuses them, so run every program on 3.4.8.
 - The model catalog cache is version 8 (release dates); a version 7 cache is
   used at once and read again in full in the background.
-- The web UI is installed in `webui/current` with one `webui/current.previous`;
-  the daemon carries an older `webui/<version>` layout forward when it starts.
 
 ### Fixed
 

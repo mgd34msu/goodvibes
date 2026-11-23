@@ -2393,8 +2393,8 @@ publish_release_directory() (
       # The update succeeded and its claim is released, but the suite swap may still fail and roll
       # back, so the superseded tree is not deleted here: it is queued ("O") for the commit step,
       # which runs only after the whole swap finished. Only a driver tree published by a DIFFERENT
-      # release is queued; the same release reinstalled is retained. A replaced WebUI tree becomes
-      # the WebUI's one rollback copy (below), never removed while it is that copy.
+      # release is queued; the same release reinstalled, and every WebUI tree, is retained (the
+      # release marker is not a deletion receipt, and WebUI directories are deliberately never pruned).
       _directory_queued=0
       if [ "$_directory_had_old" = 1 ] && [ -n "$INSTALL_JOURNAL" ] && [ "$_directory_parent" = "$INSTALL_DIR" ] && _directory_base_current \
         && [ -d "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" \
@@ -2402,21 +2402,6 @@ publish_release_directory() (
         && ! grep -qF "\"version\":\"${VERSION#v}\"" "$_directory_outgoing/.goodvibes-release.json" 2>/dev/null; then
         # T names the directory the parked tree (O) came from, so a rollback of the suite puts it back there.
         if printf 'T%s\nO%s\n' "$_directory_target" "$_directory_outgoing" >> "$INSTALL_JOURNAL"; then _directory_queued=1; fi
-      fi
-      # The WebUI keeps exactly one copy for rollback, beside the live folder as
-      # current.previous (the name the daemon's updater and rollback use): the tree
-      # just replaced takes that slot, and the copy it replaces is removed when it
-      # carries this suite's release marker. An unmarked copy is never removed.
-      if [ "$_directory_had_old" = 1 ] && [ "$_directory_parent" = "$INSTALL_DIR/webui" ] && _directory_base_current \
-        && [ -d "$_directory_outgoing" ] && [ ! -L "$_directory_outgoing" ] && installer_open_file_matches 6 "$_directory_outgoing" \
-        && [ -f "$_directory_outgoing/.goodvibes-release.json" ] && [ ! -L "$_directory_outgoing/.goodvibes-release.json" ]; then
-        if [ -d "$_directory_target.previous" ] && [ ! -L "$_directory_target.previous" ] \
-          && [ -f "$_directory_target.previous/.goodvibes-release.json" ] && [ ! -L "$_directory_target.previous/.goodvibes-release.json" ]; then
-          mv "$_directory_target.previous" "$_directory_work/superseded" && rm -rf -- "$_directory_work/superseded" || :
-        fi
-        if [ ! -e "$_directory_target.previous" ] && [ ! -L "$_directory_target.previous" ]; then
-          mv "$_directory_outgoing" "$_directory_target.previous" && say "  kept       $_directory_target.previous (for rollback)" || :
-        fi
       fi
       if _directory_base_current && rmdir "$_directory_work" 2>/dev/null; then :
       elif [ "$_directory_queued" = 1 ]; then say "  retained   $_directory_work (the previous directory is removed when the whole suite install has finished)"
@@ -2478,12 +2463,14 @@ install_browser_driver() {
 #
 # When selected, the bundle and checksum are required by the same suite
 # verification pass. Its index is checked in private staging before program
-# replacement, then the complete bundle is moved into $INSTALL_DIR/webui/current.
+# replacement, then the complete bundle is moved into its versioned directory.
 #
-# The bundle is staged whole and renamed into place (publish_release_directory),
-# never unpacked over the folder a running daemon serves; the tree it replaces is
-# kept as current.previous, the one copy for rollback, the same slots the
-# daemon's own updater uses. A custom (unmarked) folder is never moved or removed.
+# Each version unpacks into its OWN directory ($INSTALL_DIR/webui/<version>) and
+# the daemon is pointed at it afterwards. Unpacking over the directory a running
+# daemon is serving would swap files under it mid-request; this way the running
+# daemon keeps serving the old directory until it is restarted onto the new one.
+# Older versioned and custom directories remain available to running readers
+# and explicit recovery. A version name does not prove ownership or inactivity.
 #
 # CONFIGURATION IS DONE BY THE DAEMON BINARY, not by writing settings from
 # shell: `goodvibes-daemon webui enable --bundle-dir <dir>` owns the key names,
@@ -2502,15 +2489,12 @@ install_webui() {
 
   say ""
   WEBUI_VERSION=$VERSION
+  webui_plain_version="${WEBUI_VERSION#v}"
   say "Installing the web UI $WEBUI_VERSION ..."
   webui_staging="$WORKDIR/webui-staging"
   assert_install_claims
   write_directory_release_marker "$webui_staging/goodvibes-webui"
-  # One folder, named for what it holds whatever release that is: the daemon's
-  # updater replaces it in place and keeps the copy before as current.previous.
-  # A folder from an earlier release (webui/<version>) is carried forward by the
-  # daemon when it next starts (runtime/webui-directory-tidy.ts).
-  webui_target="$WEBUI_ROOT/current"
+  webui_target="$WEBUI_ROOT/$webui_plain_version"
   publish_release_directory "$webui_staging/goodvibes-webui" "$webui_target"
   say "  installed  $webui_target"
 }
@@ -2578,12 +2562,9 @@ write_directory_release_marker() {
   chmod 644 "$_marker_path" || fail INSTALL_E099 'Could not set directory release metadata permissions.'
 }
 
-# Custom (unmarked) WebUI directories are never moved or removed. Release
-# folders an earlier installer wrote (webui/<version>) are carried forward by the
-# daemon when it starts, after it serves webui/current: the newest becomes
-# current.previous when there is none, and the rest are removed
-# (runtime/webui-directory-tidy.ts), since only the daemon knows which folder it
-# serves.
+# Previous/custom WebUI directories are deliberately retained. The directory
+# name and release marker do not identify all contents or tell us whether an
+# existing daemon still serves them, so installation never prunes them.
 
 # --- PATH shadowing: is the install we just wrote the one the shell runs? ---
 #
@@ -3768,7 +3749,7 @@ parse_options() {
         say 'GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.'
         say ''
         say 'Options:'
-        say '  --version VERSION     Install this release, such as v3.4.7, for every program (default: latest;'
+        say '  --version VERSION     Install this release, such as v3.4.8, for every program (default: latest;'
         say '                        also GOODVIBES_VERSION).'
         say '  --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).'
         say '  --from-dir DIR        Install from DIR, a directory holding the release files and their SHA256SUMS.txt,'

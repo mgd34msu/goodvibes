@@ -12,9 +12,9 @@ Terms used here:
 - A provider is a model service (for example OpenRouter or Anthropic).
 - The suite is the three programs plus the web UI bundle, the browser driver and the native libraries, all from one release. When a later step of an install fails, the replaced programs are put back and so is the browser driver the run had replaced, so the programs and the driver stay from one release.
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
-- A release is a tagged GoodVibes version such as `v3.4.7`, published at `https://github.com/mgd34msu/goodvibes/releases`.
+- A release is a tagged GoodVibes version such as `v3.4.8`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
-This part describes release 3.4.7.
+This part describes release 3.4.8.
 
 ## Choosing an installation method
 
@@ -119,31 +119,31 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 On a new Linux x64 machine where `~/.local/bin` is not on `PATH`, the shell is bash and the user is `alex`, these are the lines the installer prints, in order. Words in angle brackets are filled in at run time.
 
 ```text
-Installing GoodVibes v3.4.7 for linux-x64 into /home/alex/.local/bin
+Installing GoodVibes v3.4.8 for linux-x64 into /home/alex/.local/bin
 
-Installing goodvibes v3.4.7 ...
+Installing goodvibes v3.4.8 ...
   installed  /home/alex/.local/bin/goodvibes
 
-Installing goodvibes-daemon v3.4.7 ...
+Installing goodvibes-daemon v3.4.8 ...
   installed  /home/alex/.local/bin/goodvibes-daemon
-  running:   goodvibes-daemon 3.4.7
+  running:   goodvibes-daemon 3.4.8
 
 Added /home/alex/.local/bin to PATH in /home/alex/.bashrc (installer-managed; uninstall removes it).
 
-Installed: goodvibes 3.4.7
+Installed: goodvibes 3.4.8
   installed  /home/alex/.local/bin/lib/sqlite-vec-linux-x64/vec0.so
 
-Installing the web UI v3.4.7 ...
-  installed  /home/alex/.local/bin/webui/current
+Installing the web UI v3.4.8 ...
+  installed  /home/alex/.local/bin/webui/3.4.8
   installed  /home/alex/.local/bin/playwright-core
 
-Installing goodvibes-agent v3.4.7 ...
+Installing goodvibes-agent v3.4.8 ...
   installed  /home/alex/.local/bin/goodvibes-agent
-  running:   goodvibes-agent 3.4.7
+  running:   goodvibes-agent 3.4.8
 
 Installing the wake-word model ...
   wake-word model: Wake-word model installed and verified: "hey goodvibes" <model version> (<size>). Turn it on with voice.wake.enabled, nothing further to download.
-  web UI: served by the daemon from /home/alex/.local/bin/webui/current
+  web UI: served by the daemon from /home/alex/.local/bin/webui/3.4.8
     http://127.0.0.1:3421
     reachable from this machine only (the control-plane listener is bound to loopback).
     To reach it from another device on your network:  goodvibes-daemon webui enable --lan
@@ -198,13 +198,13 @@ When `curl` itself cannot download the script (no network, DNS failure, proxy), 
 Every option can be given as an environment variable on the `sh` side of the pipe:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.7 GOODVIBES_WEBUI=0 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 GOODVIBES_WEBUI=0 sh
 ```
 
 Some options also exist as command-line flags. With `curl | sh`, flags follow `sh -s --`:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.7 --no-service
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.8 --no-service
 ```
 
 A downloaded copy of the script takes the same flags directly:
@@ -223,7 +223,7 @@ Usage: install.sh [--version VERSION] [--bin-dir DIR] [--from-dir DIR] [--no-ser
 GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.
 
 Options:
-  --version VERSION     Install this release, such as v3.4.7, for every program (default: latest;
+  --version VERSION     Install this release, such as v3.4.8, for every program (default: latest;
                         also GOODVIBES_VERSION).
   --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).
   --from-dir DIR        Install from DIR, a directory holding the release files and their SHA256SUMS.txt,
@@ -250,7 +250,7 @@ The complete list of installer options and environment variables, generated from
 
 | Option | Values and default | Effect |
 | --- | --- | --- |
-| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.4.7` or `3.4.7`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
+| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.4.8` or `3.4.8`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
 | `GOODVIBES_INSTALL_DIR` or `--bin-dir DIR` (alias `--install-dir DIR`) | `$HOME/.local/bin` | The directory that receives the programs and their support files. It is created when missing. A relative path or a symbolic link is resolved to its physical directory once at the start. The web UI goes to `<dir>/webui`, the browser driver to `<dir>/playwright-core`, native libraries to `<dir>/lib`. |
 | `GOODVIBES_DAEMON_SERVICE=0` or `--no-service` | `1` (default) | Skips first-run service registration and, when no daemon service is installed, records the choice with `goodvibes-daemon config set service.enabled false`. `service.enabled` is a daemon setting, read by the daemon before it would install itself as a service at its first idle moment and by `goodvibes doctor`, so a daemon started by hand stays without a service and doctor does not ask for one. The installer then prints `Daemon service setup skipped (--no-service); ...` followed by the daemon's path. `--service` (or `GOODVIBES_DAEMON_SERVICE=1`) turns it back on. Any value other than `1` means skip. An already installed service is left installed, recorded as it is, and refreshed and restarted on upgrade. The installer starts no daemon. When neither the flag nor the variable is given and `service.enabled` is already `false` (for example after `goodvibes-daemon uninstall-service`), no service is set up: the installer prints `Daemon service: off by your choice (service.enabled is false), so none was set up.` and `goodvibes-daemon install-service` as the way to turn it on. |
 | `GOODVIBES_AUTO_UPDATE=0` or `--no-auto-update` | `1` (default) | Runs `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` before any program starts. Both are daemon settings, kept in `~/.goodvibes/daemon/settings.json` and read by the daemon, the terminal app and the Agent, so none of the three updates itself, from its first launch. The closing lines say `Automatic updates: off for goodvibes, goodvibes-daemon and goodvibes-agent.` If the daemon refuses a write, the install still finishes and says how to turn them off. Update later by running the installer again. Any value other than `0` leaves updates on. |
@@ -281,7 +281,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 Install one exact release:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.7 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 sh
 ```
 
 Install into a different directory, for example `~/bin`:
@@ -304,10 +304,10 @@ Install with automatic updates off from the first launch:
 curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --no-auto-update
 ```
 
-Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.4.7 -R mgd34msu/goodvibes -D goodvibes-v3.4.7`), then run the installer from that copy:
+Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.4.8 -R mgd34msu/goodvibes -D goodvibes-v3.4.8`), then run the installer from that copy:
 
 ```sh
-sh install.sh --from-dir ./goodvibes-v3.4.7 --no-auto-update
+sh install.sh --from-dir ./goodvibes-v3.4.8 --no-auto-update
 ```
 
 With no service, no daemon runs until one is started by hand (`cd ~ && nohup goodvibes-daemon >/dev/null 2>&1 &`). The terminal app and the Agent never start a daemon that has no service: at start they only start an installed service that is stopped, and otherwise say that no daemon answers.
@@ -327,7 +327,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --decision-policy 'No Deci
 Install unattended (CI, a provisioning script, no terminal). Older copies on `PATH` are then removed only when `GOODVIBES_SHADOW_REMOVE=1`; with the default, an unanswerable question leaves them in place and the install still succeeds:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.7 GOODVIBES_SHADOW_REMOVE=1 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 GOODVIBES_SHADOW_REMOVE=1 sh
 ```
 
 Upgrade an existing installation to the newest release: run the same install command again. See [Updating](#updating).
@@ -346,7 +346,7 @@ Upgrade an existing installation to the newest release: run the same install com
 10. Marks the swap finished, deletes the `.goodvibes-previous` backups and releases the claims. If anything fails or the installer is interrupted before this point, the previous programs are put back automatically (see [When an installation fails or is interrupted](#when-an-installation-fails-or-is-interrupted)). Then writes the PATH line (see [How the installer handles PATH](#how-the-installer-handles-path)); a startup file it cannot write never fails or undoes the install.
 11. Saves the decision policy when `--decision-policy` was given, and turns automatic updates off when `--no-auto-update` was given.
 12. Runs `goodvibes-daemon provision-wake-model` unless `GOODVIBES_WAKE_MODEL=0`.
-13. Runs `goodvibes-daemon webui enable --bundle-dir <dir>/webui/current` unless `GOODVIBES_WEBUI=0`. The daemon writes the web UI settings and prints the address. This never widens network exposure: a daemon bound to loopback keeps serving this machine only.
+13. Runs `goodvibes-daemon webui enable --bundle-dir <dir>/webui/<version>` unless `GOODVIBES_WEBUI=0`. The daemon writes the web UI settings and prints the address. This never widens network exposure: a daemon bound to loopback keeps serving this machine only.
 14. Asks the daemon about its service (`goodvibes-daemon service-status --json`, whose `productServices` lists every daemon service GoodVibes wrote for this user). With `--no-service` and no service installed, records `service.enabled` `false`. When a service definition that GoodVibes wrote exists, runs `goodvibes-daemon refresh-service` so the definition matches the new program.
 15. Restarts every running GoodVibes daemon service of this user (the default one and any second daemon under its own `service.serviceName`), a daemon started by hand without a terminal, and Agent processes without a terminal, so they use the new programs (unless `GOODVIBES_RESTART_DAEMON=0`). A program attached to a terminal (an interactive `goodvibes-agent`, a daemon in the foreground) is never stopped: it keeps running the previous version and the installer names it and asks for it to be restarted there.
 16. When no daemon is running and no service definition exists, runs `goodvibes-daemon install-service`, which writes the service, starts it and tries to enable lingering (unless `--no-service`, or, with no service choice given, `service.enabled` is `false`).
@@ -368,8 +368,7 @@ Paths below use the default install directory `~/.local/bin` and the `linux-x64`
 | `~/.local/bin/lib/sqlite-vec-linux-x64/vec0.so` | The vector-search extension (`vec0.dylib` under `sqlite-vec-darwin-<arch>` on macOS). All three programs load it from here. |
 | `~/.local/bin/lib/sqlite-darwin-<arch>/libsqlite3.dylib` and `libsqlite3.dylib.json` | macOS only. The SQLite library the daemon uses, and its record. |
 | `~/.local/bin/playwright-core/` | The browser driver used by browser tools. Browsers themselves are downloaded later into a separate cache when first needed (`goodvibes-agent browser provision`). Holds `.goodvibes-release.json` naming its release. |
-| `~/.local/bin/webui/current/` | The web UI the daemon serves, whatever release it is; its `.goodvibes-release.json` names the release. An install or an update replaces it and keeps the copy before. |
-| `~/.local/bin/webui/current.previous/` | The one copy of the web UI kept for rollback. An older copy is removed when a newer one takes its place. An installation from before 3.4.7 (`webui/<version>/` folders) is carried forward into these two when the daemon next starts, and the older release folders and the lock files of finished updates are removed; a folder without the suite's release marker is left alone. |
+| `~/.local/bin/webui/<version>/` | The web UI bundle for that release, for example `webui/3.4.8/`. Every release the installer installs gets its own directory; older ones are never deleted by the installer. Holds `.goodvibes-release.json`. |
 | `~/.local/bin/.goodvibes-reader-requirements.json` | Written by the programs when saved data needs a minimum reader. The installer only reads it. Never delete it to force a downgrade. |
 | `~/.local/bin/<program>.previous` and other `*.previous` files | Rollback copies kept by an automatic update or `/update apply`. See [Rolling back](#rolling-back). |
 | `~/.config/systemd/user/goodvibes.service` | Linux. The daemon's service, written by `goodvibes-daemon install-service`. |
@@ -432,7 +431,7 @@ When a directory earlier on `PATH` holds another `goodvibes`, it prints which co
 ```text
 PROBLEM: typing "goodvibes" does not run the copy this installer maintains.
          wins on PATH: /home/alex/.bun/bin/goodvibes (version 1.18.1)
-         installed here: /home/alex/.local/bin/goodvibes (version 3.4.7)
+         installed here: /home/alex/.local/bin/goodvibes (version 3.4.8)
 ```
 
 Then, for each earlier copy:
@@ -477,7 +476,7 @@ Once replacement has begun, every replaced file is kept as `<file>.goodvibes-pre
 
 ```text
 install.sh: installation did not finish. The previous programs were restored and the installation claims were released; running services were not touched.
-install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.7 sh
+install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 sh
 ```
 
 If the previous files cannot all be put back, the installer keeps the claims, the backups and the journal, and prints one command per file instead:
@@ -877,7 +876,7 @@ Only a release ("binary") installation updates itself. A program run from source
 2. A check asks the release feed named by `update.releasesUrl` for the latest tag. When it is newer than the running daemon, the daemon downloads and checksum-verifies the release.
 3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback. From that last idle check until it restarts, the daemon takes no new work: a request that would start or change something (any method other than `GET` or `HEAD`, and over the WebSocket any call whose method is not a read) is answered `503` with code `DAEMON_ADMISSION_CLOSED` and `Retry-After: 5`, and reads and status still answer. A channel message that arrives meanwhile (Telegram, Slack, Discord, Mattermost, ntfy including its remote-chat topic, Home Assistant chat, the generic webhook and the other chat channels) is accepted and saved but neither read nor started, and no notice is sent: it is answered once, after the restart (a Home Assistant reply arrives as its event). A message in a delegated Telegram review chat is not taken: it stays with Telegram and is read after the restart. A GitHub webhook event is answered `202` with `outcome: waiting-for-restart`, saved, and its agent started once after the restart. A "yes" to a work proposal is kept the same way, with any direction added to it, and its work starts after the restart. Scheduled automation jobs and check-ins, watcher runs, knowledge schedules, trigger actions, memory consolidation, the daily store snapshot and the timed retention sweeps start nothing either. What fell due runs after the restart: an automation occurrence once (within `automation.catchUpWindowMinutes`), a trigger's owed action once (a condition still true fires again), consolidation at its next idle or scheduled pass, and the store snapshot at the first hourly check. When the files are not replaced after all, or the service manager refuses the handover before the daemon stops, it takes work again at once and starts what it held.
 4. The daemon stops in order, then the service manager starts the new version. Under systemd it asks for a service restart. When it was started by hand on Linux, it installs the systemd user unit and hands over to it. On macOS a one-time launchd helper restarts it after the old process exits; a daemon on macOS that launchd does not supervise is not updated this way, so update it with the installer or `/update apply`.
-5. The daemon logs and records a receipt that begins `updated from 3.4.7 to 3.4.7 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
+5. The daemon logs and records a receipt that begins `updated from 3.4.7 to 3.4.8 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
 
 No clock ends an update. The download runs until it finishes, the release server or the connection fails (the transport gives up on a transfer that receives nothing for 300 seconds), the daemon stops, or the loop is stopped; a slow connection only makes it take longer. Release files are written to a private directory beside the installation (`.update-fetch-<pid>-<random>`) as they arrive and copied into place from there, so the daemon holds one piece of a file in memory at a time; the directory is removed when the update ends, and one left by a daemon that was killed mid-download is removed by the next update.
 
@@ -893,10 +892,10 @@ On a machine whose daemon runs, it prints (receipt lines vary):
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.4.7
+  version:  3.4.8
   updates:  on, checking every 1h 0m
   receipts:
-    2026-11-20T09:12:44.120Z  updated from 3.4.7 to 3.4.7 at 2026-11-20 10:12; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
+    2026-11-20T09:12:44.120Z  updated from 3.4.7 to 3.4.8 at 2026-11-20 10:12; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
 ```
 
 The first line names `this machine`, or the daemon's address when `--host` points elsewhere. `version:` prints two lines, `<build> (the daemon build)` and `<platform version> (the platform package it reports on /status)`, when the two differ. `receipts:` reads `none written` when there are none, and `could not be read (<reason>)` when the receipts file is there but cannot be read or parsed; likewise `uptime:` reads `the lifecycle marker could not be read (<reason>)` when the marker file is there but cannot be read.
@@ -905,7 +904,7 @@ Inside `goodvibes` or `goodvibes-agent`, `/update daemon` shows the connected da
 
 ```text
 Daemon updates
-  running:  3.4.7
+  running:  3.4.8
   updates:  on, checking every 1h 0m
   next: /update daemon --check runs one check now
 ```
@@ -957,7 +956,7 @@ The lines each outcome prints (`<new>` and `<current>` are versions such as `v3.
 
 After `requires recovery`, run the install command again: it recovers a transaction whose process is gone, or stops with `INSTALL_E120` and names the files to put back (see [Installer errors and their fixes](#installer-errors-and-their-fixes)).
 
-A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.4.7, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
+A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.4.8, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
 
 A launch or Agent update replaces the daemon program on disk too, but the running daemon keeps its version until it restarts. Restart it with `goodvibes-daemon restart-service`.
 
@@ -1031,7 +1030,7 @@ On an installation that cannot update itself, `/update apply` prints `This insta
 
 Running the install command again upgrades to the newest release (or to `GOODVIBES_VERSION`). Settings, sessions and data in `~/.goodvibes` are never touched. Besides replacing the programs, an upgrade:
 
-- Installs the new web UI into `webui/current/`, keeps the one it replaces as `webui/current.previous/` (removing an older copy there) and points the daemon at `webui/current/`. Older `webui/<version>/` folders from before 3.4.7 are carried forward or removed by the daemon when it next starts (see What lands where).
+- Installs the new web UI into its own directory (`webui/<new version>/`) and points the daemon at it. Older `webui/<version>/` directories stay; delete them by hand when no daemon serves them.
 - Deletes stale rollback copies: when the new daemon differs from the old one, the `*.previous` files left by an earlier automatic update are removed (`removed <path> (a rollback copy of a release older than the one just replaced)`), so `/update rollback` reports nothing to restore instead of restoring a release two versions back. Reinstalling the same release keeps them.
 - Refreshes the daemon's service definition when GoodVibes wrote it. Nothing is printed when it was already current. When it was rewritten, the installer prints `Refreshing the daemon service goodvibes.service ...` and the daemon's lines, and the old file is kept as `<definition>.bak.<timestamp>`. A definition GoodVibes did not write is left as it is, with a `NOTE:` naming the command to hand it back.
 - Restarts what runs from this install directory, unless `GOODVIBES_RESTART_DAEMON=0`:
@@ -1056,9 +1055,9 @@ With `OLD` the current directory (for example `~/.local/bin`) and `NEW` the targ
 1. Quit every `goodvibes` and `goodvibes-agent`, and note the version: `goodvibes --version`. If a second daemon service runs from the same program (see [A second daemon as its own service](#a-second-daemon-as-its-own-service)), remove it now, from its working directory and with its `GOODVIBES_HOME`: `cd <its working directory> && GOODVIBES_HOME=<its tree> goodvibes-daemon uninstall-service`. The uninstaller knows only the default service, so a second service would otherwise keep pointing at the deleted `$OLD/goodvibes-daemon` and fail at every login.
 2. Carry over the saved-data reader record, so the new directory keeps the same protection against installing a release too old for the data: `mkdir -p "$NEW" && cp -p "$OLD/.goodvibes-reader-requirements.json" "$NEW/"` (skip when the file does not exist).
 3. Uninstall from the old directory. This removes the GoodVibes service, stops hand-started processes, deletes the programs and removes the old PATH line: `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_INSTALL_DIR="$OLD" GOODVIBES_UNINSTALL=1 sh`.
-4. Install the same version into the new directory: `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v<version> GOODVIBES_INSTALL_DIR="$NEW" sh` (for an installation without a service: `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v<version> GOODVIBES_INSTALL_DIR="$NEW" sh -s -- --no-service`). The installer writes a new service that runs `$NEW/goodvibes-daemon`, points the daemon at `$NEW/webui/current` and adds a PATH line for `$NEW`.
+4. Install the same version into the new directory: `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v<version> GOODVIBES_INSTALL_DIR="$NEW" sh` (for an installation without a service: `curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v<version> GOODVIBES_INSTALL_DIR="$NEW" sh -s -- --no-service`). The installer writes a new service that runs `$NEW/goodvibes-daemon`, points the daemon at `$NEW/webui/<version>` and adds a PATH line for `$NEW`.
 5. Remove what the uninstall kept in the old directory: `rm -rf -- "$OLD/webui" "$OLD/playwright-core" "$OLD/playwright-core.previous"` and `rm -f -- "$OLD/.goodvibes-reader-requirements.json"`; remove `$OLD` itself when it is empty and was used only for GoodVibes.
-6. Open a new shell and check: `command -v goodvibes` names `$NEW/goodvibes`, `goodvibes-daemon service-status` shows the service running, and `goodvibes-daemon webui status` names `$NEW/webui/current`.
+6. Open a new shell and check: `command -v goodvibes` names `$NEW/goodvibes`, `goodvibes-daemon service-status` shows the service running, and `goodvibes-daemon webui status` names `$NEW/webui/<version>`.
 7. Install a removed second daemon service again, the same way as before: `cd <its working directory> && GOODVIBES_HOME=<its tree> goodvibes-daemon install-service`. Its settings in `<its tree>/.goodvibes/` (port, `service.serviceName`) were not touched, so it comes back under the same name, now running `$NEW/goodvibes-daemon`.
 
 What does not carry over: the `*.previous` rollback copies (so `/update rollback` has nothing to restore until the next update), and anything the owner added to the old `webui` or `playwright-core` directories.
@@ -1068,7 +1067,7 @@ What does not carry over: the `*.previous` rollback copies (so `/update rollback
 To stay on one release and stop every automatic update:
 
 1. Turn off every automatic update: `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` (one setting file read by all three programs).
-2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.7 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
+2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.8 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
 3. Check: `goodvibes-daemon update` shows `updates:  off: update.auto is not true, so this daemon will not update itself`.
 
 To resume updates, set the same keys back to `true` (or run `goodvibes-daemon config unset update.auto`) and restart the programs.
@@ -1080,7 +1079,7 @@ Installing an older release over a newer one works only when the older programs 
 Install with `--no-auto-update` (or `GOODVIBES_AUTO_UPDATE=0`):
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.7 --no-auto-update
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.8 --no-auto-update
 ```
 
 Before any program starts, the installer writes `update.auto` and `update.autoUpdateAtLaunch` as `false` in the daemon's settings file, which the daemon, the terminal app and the Agent all read, so none of them updates itself from its first launch. Combine it with the other options, for example `--no-service`, `--bin-dir` or `--from-dir`. Behind a proxy, add the variables shown in [Network access, proxies and machines without internet](#network-access-proxies-and-machines-without-internet).
@@ -1124,15 +1123,16 @@ After an upgrade with the installer, no complete rollback set is kept. To go bac
 
 ### What is on disk after each upgrade and rollback
 
-The example starts from a release install of v3.4.7 in `~/.local/bin`, whose web UI is configured at `~/.local/bin/webui/current`, and moves to v3.4.8.
+The example starts from a release install of v3.3.1 in `~/.local/bin`, whose web UI is configured at `~/.local/bin/webui/3.3.1`, and moves to v3.3.2.
 
 | After | Programs and companions | Browser driver | Web UI | What the daemon serves |
 | --- | --- | --- | --- | --- |
-| The install of v3.4.7 | v3.4.7 files; no `.previous` copies | `playwright-core/` (v3.4.7) | `webui/current/` (v3.4.7) | `webui/current/` |
-| `/update apply`, a launch update or the daemon's update loop to v3.4.8 | v3.4.8 files in place; every replaced file kept as `<file>.previous` (v3.4.7) | `playwright-core/` holds v3.4.8; `playwright-core.previous/` holds v3.4.7 | `webui/current/` holds v3.4.8 (its `.goodvibes-release.json` says `3.4.8`); `webui/current.previous/` holds v3.4.7 | `webui/current/`, v3.4.8 after the daemon restarts |
-| `/update rollback` from there | Live and kept copies are exchanged: v3.4.7 files in place, the v3.4.8 files become the `<file>.previous` copies | `playwright-core/` v3.4.7, `playwright-core.previous/` v3.4.8 | `webui/current/` v3.4.7, `webui/current.previous/` v3.4.8 | `webui/current/`, v3.4.7 after the daemon restarts |
-| Running the installer for v3.4.8 instead (from the v3.4.7 install) | v3.4.8 files; no `.previous` copies (program `*.previous` copies from earlier updates are deleted when the new daemon differs from the old one) | `playwright-core/` v3.4.8; the replaced v3.4.7 tree is deleted when the install finishes | `webui/current/` holds v3.4.8; the replaced v3.4.7 copy becomes `webui/current.previous/`, and an older copy there is removed | `webui/current/` |
-| Running the installer for v3.4.7 again after that (a downgrade by tag) | v3.4.7 files; no `.previous` copies | `playwright-core/` v3.4.7 | `webui/current/` holds v3.4.7 (left untouched when it already holds exactly the v3.4.7 files); `webui/current.previous/` holds the copy it replaced | `webui/current/` |
+| The install of v3.3.1 | v3.3.1 files; no `.previous` copies | `playwright-core/` (v3.3.1) | `webui/3.3.1/` (v3.3.1) | `webui/3.3.1/` |
+| `/update apply`, a launch update or the daemon's update loop to v3.3.2 | v3.3.2 files in place; every replaced file kept as `<file>.previous` (v3.3.1) | `playwright-core/` holds v3.3.2; `playwright-core.previous/` holds v3.3.1 | The configured directory is updated in place: `webui/3.3.1/` now holds v3.3.2 (its `.goodvibes-release.json` says `3.3.2`); `webui/3.3.1.previous/` holds v3.3.1 | The same configured path, `webui/3.3.1/`, now v3.3.2 after the daemon restarts |
+| `/update rollback` from there | Live and kept copies are exchanged: v3.3.1 files in place, the v3.3.2 files become the `<file>.previous` copies | `playwright-core/` v3.3.1, `playwright-core.previous/` v3.3.2 | `webui/3.3.1/` v3.3.1, `webui/3.3.1.previous/` v3.3.2 | `webui/3.3.1/`, v3.3.1 after the daemon restarts |
+| Running the installer for v3.3.2 instead (from the v3.3.1 install) | v3.3.2 files; no `.previous` copies (program `*.previous` copies from earlier updates are deleted when the new daemon differs from the old one; directory `.previous` copies are left alone) | `playwright-core/` v3.3.2; the replaced v3.3.1 tree is deleted when the install finishes | A new `webui/3.3.2/`; `webui/3.3.1/` stays untouched | The installer runs `goodvibes-daemon webui enable --bundle-dir ~/.local/bin/webui/3.3.2`, so `webui/3.3.2/` after the restart |
+| `/update apply` to v3.3.2 (second row), then the installer for v3.3.3 | v3.3.3 files; the program `*.previous` copies are deleted because the new daemon differs from the old one (reinstalling the same release keeps them) | `playwright-core/` v3.3.3; the replaced v3.3.2 tree is deleted when the install finishes; `playwright-core.previous/` (v3.3.1) stays | A new `webui/3.3.3/`; `webui/3.3.1/` (holding v3.3.2) and `webui/3.3.1.previous/` (v3.3.1) stay | `webui/3.3.3/` |
+| Running the installer for v3.3.1 again after that (a downgrade by tag) | v3.3.1 files; no `.previous` copies | `playwright-core/` v3.3.1 | `webui/3.3.1/` is reused (left untouched when it already holds exactly the v3.3.1 files, otherwise replaced); `webui/3.3.2/` stays | `webui/3.3.1/` |
 
 Each automatic update or `/update apply` keeps one generation of directory backups: an older `.previous` tree that carries a GoodVibes release marker is deleted, and one without a marker (local additions) is set aside and reported as `retained earlier backup: <path>`.
 
@@ -1540,7 +1540,7 @@ Many ids guard against something changing the install directory, a claim file or
 | `INSTALL_E006` | could not resolve the latest release tag for mgd34msu/goodvibes | `curl` could not reach GitHub. | Check the network and proxy, or set `GOODVIBES_VERSION=vX.Y.Z`. |
 | `INSTALL_E007` | could not resolve the latest release tag | GitHub gave no tag (with `wget`, or an empty redirect). | As `INSTALL_E006`. |
 | `INSTALL_E008` | All products use GOODVIBES_VERSION; remove conflicting per-product version overrides. | `GOODVIBES_DAEMON_VERSION`, `GOODVIBES_AGENT_VERSION` or `GOODVIBES_WEBUI_VERSION` differs from `GOODVIBES_VERSION`. | `unset GOODVIBES_DAEMON_VERSION GOODVIBES_AGENT_VERSION GOODVIBES_WEBUI_VERSION`. |
-| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.4.7`. |
+| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.4.8`. |
 | `INSTALL_E010` | Missing or ambiguous checksum: `<file>`. Release `<v>` is incomplete; no source build will be attempted. | The release's checksum list has no line (or more than one line) for a file this platform needs. | Choose another release with `GOODVIBES_VERSION`. |
 | `INSTALL_E011` | Checksum mismatch: `<file>` | The download was corrupted or altered (often a proxy). | Retry; if it persists, check the network path. |
 | `INSTALL_E012` | Could not extract the verified browser driver. | `tar` failed (disk full, `$TMPDIR` problem). | Free space or set `TMPDIR`; retry. |
@@ -1590,9 +1590,9 @@ Many ids guard against something changing the install directory, a claim file or
 | `INSTALL_E067` | Released directories must belong to this original suite installation. | Internal check of the target directory. | Retry. |
 | `INSTALL_E068` to `INSTALL_E071` | The original directory publication parent is unavailable / Could not retain ... / Verified directory staging is unavailable / changed. | The install directory or `$TMPDIR` staging changed. | Retry. |
 | `INSTALL_E072` | An interrupted run left the staged directory `<dir>.incoming`; it was preserved and nothing was changed. | A killed earlier install. | If no install or update runs, run the `rm -rf -- ...` command the message prints, retry. |
-| `INSTALL_E073` | The existing directory target is a custom file or alias; it was preserved. | `playwright-core` or `webui/current` is a file or a link. | Move it away, retry. |
+| `INSTALL_E073` | The existing directory target is a custom file or alias; it was preserved. | `playwright-core` or `webui/<version>` is a file or a link. | Move it away, retry. |
 | `INSTALL_E074` to `INSTALL_E076` | Could not retain the original installed directory / reserve private directory staging / Original directory staging changed. | No permission, disk full, or a change during the install. | Retry. |
-| `INSTALL_E077` | Another directory update or interrupted publication owns this target. | `<dir>.directory-update.lock` exists. | If no install or update runs, delete the lock file named in the install directory (`playwright-core.directory-update.lock` or `webui/current.directory-update.lock`), retry. |
+| `INSTALL_E077` | Another directory update or interrupted publication owns this target. | `<dir>.directory-update.lock` exists. | If no install or update runs, delete the lock file named in the install directory (`playwright-core.directory-update.lock` or `webui/<version>.directory-update.lock`), retry. |
 | `INSTALL_E078` to `INSTALL_E095` | Could not claim the original directory target / retain the directory claim / ... changed ... / Could not copy / set permissions / park / publish / The directory rename result is unknown. | The web UI or browser driver directory changed, disk full, or no permission, while being published. The previous directory was kept or restored. | Retry. When the message also says `directory publication needs inspection; preserve <dir> and <lock> before retrying`, look at those paths first. |
 | `INSTALL_E096` to `INSTALL_E099` | Released directory staging is unavailable / The release archive collides with local directory bookkeeping / Could not record the selected directory release / Could not set directory release metadata permissions. | Staging under `$TMPDIR` failed, or the archive already contains `.goodvibes-release.json`. | Retry; if `INSTALL_E097` repeats, use another release. |
 | `INSTALL_E100`, `INSTALL_E101` | An interrupted update left `<path>`; nothing was removed. | Uninstall found a partial update file. | Follow the message: put the `.update-previous` copy back with the printed `mv` command when the program is missing, otherwise delete the file with the printed `rm` command, then run the uninstall again. |

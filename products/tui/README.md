@@ -6,7 +6,7 @@
 
 It talks to many model providers (OpenAI, Anthropic, Gemini, Bedrock, Copilot, OpenRouter and other OpenAI-compatible gateways, plus local servers like Ollama and LM Studio that `/scan` finds on your machine and LAN), keeps its settings, sessions, and secrets on your own machine, and shows you the token count and running cost of every turn. Background work opens in large modals over the conversation: running agents, changed files and diffs, tokens and cost.
 
-<img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in a cyan-to-magenta gradient, the version v3.4.7 and tagline beneath it, the model rtfake:rt-1 with 28 tools, the working directory, and the hint Ctrl+P commands, ? help, F2 agents. Below the empty composer the status bar reads Permissions: asking you, for now · you chose Jev decides, shift+tab, 1 notice, then context 0%, branch main, changed and model rt-1." width="900">
+<img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in a cyan-to-magenta gradient, the version v3.4.8 and tagline beneath it, the model rtfake:rt-1 with 28 tools, the working directory, and the hint Ctrl+P commands, ? help, F2 agents. Below the empty composer the status bar reads Permissions: asking you, for now · you chose Jev decides, shift+tab, 1 notice, then context 0%, branch main, changed and model rt-1." width="900">
 
 ## Install and start
 

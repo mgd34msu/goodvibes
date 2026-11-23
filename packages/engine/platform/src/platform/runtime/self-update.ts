@@ -5,8 +5,6 @@ export type { VerifiedUpdateStage, VerifiedUpdateMember } from './verified-updat
 export { applySuiteUpdate, assertSuiteUpdateCurrent, rollbackSuiteUpdate, configuredSuiteWebuiDirectory, retainSuiteUpdateConfiguration, installedSuiteNeedsRepair, suiteUpdateRequiresRecovery, SuiteUpdateRecoveryError, SuiteUpdatePreparationError } from './suite-update.js';
 export type { SuiteUpdateOptions, SuiteUpdateResult, SuiteRollbackOptions, SuiteUpdateConfigurationSource } from './suite-update.js';
 export { resolveSuiteUpdatePlan } from './suite-update-plan.js';
-export { tidyInstalledWebuiDirectory, INSTALLED_WEBUI_FOLDER } from './webui-directory-tidy.js';
-export type { WebuiDirectoryTidyResult } from './webui-directory-tidy.js';
 export type { SuiteUpdatePlan, SuiteProgram } from './suite-update-plan.js';
 export { createInstalledReaderCohort } from './native-reader-cohort.js';
 export { isCompiledBunModuleUrl } from '../utils/bun-module.js';

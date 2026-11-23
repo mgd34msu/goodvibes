@@ -106,15 +106,19 @@ jobs:
           GITHUB_REF_NAME="$RELEASE_TAG" bun packages/engine/scripts/verify-release-tag-version.ts
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       # The release being upgraded from is the highest earlier STABLE version tag in
-      # this release's own history; none for the first release, which is warned about.
+      # this release's own history that GitHub has a published release for (not a
+      # draft, with assets): a tag whose release failed shipped nothing. None for the
+      # first release, which is warned about. Reading releases needs only the
+      # workflow's `contents: read`.
       - name: Resolve the previous published release
         id: previous
         env:
           RELEASE_TAG: ${{ steps.source.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if git rev-parse -q --verify "refs/tags/$RELEASE_TAG^{commit}" >/dev/null; then base="refs/tags/$RELEASE_TAG^"; else base=HEAD; fi
-          python3 "$GITHUB_WORKSPACE/.github/scripts/resolve_previous_release.py" "$RELEASE_TAG" "$base"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/resolve_previous_release.py" "$RELEASE_TAG" "$base" "$GITHUB_REPOSITORY"
 
   # Publication needs a green CI on the exact commit being released: CI's final
   # `CI ok` job fails when any other CI job does.

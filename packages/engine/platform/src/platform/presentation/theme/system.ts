@@ -15,10 +15,14 @@
 import { ansiToHex, ensureContrast, isHexColor, mixHex, normalizeHex, relativeLuminance, tint } from './color.js';
 import type { TerminalPalette, ThemeJson, ThemeMode } from './types.js';
 
-/** Contrast floors against backgroundPanel, shared with the bundled-theme tests. */
+/**
+ * Contrast floors, the ones the bundled themes keep. Muted and faint text carry
+ * key hints, reasons and times, so both are readable text (4.5:1), on the panel
+ * and on the element surface.
+ */
 const FLOOR_TEXT = 7;
 const FLOOR_MUTED = 4.5;
-const FLOOR_FAINT = 2.5;
+const FLOOR_FAINT = 4.5;
 const FLOOR_STATUS = 3;
 
 function slot(palette: TerminalPalette, index: number, pair: number): string {
@@ -60,8 +64,8 @@ export function generateSystemTheme(palette: TerminalPalette, mode: ThemeMode): 
   const element = ramp(3);
 
   const text = ensureContrast(rawFg, panel, FLOOR_TEXT);
-  const textMuted = ensureContrast(mixHex(bg, text, 0.62), panel, FLOOR_MUTED);
-  const textFaint = ensureContrast(mixHex(bg, text, 0.4), panel, FLOOR_FAINT);
+  const textMuted = ensureContrast(ensureContrast(mixHex(bg, text, 0.62), panel, FLOOR_MUTED), element, FLOOR_MUTED);
+  const textFaint = ensureContrast(ensureContrast(mixHex(bg, text, 0.4), panel, FLOOR_FAINT), element, FLOOR_FAINT);
 
   const status = (index: number, pair: number): string =>
     ensureContrast(slot(palette, index, pair), panel, FLOOR_STATUS);

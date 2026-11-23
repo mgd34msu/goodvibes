@@ -8042,6 +8042,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "value": "sample",
           "persistedTo": "sample",
           "tier": "sample",
+          "effectiveOrigin": "sample",
           "daemonOwned": false
         }
       ]
@@ -24780,7 +24781,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "source": "catalog",
                 "effectiveByRequested": {}
               },
-              "textWork": "text"
+              "textWork": "text",
+              "recommended": "sample"
             }
           ],
           "modelList": {

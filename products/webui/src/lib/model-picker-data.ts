@@ -36,6 +36,7 @@ export function pickerProviderOf(provider: ProviderOption, options: readonly Mod
       providerId: option.providerId,
       efforts: provider.id === 'decision-router' ? [] : effortLevelsOf(value),
       kindUnknown: textWork !== 'text',
+      ...(typeof value.recommended === 'string' && value.recommended ? { recommended: value.recommended } : {}),
     });
   }
   const subscriptionOnly = status.routes.length > 0 && status.routes.every((route) => route.route === 'subscription-oauth');

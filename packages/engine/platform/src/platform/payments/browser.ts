@@ -36,5 +36,39 @@ export const CVV_PROMPT_TRADEOFF_WARNING =
   + 'are within budget and would otherwise have gone ahead on their own. Never send the code in a chat.';
 
 
+/** One way purchases may run once payments are on: `payments.confirmEveryPurchase` true (`ask`) or false (`veto`). */
+export interface PurchaseModeChoice {
+  readonly id: 'ask' | 'veto';
+  readonly confirmEveryPurchase: boolean;
+  readonly label: string;
+  /** What it means, in one line. */
+  readonly detail: string;
+}
+
+/**
+ * The two ways purchases can run, as every surface offers them where payments
+ * are turned on. The words live here so the terminal programs and the web UI
+ * say the same thing. The second line states what happens when the stop notice
+ * cannot reach the owner, his recorded decision (docs/payments.md, the ruling on
+ * undeliverable notices), so it is known at the moment it is chosen.
+ */
+export function purchaseModeChoices(vetoMinutes: number): readonly PurchaseModeChoice[] {
+  const minutes = Number.isFinite(vetoMinutes) && vetoMinutes > 0 ? Math.round(vetoMinutes) : 10;
+  return [
+    {
+      id: 'ask',
+      confirmEveryPurchase: true,
+      label: 'Ask me before every purchase',
+      detail: 'Nothing is bought until you approve it, naming the shop, the item and the most it may cost.',
+    },
+    {
+      id: 'veto',
+      confirmEveryPurchase: false,
+      label: `Buy, and give me ${minutes} minute${minutes === 1 ? '' : 's'} to stop it`,
+      detail: `A purchase within your budgets at a shop you can get your money back from goes ahead unless you say stop within ${minutes} minute${minutes === 1 ? '' : 's'}; if the notice cannot reach you, it still goes ahead.`,
+    },
+  ];
+}
+
 export { readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation, purchaseDisposition, readPurchaseOutcome, PAYMENT_PURCHASE_RECONCILE_HTTP } from './operation-view.js';
 export type { PaymentOperationView, PaymentOperationState, PaymentOperationCancellation, PaymentOperationLimit, PurchaseDisposition, PurchaseOutcome, PaymentReconciliationFinding } from './operation-view.js';

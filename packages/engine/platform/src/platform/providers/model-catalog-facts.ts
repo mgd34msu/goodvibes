@@ -94,6 +94,39 @@ export function catalogTextWork(provider: string, modelId: string): CatalogTextW
   return answers.size === 1 ? answers.values().next().value! : 'unknown';
 }
 
+/** What the catalog publishes about one provider's model that a recommendation may rest on. */
+export interface CatalogRecommendationFacts {
+  readonly family?: string | undefined;
+  readonly releaseDate?: string | undefined;
+  readonly contextWindow?: number | undefined;
+  /** USD per 1M tokens, input and output; absent when the catalog prices it at nothing it states. */
+  readonly pricing?: { readonly input: number; readonly output: number } | undefined;
+}
+
+/** One value all of a model's entries agree on, else undefined. */
+function agreed<T>(values: readonly (T | undefined)[], key: (value: T) => string = String): T | undefined {
+  const present = values.filter((value): value is T => value !== undefined);
+  if (present.length === 0 || present.length !== values.length) return undefined;
+  return new Set(present.map(key)).size === 1 ? present[0] : undefined;
+}
+
+/**
+ * The catalog facts of one provider's model, from this provider's entries only;
+ * a fact its entries disagree on is left out. Undefined when the catalog has no
+ * entry for it.
+ */
+export function catalogRecommendationFacts(provider: string, modelId: string): CatalogRecommendationFacts | undefined {
+  const models = catalogModelsForReference(modelId, provider);
+  if (models.length === 0) return undefined;
+  const pricing = agreed(models.map((model) => model.pricing ?? undefined), (price) => `${price.input}/${price.output}`);
+  return {
+    family: agreed(models.map((model) => model.family)),
+    releaseDate: agreed(models.map((model) => model.releaseDate)),
+    contextWindow: agreed(models.map((model) => model.contextWindow)),
+    ...(pricing ? { pricing: { input: pricing.input, output: pricing.output } } : {}),
+  };
+}
+
 /** Unknown or conflicting endpoint limits remain unknown. */
 export function knownCatalogMaxOutput(provider: string, modelId: string): number | undefined {
   const models = catalogModelsForReference(modelId, provider);

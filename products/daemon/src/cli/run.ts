@@ -256,7 +256,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const { prepareDaemonCliServe, runConfiguredDaemonCli } = await import('./serve.js');
         const errors = prepareDaemonCliServe(config, cli.flags);
         if (errors.length) return result({ exitCode: 2, lines: errors });
-        const [{ repairDaemonSuiteBeforeStartup }, { installProcessCrashCapture, surfaceCrashLogPath }] = await Promise.all([
+        const [{ repairDaemonSuiteBeforeStartup, tidyWebuiFolderAtStartup }, { installProcessCrashCapture, surfaceCrashLogPath }] = await Promise.all([
           import('./startup-suite-repair.js'),
           import('@goodvibes/engine/platform/platform/runtime/operations'),
         ]);
@@ -269,6 +269,8 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
           async signal => {
             if (await repairDaemonSuiteBeforeStartup({ configuration, argv: originalArgv, env, signal, print: stdout })) return null;
             signal.throwIfAborted();
+            // Before the web UI is served: its installed folder is named for what it holds and keeps one copy for rollback.
+            tidyWebuiFolderAtStartup(configuration.config, stdout);
             const active = createDaemonCliConfiguration(cli.flags, env, options.cwd, { diagnosticMode: 'structural' });
             const currentErrors = prepareDaemonCliServe(active.config, cli.flags);
             if (currentErrors.length) throw new Error('Daemon serving configuration changed before activation');

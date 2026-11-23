@@ -13,7 +13,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     summary: 'Everything the assistant can do, grouped by what you want to get done.',
     detail: 'Pick the lane that matches what you want, or just close this and type. Every page here is also reachable later.',
     actions: [
-      { id: 'chat', label: 'Just start typing', detail: 'Close this workspace and ask for anything, research, reminders, email, documents, or scheduling. Typing any letter here does the same, and the letter lands in the composer.', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
+      { id: 'chat', label: 'Just start typing', detail: 'Close this workspace and ask for anything, research, reminders, email, documents, or scheduling. Typing any letter here does the same, and the letter lands in the composer; Esc on what you typed, before it is sent, comes back to the area and row you left (a single stray letter is dropped, anything longer stays in the composer).', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
       actRow('assistant-setup-lane', 'setup'),
       { id: 'assistant-personal-ops-lane', label: 'Inbox, calendar & reminders', detail: 'Daily personal operations in one place.', targetCategoryId: 'personal-ops', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-research-docs-lane', label: 'Research something', detail: 'Web research with visible runs, sources, and saved reports.', targetCategoryId: 'research', kind: 'workspace', safety: 'safe' },

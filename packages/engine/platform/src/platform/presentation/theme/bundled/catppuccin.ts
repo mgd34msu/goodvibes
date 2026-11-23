@@ -24,10 +24,11 @@ export const CATPPUCCIN_THEME: ThemeJson = {
     info: { dark: '#89dceb', light: '#038ec5' },
     // light: published #4c4f69 is 6.57:1 on the panel; adjusted to reach 7:1.
     text: { dark: '#cdd6f4', light: '#484b64' },
-    // light: published #6c6f85 is 4.06:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: { dark: '#a6adc8', light: '#64677c' },
-    // light: published #9ca0b0 is 2.14:1 on the panel; adjusted to reach 2.5:1.
-    textFaint: { dark: '#6c7086', light: '#9093a2' },
+    // Muted and faint carry key hints, reasons and times: each is the smallest lift
+    // of the published colour (muted light #6c6f85, faint #6c7086 / #9ca0b0) that
+    // reaches 4.5:1 on the panel and on elements.
+    textMuted: { dark: '#a6adc8', light: '#5f6276' },
+    textFaint: { dark: '#989aaa', light: '#61636d' },
     selectedListItemText: { dark: '#1e1e2e', light: '#eff1f5' },
     background: { dark: '#1e1e2e', light: '#eff1f5' },
     backgroundPanel: { dark: '#181825', light: '#e6e9ef' },

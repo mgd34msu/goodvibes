@@ -312,6 +312,8 @@ export function Composer({
   // pointer-up is suppressed so the form does not ALSO submit normally.
   const steerHoldTimerRef = useRef<number | null>(null);
   const steerHoldFiredRef = useRef(false);
+  // The model menu opens beside this box, never over it.
+  const boxRef = useRef<HTMLDivElement | null>(null);
   const startSteerHold = useCallback(() => {
     steerHoldFiredRef.current = false;
     // A second press (multi-touch, or a pointerup that never arrived) restarts the
@@ -435,7 +437,7 @@ export function Composer({
         </div>
       )}
 
-      <div className="composer-box" data-drag-over={isDragOver ? 'true' : undefined}>
+      <div ref={boxRef} className="composer-box" data-drag-over={isDragOver ? 'true' : undefined}>
         {showSlashMenu && filteredSlashCommands.length > 0 && (
           <SlashMenu
             commands={filteredSlashCommands}
@@ -487,7 +489,7 @@ export function Composer({
           </button>
 
           <div className="composer-toolbar__end">
-            <ModelPicker {...modelPicker} />
+            <ModelPicker {...modelPicker} boxRef={boxRef} />
             <MicButton onTranscript={handleTranscript} disabled={isSendPending} />
             <VoiceSettings />
             {queueing && (

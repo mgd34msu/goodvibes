@@ -87,6 +87,8 @@ interface ConfigSettingsValue {
   config: UseQueryResult;
   groups: SettingsGroupModel[];
   currency: string;
+  /** How purchases run (payments.confirmEveryPurchase) and the stop window's minutes, for the payments switch. */
+  purchaseMode: { readonly confirmEveryPurchase: boolean; readonly vetoMinutes: number };
   refused: boolean;
   degraded: boolean;
   commit: (key: string, value: unknown) => Promise<void>;
@@ -149,6 +151,13 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
   const currency = useMemo(() => {
     const { present, value } = readConfigPath(config.data, 'payments.currency');
     return present && typeof value === 'string' && value ? value : 'USD';
+  }, [config.data]);
+  const purchaseMode = useMemo(() => {
+    const veto = readConfigPath(config.data, 'payments.windows.vetoMinutes').value;
+    return {
+      confirmEveryPurchase: readConfigPath(config.data, 'payments.confirmEveryPurchase').value === true,
+      vetoMinutes: typeof veto === 'number' && veto > 0 ? veto : 10,
+    };
   }, [config.data]);
 
   const refused = config.isError && isAdminRequiredError(config.error);
@@ -236,6 +245,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     config,
     groups,
     currency,
+    purchaseMode,
     refused,
     degraded,
     commit,
@@ -246,7 +256,7 @@ export function ConfigSettingsProvider({ enabled = true, children }: { enabled?:
     pendingRestart,
     restartStatusError,
     retryRestartStatus,
-  }), [config, groups, currency, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, restartStatusError, retryRestartStatus]);
+  }), [config, groups, currency, purchaseMode, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, restartStatusError, retryRestartStatus]);
 
   return <ConfigSettingsContext.Provider value={value}>{children}</ConfigSettingsContext.Provider>;
 }
@@ -271,7 +281,7 @@ export function ConfigGroupList({
   emptyText?: string;
 }) {
   const {
-    config, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, restartStatusError, retryRestartStatus, currency,
+    config, refused, degraded, commit, commitMany, reset, readLatest, persistedByKey, pendingRestart, restartStatusError, retryRestartStatus, currency, purchaseMode,
   } = useConfigSettings();
   const shown = useMemo(() => filterSettingsModel([...groups], query), [groups, query]);
   // One level under the section heading when the list sits inside a titled section.
@@ -356,6 +366,7 @@ export function ConfigGroupList({
                   readLatest={readLatest}
                   persisted={persistedByKey[field.key]}
                   currency={currency}
+                  purchaseMode={purchaseMode}
                 />
               ))}
             </div>

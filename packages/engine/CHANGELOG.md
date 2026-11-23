@@ -1,5 +1,42 @@
 # Changelog
 
+## [3.4.7] - 2026-11-22
+
+The full write-up is in
+[docs/releases/3.4.7.md](https://github.com/mgd34msu/goodvibes/blob/v3.4.7/docs/releases/3.4.7.md).
+
+### Upgrading from 3.4.6
+
+- `models.list` answers carry `recommended` on the models of the Recommended
+  short list; a 3.4.6 client refuses them, so run every program on 3.4.7.
+- The model catalog cache is version 8 (release dates); a version 7 cache is
+  used at once and read again in full in the background.
+- The web UI is installed in `webui/current` with one `webui/current.previous`;
+  the daemon carries an older `webui/<version>` layout forward when it starts.
+
+### Fixed
+
+- The standalone daemon loads the model catalog at start and checks it when it
+  is due; its model lists said "kind unknown" for every model.
+- `config.setMany` answers carrying `effectiveOrigin` no longer fail the
+  client's answer check.
+- Channel replies, status lines and work labels cut to fit say they were
+  shortened instead of ending in a bare ellipsis.
+
+### Changed
+
+- The web model menu is placed beside its control within the window, opens
+  centred over a dimmed page when neither side has room, and its footer says
+  one thing for the current pick.
+- Every model picker shows up to five Recommended models with why, from the
+  catalog's release dates, context windows and prices.
+- The approval that makes a rule is "Yes, and remember (choose what)".
+- Turning payments on asks "Ask me before every purchase" or "Buy, and give me
+  N minutes to stop it".
+- The Agent workspace footer says `a-z start a message, Esc there comes back
+  here`; Esc on unsent text returns to the area and row left.
+- Muted and faint terminal text is at least 4.5:1 in every built-in theme.
+
 ## [3.4.6] - 2026-11-22
 
 The full write-up is in

@@ -173,7 +173,9 @@ export function appendAttachmentSummary(body: string, attachments: readonly Arti
 export function trimForSurface(body: string, maxChars: number): string {
   const normalized = body.replace(/\r\n/g, '\n').trim();
   if (normalized.length <= maxChars) return normalized;
-  return `${normalized.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+  // A cut says it is one, never a bare ellipsis.
+  const marker = ' [shortened]';
+  return `${normalized.slice(0, Math.max(0, maxChars - marker.length)).trimEnd()}${marker}`;
 }
 
 /**

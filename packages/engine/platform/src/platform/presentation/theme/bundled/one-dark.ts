@@ -21,8 +21,10 @@ export const ONE_DARK_THEME: ThemeJson = {
     info: '#56b6c2',
     text: '#abb2bf',
     // dark: published #7f848e is 4.10:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: '#878b95',
-    textFaint: '#5c6370',
+    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
+    // panel and on elements (published #878b95 and #5c6370).
+    textMuted: '#9498a1',
+    textFaint: '#9399a1',
     selectedListItemText: '#282c34',
     background: '#282c34',
     backgroundPanel: '#21252b',

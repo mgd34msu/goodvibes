@@ -252,6 +252,10 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
       // to). Host work owns this admission wait.
       await runtime.providerRegistry.ready();
       fence();
+      // The model catalog the lists the daemon serves read their facts from
+      // (models.list: whether a model holds a conversation, the recommended
+      // short list): the cached copy at once, a background check when it is due.
+      runtime.providerRegistry.initCatalog();
 
       discovery = createDaemonProviderDiscovery(
         { homeDirectory: runtime.homeDirectory, surfaceRoot: runtime.surfaceRoot },

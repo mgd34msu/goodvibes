@@ -1,5 +1,5 @@
 import type { ModelDefinition, FavoritesStore, BenchmarkStore, ProviderRegistry, CatalogTextWork } from '@goodvibes/engine/platform/platform/providers';
-import { catalogTextWork, compositeScore, EFFORT_DESCRIPTIONS } from '@goodvibes/engine/platform/platform/providers';
+import { catalogTextWork, compositeScore, EFFORT_DESCRIPTIONS, recommendModels } from '@goodvibes/engine/platform/platform/providers';
 import {
   effortPresentationForModel,
   toEffortModel,
@@ -29,8 +29,8 @@ import type {
   ProviderItemsCache,
 } from './model-picker-types.js';
 import { groupProviders } from './model-picker-provider-filter.js';
-import { buildFilteredModels, buildFilteredProviders } from './model-picker-filter.js';
-import { buildModelItems, buildProviderItems, buildEffortItems, getModelGroupKey } from './model-picker-items.js';
+import { buildFilteredModels, buildFilteredProviders, setKey } from './model-picker-filter.js';
+import { buildModelItems, buildProviderItems, buildEffortItems, getModelGroupKey, RECOMMENDED_GROUP } from './model-picker-items.js';
 export type ModelPickerCatalogFill = PlatformCatalogFill<ModelPickerTargetInfo>;
 /** The group, listed last, of models the catalog does not describe: they are offered, not hidden, and marked. */
 export const UNKNOWN_KIND_GROUP = 'Not described by the catalog';
@@ -633,6 +633,7 @@ export class ModelPickerModal {
         benchmarkStore: this.benchmarkStore,
         providerRegistry: this.providerRegistry,
         textWork: (model) => this.textWork(model),
+        recommended: new Set(this.recommendedModels().keys()),
       },
       this.filteredModelsCache,
     );
@@ -674,8 +675,34 @@ export class ModelPickerModal {
    * - 'All Synthetic', remaining synthetic models
    */
   getModelGroupKey(model: ModelDefinition): string {
+    if (this.recommendedWhy(model) !== undefined) return RECOMMENDED_GROUP;
     if (this.textWork(model) === 'unknown') return UNKNOWN_KIND_GROUP;
     return getModelGroupKey(model, this.groupBy, this.providerRegistry, this.benchmarkStore);
+  }
+
+  private recommendedCache: { readonly models: ModelDefinition[]; readonly key: string; readonly why: ReadonlyMap<string, string> } | null = null;
+
+  /**
+   * The recommended short list (recommendModels) among the connected providers'
+   * models, by registry key, without the pinned and recent ones (they are listed
+   * above it); empty while a benchmark sort orders the list.
+   */
+  recommendedModels(): ReadonlyMap<string, string> {
+    if (this.benchmarkSort !== 'none') return new Map();
+    const key = `${setKey(this.configuredProviders)}|${setKey(this.pinnedIds)}|${this.recentIds.join(',')}`;
+    if (this.recommendedCache?.models === this.models && this.recommendedCache.key === key) return this.recommendedCache.why;
+    const all = recommendModels(this.models.filter((model) => this.configuredProviders.has(model.provider)));
+    const why = new Map([...all].filter(([registryKey]) => {
+      const model = this.models.find((candidate) => candidate.registryKey === registryKey);
+      return model !== undefined && !this.pinnedIds.has(registryKey) && !this.pinnedIds.has(model.id) && !this.recentIds.includes(registryKey);
+    }));
+    this.recommendedCache = { models: this.models, key, why };
+    return why;
+  }
+
+  /** Why this model is on the recommended short list, or undefined when it is not. */
+  recommendedWhy(model: ModelDefinition): string | undefined {
+    return this.recommendedModels().get(model.registryKey);
   }
 
   private readonly textWorkCache = new WeakMap<ModelDefinition, CatalogTextWork>();
@@ -712,6 +739,7 @@ export class ModelPickerModal {
         this.providerRegistry,
         this.benchmarkStore,
         this.modelItemsCache,
+        this.recommendedModels(),
       );
       this.modelItemsCache = cache;
       return result;

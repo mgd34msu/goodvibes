@@ -69,7 +69,12 @@ export function toModelItem(model: ModelDefinition, isPinned: boolean, providerR
 // ---------------------------------------------------------------------------
 // buildModelItems, filtered models -> PickerItem[] with group headers
 // ---------------------------------------------------------------------------
-export function buildModelItems(filtered: ModelDefinition[], pinnedIds: ReadonlySet<string>, groupBy: GroupByMode, providerRegistry: Pick<ProviderRegistry, 'getSyntheticModelInfoFromCatalog'>, benchmarkStore: Pick<BenchmarkStore, 'getBenchmarks'>, cache: ModelItemsCache | null): {
+/** The group the recommended short list is drawn under. */
+export const RECOMMENDED_GROUP = 'Recommended';
+
+export function buildModelItems(filtered: ModelDefinition[], pinnedIds: ReadonlySet<string>, groupBy: GroupByMode, providerRegistry: Pick<ProviderRegistry, 'getSyntheticModelInfoFromCatalog'>, benchmarkStore: Pick<BenchmarkStore, 'getBenchmarks'>, cache: ModelItemsCache | null,
+/** Registry key to why, for the recommended models listed in their own group (not pinned, not recent). */
+recommended: ReadonlyMap<string, string> = new Map()): {
     result: PickerItem[];
     cache: ModelItemsCache;
 } {
@@ -94,12 +99,14 @@ export function buildModelItems(filtered: ModelDefinition[], pinnedIds: Readonly
     // Grouped unpinned models
     let lastGroupKey = '';
     for (const m of unpinned) {
-        const groupKey = getModelGroupKey(m, groupBy, providerRegistry, benchmarkStore);
+        const why = recommended.get(m.registryKey);
+        const groupKey = why !== undefined ? RECOMMENDED_GROUP : getModelGroupKey(m, groupBy, providerRegistry, benchmarkStore);
         if (groupKey !== lastGroupKey) {
             items.push({ id: `__header__${groupKey}`, label: groupKey, isGroupHeader: true });
             lastGroupKey = groupKey;
         }
-        items.push(toModelItem(m, false, providerRegistry, benchmarkStore));
+        const item = toModelItem(m, false, providerRegistry, benchmarkStore);
+        items.push(why !== undefined ? { ...item, detail: `${item.detail} · ${why}` } : item);
     }
     const newCache: ModelItemsCache = {
         filteredModelsRef: filtered,

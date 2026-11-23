@@ -21,8 +21,10 @@ export const GRUVBOX_THEME: ThemeJson = {
     info: { dark: '#8ec07c', light: '#427b58' },
     text: { dark: '#ebdbb2', light: '#3c3836' },
     // light: published #7c6f64 is 4.42:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: { dark: '#a89984', light: '#7a6d62' },
-    textFaint: { dark: '#7c6f64', light: '#a89984' },
+    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
+    // panel and on elements (published muted #a89984 / #7a6d62, faint #7c6f64 / #a89984).
+    textMuted: { dark: '#aea08d', light: '#6a5f55' },
+    textFaint: { dark: '#aaa199', light: '#696053' },
     selectedListItemText: { dark: '#282828', light: '#fbf1c7' },
     background: { dark: '#282828', light: '#fbf1c7' },
     backgroundPanel: { dark: '#1d2021', light: '#f9f5d7' },

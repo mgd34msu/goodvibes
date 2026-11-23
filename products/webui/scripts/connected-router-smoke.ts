@@ -239,7 +239,7 @@ try {
       const envelope = { fetchedAt: Date.now(), ttlMs: 86_400_000 };
       writeFileSync(benchmark.getCachePath(), JSON.stringify({ version: 1, ...envelope, entries: [] }));
       const cache = config.getControlPlaneConfigDir(); mkdirSync(cache, { recursive: true });
-      writeFileSync(join(cache, 'model-catalog.json'), JSON.stringify({ version: 7, ...envelope, models: [] }));
+      writeFileSync(join(cache, 'model-catalog.json'), JSON.stringify({ version: 8, ...envelope, models: [] }));
       writeFileSync(join(cache, 'model-limits.json'), JSON.stringify({ version: 1, ...envelope, models: {} }));
       for (const id of ['aihubmix', 'vercel-ai-gateway']) writeFileSync(join(cache, `gateway-pricing-${id}.json`), JSON.stringify({ version: 1, ...envelope, models: {} }));
       // Actual anonymous builtins attempt startup discovery without a key.

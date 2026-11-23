@@ -2239,7 +2239,7 @@ export { forSession as forSessionRuntime }
 // @public (undocumented)
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
-    readonly productVersion: "3.4.6";
+    readonly productVersion: "3.4.7";
     readonly operatorMethodCount: 651;
     readonly operatorEventCount: 37;
     readonly peerEndpointCount: 6;
@@ -15614,15 +15614,18 @@ export interface OperatorMethodOutputMap {
     "config.setMany": {
         success: boolean;
         revision: number;
-        entries: readonly ({
+        entries: readonly (({
             key: string;
             value?: ({} & {
                 readonly [key: string]: JsonValue;
             }) | boolean | null | number | readonly JsonValue[] | string;
             persistedTo?: string;
             tier?: string;
+            effectiveOrigin?: string;
             daemonOwned?: boolean;
-        })[];
+        } & {
+            readonly [key: string]: unknown;
+        }))[];
     } | ({
         success?: false;
         code: "OWNER_APPROVAL_PENDING";
@@ -29356,6 +29359,7 @@ export interface OperatorMethodOutputMap {
                     });
                 };
                 textWork: "other" | "text" | "unknown";
+                recommended?: string;
             })[];
             modelList: {
                 source: "cache" | "catalog" | "live";

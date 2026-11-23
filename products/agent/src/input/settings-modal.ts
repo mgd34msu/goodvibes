@@ -461,6 +461,11 @@ export class SettingsModal extends TerminalSettingsModalState<
   refreshPickerValues(): void {
     this._refreshAllEntries();
     this.contextScroll = 0;
+    // A picker may have changed settings the connected host holds: show what it holds now.
+    if (this.configManager && agentDaemonConfigClientInstalled()) {
+      this.hostHeldValues.clear();
+      this._readHostValues(this.configManager);
+    }
   }
 
   activateSelected(): void {

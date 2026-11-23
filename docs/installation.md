@@ -12,7 +12,7 @@ Missing assets or mismatched checksums stop installation before replacing progra
 To pin the complete suite:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.6 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.7 sh
 ```
 
 The installer uses POSIX shell, curl or wget, tar, and sha256sum or shasum.
@@ -165,11 +165,16 @@ Released native installations enable automatic updates by default. The daemon
 checks shortly after startup and then hourly, deferring replacement while work
 is active. The TUI and Agent also check at launch. An update selects one release
 for installed sibling programs, their native companions, the browser driver and
-the configured release WebUI. An update replaces the contents of the configured
-WebUI directory in place (and rewrites its release marker), so after an update a
-directory named for the installed release, such as `webui/3.3.0`, can hold a newer
-release; the installer publishes each release it installs into a new directory and
-never prunes older ones. Programs already running continue their original
+the configured release WebUI. The WebUI lives in `webui/current`: an update or a
+new install replaces its contents and keeps the copy before as
+`webui/current.previous`, the one copy kept for rollback. An installation from an
+earlier release (`webui/<version>`, which kept its first version's name while
+updates replaced what it held) is carried forward when the daemon next starts:
+the served folder becomes `webui/current`, its previous copy (or the newest older
+release folder) becomes `webui/current.previous`, the setting that names it moves
+with it, and the older release folders and the lock files of finished updates are
+removed. A folder without the suite's release marker is never moved or removed.
+Programs already running continue their original
 build until restarted. Source and package-managed runs keep their own update
 mechanism.
 

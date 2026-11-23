@@ -1242,7 +1242,7 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "label": "Let GoodVibes make purchases",
     "type": "boolean",
     "default": false,
-    "description": "Master switch for the payment capability. Default OFF. While false the daemon will not price, reserve, or charge anything, and the payments operator methods refuse. Turning it on does not by itself allow a purchase, the daily budgets below start at 0, so nothing goes through until you set an amount."
+    "description": "Master switch for the payment capability. Default OFF. While false the daemon will not price, reserve, or charge anything, and the payments operator methods refuse. Turning it on does not by itself allow a purchase, the daily budgets below start at 0, so nothing goes through until you set an amount. Settings in both terminal programs and the web UI turn it on only together with how purchases run: \"Ask me before every purchase\" (payments.confirmEveryPurchase on) or \"Buy, and give me N minutes to stop it\" (off; N is payments.windows.vetoMinutes, and if the notice cannot reach you the purchase still goes ahead)."
   },
   {
     "key": "payments.confirmEveryPurchase",

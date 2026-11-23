@@ -21,10 +21,11 @@ export const TOKYONIGHT_THEME: ThemeJson = {
     info: { dark: '#7dcfff', light: '#007197' },
     // light: published #3760bf is 4.52:1 on the panel; adjusted to reach 7:1.
     text: { dark: '#c0caf5', light: '#28458a' },
-    // light: published #6172b0 is 3.57:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: { dark: '#a9b1d6', light: '#536297' },
-    // light: published #8990b3 is 2.42:1 on the panel; adjusted to reach 2.5:1.
-    textFaint: { dark: '#565f89', light: '#868daf' },
+    // Muted and faint carry key hints, reasons and times: each is the smallest lift
+    // of the published colour (muted light #6172b0, faint #565f89 / #8990b3) that
+    // reaches 4.5:1 on the panel and on elements.
+    textMuted: { dark: '#a9b1d6', light: '#4c5a8b' },
+    textFaint: { dark: '#8f95b1', light: '#575c72' },
     selectedListItemText: { dark: '#1a1b26', light: '#e1e2e7' },
     background: { dark: '#1a1b26', light: '#e1e2e7' },
     backgroundPanel: { dark: '#16161e', light: '#e1e2e7' },

@@ -37,6 +37,8 @@ export interface ScriptedCommand {
 
 export interface RealDaemon {
   readonly baseUrl: string;
+  /** The web UI at the network address it was started with (`publicHost`): `web.publicBaseUrl`, which the browser maps to this loopback listener. */
+  readonly publicUrl: string | undefined;
   /** The operator credential the daemon minted in its own home (what the owner's apps on this machine hold). */
   readonly ownerToken: string;
   invoke(token: string, method: string, body?: Record<string, unknown>): Promise<{ status: number; body: unknown; text: string }>;
@@ -120,7 +122,11 @@ function startModel(commands: readonly ScriptedCommand[]): Promise<{ server: Ser
 }
 
 /** Start the daemon from source in a fresh scratch home; resolves once it reports it is ready. */
-export async function startRealDaemon(options: { commands?: readonly ScriptedCommand[] } = {}): Promise<RealDaemon> {
+export async function startRealDaemon(options: {
+  commands?: readonly ScriptedCommand[];
+  /** A host name the web UI is also served at over plain http (`web.publicBaseUrl`), as a phone on the local network reaches it. */
+  publicHost?: string;
+} = {}): Promise<RealDaemon> {
   const before = listeningPorts();
   const model = await startModel(options.commands ?? []);
   const root = mkdtempSync(join(tmpdir(), 'gv-webui-e2e-'));
@@ -130,11 +136,12 @@ export async function startRealDaemon(options: { commands?: readonly ScriptedCom
   const tmp = join(root, 'tmp');
   for (const dir of [home, workspace, daemonHome, tmp, join(home, '.config'), join(home, '.cache'), join(home, '.local/share'), join(home, '.local/state')]) mkdirSync(dir, { recursive: true });
   const ports = { controlPlane: await freePort(), http: await freePort(), web: await freePort() };
+  const publicUrl = options.publicHost ? `http://${options.publicHost}:${ports.controlPlane}` : undefined;
   writeFileSync(join(daemonHome, 'settings.json'), JSON.stringify({
     judgment: { policy: 'No Decision Model' },
     controlPlane: { host: '127.0.0.1', port: ports.controlPlane, webui: { serve: true, bundleDir: E2E_DIST_DIR } },
     httpListener: { host: '127.0.0.1', port: ports.http },
-    web: { host: '127.0.0.1', port: ports.web },
+    web: { host: '127.0.0.1', port: ports.web, ...(publicUrl ? { publicBaseUrl: publicUrl } : {}) },
   }, null, 2));
   // The model setting and the provider file, in each surface's settings as the apps on this machine write them.
   for (const surface of ['tui', 'agent', 'daemon-host']) {
@@ -184,7 +191,7 @@ export async function startRealDaemon(options: { commands?: readonly ScriptedCom
     return { status: response.status, body: parsed, text };
   };
   return {
-    baseUrl, ownerToken, api,
+    baseUrl, publicUrl, ownerToken, api,
     invoke: (token, method, body = {}) => api(token, 'POST', `/api/control-plane/methods/${method}/invoke`, { body }),
     async stop() {
       const exited = child.exitCode === null ? new Promise<void>((done) => child.once('exit', () => done())) : Promise.resolve();
@@ -196,9 +203,12 @@ export async function startRealDaemon(options: { commands?: readonly ScriptedCom
   };
 }
 
-/** Pair the browser as the owner's own device, as the terminal's pairing QR does; returns the link's fragment and token. */
-export async function ownerPairingLink(daemon: RealDaemon): Promise<{ fragment: string; token: string }> {
-  const minted = await daemon.invoke(daemon.ownerToken, 'pairing.handoff.create', { name: 'e2e-browser', offers: [], forThisMachine: true });
+/**
+ * Pair the browser as the owner's own device, as the terminal's pairing QR does; returns the link's fragment and token.
+ * `forThisMachine: false` asks for the code a phone scans, which the daemon makes only when its web address reaches other devices.
+ */
+export async function ownerPairingLink(daemon: RealDaemon, options: { forThisMachine?: boolean } = {}): Promise<{ fragment: string; token: string }> {
+  const minted = await daemon.invoke(daemon.ownerToken, 'pairing.handoff.create', { name: 'e2e-browser', offers: [], forThisMachine: options.forThisMachine ?? true });
   const body = minted.body as { fragment?: string; token?: { token?: string } };
   if (minted.status !== 200 || !body.fragment || !body.token?.token) throw new Error(`pairing.handoff.create answered ${minted.status}: ${minted.text.slice(0, 300)}`);
   return { fragment: body.fragment, token: body.token.token };

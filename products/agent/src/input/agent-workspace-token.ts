@@ -56,8 +56,9 @@ export function handleAgentWorkspaceToken(
     else if (token.value === '/') workspace.beginActionSearch();
     else if (token.value.trim().length > 0) {
       // "Just start typing" is literal: the first printable character closes
-      // the workspace and is not consumed, so it lands in the composer.
-      workspace.closeToComposer();
+      // the workspace and is not consumed, so it lands in the composer. Esc on
+      // the unsent text comes back to this area and row.
+      workspace.closeToComposerByTyping();
       requestRender();
       return false;
     }

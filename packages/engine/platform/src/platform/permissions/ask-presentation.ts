@@ -36,7 +36,7 @@ export type AskKind =
 
 export interface AskChoice {
   readonly id: 'once' | 'remember' | 'no' | 'apply-selected' | `option:${number}` | 'own-words' | 'object' | 'acknowledge';
-  /** "Yes, once" | "Yes, and don't ask again…" | "No" | "Hello" | "Something else…" */
+  /** "Yes, once" | "Yes, and remember (choose what)" | "No" | "Hello" | "Something else…" */
   readonly label: string;
   /** The terminal key: 'y' | 'a' | 'n' | '1'..'8'. */
   readonly key?: string | undefined;
@@ -358,6 +358,13 @@ function rememberOf(request: PermissionPromptRequest, cannotUndo: boolean): AskP
   return { offered: true, tiers: tiers.map((option) => ({ tier: option.tier, label: option.label, detail: option.detail })) };
 }
 
+/**
+ * The choice that says yes and remembers it. It opens a list of how far the
+ * remembering reaches (this command, this tool here, ...), so the label says a
+ * choice follows; Enter never picks it.
+ */
+const REMEMBER_CHOICE_LABEL = 'Yes, and remember (choose what)';
+
 /** Owner-only asks whose effect cannot be taken back: the choices open on No (money spent, a message sent as the owner). */
 const OPENS_ON_NO: ReadonlySet<string> = new Set(['unrecoverable-delete', 'irreversible-operator', 'spend-over-limit', 'payment-step', 'new-recipient', 'untrusted-derived-send']);
 
@@ -370,7 +377,7 @@ function approvalChoices(kind: AskKind, remember: AskPresentation['remember'], c
     : { id: 'once', label: 'Yes, once', key: 'y', ...(cannotUndo ? { danger: true as const } : opensOnNo ? {} : { default: true as const }) };
   return [
     yes,
-    ...(remember.offered ? [{ id: 'remember' as const, label: 'Yes, and don\'t ask again…', key: 'a' }] : []),
+    ...(remember.offered ? [{ id: 'remember' as const, label: REMEMBER_CHOICE_LABEL, key: 'a' }] : []),
     { id: 'no', label: 'No', key: 'n', ...(opensOnNo ? { default: true as const } : {}) },
   ];
 }

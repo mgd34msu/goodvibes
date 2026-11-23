@@ -25,7 +25,9 @@ export const GITHUB_THEME: ThemeJson = {
     info: { dark: '#4493f8', light: '#0969da' },
     text: { dark: '#f0f6fc', light: '#1f2328' },
     textMuted: { dark: '#9198a1', light: '#59636e' },
-    textFaint: { dark: '#656c76', light: '#818b98' },
+    // Faint carries key hints, reasons and times: at least 4.5:1 on the panel and
+    // on elements (published #656c76 / #818b98).
+    textFaint: { dark: '#888e95', light: '#676e79' },
     selectedListItemText: { dark: '#0d1117', light: '#ffffff' },
     background: { dark: '#0d1117', light: '#ffffff' },
     backgroundPanel: { dark: '#151b23', light: '#f6f8fa' },

@@ -342,9 +342,11 @@ function modelRows(picker: ModelPickerModal): KitRow[] {
     // A tier the catalog has not published (the catalog not loaded yet, say) is not shown: it is not known to be paid.
     const right = synthetic ? undefined : [formatContext(model.contextWindow), model.tier].filter((part): part is string => Boolean(part)).join(' · ');
     const kind = picker.textWork(model) === 'unknown' ? UNKNOWN_KIND_NOTE : '';
+    // On the recommended short list: why, in place of the capability words.
+    const why = picker.recommendedWhy(model);
     rows.push({
       label: model.displayName,
-      desc: synthetic ? undefined : [modelKey(model), capabilityText(model), kind].filter(Boolean).join(' · '),
+      desc: synthetic ? undefined : [modelKey(model), why ?? capabilityText(model), kind].filter(Boolean).join(' · '),
       right,
       rightFg: model.tier === 'free' ? t.success : undefined,
       mark: picker.pinnedIds.has(model.id) ? '★' : undefined,

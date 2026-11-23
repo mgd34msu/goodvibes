@@ -445,6 +445,44 @@
   max-width: 42rem;
 }
 
+/* payments.enabled: the switch, and the two ways purchases run when it is turned on. */
+.payments-enabled-field {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-2);
+  width: 100%;
+  max-width: 42rem;
+}
+
+.payments-enabled-field__mode,
+.payments-enabled-field__ask {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.payments-enabled-field .gv-checkbox__label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.payments-enabled-field__label {
+  color: var(--text);
+  font-weight: var(--weight-medium);
+}
+
+.payments-enabled-field__detail {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.payments-enabled-field__buttons {
+  display: flex;
+  gap: var(--space-2);
+}
+
 /* ── Account status rows (mail and calendar) ───────────────────────────────── */
 .account-status__detail {
   white-space: normal;

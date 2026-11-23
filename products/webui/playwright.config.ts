@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { NETWORK_HOST } from './e2e/support/network-host';
 
 /**
  * Playwright harness for the web UI's browser journeys, on a phone viewport
@@ -29,9 +30,11 @@ export default defineConfig({
   timeout: 60_000,
   expect: { timeout: 10_000 },
   use: {
-    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? {
-      launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH },
-    } : {}),
+    launchOptions: {
+      // The plain-http journey opens the web UI at a network host name; the browser maps it to the daemon's loopback listener.
+      args: [`--host-resolver-rules=MAP ${NETWORK_HOST} 127.0.0.1`],
+      ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH } : {}),
+    },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },

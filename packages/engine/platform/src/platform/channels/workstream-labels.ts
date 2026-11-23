@@ -106,8 +106,10 @@ function toLabel(task: string): string {
   const firstClause = task.split(/[.\n;]/)[0] ?? task;
   const collapsed = firstClause.replace(/\s+/g, ' ').trim();
   if (collapsed.length === 0) return '';
+  // A cut label says so in words, never with a bare ellipsis.
+  const marker = ' (shortened)';
   return collapsed.length > MAX_LABEL_CHARS
-    ? `${collapsed.slice(0, MAX_LABEL_CHARS - 1).trimEnd()}…`
+    ? `${collapsed.slice(0, MAX_LABEL_CHARS - marker.length).trimEnd()}${marker}`
     : collapsed;
 }
 

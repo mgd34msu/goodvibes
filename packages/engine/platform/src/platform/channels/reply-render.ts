@@ -24,10 +24,17 @@ import type {
   ChannelReasoningVisibility,
 } from './types.js';
 
+/**
+ * `value` within `limit` characters. A cut says it is one and how much it left
+ * out, in the words the delivery cut uses (delivery/shared.ts fitForSurface),
+ * on the same line so a one-line status stays one line; never a bare ellipsis.
+ */
 export function trimText(value: string, limit: number): string {
   const normalized = value.replace(/\r\n/g, '\n').trim();
   if (normalized.length <= limit) return normalized;
-  return `${normalized.slice(0, Math.max(0, limit - 3)).trimEnd()}...`;
+  const marker = (omitted: number): string => ` [shortened: ${omitted} characters not shown]`;
+  const kept = normalized.slice(0, Math.max(0, limit - marker(normalized.length).length)).trimEnd();
+  return `${kept}${marker(normalized.length - kept.length)}`;
 }
 
 function safeParseJson(raw: string): unknown {

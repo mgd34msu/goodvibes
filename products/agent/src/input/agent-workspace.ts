@@ -93,6 +93,7 @@ export class AgentWorkspace {
 
   open(context: CommandContext, dispatchCommand: AgentWorkspaceCommandDispatcher, categoryId?: string, onlyGroup?: AgentWorkspaceCategoryGroup, requestRender?: () => void): void {
     this.requestRender = requestRender ?? null;
+    this.typedAwayFrom = null;
     this.context?.nativeWorkLedger?.close();
     this.context = context;
     this.workContextScroll = 0;
@@ -187,6 +188,56 @@ export class AgentWorkspace {
   closeToComposer(): void {
     if (this.context?.dismissAgentWorkspace?.()) return;
     this.close();
+  }
+
+  /** Where typing left the workspace for the composer: Esc on the unsent text comes back to this area and row. */
+  private typedAwayFrom: {
+    readonly categoryId: string;
+    readonly actionIndex: number;
+    readonly focusPane: AgentWorkspaceFocusPane;
+    readonly onlyGroup: AgentWorkspaceCategoryGroup | null;
+    readonly onlyActionIds: ReadonlySet<string> | null;
+    readonly onboardingState: OnboardingState | null;
+  } | null = null;
+
+  /** A printable key starts a message: the workspace closes into the composer and remembers where it was. */
+  closeToComposerByTyping(): void {
+    this.typedAwayFrom = {
+      categoryId: this.selectedActionCategory.id,
+      actionIndex: this.selectedActionIndex,
+      focusPane: this.focusPane,
+      onlyGroup: this._onlyGroup,
+      onlyActionIds: this._onlyActionIds,
+      onboardingState: this._onboardingState,
+    };
+    this.closeToComposer();
+  }
+
+  /** True while typing has taken the person from this workspace to the composer. */
+  get leftByTyping(): boolean {
+    return this.typedAwayFrom !== null && !this.active;
+  }
+
+  /** The person sent or cleared what they typed: Esc no longer leads back here. */
+  forgetTypedAway(): void {
+    this.typedAwayFrom = null;
+  }
+
+  /** Back to the exact area and row typing left; false when there is none to go back to. */
+  returnFromTyping(): boolean {
+    const back = this.typedAwayFrom;
+    this.typedAwayFrom = null;
+    if (!back || !this.context || this.active) return false;
+    this._onlyGroup = back.onlyGroup;
+    this._onlyActionIds = back.onlyActionIds;
+    this._onboardingState = back.onboardingState;
+    this.reopen();
+    const index = this.categories.findIndex((category) => category.id === back.categoryId);
+    if (index >= 0) this.selectedCategoryIndex = index;
+    this.selectedActionIndex = back.actionIndex;
+    this.focusPane = back.focusPane;
+    this.clampSelection();
+    return true;
   }
 
   get nativeWorkLedgerState(): import('../runtime/native-work-ledger.ts').NativeWorkLedgerState {

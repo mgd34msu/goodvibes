@@ -22,6 +22,7 @@ import { findModelDefinition } from '../../providers/registry-models.js';
 import { resolveModelReference } from '../../providers/model-id-resolution.js';
 import { providerDisplayLabel } from '../../providers/provider-labels.js';
 import { catalogTextWork, type CatalogTextWork } from '../../providers/model-catalog-facts.js';
+import { recommendModels } from '../../providers/model-recommendations.js';
 import {
   REASONING_EFFORT_SEVERITY,
   readReasoningEffortLevel,
@@ -63,6 +64,8 @@ export interface ProviderModelEntry {
    * embedding model), `unknown` the catalog does not say.
    */
   readonly textWork: CatalogTextWork;
+  /** On the provider's recommended shortlist (recommendModels): why, in catalog facts. Absent otherwise. */
+  readonly recommended?: string | undefined;
 }
 
 export type { ConfiguredVia } from '../../providers/configured-status.js';
@@ -259,8 +262,14 @@ async function handleListProviderModels(context: ModelRouteContext): Promise<Res
   const statuses = await providerRegistry.describeConfiguredProviders(
     currentProvider === undefined ? [...byProvider.keys()] : [...byProvider.keys(), currentProvider]);
   const providers: ModelRouteProviderRecord[] = [];
-  for (const [providerId, models] of byProvider) {
+  for (const [providerId, listed] of byProvider) {
     const status = statuses.get(providerId) ?? { configured: false, envVars: [] };
+    // A connected provider's shortlist, from catalog facts; a provider that is not connected has none.
+    const recommended = status.configured ? recommendModels(listed) : new Map<string, string>();
+    const models = recommended.size === 0 ? listed : listed.map((model) => {
+      const why = recommended.get(model.registryKey);
+      return why === undefined ? model : { ...model, recommended: why };
+    });
     providers.push({
       id: providerId,
       label: providerDisplayLabel(providerId),

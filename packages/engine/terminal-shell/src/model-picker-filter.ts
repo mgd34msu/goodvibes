@@ -61,12 +61,14 @@ export interface FilterModelParams {
      * listed; 'unknown' is listed after the described models.
      */
     readonly textWork?: ((model: ModelDefinition) => CatalogTextWork) | undefined;
+    /** Registry keys of the recommended short list (recommendModels), listed after pinned and recent models. */
+    readonly recommended?: ReadonlySet<string> | undefined;
 }
 export function buildFilteredModels(params: FilterModelParams, cache: FilteredModelsCache | null): {
     result: ModelDefinition[];
     cache: FilteredModelsCache;
 } {
-    const { models, configuredProviders, pinnedIds, recentIds, query, categoryFilter, capabilityFilter, availableOnly, benchmarkSort, groupBy, benchmarkStore, providerRegistry, textWork, } = params;
+    const { models, configuredProviders, pinnedIds, recentIds, query, categoryFilter, capabilityFilter, availableOnly, benchmarkSort, groupBy, benchmarkStore, providerRegistry, textWork, recommended, } = params;
     const configuredProvidersKey = setKey(configuredProviders);
     const pinnedIdsKey = setKey(pinnedIds);
     const recentIdsKey = orderedListKey(recentIds);
@@ -196,6 +198,11 @@ export function buildFilteredModels(params: FilterModelParams, cache: FilteredMo
         if (described.length > 0 && described.length < result.length) {
             result = [...described, ...result.filter(m => textWork(m) !== 'text')];
         }
+    }
+    // The recommended short list leads the rest (pinned and recent go above it
+    // next); a benchmark sort the person chose keeps its own order.
+    if (recommended && recommended.size > 0 && benchmarkSort === 'none') {
+        result = [...result.filter(m => recommended.has(m.registryKey)), ...result.filter(m => !recommended.has(m.registryKey))];
     }
     // Boost recent (non-pinned) models to the front
     if (recentIds.length > 0) {

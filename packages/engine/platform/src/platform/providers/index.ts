@@ -271,6 +271,8 @@ export { ProviderSetupReadings, classifyProviderSetup, describeProviderSetup, pr
 export type { ProviderSetupClass, ProviderSetupClassification, ProviderSetupFacts, ProviderSetupReadOptions } from './provider-setup.js';
 
 export { installCatalogModelFacts, catalogTextWork } from './model-catalog-facts.js';
+export { recommendModels, MAX_RECOMMENDED } from './model-recommendations.js';
+export type { RecommendationCandidate } from './model-recommendations.js';
 export type { CatalogTextWork } from './model-catalog-facts.js';
 export { ModelFamilyReadings, modelFamilyReadings } from './model-family.js';
 export type { ModelFamily, ModelFamilyInput } from './model-family.js';

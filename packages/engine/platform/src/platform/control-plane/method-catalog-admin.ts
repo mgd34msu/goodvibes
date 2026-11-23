@@ -75,8 +75,10 @@ const CONFIG_SET_MANY_OUTPUT_SCHEMA = objectSchema({
     value: JSON_VALUE_SCHEMA,
     persistedTo: STRING_SCHEMA,
     tier: STRING_SCHEMA,
+    // Where the held value comes from when that is not its tier (a default the host set, a runtime value), as config.set reports it.
+    effectiveOrigin: STRING_SCHEMA,
     daemonOwned: BOOLEAN_SCHEMA,
-  }, ['key'])),
+  }, ['key'], { additionalProperties: true })),
 }, ['success', 'revision', 'entries']);
 
 export const builtinGatewayAdminMethodDescriptors: readonly GatewayMethodDescriptor[] = [

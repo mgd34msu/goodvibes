@@ -22,8 +22,10 @@ export const ROSEPINE_THEME: ThemeJson = {
     info: { dark: '#c4a7e7', light: '#907aa9' },
     text: { dark: '#e0def4', light: '#575279' },
     // light: published #797593 is 4.23:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: { dark: '#908caa', light: '#74708d' },
-    textFaint: { dark: '#6e6a86', light: '#9893a5' },
+    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
+    // panel and on elements (published light muted #74708d, faint #6e6a86 / #9893a5).
+    textMuted: { dark: '#908caa', light: '#6b6782' },
+    textFaint: { dark: '#8e8aa1', light: '#6c6875' },
     selectedListItemText: { dark: '#191724', light: '#faf4ed' },
     background: { dark: '#191724', light: '#faf4ed' },
     backgroundPanel: { dark: '#1f1d2e', light: '#fffaf3' },

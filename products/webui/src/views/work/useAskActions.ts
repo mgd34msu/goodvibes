@@ -17,7 +17,7 @@ import type { ApprovalActions } from './useApprovalActions';
 export interface ChoiceInput {
   /** Free text: a question's own answer, or the reason for a No. */
   readonly text?: string;
-  /** The remember tier picked in "Don't ask again…". */
+  /** The remember tier picked after "Yes, and remember (choose what)". */
   readonly rememberTier?: string;
   /** For "Apply selected": the edit hunks kept, by index. */
   readonly selectedHunks?: readonly number[];

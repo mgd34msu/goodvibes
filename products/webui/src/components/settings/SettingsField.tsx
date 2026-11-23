@@ -24,6 +24,9 @@ import { DecisionRouterEditor } from "./DecisionRouterEditor";
  *   daemon.timezone        → TimezonePicker, a searchable IANA-zone select
  *                             (never free text) with an explicit "UTC (unset)"
  *                             option that writes ''.
+ *   payments.enabled       → PaymentsEnabledField: turning it on asks which of
+ *                             the two ways purchases run (confirmEveryPurchase)
+ *                             and writes both in one update.
  *   payments.cvvHandling   → CvvHandlingField, an enum select that surfaces
  *                             CVV_PROMPT_TRADEOFF_WARNING the moment 'prompt'
  *                             is selected.
@@ -64,6 +67,7 @@ import { ModelPricesEditor } from "./ModelPricesEditor";
 import { TimezonePicker } from "./TimezonePicker";
 import { MoneyField } from "./MoneyField";
 import { CvvHandlingField } from "./CvvHandlingField";
+import { PaymentsEnabledField } from "./PaymentsEnabledField";
 
 interface SettingsFieldProps {
   readonly field: ConfigFieldModel;
@@ -82,6 +86,8 @@ interface SettingsFieldProps {
   readonly currency?: string;
   /** The daemon's current value for a key, read just before an editor that rewrites a whole object saves. */
   readonly readLatest?: (key: string) => Promise<unknown>;
+  /** For `payments.enabled`: how purchases run now (`payments.confirmEveryPurchase`) and the stop window's minutes. */
+  readonly purchaseMode?: { readonly confirmEveryPurchase: boolean; readonly vetoMinutes: number };
 }
 
 /** True when any own property on the way down is an accessor: reading it would run daemon-supplied code. */
@@ -113,7 +119,7 @@ function scalarToText(v: unknown): string {
   return JSON.stringify(v);
 }
 
-export function SettingsField({ field, onCommit, onCommitMany, onReset, persisted, currency, readLatest }: SettingsFieldProps) {
+export function SettingsField({ field, onCommit, onCommitMany, onReset, persisted, currency, readLatest, purchaseMode }: SettingsFieldProps) {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Secret replacements are write-only: never seed them from live config.
@@ -130,6 +136,22 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
       await onCommit(field.key, value);
       setRevealing(false);
       setDraft("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      inFlight.current = false;
+      setSaving(false);
+    }
+  }
+
+  /** Turning payments on: the way purchases run and the switch, in one update. */
+  async function turnPaymentsOn(confirmEveryPurchase: boolean): Promise<void> {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setSaving(true);
+    setError(null);
+    try {
+      await onCommitMany([["payments.confirmEveryPurchase", confirmEveryPurchase], ["payments.enabled", true]]);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -195,6 +217,20 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
       const value = typeof current === "string" ? current : "";
       return (
         <TimezonePicker value={value} disabled={saving} onCommit={(next) => void commit(next)} />
+      );
+    }
+
+    // payments.enabled, turned on only together with a choice of how purchases run.
+    if (field.key === "payments.enabled" && purchaseMode) {
+      return (
+        <PaymentsEnabledField
+          enabled={Boolean(effectiveValue(field))}
+          confirmEveryPurchase={purchaseMode.confirmEveryPurchase}
+          vetoMinutes={purchaseMode.vetoMinutes}
+          disabled={saving}
+          onTurnOff={() => void commit(false)}
+          onTurnOn={(confirm) => void turnPaymentsOn(confirm)}
+        />
       );
     }
 
@@ -349,6 +385,7 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
   const stacked =
     field.type === "object" ||
     field.key === "daemon.timezone" ||
+    field.key === "payments.enabled" ||
     (field.isSecret && field.type === "string" && revealing);
 
   return (

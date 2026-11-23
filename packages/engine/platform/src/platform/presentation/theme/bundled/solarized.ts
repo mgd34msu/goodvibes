@@ -25,10 +25,11 @@ export const SOLARIZED_THEME: ThemeJson = {
     // dark: published #93a1a1 is 5.61:1 on the panel; adjusted to reach 7:1.
     // light: published #586e75 is 4.99:1 on the panel; adjusted to reach 7:1.
     text: { dark: '#a9b4b4', light: '#46575c' },
-    // light: published #657b83 is 4.13:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: { dark: '#839496', light: '#5f747b' },
-    // light: published #93a1a1 is 2.48:1 on the panel; adjusted to reach 2.5:1.
-    textFaint: { dark: '#586e75', light: '#929f9f' },
+    // Muted and faint carry key hints, reasons and times: each is the smallest lift
+    // of the published colour (muted #839496 / #657b83, faint #586e75 / #93a1a1)
+    // that reaches 4.5:1 on the panel and on elements.
+    textMuted: { dark: '#8c9b9d', light: '#586c72' },
+    textFaint: { dark: '#8b9b9f', light: '#626a6a' },
     selectedListItemText: { dark: '#002b36', light: '#fdf6e3' },
     background: { dark: '#002b36', light: '#fdf6e3' },
     backgroundPanel: { dark: '#002b36', light: '#fdf6e3' },

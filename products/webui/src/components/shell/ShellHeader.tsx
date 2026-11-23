@@ -44,7 +44,7 @@ export function ShellHeader({ title, phone, indicators, onOpenDrawer, onNewChat,
   if (phone) {
     const needs = attention > 0 ? `, ${attention} need${attention === 1 ? 's' : ''} you` : '';
     return (
-      <header className="shell-header shell-header--phone">
+      <header className="shell-header shell-header--phone" data-gv-top-bar="">
         <IconButton
           label={`Open navigation${needs}`}
           icon={(
@@ -64,7 +64,7 @@ export function ShellHeader({ title, phone, indicators, onOpenDrawer, onNewChat,
     );
   }
   return (
-    <header className="shell-header">
+    <header className="shell-header" data-gv-top-bar="">
       {titleArea}
       <div className="shell-header__end">
         {indicators && <div className="shell-header__indicators">{indicators}</div>}

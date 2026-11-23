@@ -51,6 +51,7 @@ interface ModelsDevModel {
   type?: string | undefined;
   name?: string | undefined;
   family?: string | undefined;
+  release_date?: string | undefined;
   cost?: ModelsDevModelCost | undefined;
   limit?: ModelsDevModelLimit | undefined;
   capabilities?: {
@@ -70,7 +71,7 @@ type ModelsDevResponse = Record<string, CatalogProviderShape>;
 /** The catalog is checked once a day; an unchanged archive answers the check with a 304. */
 const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
 /** Repository-backed cache with canonical identities, model types and capability facts. */
-const CATALOG_CACHE_VERSION = 7;
+const CATALOG_CACHE_VERSION = 8;
 
 export function getCatalogCachePath(cacheDir: string): string {
   return join(cacheDir, 'model-catalog.json');
@@ -188,6 +189,8 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
       const modelId = typeof modelData.id === 'string' && modelData.id.trim() ? modelData.id : modelKey;
       const modelName = typeof modelData.name === 'string' && modelData.name.trim() ? modelData.name : modelId;
       const modelFamily = typeof modelData.family === 'string' ? modelData.family : undefined;
+      const releaseDate = typeof modelData.release_date === 'string' && /^\d{4}-\d{2}(-\d{2})?$/.test(modelData.release_date.trim())
+        ? modelData.release_date.trim() : undefined;
       const rawCost = modelData.cost;
       const cost = rawCost ? {
         input: rawCost.input ?? rawCost.text?.input?.price,
@@ -237,6 +240,7 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
           ? { canonicalModelId: modelData.canonical_model_id } : {}),
         name: modelName,
         ...(modelFamily ? { family: modelFamily } : {}),
+        ...(releaseDate ? { releaseDate } : {}),
         provider: providerName,
         providerId,
         providerEnvVars: getStringArray(providerData.env),
@@ -265,10 +269,15 @@ function transformModelsDevResponse(input: unknown, access: ReadonlyMap<string, 
 function validateCatalogCache(value: unknown): { cache: CatalogCacheFile | null; reason?: string } {
   const current = validateTtlCacheEnvelope<CatalogCacheFile>(value, 'models', 'array', CATALOG_CACHE_VERSION);
   if (current.cache) return current;
-  // Preserve offline data, but refresh catalogs decoded before schema-2 support.
-  for (const version of [6, 5]) {
+  // Preserve offline data, but refresh catalogs decoded before schema-2 support
+  // (5, 6) or before release dates were kept (7). Without its ETag the next check
+  // reads the archive whole instead of being told it is unchanged.
+  for (const version of [7, 6, 5]) {
     const legacy = validateTtlCacheEnvelope<CatalogCacheFile>(value, 'models', 'array', version);
-    if (legacy.cache) return { cache: { ...legacy.cache, version: CATALOG_CACHE_VERSION, ttlMs: 0 } };
+    if (legacy.cache) {
+      const { etag: _unused, ...kept } = legacy.cache;
+      return { cache: { ...kept, version: CATALOG_CACHE_VERSION, ttlMs: 0 } };
+    }
   }
   return current;
 }

@@ -45771,6 +45771,9 @@ Write several config values on the daemon as one update: `{ entries: [{ key, val
               "tier": {
                 "type": "string"
               },
+              "effectiveOrigin": {
+                "type": "string"
+              },
               "daemonOwned": {
                 "type": "boolean"
               }
@@ -45778,7 +45781,7 @@ Write several config values on the daemon as one update: `{ entries: [{ key, val
             "required": [
               "key"
             ],
-            "additionalProperties": false
+            "additionalProperties": true
           }
         }
       },
@@ -141120,7 +141123,7 @@ Switch the daemon's current model live, by the registry key `models.list` return
 
 #### `models.list`
 
-Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open: a provider's list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal's does.
+Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open: a provider's list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal's does. A connected provider's models may carry `recommended`, why the model is on that provider's short list of at most five, in catalog facts only ("newest claude-sonnet", "largest context: 1M tokens", "lowest price: $0.15 in, $0.60 out per 1M tokens"); a picker shows them after pinned and recent, and a provider the catalog gives no such facts for has none.
 
 - Title: `Model Catalog`
 - Source: `builtin`
@@ -141316,6 +141319,9 @@ Every provider this daemon knows about with the models it offers, whether it is 
                     "other",
                     "unknown"
                   ]
+                },
+                "recommended": {
+                  "type": "string"
                 }
               },
               "required": [

@@ -11,9 +11,9 @@
  *
  *     Runs your tests. Changes no files outside this folder.
  *
- *      Yes, once    Yes, and don't ask again…    No
+ *      Yes, once    Yes, and remember (choose what)    No
  *
- *      y  yes    a  don't ask again    n  no    d  details    or type why not
+ *      y  yes    a  remember    n  no    d  details    or type why not
  *
  * One question in a sentence, what it will do (red only for what cannot be
  * undone, and only when the program has that fact), the choices with their
@@ -52,7 +52,7 @@ import { drawRow, measureRow, type KitRow, type KitSpan } from './surface-kit-li
 export interface AskCardState {
   /** The chosen button (index into askCardButtons). */
   readonly choice?: number | undefined;
-  /** The "don't ask again" choices are open, and which is highlighted. */
+  /** The "Yes, and remember" choices are open, and which is highlighted. */
   readonly submenuOpen?: boolean | undefined;
   readonly submenuIndex?: number | undefined;
   readonly detailsExpanded?: boolean | undefined;
@@ -347,7 +347,7 @@ function cardKeys(presentation: AskPresentation, request: PermissionPromptReques
   }
   const hints: KitHint[] = [
     ['y', 'yes'],
-    ...(offered ? [['a', 'don\'t ask again'] as const] : []),
+    ...(offered ? [['a', 'remember'] as const] : []),
     ['n', 'no'],
     ['d', state.detailsExpanded ? 'hide details' : 'details'],
   ];

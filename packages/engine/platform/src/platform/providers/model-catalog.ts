@@ -35,6 +35,8 @@ export interface CatalogModel {
   outputModalities?: readonly string[] | undefined;
   name: string;
   family?: string | undefined;
+  /** The catalog's published release date (YYYY-MM-DD, or YYYY-MM), absent when it gives none. */
+  releaseDate?: string | undefined;
   provider: string;
   providerId: string;
   providerEnvVars: string[];

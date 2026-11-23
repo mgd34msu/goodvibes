@@ -155,7 +155,10 @@ has effort levels; the one in use is checked). Providers you are connected to
 come first; the others are listed under "Not connected" with the one action
 that connects them ("Connect in Settings", or "Copy /provider sign-in <id>"
 where only the terminal app can sign in). Within a provider: Favorites (pinned
-models), Recent, then the rest, and last, under "Not described by the
+models), Recent, "Recommended" (at most five, each with why in the catalog's
+own facts: "newest claude-sonnet", "largest context: 1M tokens", "lowest
+price: $0.15 in, $0.60 out per 1M tokens"; none when the catalog has no such
+facts for the provider), then the rest, and last, under "Not described by the
 catalog", models marked "kind unknown"; image, speech and embedding models are
 not listed. The filter box at the top searches every connected provider's
 models at once. Keys: arrows move, Right or Enter goes into the next step, Left
@@ -163,10 +166,15 @@ or Escape goes back one step, typing filters. On a phone the same steps open in
 a bottom sheet.
 
 A pick is for this chat only, an open chat at once and a new chat when its first
-message creates it; the menu says so ("For this chat only. The default for new
-chats is set in Settings.") and offers "Make this the default for new chats",
-which saves the chat's model and effort as the default (also changed in
-Settings, Models and providers). When a provider's list was read more than a
+message creates it; the menu says so ("For this chat only.") and offers "Make
+this the default for new chats", which saves the chat's model and effort as the
+default (also changed in Settings, Models and providers). When the chat's model
+and effort already are the default, the menu says "This is the default for new
+chats." instead. The menu opens beside the composer on the side with more room,
+below the composer on a new chat and above it in an open chat, and stays there
+through the three steps; a list longer than the room scrolls inside it. In a
+window too short for six rows on either side of the composer, it opens in the
+middle of the page over a dimmed backdrop; Escape or a click outside closes it. When a provider's list was read more than a
 day ago the menu says when ("List read 3 days ago"), and when its last reading
 failed it says "Could not read its list now"; "Refresh models" reads the lists
 again from the providers (one provider in its step, every provider in the first

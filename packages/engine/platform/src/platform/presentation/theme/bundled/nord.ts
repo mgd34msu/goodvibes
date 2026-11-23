@@ -22,10 +22,11 @@ export const NORD_THEME: ThemeJson = {
     success: '#a3be8c',
     info: '#81a1c1',
     text: '#eceff4',
-    // dark: published #7b88a1 (nordtheme/vim nord3_gui_brightened, brightest step) is 3.50:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: '#919cb1',
-    // dark: published #616e88 (nordtheme/vim nord3_gui_bright) is 2.43:1 on the panel; adjusted to reach 2.5:1.
-    textFaint: '#64718a',
+    // Muted and faint carry key hints, reasons and times: each is the smallest lift
+    // of the published colour (#7b88a1 nord3_gui_brightened, #616e88 nord3_gui_bright)
+    // that reaches 4.5:1 on the panel and on elements.
+    textMuted: '#a5aebf',
+    textFaint: '#a6aebc',
     selectedListItemText: '#2e3440',
     background: '#2e3440',
     backgroundPanel: '#2e3440',

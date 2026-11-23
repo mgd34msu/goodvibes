@@ -24,7 +24,7 @@ export const { handleSettingsModalToken } = createSettingsModalRoute<
       return;
     }
     if (action === 'decision-router') { openDecisionRouterSettings(context, changed); return; }
-    if (action === 'judgment-provider' || action === 'judgment-model' || action === 'judgment-fallbacks' || action === 'decision-policy' || action === 'permission-mode') {
+    if (action === 'judgment-provider' || action === 'judgment-model' || action === 'judgment-fallbacks' || action === 'decision-policy' || action === 'permission-mode' || action === 'payments-mode') {
       openSettingsChoice(context, action, changed, setExecutionMode);
       return;
     }

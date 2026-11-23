@@ -91,7 +91,7 @@ How each option behaves:
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
 | `--strict` | `doctor` only: also fail on advisory findings. |
 | `-h, --help` | Prints help: first `Most used:` (start the app, `run "<prompt>"`, `pair`, `status`, `goodvibes-daemon update --check`; the Agent adds `setup`), then every command, the options and examples. `goodvibes help <command>` prints one command's help. |
-| `-v, --version` | Prints `goodvibes 3.4.6`. |
+| `-v, --version` | Prints `goodvibes 3.4.7`. |
 
 Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 
@@ -639,7 +639,7 @@ goodvibes completion fish > ~/.config/fish/completions/goodvibes.fish
 ### `goodvibes help` and `goodvibes version`
 
 `goodvibes help` prints the overview; `goodvibes help <command>` prints one command's usage and examples.
-`goodvibes version` prints `goodvibes 3.4.6`.
+`goodvibes version` prints `goodvibes 3.4.7`.
 `goodvibes help version` has no detailed help and prints the overview.
 
 ## The interface
@@ -1048,7 +1048,7 @@ When a file was changed after that call (by you, another tool or another program
 When the provider is not signed in, the terminal app asks for its API key on a hidden line before the switch lands.
 An unknown id is refused with the provider registry's reason. `/model use` alone asks which model, from the models you can switch to.
 `/model refresh` asks every provider you have set up for its models again (past any list kept on disk), then refreshes the catalog, the benchmarks and the token limits, asks the daemon to read its own lists again (`models.refresh`; the lists the web app and every other program show), and prints one line per provider: how many models it has, or why its list could not be read (`could not be read, its server is not running`, `could not be read (<error>); 12 models from its last list`, `0 models: it answered with an empty list`); a provider that does not list its own models says it uses the built-in catalog. With a daemon running, a note follows: `The daemon read its lists again too (what the web UI and the other programs show): <n> providers answered` (and `; could not read <provider> (<error>)`). In the model picker, `Ctrl+R` runs `/model refresh`. A part that failed makes the refresh a refusal naming it, after the rest was printed.
-The model picker (its key, or a failed turn's `alt+o`) has a tab for each thing a model is chosen for: Main chat, Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `kind unknown`; pinned and recent models still come first.
+The model picker (its key, or a failed turn's `alt+o`) has a tab for each thing a model is chosen for: Main chat, Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `kind unknown`; pinned and recent models still come first. After them, a `Recommended` group lists at most five models from connected providers, each with why, in catalog facts only: `newest <family>` (the latest release date in a family the catalog names), `largest context: <n> tokens`, `lowest price: $<in> in, $<out> out per 1M tokens`, compared among one provider's models; a provider the catalog gives none of these facts for has none, and a benchmark sort lists no group. The Agent's picker shows the same group.
 
 `/effort` is described once for both programs: `show` ("See how hard the model thinks", the report) and `set <level>` ("Choose how hard the model thinks"; bare `/effort set` lists the levels the current model offers).
 `/effort set high` saves `provider.reasoningEffort` and prints the level in effect.

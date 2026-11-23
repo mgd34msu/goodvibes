@@ -250,21 +250,58 @@
   color: var(--text-2);
 }
 
-/* The model menu: provider, then model, then effort, with one filter box (views/chat/ModelPicker.tsx). */
-.model-picker {
+/* The model menu: provider, then model, then effort, with one filter box (views/chat/ModelPicker.tsx).
+   Beside the composer on the side with more room, no taller than that room
+   (--model-picker-room, set by useFittedPosition); only its list scrolls.
+   Without room for six rows on either side it is a panel in the middle of the
+   page, over a dimmed backdrop, at a fixed height. */
+.gv-popover.model-picker {
   display: flex;
   flex-direction: column;
   width: 380px;
   max-width: calc(100vw - 16px);
-  max-height: min(520px, calc(100vh - 120px));
+  max-height: var(--model-picker-room, 520px);
+  overflow: hidden;
   padding: 6px;
 }
 
+.gv-popover.model-picker[data-side="center"] {
+  height: var(--model-picker-room);
+}
+
+.model-picker__backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-palette);
+}
+
+/* Opening below, it unfolds downward from the composer. */
+.gv-popover.model-picker[data-side="bottom"] {
+  animation-name: gv-model-picker-drop-in;
+}
+
+@keyframes gv-model-picker-drop-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* A bottom sheet that leaves the phone header (52 tall) and the grabber in view,
+   also when an on-screen keyboard shortens the viewport. */
 .model-picker--sheet {
+  display: flex;
+  flex-direction: column;
   width: 100%;
+  min-height: 0;
   max-width: none;
-  max-height: min(80vh, 640px);
+  max-height: min(640px, calc(100dvh - 84px));
   padding: 0 4px 8px;
+}
+
+.model-picker__head,
+.model-picker__filter,
+.model-picker__status,
+.model-picker__foot {
+  flex-shrink: 0;
 }
 
 .model-picker__head {
@@ -341,6 +378,23 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+/* Rows past an edge: that edge fades, so a cut row reads as more to scroll
+   (ModelPicker sets data-more from the list's scroll position). */
+.model-picker__list[data-more="below"] {
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), rgb(0 0 0 / 0.15));
+}
+
+.model-picker__list[data-more="above"] {
+  mask-image: linear-gradient(to top, #000 calc(100% - 40px), rgb(0 0 0 / 0.15));
+}
+
+.model-picker__list[data-more="both"] {
+  mask-image: linear-gradient(to bottom, rgb(0 0 0 / 0.15), #000 40px, #000 calc(100% - 40px), rgb(0 0 0 / 0.15));
 }
 
 .model-picker__group {
@@ -394,6 +448,22 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* A recommended model: its name, and under it why it is recommended. */
+.model-picker__labels {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.model-picker__detail {
+  color: var(--text-2);
+  font-size: var(--text-meta);
+  line-height: var(--leading-meta);
+  overflow-wrap: anywhere;
 }
 
 .model-picker__hint {

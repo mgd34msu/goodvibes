@@ -3,7 +3,7 @@
  * (design ux.md 3.1, A2.1): one scheme.
  *
  *   y        yes, once
- *   a        "Yes, and don't ask again…": opens the remember choices
+ *   a        "Yes, and remember (choose what)": opens the remember choices
  *            (offered only when the ask can be remembered)
  *   n        no
  *   d        details

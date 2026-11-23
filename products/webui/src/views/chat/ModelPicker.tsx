@@ -17,12 +17,15 @@
  *
  * Keyboard: arrows move, Right or Enter goes into the next step, Left or
  * Escape goes back one step (Escape on the first step closes), typing
- * filters. On a phone the same steps open in a bottom sheet.
+ * filters. Beside the composer it opens on the side with more room; when
+ * neither side has room for six rows it opens in the middle of the page over a
+ * dimmed backdrop (Escape or a press outside closes it). On a phone the same
+ * steps open in a bottom sheet.
  */
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react';
-import { PHONE_QUERY, useFloatingPosition, useMediaQuery, useOutsidePress } from '../../components/ui/overlay';
+import { PHONE_QUERY, useFittedPosition, useMediaQuery, useOutsidePress } from '../../components/ui/overlay';
 import { copyOutcomeMessage, copyText } from '../../lib/copy-text';
 
 /** One model the menu can pick. */
@@ -34,6 +37,8 @@ export interface PickerModel {
   readonly efforts: readonly string[];
   /** The catalog does not say whether it holds a conversation: listed last, under `Not described by the catalog`, marked `kind unknown`. */
   readonly kindUnknown: boolean;
+  /** On the provider's recommended short list (models.list `recommended`): why, in catalog facts. */
+  readonly recommended?: string | undefined;
 }
 
 /** One provider in the menu. */
@@ -68,12 +73,20 @@ export interface ModelPickerProps {
   readonly onOpenSettings: () => void;
   /** Read the model lists again (one provider, or all); resolves with the sentence to show. */
   readonly onRefresh: (providerId?: string) => Promise<string>;
+  /** The box the control sits in (the composer): the menu opens beside it, never over it. */
+  readonly boxRef?: RefObject<HTMLElement | null>;
 }
 
 /** A list older than this was not read when it was due: the menu says when it was read. */
 const LIST_LIFETIME_MS = 24 * 60 * 60 * 1000;
 /** Rows drawn at once; a longer list says how many more and that typing narrows it. */
 const ROW_CAP = 300;
+/** The tallest the menu grows. */
+const PANEL_MAX_HEIGHT = 520;
+/** Beside the composer the menu shows at least this many rows; with less room it opens in the middle of the page. */
+const USABLE_ROWS = 6;
+/** A row's least height (.model-picker__row min-height). */
+const ROW_MIN_HEIGHT = 34;
 
 type Step = { readonly kind: 'provider' } | { readonly kind: 'model'; readonly providerId: string } | { readonly kind: 'effort'; readonly model: PickerModel };
 
@@ -82,6 +95,8 @@ interface Row {
   readonly kind: 'header' | 'note' | 'item';
   readonly label: ReactNode;
   readonly hint?: ReactNode;
+  /** A second line under the label (a recommended model's why). */
+  readonly detail?: string;
   readonly checked?: boolean;
   readonly disabled?: boolean;
   /** Has a next step (drawn with a chevron; Right goes into it). */
@@ -117,14 +132,16 @@ export function listFreshness(provider: Pick<PickerProvider, 'listedAt' | 'listE
   return null;
 }
 
-/** Pinned first, then recent, then the described models, then the ones the catalog does not describe: the terminal's order. */
-function ordered(models: readonly PickerModel[], pinned: readonly string[], recent: readonly string[]): { favorites: PickerModel[]; recentModels: PickerModel[]; rest: PickerModel[] } {
+/** Pinned first, then recent, then the recommended short list, then the described models, then the ones the catalog does not describe: the terminal's order. */
+function ordered(models: readonly PickerModel[], pinned: readonly string[], recent: readonly string[]): { favorites: PickerModel[]; recentModels: PickerModel[]; recommendedModels: PickerModel[]; rest: PickerModel[] } {
   const pinnedSet = new Set(pinned);
   const favorites = models.filter((model) => pinnedSet.has(model.registryKey));
   const recentModels = recent.map((key) => models.find((model) => model.registryKey === key)).filter((model): model is PickerModel => model !== undefined && !pinnedSet.has(model.registryKey));
   const taken = new Set([...favorites, ...recentModels].map((model) => model.registryKey));
+  const recommendedModels = models.filter((model) => model.recommended !== undefined && !taken.has(model.registryKey));
+  for (const model of recommendedModels) taken.add(model.registryKey);
   const others = models.filter((model) => !taken.has(model.registryKey));
-  return { favorites, recentModels, rest: [...others.filter((model) => !model.kindUnknown), ...others.filter((model) => model.kindUnknown)] };
+  return { favorites, recentModels, recommendedModels, rest: [...others.filter((model) => !model.kindUnknown), ...others.filter((model) => model.kindUnknown)] };
 }
 
 export function ModelPicker(props: ModelPickerProps) {
@@ -133,6 +150,8 @@ export function ModelPicker(props: ModelPickerProps) {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const backdropRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<Step>({ kind: 'provider' });
   const [query, setQuery] = useState('');
@@ -140,7 +159,16 @@ export function ModelPicker(props: ModelPickerProps) {
   const [status, setStatus] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const isPhone = useMediaQuery(PHONE_QUERY);
-  const position = useFloatingPosition(open && !isPhone, triggerRef, panelRef, 'top-end');
+  // The least height the menu is usable at: its head, filter, footer and six rows.
+  const usableHeight = useCallback(() => {
+    const panel = panelRef.current;
+    const list = listRef.current;
+    if (!panel || !list) return 0;
+    const row = list.querySelector<HTMLElement>('.model-picker__row')?.offsetHeight ?? 0;
+    return panel.offsetHeight - list.offsetHeight + USABLE_ROWS * Math.max(row, ROW_MIN_HEIGHT);
+  }, []);
+  const position = useFittedPosition(open && !isPhone, triggerRef, panelRef, { clearRef: props.boxRef, minHeight: usableHeight, maxHeight: PANEL_MAX_HEIGHT });
+  const centered = position?.side === 'center';
   const now = Date.now();
 
   const allModels = useMemo(() => providers.flatMap((provider) => provider.models), [providers]);
@@ -153,7 +181,10 @@ export function ModelPicker(props: ModelPickerProps) {
     setStatus(null);
     if (refocus) triggerRef.current?.focus();
   }, []);
-  useOutsidePress(open && !isPhone, [triggerRef, panelRef], () => close(false));
+  // A press outside closes it. Over the page a press lands on the backdrop, which
+  // closes it itself and keeps the press from becoming a mouse press, so focus
+  // does not leave for the page before it returns to the control.
+  useOutsidePress(open && !isPhone, [triggerRef, panelRef, backdropRef], () => close(false));
 
   const openMenu = () => {
     setStep({ kind: 'provider' });
@@ -168,15 +199,17 @@ export function ModelPicker(props: ModelPickerProps) {
   };
 
   /** A model row: into its effort step when it has efforts to choose, else picked. */
-  const modelRow = (model: PickerModel, withProvider: boolean): Row => {
+  const modelRow = (model: PickerModel, withProvider: boolean, why = false): Row => {
     const provider = providers.find((candidate) => candidate.id === model.providerId);
     const deeper = model.efforts.length > 0;
     return {
       id: `model:${model.registryKey}`,
       kind: 'item',
       label: model.label,
-      // The terminal picker's words for a model the catalog does not describe.
+      // The terminal picker's words for a model the catalog does not describe; in the
+      // recommended group, why the model is on it.
       hint: [withProvider ? provider?.label : null, model.kindUnknown ? 'kind unknown' : null].filter(Boolean).join(' · ') || undefined,
+      ...(why && model.recommended ? { detail: model.recommended } : {}),
       checked: model.registryKey === current.registryKey,
       deeper,
       onActivate: () => {
@@ -217,8 +250,8 @@ export function ModelPicker(props: ModelPickerProps) {
       }
       const found = providers.filter((provider) => provider.connected)
         .flatMap((provider) => provider.models.filter((model) => matches(`${model.label} ${model.registryKey} ${provider.label}`)));
-      const { favorites, recentModels, rest } = ordered(found, pinned, recent);
-      const list = [...favorites, ...recentModels, ...rest];
+      const { favorites, recentModels, recommendedModels, rest } = ordered(found, pinned, recent);
+      const list = [...favorites, ...recentModels, ...recommendedModels, ...rest];
       for (const model of list.slice(0, ROW_CAP)) out.push(modelRow(model, true));
       if (list.length > ROW_CAP) out.push({ id: 'more', kind: 'note', label: `${list.length - ROW_CAP} more: type more to narrow the list.` });
       if (out.length === 0) out.push({ id: 'none', kind: 'note', label: 'No connected provider has a model by that name.' });
@@ -250,11 +283,12 @@ export function ModelPicker(props: ModelPickerProps) {
       if (!provider) return out;
       const fresh = listFreshness(provider, now);
       if (fresh) out.push({ id: 'fresh', kind: 'note', label: `${fresh}.` });
-      const { favorites, recentModels, rest } = ordered(provider.models, pinned, recent);
+      const { favorites, recentModels, recommendedModels, rest } = ordered(provider.models, pinned, recent);
       if (favorites.length > 0) { out.push({ id: 'h:fav', kind: 'header', label: 'Favorites' }); favorites.forEach((model) => out.push(modelRow(model, false))); }
       if (recentModels.length > 0) { out.push({ id: 'h:recent', kind: 'header', label: 'Recent' }); recentModels.forEach((model) => out.push(modelRow(model, false))); }
+      if (recommendedModels.length > 0) { out.push({ id: 'h:recommended', kind: 'header', label: 'Recommended' }); recommendedModels.forEach((model) => out.push(modelRow(model, false, true))); }
       const described = rest.filter((model) => !model.kindUnknown);
-      if (described.length > 0) out.push({ id: 'h:all', kind: 'header', label: favorites.length + recentModels.length > 0 ? 'All models' : 'Models' });
+      if (described.length > 0) out.push({ id: 'h:all', kind: 'header', label: favorites.length + recentModels.length + recommendedModels.length > 0 ? 'All models' : 'Models' });
       rest.slice(0, ROW_CAP).forEach((model, index) => {
         // The models the catalog does not describe follow, under the terminal picker's group title.
         if (model.kindUnknown && (index === 0 || !rest[index - 1]!.kindUnknown)) out.push({ id: 'h:unknown', kind: 'header', label: 'Not described by the catalog' });
@@ -283,6 +317,8 @@ export function ModelPicker(props: ModelPickerProps) {
   // The first step opens on the provider in use, the second on the model in use.
   useEffect(() => {
     if (!open) return;
+    // A new step or filter starts its list at the top; the row in use is then scrolled into view.
+    if (listRef.current) listRef.current.scrollTop = 0;
     const at = items.findIndex((row) => row.checked);
     setActive(at >= 0 ? at : 0);
     // Only when the step or the filter changes: moving with the arrows keeps its place.
@@ -297,6 +333,20 @@ export function ModelPicker(props: ModelPickerProps) {
     if (!open || !activeRow) return;
     document.getElementById(`${listId}-${activeRow.id}`)?.scrollIntoView({ block: 'nearest' });
   }, [open, activeRow, listId]);
+
+  // A list taller than its room fades at the edge that has more rows past it.
+  const markOverflow = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const above = list.scrollTop > 1;
+    const below = list.scrollTop + list.clientHeight < list.scrollHeight - 1;
+    const more = above && below ? 'both' : above ? 'above' : below ? 'below' : '';
+    if (more) list.dataset.more = more;
+    else delete list.dataset.more;
+  }, []);
+  useLayoutEffect(() => {
+    if (open) markOverflow();
+  }, [open, rows, position?.maxHeight, isPhone, markOverflow]);
 
   const back = () => {
     if (step.kind === 'effort') setStep({ kind: 'model', providerId: step.model.providerId });
@@ -322,6 +372,7 @@ export function ModelPicker(props: ModelPickerProps) {
         event.preventDefault();
         event.stopPropagation();
         if (query) setQuery('');
+        else if (centered) close();
         else back();
         break;
       case 'Tab': close(false); break;
@@ -345,9 +396,13 @@ export function ModelPicker(props: ModelPickerProps) {
       ref={panelRef}
       role="dialog"
       aria-label="Choose a model"
+      aria-modal={centered || undefined}
       data-gv-layer=""
       className={isPhone ? 'model-picker model-picker--sheet' : 'glass gv-popover model-picker'}
-      style={isPhone ? undefined : (position ? { top: position.top, left: position.left } : { top: -9999, left: -9999 })}
+      data-side={isPhone ? undefined : position?.side}
+      style={isPhone ? undefined : (position
+        ? { top: position.top ?? 'auto', bottom: position.bottom ?? 'auto', left: position.left, '--model-picker-room': `${position.maxHeight}px` } as CSSProperties
+        : { top: -9999, left: -9999 })}
     >
       <div className="model-picker__head">
         {(step.kind !== 'provider' && !query) && (
@@ -378,7 +433,7 @@ export function ModelPicker(props: ModelPickerProps) {
           spellCheck={false}
         />
       </div>
-      <div id={listId} role="listbox" aria-label={title} className="model-picker__list">
+      <div ref={listRef} id={listId} role="listbox" aria-label={title} className="model-picker__list" onScroll={markOverflow}>
         {rows.map((row) => row.kind === 'header'
           ? <div key={row.id} role="presentation" className="model-picker__group">{row.label}</div>
           : row.kind === 'note'
@@ -397,7 +452,14 @@ export function ModelPicker(props: ModelPickerProps) {
                 onClick={() => { if (!row.disabled) row.onActivate?.(); }}
               >
                 <span className="model-picker__check" aria-hidden>{row.checked ? <Check size={15} /> : null}</span>
-                <span className="model-picker__label">{row.label}{row.checked && <span className="gv-sr-only"> (in use)</span>}</span>
+                {row.detail ? (
+                  <span className="model-picker__labels">
+                    <span className="model-picker__label">{row.label}{row.checked && <span className="gv-sr-only"> (in use)</span>}</span>
+                    <span className="model-picker__detail">{row.detail}</span>
+                  </span>
+                ) : (
+                  <span className="model-picker__label">{row.label}{row.checked && <span className="gv-sr-only"> (in use)</span>}</span>
+                )}
                 {row.hint && <span className="model-picker__hint">{row.hint}</span>}
                 {row.deeper && <ChevronRight size={15} aria-hidden className="model-picker__chevron" />}
               </div>
@@ -405,15 +467,21 @@ export function ModelPicker(props: ModelPickerProps) {
       </div>
       {status && <div className="model-picker__status" role="status">{status}</div>}
       <div className="model-picker__foot">
-        <span className="model-picker__scope">For this chat only. The default for new chats is set in Settings.</span>
-        <button
-          type="button"
-          className="model-picker__default"
-          disabled={props.isDefault || props.makeDefaultPending || !currentModel}
-          onClick={() => props.onMakeDefault()}
-        >
-          {props.isDefault ? 'This is the default for new chats' : props.makeDefaultPending ? 'Making it the default…' : 'Make this the default for new chats'}
-        </button>
+        {props.isDefault ? (
+          <span className="model-picker__scope">This is the default for new chats.</span>
+        ) : (
+          <>
+            <span className="model-picker__scope">For this chat only.</span>
+            <button
+              type="button"
+              className="model-picker__default"
+              disabled={props.makeDefaultPending || !currentModel}
+              onClick={() => props.onMakeDefault()}
+            >
+              {props.makeDefaultPending ? 'Making it the default…' : 'Make this the default for new chats'}
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -447,7 +515,20 @@ export function ModelPicker(props: ModelPickerProps) {
               {panel}
             </div>
           </div>
-        ) : panel,
+        ) : (
+          <>
+            {centered && (
+              <div
+                ref={backdropRef}
+                className="scrim model-picker__backdrop"
+                aria-hidden="true"
+                data-gv-layer=""
+                onPointerDown={(event) => { event.preventDefault(); close(true); }}
+              />
+            )}
+            {panel}
+          </>
+        ),
         document.body,
       )}
     </>

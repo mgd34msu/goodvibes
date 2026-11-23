@@ -31,7 +31,7 @@ test('an approval granted at the command-class tier reaches the daemon with that
     const asked = (await approvals()).find((row) => row.status === 'pending' && row.request?.tool === 'exec')!;
 
     await page.goto(`${daemon.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}${link.fragment}`);
-    await page.getByRole('button', { name: 'Don\'t ask again…' }).click();
+    await page.getByRole('button', { name: 'Yes, and remember (choose what)' }).click();
     await page.getByRole('radio', { name: 'Any bun command in this project' }).check();
     await page.getByRole('button', { name: 'Allow and remember' }).click();
 

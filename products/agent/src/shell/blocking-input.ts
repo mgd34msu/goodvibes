@@ -11,7 +11,7 @@ export type PendingPermissionState = PermissionRequest & AskCardState & {
    * `modifiedArgs.answer` carries the text typed into a command's terminal prompt (an `exec:prompt` ask);
    * for a multi-edit `edit` with only some changes applied, `modifiedArgs` holds those edits and
    * `extras.selectedHunks` their indices, which the approval broker applies. `extras.rememberTier` is
-   * the "don't ask again" choice; `extras.reason` the reason typed with a refusal.
+   * the "Yes, and remember" choice; `extras.reason` the reason typed with a refusal.
    */
   resolve: (approved: boolean, remember?: boolean, modifiedArgs?: Record<string, unknown>, extras?: AskCardResolveExtras) => void;
   /** Present when the ask is a multi-edit `edit` (isHunkSelectable): which changes are applied, and the cursor. */

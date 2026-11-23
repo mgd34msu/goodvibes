@@ -280,6 +280,131 @@ export function useFloatingPosition(
   return position;
 }
 
+/**
+ * Where a panel that sizes itself to the room beside its anchor goes. It opens
+ * on the side with more room; `top` is set when it opens below (its top edge
+ * stays put), `bottom` when it opens above (its bottom edge stays put), so a
+ * change of content changes only the far edge. Its height never passes
+ * `maxHeight`, the room on that side. When neither side has `minHeight`, it is
+ * `center`: a panel of fixed height `maxHeight` in the middle of the visible
+ * area below the top bar, over the page.
+ */
+export interface FittedPosition {
+  side: 'top' | 'bottom' | 'center';
+  /** Its top edge from the viewport top, when it opens below or in the middle. */
+  top: number | null;
+  /** Its bottom edge from the layout viewport's bottom, when it opens above. */
+  bottom: number | null;
+  left: number;
+  maxHeight: number;
+}
+
+/**
+ * Pure placement for a panel that fits itself to the room beside its anchor.
+ * `anchor` is the extent the panel must not cover (its right edge is the one
+ * the panel lines up with); `viewport` is the visible area (`top` already below
+ * any top bar) and the layout viewport's height, which a bottom edge is measured
+ * from. `minHeight` is the least height the panel is usable at; `maxHeight` the
+ * most it ever takes.
+ */
+export function computeFittedPosition(
+  anchor: { top: number; bottom: number; right: number },
+  width: number,
+  viewport: { top: number; bottom: number; width: number; layoutHeight: number },
+  size: { minHeight: number; maxHeight: number },
+  gap = 6,
+): FittedPosition {
+  const roomBelow = Math.min(size.maxHeight, viewport.bottom - VIEWPORT_MARGIN - (anchor.bottom + gap));
+  const roomAbove = Math.min(size.maxHeight, anchor.top - gap - (viewport.top + VIEWPORT_MARGIN));
+  if (Math.max(roomBelow, roomAbove) < size.minHeight) {
+    const area = viewport.bottom - viewport.top - 2 * VIEWPORT_MARGIN;
+    const height = Math.max(0, Math.floor(Math.min(size.maxHeight, area)));
+    return {
+      side: 'center',
+      top: Math.round(viewport.top + VIEWPORT_MARGIN + (area - height) / 2),
+      bottom: null,
+      left: Math.round(Math.max(VIEWPORT_MARGIN, (viewport.width - width) / 2)),
+      maxHeight: height,
+    };
+  }
+  const left = Math.round(Math.max(VIEWPORT_MARGIN, Math.min(anchor.right - width, viewport.width - VIEWPORT_MARGIN - width)));
+  if (roomBelow >= roomAbove) {
+    return { side: 'bottom', top: Math.round(anchor.bottom + gap), bottom: null, left, maxHeight: Math.max(0, Math.floor(roomBelow)) };
+  }
+  return { side: 'top', top: null, bottom: Math.round(viewport.layoutHeight - (anchor.top - gap)), left, maxHeight: Math.max(0, Math.floor(roomAbove)) };
+}
+
+/** The app's top bar: a fitted panel never covers it. */
+const TOP_BAR_SELECTOR = '[data-gv-top-bar]';
+
+/**
+ * Keep `floatingRef` beside `anchorRef` while `open`, on the side with more
+ * room, never over the anchor, the `clearRef` element (the box the anchor sits
+ * in) or the app's top bar, and inside the visible viewport; in the middle of
+ * the page when neither side has the `minHeight` the caller measures. The side
+ * and the anchored edge depend only on the anchor, the viewport and the measured
+ * least height, so the panel does not move when its content changes; it is
+ * placed again on resize, on a scroll outside it, and when the visible viewport
+ * changes (an on-screen keyboard).
+ */
+export function useFittedPosition(
+  open: boolean,
+  anchorRef: RefObject<HTMLElement | null>,
+  floatingRef: RefObject<HTMLElement | null>,
+  options: { clearRef?: RefObject<HTMLElement | null> | undefined; gap?: number; minHeight: () => number; maxHeight: number },
+): FittedPosition | null {
+  const [position, setPosition] = useState<FittedPosition | null>(null);
+  const clearRef = options.clearRef;
+  const gap = options.gap ?? 6;
+  const { minHeight, maxHeight } = options;
+
+  const update = useCallback(() => {
+    const anchor = anchorRef.current;
+    const floating = floatingRef.current;
+    if (!anchor || !floating) return;
+    const a = anchor.getBoundingClientRect();
+    const c = clearRef?.current?.getBoundingClientRect();
+    const visual = window.visualViewport;
+    const visibleTop = visual ? visual.offsetTop : 0;
+    const visibleBottom = visual ? visual.offsetTop + visual.height : window.innerHeight;
+    const bar = document.querySelector(TOP_BAR_SELECTOR)?.getBoundingClientRect();
+    const next = computeFittedPosition(
+      { top: Math.min(a.top, c?.top ?? a.top), bottom: Math.max(a.bottom, c?.bottom ?? a.bottom), right: a.right },
+      floating.getBoundingClientRect().width,
+      { top: Math.max(visibleTop, bar && bar.height > 0 ? bar.bottom : 0), bottom: visibleBottom, width: window.innerWidth, layoutHeight: window.innerHeight },
+      { minHeight: minHeight(), maxHeight },
+      gap,
+    );
+    setPosition((prev) => (prev && prev.side === next.side && prev.top === next.top && prev.bottom === next.bottom && prev.left === next.left && prev.maxHeight === next.maxHeight ? prev : next));
+  }, [anchorRef, floatingRef, clearRef, gap, minHeight, maxHeight]);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setPosition(null);
+      return undefined;
+    }
+    update();
+    // A scroll inside the panel (its own list) does not move the anchor.
+    const onScroll = (event: Event): void => {
+      if (event.target instanceof Node && floatingRef.current?.contains(event.target)) return;
+      update();
+    };
+    const visual = window.visualViewport;
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', onScroll, true);
+    visual?.addEventListener('resize', update);
+    visual?.addEventListener('scroll', update);
+    return () => {
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', onScroll, true);
+      visual?.removeEventListener('resize', update);
+      visual?.removeEventListener('scroll', update);
+    };
+  }, [open, update, floatingRef]);
+
+  return position;
+}
+
 /** Live `matchMedia` result. False where matchMedia is unavailable (tests, SSR). */
 export function useMediaQuery(query: string): boolean {
   const read = (): boolean => {

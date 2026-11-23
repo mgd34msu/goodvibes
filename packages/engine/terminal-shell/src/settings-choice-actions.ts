@@ -4,9 +4,10 @@ import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointU
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
 import type { ModelPickerChoice } from './model-picker-types.js';
 import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
+import { purchaseModeChoices } from '@goodvibes/engine/platform/platform/payments/browser';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
-export type SettingsChoiceAction = 'judgment-provider' | 'judgment-model' | 'decision-policy' | 'permission-mode' | 'decision-router' | 'judgment-fallbacks';
+export type SettingsChoiceAction = 'judgment-provider' | 'judgment-model' | 'decision-policy' | 'permission-mode' | 'decision-router' | 'judgment-fallbacks' | 'payments-mode';
 export interface SettingsChoiceContext {
   readonly platform: {
     readonly configManager: Pick<ConfigManager, 'get' | 'setMany'>;
@@ -24,6 +25,8 @@ export const SETTINGS_CHOICE_ACTIONS: Readonly<Record<string, SettingsChoiceActi
   'judgment.policy': 'decision-policy',
   'permissions.mode': 'permission-mode',
   'provider.decisionRouter': 'decision-router',
+  // Turning payments on is choosing how purchases run (payments.confirmEveryPurchase) at the same time.
+  'payments.enabled': 'payments-mode',
 });
 const PROVIDERS = [
   { id: 'system-one', label: 'System One', detail: 'TypeSafe Jev or a compatible hosted/local System One deployment.' },
@@ -85,6 +88,7 @@ export function openSettingsChoice(
   const config = ctx.platform.configManager;
   const watchedKeys: readonly ConfigKey[] = action === 'judgment-fallbacks' ? ['judgment.fallbacks']
     : action === 'decision-policy' ? ['judgment.policy'] : action === 'permission-mode' ? ['permissions.mode']
+    : action === 'payments-mode' ? ['payments.enabled', 'payments.confirmEveryPurchase']
     : ['judgment.model', 'judgment.backend', 'judgment.endpoint', 'judgment.keySource', 'judgment.keyName'];
   const revision = () => JSON.stringify(watchedKeys.map(key => config.get(key)));
   const openedRevision = revision();
@@ -123,7 +127,8 @@ export function openSettingsChoice(
     ctx.renderRequest();
     if (!result.pending) return;
     void result.pending.settle().then((refused) => {
-      if (refused.length === 0) return;
+      // Applied by the daemon: a view showing what the daemon holds reads it again.
+      if (refused.length === 0) { changed(); ctx.renderRequest(); return; }
       const byReason = new Map<string, string[]>();
       for (const refusal of refused) {
         const reason = summarizeError(refusal.error);
@@ -136,6 +141,26 @@ export function openSettingsChoice(
       ctx.renderRequest();
     });
   };
+  if (action === 'payments-mode') {
+    // Off, or on in one of the two ways. Turned off, the list opens on Off, so
+    // turning payments on is always picking one of the two ways; nobody's
+    // stored choice changes until a way is picked here.
+    const enabled = config.get('payments.enabled') === true;
+    const ask = config.get('payments.confirmEveryPurchase') === true;
+    const modes = purchaseModeChoices(Number(config.get('payments.windows.vetoMinutes')));
+    // Both ways and what each means stay in view whichever row is highlighted.
+    const meanings = ['Off: nothing is bought.', ...modes.map((mode) => `${mode.label}: ${mode.detail}`)].join('\n');
+    open('Purchases', [
+      { id: 'off', label: 'Off', detail: meanings, primaryAction: 'select' },
+      ...modes.map((mode) => ({ id: mode.id, label: mode.label, detail: meanings, primaryAction: 'select' as const })),
+    ], { preSelectId: !enabled ? 'off' : ask ? 'ask' : 'veto', allowSearch: false }, (result) => {
+      if (!result) return;
+      const mode = modes.find((entry) => entry.id === result.item.id);
+      if (!mode) { if (enabled) save([['payments.enabled', false]]); return; }
+      save([['payments.confirmEveryPurchase', mode.confirmEveryPurchase], ['payments.enabled', true]]);
+    });
+    return true;
+  }
   if (action === 'decision-policy' || action === 'permission-mode') {
     const key = action === 'decision-policy' ? 'judgment.policy' : 'permissions.mode';
     const values = CONFIG_SCHEMA.find(setting => setting.key === key)?.enumValues ?? [];

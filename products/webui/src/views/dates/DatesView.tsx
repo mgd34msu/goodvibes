@@ -236,6 +236,9 @@ const EMPTY_PLAN: PlanDraft = { title: '', from: '', to: '', away: false, destin
 
 type ProposalShape = OperatorMethodOutput<'occasions.propose'>;
 type EditOutcome = OperatorMethodOutput<'occasions.update'>;
+/** A save is an edit (occasions.update) or a new line (occasions.confirm): the reply is either. */
+type OccasionSaveOutcome = EditOutcome | OperatorMethodOutput<'occasions.confirm'>;
+type PlanSaveOutcome = OperatorMethodOutput<'occasions.plans.update'> | OperatorMethodOutput<'occasions.plans.confirm'>;
 
 /** An edit's preview, in the shape the dialog already renders for a new one. */
 function proposalOfEdit(result: EditOutcome): ProposalShape {
@@ -490,7 +493,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const confirmOccasion = useMutation({
-    mutationFn: (editing: string | null) => editing
+    mutationFn: (editing: string | null): Promise<OccasionSaveOutcome> => editing
       ? platformClient.operator.invoke('occasions.update', {
         occasionId: editing,
         ...occasionChanges(occasion, occasionBaselineRef.current),
@@ -553,7 +556,7 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   });
 
   const confirmPlan = useMutation({
-    mutationFn: (editing: PlanRef | null) => editing
+    mutationFn: (editing: PlanRef | null): Promise<PlanSaveOutcome> => editing
       ? platformClient.operator.invoke('occasions.plans.update', {
         planId: editing.id,
         planFrom: editing.from,

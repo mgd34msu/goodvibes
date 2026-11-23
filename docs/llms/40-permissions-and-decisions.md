@@ -249,7 +249,7 @@ In the terminal app and the Agent, an ask appears as the same card. Its title is
 | Key | Action |
 | --- | --- |
 | `y` | Yes, once. |
-| `a` | `Yes, and don't ask again…`: opens the remember choices (when the ask offers them). |
+| `a` | `Yes, and remember (choose what)`: opens the remember choices (when the ask offers them); the web UI's ask card has the same button. Enter never remembers. |
 | Up, Down, `1` to `9`, Enter | In the remember choices: move, pick, and allow and remember with that choice. Esc goes back. |
 | `n` | No. |
 | `d` | Details: why you are asked, the tool, the folder, the sandbox, the decision, effects, review reasons, the checklist and the raw arguments. |

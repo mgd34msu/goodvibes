@@ -20,10 +20,11 @@ export const GOODVIBES_THEME: ThemeJson = {
     info: { dark: '#7aa7f5', light: '#2e62c8' },
 
     text: { dark: '#e4e2ee', light: '#1c1b22' },
-    textMuted: { dark: '#8e8ba3', light: '#62606d' },
-    // Dark: the approved #5c5a70 measures 2.28:1 on the #232438 panel, below
-    // the 2.5 floor; #636176 is the smallest lift that reaches it.
-    textFaint: { dark: '#636176', light: '#9794a4' },
+    // Muted and faint text carry key hints, reasons and times, so both reach
+    // 4.5:1 on the panel and on elements: the smallest lift of the approved
+    // values that does (dark muted #8e8ba3, faint #636176; light faint #9794a4).
+    textMuted: { dark: '#9895ab', light: '#62606d' },
+    textFaint: { dark: '#9896a4', light: '#6c6a76' },
     selectedListItemText: { dark: '#10111a', light: '#ffffff' },
 
     background: 'transparent',

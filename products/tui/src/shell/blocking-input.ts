@@ -37,7 +37,7 @@ export type PendingPermissionState = PermissionRequest & {
   requestedBy?: string;
   /** The chosen button (index into the card's buttons); arrows move it, Enter presses it. */
   choice?: number;
-  /** The "Yes, and don't ask again…" choices are open, and which is highlighted. */
+  /** The "Yes, and remember (choose what)" choices are open, and which is highlighted. */
   submenuOpen?: boolean;
   submenuIndex?: number;
   /** First card-body row shown when the card is taller than the screen. */

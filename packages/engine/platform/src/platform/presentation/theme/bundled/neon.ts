@@ -5,8 +5,9 @@
  * TUI's transcript and syntax colors (goodvibes-tui src/renderer/code-block.ts
  * and syntax-highlighter.ts), so themeToTones(resolveTheme(neon, 'dark'))
  * reproduces TONE_TOKENS. One documented difference: textFaint (fg.dim and
- * chrome.faint) is lifted from #475569 to #4e5c6f, the smallest change that
- * reaches the 2.5:1 floor against the #161a22 panel.
+ * chrome.faint) carries key hints, reasons and times, so it is lifted from
+ * #475569 to #87919e, the smallest change that reaches 4.5:1 against the
+ * panel and the element surface.
  *
  * Light takes TONE_TOKENS_LIGHT's values where that table defines them
  * (chrome, state.info, reasoning, brand, gradient) and a slate/Tailwind light
@@ -29,8 +30,10 @@ export const NEON_THEME: ThemeJson = {
 
     text: { dark: '#e2e8f0', light: '#0f172a' },
     textSecondary: { dark: '#cbd5e1', light: '#334155' },
-    textMuted: { dark: '#94a3b8', light: '#64748b' },
-    textFaint: { dark: '#4e5c6f', light: '#94a3b8' },
+    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
+    // panel and on elements (published light muted #64748b, faint #4e5c6f / #94a3b8).
+    textMuted: { dark: '#94a3b8', light: '#617187' },
+    textFaint: { dark: '#87919e', light: '#67717f' },
     textPlaceholder: { dark: '#334155', light: '#cbd5e1' },
     selectedListItemText: { dark: '#0f172a', light: '#ffffff' },
 

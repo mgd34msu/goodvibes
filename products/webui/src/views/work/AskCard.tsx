@@ -5,7 +5,7 @@
  * ask detail, from the ask's presentation alone (lib/asks.ts); it builds no
  * words for a fact the presentation carries.
  *
- * Choices: the default one is the primary button. "Don't ask again…" opens the
+ * Choices: the default one is the primary button. "Yes, and remember (choose what)" opens the
  * remember tiers as radio rows (Allow and remember / Back); "No" on an ask that
  * takes a reason opens an optional reason field (Refuse / Back). An ask that
  * can't be undone draws its border and consequence in --bad and offers no
@@ -60,9 +60,8 @@ function capitalized(text: string): string {
   return text ? `${text.charAt(0).toUpperCase()}${text.slice(1)}` : text;
 }
 
-/** The web's label for a choice: the remember choice reads "Don't ask again…" (A2.4), a question's free answer "Answer in your own words". */
+/** The web's label for a choice: the presentation's own words (the remember choice reads "Yes, and remember (choose what)" everywhere), a question's free answer "Answer in your own words". */
 function choiceLabel(choice: AskChoice, question: boolean): string {
-  if (choice.id === 'remember') return 'Don\'t ask again…';
   if (choice.id === 'own-words' && question) return 'Answer in your own words';
   return choice.label;
 }
@@ -179,7 +178,7 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
   );
 
   const rememberStep = mode.step === 'remember' && p.remember.offered ? (
-    <div className="ask-card__step" role="group" aria-label="Don't ask again for">
+    <div className="ask-card__step" role="group" aria-label="Remember for">
       <div className="ask-card__tiers">
         {p.remember.tiers.map((tier) => (
           <Radio key={tier.tier} name={`remember-${ask.key}`} checked={rememberTier === tier.tier} onChange={() => setRememberTier(tier.tier)}>

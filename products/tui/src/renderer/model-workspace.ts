@@ -114,9 +114,10 @@ function modelRows(picker: ModelPickerModal, compact = false): KitRow[] {
     const current = isTargetModel(target, model);
     const selected = index === picker.selectedIndex;
     const where = compact && selected ? modelKey(model) : model.provider;
+    const why = picker.recommendedWhy(model);
     rows.push({
       label: model.displayName || model.id,
-      desc: picker.textWork(model) === 'unknown' ? `${where} · ${UNKNOWN_KIND_NOTE}` : where,
+      desc: why !== undefined ? `${where} · ${why}` : picker.textWork(model) === 'unknown' ? `${where} · ${UNKNOWN_KIND_NOTE}` : where,
       right: formatContext(model.contextWindow),
       mark: current ? '●' : undefined,
       markFg: t.brand,

@@ -36,7 +36,7 @@ export function writeModelCatalogCache(models: CatalogModel[], cacheDir: string,
   const { catalogPath } = getProviderCachePaths(cacheDir);
   mkdirSync(cacheDir, { recursive: true });
   // The repository-backed cache retains identity and capability metadata.
-  const payload = { version: 7, fetchedAt, ttlMs, models } satisfies NonNullable<ReturnType<typeof loadCatalogCache>>;
+  const payload = { version: 8, fetchedAt, ttlMs, models } satisfies NonNullable<ReturnType<typeof loadCatalogCache>>;
   writeFileSync(catalogPath, JSON.stringify(payload, null, 2), 'utf-8');
 }
 

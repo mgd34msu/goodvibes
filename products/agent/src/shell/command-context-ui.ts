@@ -27,7 +27,7 @@ export interface PermissionAnswer {
   readonly modifiedArgs?: Record<string, unknown>;
   /** The hunks a multi-edit card applied when not all were (indices into the ask's own edits); the approval broker applies them. */
   readonly selectedHunks?: readonly number[];
-  /** How far a "don't ask again" answer reaches; absent: this call only. */
+  /** How far a "Yes, and remember" answer reaches; absent: this call only. */
   readonly rememberTier?: RememberTier;
   /** The reason typed with a refusal, told to the model with it. */
   readonly reason?: string;

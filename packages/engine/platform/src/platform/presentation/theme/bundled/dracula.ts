@@ -21,8 +21,10 @@ export const DRACULA_THEME: ThemeJson = {
     info: { dark: '#8be9fd', light: '#036a96' },
     text: { dark: '#f8f8f2', light: '#1f1f1f' },
     // dark: published #6272a4 is 3.36:1 on the panel; adjusted to reach 4.5:1.
-    textMuted: { dark: '#7b89b3', light: '#6c664b' },
-    textFaint: { dark: '#6272a4', light: '#a39f8a' },
+    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
+    // panel and on elements (published dark muted #7b89b3, faint #6272a4 / #a39f8a).
+    textMuted: { dark: '#adb6d0', light: '#6c664b' },
+    textFaint: { dark: '#adb6d0', light: '#6b685b' },
     selectedListItemText: { dark: '#282a36', light: '#fffbeb' },
     background: { dark: '#282a36', light: '#fffbeb' },
     backgroundPanel: { dark: '#21222c', light: '#fffbeb' },

@@ -38,7 +38,9 @@ export type KeyAction =
   | 'open-notifications'
   | 'failure-other-model'
   | 'failure-details'
-  | 'failure-sign-in';
+  | 'failure-sign-in'
+  | 'next-session'
+  | 'previous-session';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open the command palette (search & run any command)',
@@ -75,7 +77,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'kill-to-start', 'kill-word-forward', 'yank', 'yank-pop',
   'cancel-tool-call', 'toggle-keep-awake', 'toggle-memory-provenance', 'voice-input',
   'focus-work-tree', 'cycle-permission-mode', 'open-notifications', 'failure-other-model',
-  'failure-details', 'failure-sign-in',
+  'failure-details', 'failure-sign-in', 'next-session', 'previous-session',
 ], {
 // Ctrl+P opens the command palette, the one entry point for every command,
   // view and setting; Ctrl+K (the other common palette chord) opens it too. The

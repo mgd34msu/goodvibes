@@ -93,6 +93,19 @@
   color: var(--bad);
 }
 
+/* A purchase that goes ahead by itself: its time and why, in plain sight while the window runs. */
+.ask-card__countdown {
+  margin: 0;
+  color: var(--warn);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+}
+
+/* Taking the request back sits after the answers, set apart from them. */
+.ask-card__withdraw {
+  margin-left: auto;
+}
+
 .ask-card__choices {
   display: flex;
   flex-wrap: wrap;

@@ -13,8 +13,10 @@
  * Each row is a plain title with the slash command (or the key) right-aligned
  * and dim, so the palette also teaches it.
  *
- * Suggested learns from what you use (per process); until it has something
- * to learn from it offers a sensible starting set.
+ * Suggested learns from what you use, kept across restarts in the app's
+ * `palette-usage.json` beside its input history; until it has something to
+ * learn from it offers a sensible starting set. Every other command is listed
+ * under the task it serves (COMMAND_TASK_GROUPS), and Ctrl+] jumps group to group.
  *
  * Enter runs the selected command; a described command opens its guided
  * path (what do you want to do, then its blanks). Another command that needs
@@ -28,6 +30,8 @@ import type { SurfaceModal, SurfaceModalHost } from './surface-modal-host.js';
 import type { SurfaceLayer } from './renderer/surface-kit.js';
 import { renderCommandPalette } from './renderer/command-palette.js';
 import { isTextBackspace } from './delete-key-policy.js';
+import { readFileSync } from 'node:fs';
+import { logger, summarizeError, writeFileAtomic } from '@goodvibes/engine/platform/platform/utils';
 import type { PaletteEntry, PaletteGroup, PaletteRunMode, PaletteSection, PaletteView } from './command-palette-types.js';
 export type { PaletteEntry, PaletteGroup, PaletteRunMode, PaletteSection, PaletteView, ShortcutGroup } from './command-palette-types.js';
 
@@ -103,20 +107,94 @@ const CURATED_LINES: ReadonlyArray<{ readonly id: string; readonly command: stri
   },
 ];
 
+/**
+ * The task groups both apps sort their commands into (the palette, the
+ * command reference): what a person came to do. Commands outside the curated
+ * groups are listed under these in this order; a command no app placed falls
+ * under `More commands`.
+ */
+export const COMMAND_TASK_GROUPS = {
+  sessions: 'Sessions and history',
+  code: 'Change code',
+  check: 'Run and check',
+  agents: 'Agents and work',
+  models: 'Models and providers',
+  knowledge: 'Memory and knowledge',
+  channels: 'Channels and devices',
+  tools: 'Tools and extensions',
+  settings: 'Settings and safety',
+  help: 'Help and setup',
+} as const;
+const TASK_ORDER: readonly string[] = Object.values(COMMAND_TASK_GROUPS);
+const MORE_COMMANDS = 'More commands';
+
+/** A command's own group (`defineCommand`'s `group`, as the Agent reports it) read as the task it serves. */
+const GROUP_TASKS: Readonly<Record<string, string>> = {
+  Agent: COMMAND_TASK_GROUPS.agents, Agents: COMMAND_TASK_GROUPS.agents, Work: COMMAND_TASK_GROUPS.agents, Automation: COMMAND_TASK_GROUPS.agents,
+  Conversation: COMMAND_TASK_GROUPS.sessions, Shell: COMMAND_TASK_GROUPS.sessions, Sessions: COMMAND_TASK_GROUPS.sessions,
+  Changes: COMMAND_TASK_GROUPS.code, Editor: COMMAND_TASK_GROUPS.code,
+  Health: COMMAND_TASK_GROUPS.check,
+  Models: COMMAND_TASK_GROUPS.models, Providers: COMMAND_TASK_GROUPS.models,
+  Knowledge: COMMAND_TASK_GROUPS.knowledge, Memory: COMMAND_TASK_GROUPS.knowledge,
+  Channels: COMMAND_TASK_GROUPS.channels, Notifications: COMMAND_TASK_GROUPS.channels, Inbox: COMMAND_TASK_GROUPS.channels, Devices: COMMAND_TASK_GROUPS.channels, Personal: COMMAND_TASK_GROUPS.channels,
+  Extensions: COMMAND_TASK_GROUPS.tools, Tools: COMMAND_TASK_GROUPS.tools, Services: COMMAND_TASK_GROUPS.tools,
+  Settings: COMMAND_TASK_GROUPS.settings, Permissions: COMMAND_TASK_GROUPS.settings, Security: COMMAND_TASK_GROUPS.settings, Payments: COMMAND_TASK_GROUPS.settings, You: COMMAND_TASK_GROUPS.settings, Experience: COMMAND_TASK_GROUPS.settings, Display: COMMAND_TASK_GROUPS.settings,
+  Setup: COMMAND_TASK_GROUPS.help, Product: COMMAND_TASK_GROUPS.help, Platform: COMMAND_TASK_GROUPS.help, Help: COMMAND_TASK_GROUPS.help,
+};
+
+/** Commands registered with others of a different task (the shell's core set), placed by name. */
+const NAME_TASKS: Readonly<Record<string, string>> = {
+  help: COMMAND_TASK_GROUPS.help, commands: COMMAND_TASK_GROUPS.help, keybindings: COMMAND_TASK_GROUPS.settings, theme: COMMAND_TASK_GROUPS.settings,
+};
+
+/** The task group a command is listed under: by name when placed so, else its category when that is a task group, else its own group's task. */
+export function commandTaskGroup(category: string, name?: string): string {
+  if (name !== undefined && NAME_TASKS[name]) return NAME_TASKS[name]!;
+  return TASK_ORDER.includes(category) ? category : GROUP_TASKS[category] ?? MORE_COMMANDS;
+}
+
 /** The Suggested group before there is any usage to learn from. */
 const DEFAULT_SUGGESTED = ['changes', 'model', 'compact'];
 const SUGGESTED_COUNT = 3;
 
-/** How often each command was run from the palette in this process. */
+/** How often each command was run from the palette: loaded from the app's usage file, kept across restarts. */
 const usage = new Map<string, number>();
+/** The file the counts are kept in (beside input history), and whether it has been read. */
+let usageFile: string | undefined;
+let usageLoaded = false;
 
+/** Read the kept counts once per process; a missing or unreadable file starts from none. */
+function loadPaletteUsage(path: string | undefined): void {
+  if (path === undefined || (usageLoaded && usageFile === path)) return;
+  usageFile = path;
+  usageLoaded = true;
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+    if (typeof parsed !== 'object' || parsed === null) return;
+    for (const [id, count] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof count === 'number' && Number.isFinite(count) && count > 0) usage.set(id, Math.max(usage.get(id) ?? 0, Math.floor(count)));
+    }
+  } catch { /* no file yet, or not JSON: Suggested starts from its default set */ }
+}
+
+/** Count one run from the palette; with a usage file, the counts are written there (one small file, on this keypress only). */
 export function recordPaletteUse(id: string): void {
   usage.set(id, (usage.get(id) ?? 0) + 1);
+  if (usageFile === undefined) return;
+  try {
+    // The 50 most used: the file stays small whatever is run.
+    const kept = Object.fromEntries([...usage.entries()].sort((a, b) => b[1] - a[1]).slice(0, 50));
+    writeFileAtomic(usageFile, `${JSON.stringify(kept)}\n`, { mkdirp: true });
+  } catch (error) {
+    logger.warn('Command palette usage was not saved', { error: summarizeError(error) });
+  }
 }
 
 /** Test hook. */
 export function resetPaletteUsageForTests(): void {
   usage.clear();
+  usageFile = undefined;
+  usageLoaded = false;
 }
 
 function hasRequiredArgs(command: PaletteCommand): boolean {
@@ -196,7 +274,8 @@ export function buildPaletteEntries(
     const entry: PaletteEntry = {
       id: line.id, kind: 'command', title: line.title, summary: line.summary, description: line.summary,
       category: categories.get(line.command) ?? 'Other', group: line.group, aliases: [], keywords: line.keywords,
-      actions: [], needsArgs: false, right: `/${line.command}`, line: { command: line.command, args: line.args },
+      // The whole line it runs, so the row teaches what to type; the row's title wraps to make room.
+      actions: [], needsArgs: false, right: `/${line.command} ${line.args.join(' ')}`, line: { command: line.command, args: line.args },
     };
     // After the last curated row of its group, so it reads with its neighbours.
     const index = entries.reduce((last, candidate, at) => candidate.group === line.group ? at : last, -1);
@@ -316,10 +395,18 @@ export class CommandPalette implements SurfaceModal, PaletteView {
         if (suggested.length >= SUGGESTED_COUNT) break;
       }
       if (suggested.length > 0) sections.push({ group: 'Suggested', entries: suggested });
-      for (const group of ['Session', 'Views', 'Settings', 'Commands', 'Keyboard shortcuts'] as const) {
+      for (const group of ['Session', 'Views', 'Settings'] as const) {
         const entries = this.entries.filter((e) => e.group === group && !suggested.includes(e));
         if (entries.length > 0) sections.push({ group, entries });
       }
+      // Every other command under the task it serves, in one order, not one long alphabetical list.
+      const rest = this.entries.filter((e) => e.group === 'Commands' && !suggested.includes(e));
+      for (const task of [...TASK_ORDER, MORE_COMMANDS]) {
+        const entries = rest.filter((e) => commandTaskGroup(e.category, e.id) === task);
+        if (entries.length > 0) sections.push({ group: 'Commands', title: task, entries });
+      }
+      const keys = this.entries.filter((e) => e.group === 'Keyboard shortcuts');
+      if (keys.length > 0) sections.push({ group: 'Keyboard shortcuts', entries: keys });
     } else {
       const ranked = this.entries
         .map((entry, index) => ({ entry, index, score: paletteScore(entry, this.query) }))
@@ -410,6 +497,19 @@ export class CommandPalette implements SurfaceModal, PaletteView {
     this.selectedIndex = (this.selectedIndex + delta + count) % count;
   }
 
+  /** Select the first row of the next (+1) or previous (-1) group, wrapping around. */
+  jumpGroup(delta: 1 | -1): void {
+    const starts: number[] = [];
+    let at = 0;
+    for (const section of this.sections()) {
+      if (section.entries.length > 0) starts.push(at);
+      at += section.entries.length;
+    }
+    if (starts.length === 0) return;
+    const current = starts.reduce((found, start, index) => (start <= this.selectedIndex ? index : found), 0);
+    this.selectedIndex = starts[(current + delta + starts.length) % starts.length]!;
+  }
+
   handleToken(token: InputToken, host: SurfaceModalHost): void {
     if (token.type === 'text') {
       const text = [...token.value].filter((ch) => ch >= ' ' && ch !== '\x7f').join('');
@@ -420,6 +520,12 @@ export class CommandPalette implements SurfaceModal, PaletteView {
     const key = token.logicalName ?? '';
     if (token.ctrl && (key === 'p' || key === 'k')) {
       host.close(this, 'escape');
+      return;
+    }
+    // Ctrl+] jumps to the next group's first row (wrapping); Ctrl+[ to the previous one where the
+    // terminal can send it apart from Esc (the kitty keyboard protocol).
+    if (token.ctrl && (key === ']' || key === '[')) {
+      this.jumpGroup(key === ']' ? 1 : -1);
       return;
     }
     if (key === 'up') this.move(-1);
@@ -457,12 +563,15 @@ export interface CommandPaletteHost {
   /** Puts `/name ` in the composer, command mode armed, so arguments can be typed. */
   readonly fill: (name: string) => void;
   readonly render: () => void;
+  /** Where Suggested's counts are kept across restarts (beside input history); absent: this process only. */
+  readonly usageFile?: string | undefined;
 }
 
 /** Open the palette over the shell, unless it is already the top modal. */
 export function openCommandPaletteOn(host: CommandPaletteHost): void {
   const commands = host.commands();
   if (!commands) return;
+  loadPaletteUsage(host.usageFile);
   if (host.modals.top() instanceof CommandPalette) return;
   const palette = new CommandPalette({
     entries: buildPaletteEntries(commands, host.categories(), host.extraKeywords, host.shortcuts?.() ?? []),

@@ -14,8 +14,8 @@
  */
 import { modelOptionsSourceOf, useProviderModelOptions, type ModelOptionsSource } from '../../../../lib/use-provider-model-options';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { copyText, selectContents } from '../../../../lib/copy-text';
+import { useMemo, useState } from 'react';
+import { SubscriptionSignIn } from '../../SubscriptionSignIn';
 import { createPortal } from 'react-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../../../../lib/goodvibes';
@@ -27,8 +27,10 @@ import {
   sortProvidersConfiguredFirst,
   type ModelOption,
 } from '../../../../lib/provider-models';
-import { deriveProviderStatus, freshnessPhrase, freshnessTone, providerRepair, providerStatePhrase } from '../../../../lib/provider-status';
+import { apiKeyRouteOf, deriveProviderStatus, freshnessPhrase, freshnessTone, providerRepair, providerStatePhrase, subscriptionSignInOf } from '../../../../lib/provider-status';
+import { ProviderApiKey } from '../../ProviderApiKey';
 import { formatError } from '../../../../lib/errors';
+import { priceTierWords } from '../../../../lib/model-picker-data';
 import { useToast } from '../../../../lib/toast';
 import { DataBlock } from '../../../DataBlock';
 import { CredentialStatusPanel } from '../../../CredentialStatusPanel';
@@ -64,37 +66,6 @@ export function priceLabel(model: unknown): string {
   if (typeof input !== 'number' || typeof output !== 'number') return '';
   if (input === 0 && output === 0) return 'Free';
   return `${money(input)} in · ${money(output)} out per 1M`;
-}
-
-/**
- * The fix for a provider that needs the person, on its row: a subscription
- * sign-in is made by a terminal app on the daemon's machine, so the button
- * copies the command that does it, and says so once copied.
- */
-function CopyCommandButton({ label, command }: { label: string; command: string }) {
-  const [copied, setCopied] = useState<'no' | 'yes' | 'failed'>('no');
-  const commandRef = useRef<HTMLElement>(null);
-  // Not copied: the command is shown and selected, so one key press copies it.
-  useEffect(() => { if (copied === 'failed' && commandRef.current) selectContents(commandRef.current); }, [copied]);
-  return (
-    <>
-      <Button
-        size="sm"
-        variant="outline"
-        title={`Copies ${command} to run in the terminal app`}
-        aria-label={`${label}: copy ${command} to run in the terminal app`}
-        onClick={() => { void copyText(command).then((outcome) => setCopied(outcome === 'copied' ? 'yes' : 'failed')); }}
-      >
-        {copied === 'yes' ? 'Copied: run it in the terminal' : label}
-      </Button>
-      {/* Not copied (the browser keeps the clipboard from a page on plain http): the command, selected for the person to copy. */}
-      {copied === 'failed' && (
-        <span role="status">
-          {' '}Selected, press Ctrl+C (Cmd+C on a Mac) to copy it, then run it in the terminal: <code ref={commandRef}>{command}</code>
-        </span>
-      )}
-    </>
-  );
 }
 
 function useProviderData() {
@@ -177,7 +148,7 @@ export function ModelsSection() {
             )}
           </SettingsBlock>
 
-          <SettingsBlock title="Providers" description="Configured providers first. Open one for its models and sign-in routes.">
+          <SettingsBlock title="Providers" description="A sign-in that needs you first, then the configured providers, then the rest. Open one for its models and sign-in routes.">
             {data.providers.isError ? (
               <ErrorState
                 error={data.providers.error}
@@ -212,8 +183,12 @@ export function ModelsSection() {
                       onSelect={() => setSelectedId(provider.id)}
                       trailing={(
                         <>
-                          {repair?.command && repair.action && (
-                            <CopyCommandButton label={repair.action} command={repair.command} />
+                          {repair?.signIn && <SubscriptionSignIn provider={repair.signIn} label="Sign in again" />}
+                          {!repair && !status.configured && subscriptionSignInOf(status) && (
+                            <SubscriptionSignIn provider={subscriptionSignInOf(status) ?? provider.id} />
+                          )}
+                          {!status.configured && apiKeyRouteOf(status) && (
+                            <ProviderApiKey provider={provider.id} title={title} opener="Add API key" />
                           )}
                           <span className="settings-row-count" aria-hidden="true">
                             {count > 0 ? `${count} model${count === 1 ? '' : 's'}` : ''}
@@ -283,6 +258,10 @@ function ProviderDetail({
   const modelsRead = providerModels.read;
   const refreshing = source.kind === 'ready' && (source.refreshing || detail.isFetching);
   const title = bestTitle(provider, providerId);
+  // A subscription this provider signs in to, and whether that sign-in is good now.
+  const subscription = subscriptionSignInOf(status);
+  const subscriptionSignedIn = status.routes.some((route) => route.route === 'subscription-oauth' && route.freshness === 'healthy');
+  const apiKey = apiKeyRouteOf(status);
 
   const selectModel = useMutation({
     mutationFn: (registryKey: string) => {
@@ -319,6 +298,23 @@ function ProviderDetail({
         </div>
       </div>
 
+      {subscription && !subscriptionSignedIn && (
+        <SettingsBlock title="Subscription" description={`Sign in to your ${title} subscription from here; GoodVibes keeps the sign-in.`}>
+          <SubscriptionSignIn provider={subscription} />
+        </SettingsBlock>
+      )}
+
+      {apiKey && (
+        <SettingsBlock
+          title="API key"
+          description={apiKey.configured
+            ? 'A key is in use. To replace it, type the new one; the key in use is never shown.'
+            : `Type the API key from ${title}. GoodVibes keeps it in its secret store and never shows it again.`}
+        >
+          <ProviderApiKey provider={providerId} title={title} replacing={apiKey.configured} />
+        </SettingsBlock>
+      )}
+
       <SettingsBlock title="Models" description="Pick the model new chats use.">
         {selectModel.isError && <ErrorState error={selectModel.error} title="Model selection failed" />}
         {modelsRead.kind === 'loading' ? (
@@ -333,7 +329,10 @@ function ProviderDetail({
           <RowList aria-label="Available models">
             {models.map((model) => {
               const isCurrent = model.registryKey === currentRegistryKey;
-              const facts = [contextLabel(model.value), priceLabel(model.value)].filter(Boolean).join(' · ');
+              // The price tier (free, paid, subscription, price not known) is the platform's fact; the per-token prices follow when the catalog has them.
+              const tier = priceTierWords(asRecord(model.value).priceTier);
+              const prices = priceLabel(model.value);
+              const facts = [contextLabel(model.value), tier, prices && prices !== 'Free' ? prices : undefined].filter(Boolean).join(' · ');
               return (
                 <Row
                   key={model.id}

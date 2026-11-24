@@ -25,6 +25,8 @@ import '../../styles/components/command.css';
 interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
+  /** The search it opens on ("/schedule" from the composer's slash command); empty by default. */
+  initialQuery?: string;
 }
 
 const SECTION_ICONS: Record<PaletteSection, ReactNode> = {
@@ -51,7 +53,7 @@ export function formatShortcut(shortcut: string): string {
     .join(' ');
 }
 
-export function CommandPalette({ open, onClose }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, initialQuery = '' }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [commands, setCommands] = useState(getCommands);
   const [activeIndex, setActiveIndex] = useState(0);
@@ -64,7 +66,10 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
   useTopLayerEscape(open, isTop, onClose);
 
   // Clear before the next visible frame, including a close/open in quick succession.
-  useLayoutEffect(() => { if (!open) { setQuery(''); setActiveIndex(0); } }, [open]);
+  useLayoutEffect(() => {
+    if (!open) { setQuery(''); setActiveIndex(0); return; }
+    if (initialQuery) { setQuery(initialQuery); setActiveIndex(0); }
+  }, [open, initialQuery]);
 
   useEffect(() => subscribeCommands(() => setCommands(getCommands())), []);
 

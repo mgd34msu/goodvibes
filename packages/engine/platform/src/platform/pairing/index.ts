@@ -121,8 +121,9 @@ export {
   pairingUnreachableLines,
   pairingUnreachableSteps,
   POSTURE_CAPABILITY_LABEL,
+  SERVE_TO_NETWORK_QUESTION,
 } from './offer-copy.js';
 export type { PairingOfferCopy, PairingStep } from './offer-copy.js';
 
-export { controlPlaneOriginUsesStableHost, controlPlaneScheme, explicitPublicBaseUrl, formatHttpOrigin, isHttpOnLan, pairingOriginUsesStableHost, pairingReachFromSettings, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, resolvePairingWebOrigin, resolveWebUiListener, resolveWebUiOrigin } from './web-origin.js';
+export { controlPlaneOriginUsesStableHost, controlPlaneScheme, explicitPublicBaseUrl, formatHttpOrigin, isHttpOnLan, lanHttpsOriginOf, lanHttpsPort, pairingOriginUsesStableHost, pairingReachFromSettings, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, resolvePairingWebOrigin, resolveWebUiListener, resolveWebUiOrigin } from './web-origin.js';
 export type { ControlPlaneOrigin, PairingWebOrigin } from './web-origin.js';

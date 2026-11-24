@@ -48,6 +48,16 @@ export interface ControlPlaneConfig {
     certFile: string;
     keyFile: string;
   };
+  /**
+   * A second listener, https on the local network, beside the plain one: its
+   * certificate is issued by a certificate authority this machine made for its
+   * own names and private addresses only (daemon/lan-https). Off by default;
+   * the plain listener is unchanged either way.
+   */
+  lanHttps: {
+    enabled: boolean;
+    port: number;
+  };
 }
 
 export interface HttpListenerRuntimeConfig {

@@ -401,7 +401,9 @@ export function boardNodeDetail(row: BoardRow, node: Partial<ProcessNode> | unde
   const lines: PanelText[] = [];
   const fact = (label: string, value: string): void => { lines.push({ text: `${label}  ${value}`, tone: 'muted' }); };
   if (node?.model) fact('model', node.model);
-  if (node?.elapsedMs !== undefined && node.elapsedMs > 0) fact('time', formatBeadTime(node.elapsedMs).replace(/\.\ds$/, 's'));
+  // The row's own time (one clock reading per frame, one rounding) so the row and its detail never disagree.
+  const time = row.right || (node?.elapsedMs !== undefined && node.elapsedMs > 0 ? formatBeadTime(node.elapsedMs).replace(/\.\ds$/, 's') : '');
+  if (time) fact('time', time);
   if (node?.progress && (node.progress.filesRead > 0 || node.progress.filesChanged > 0)) fact('files', `${node.progress.filesRead} read · ${node.progress.filesChanged} changed`);
   const usage = node?.usage;
   const tokens = usage ? usage.inputTokens + usage.outputTokens + usage.cacheReadTokens + usage.cacheWriteTokens : 0;

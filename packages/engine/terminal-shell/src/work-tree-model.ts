@@ -686,6 +686,10 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
         parts.push(outcome);
     if (toolCount > 0)
         parts.push(plural(toolCount, 'tool'));
+    // A folded turn still says how many of its calls failed, so a failure is never hidden by the fold.
+    const failedCalls = rows.filter(({ row }) => row.kind === 'bead' && row.bead.lane === SPINE && row.bead.status === 'err').length;
+    if (failedCalls > 0)
+        parts.push(`${failedCalls} failed`);
     if (ctx.lanes > 0)
         parts.push(plural(ctx.lanes, 'agent'));
     if (head.reasoningContent || head.reasoningSummary)

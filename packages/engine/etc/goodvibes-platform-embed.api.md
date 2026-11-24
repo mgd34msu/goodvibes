@@ -4,6 +4,7 @@
 
 ```ts
 
+import { Buffer as Buffer_2 } from 'node:buffer';
 import { CallOptions } from '@goodvibes/judgment';
 import type { Fidelity } from '@goodvibes/judgment';
 import { JevContinuation } from '@goodvibes/judgment/decisions';
@@ -180,6 +181,8 @@ export class DaemonServer {
     getRelayReachability(): RelayReachability | null;
     inJudgmentRuntime<T>(fn: () => T): T;
     get isRunning(): boolean;
+    // Warning: (ae-forgotten-export) The symbol "LanHttpsState" needs to be exported by the entry point embed.d.ts
+    lanHttpsState(): LanHttpsState;
     // Warning: (ae-forgotten-export) The symbol "ControlPlaneRecentEvent" needs to be exported by the entry point embed.d.ts
     //
     // (undocumented)

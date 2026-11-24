@@ -118,6 +118,8 @@ export interface ShellFooterBuildOptions {
   readonly homeName?: string | null;
   /** A contract's open question the next typed message answers (contract-question-composer.ts), a row above the composer. */
   readonly contractQuestionHint?: string | null;
+  /** Typing left the Agent workspace for the composer: the area Esc goes back to, named in a row above the composer. */
+  readonly workspaceReturnArea?: string | null;
   /** Live microphone state; a visible state renders the microphone chip. */
   readonly voiceCapture?: VoiceCaptureIndicatorState | null;
   /** What main is doing while it works (a turn, a compaction): the throbber row. Null at rest. */
@@ -204,7 +206,13 @@ export const { buildShellFooter, estimateShellFooterHeight } = createShellFooter
     ...intentChips(options),
     ...((options.composerFlags ?? []).includes('attachments') ? [{ text: 'image attached', fg: activeTokens().info }] : []),
   ],
-  hints: (options) => (options.contractQuestionHint
-    ? [UIFactory.stringToLine(`   ${options.contractQuestionHint}`, options.width, { fg: activeTokens().textMuted, bold: true })]
-    : []),
+  hints: (options) => [
+    ...(options.contractQuestionHint
+      ? [UIFactory.stringToLine(`   ${options.contractQuestionHint}`, options.width, { fg: activeTokens().textMuted, bold: true })]
+      : []),
+    // Typing out of the workspace is said where the typing goes, so the switch is never silent.
+    ...(options.workspaceReturnArea
+      ? [UIFactory.stringToLine(`   Typing to the assistant · Esc: back to ${options.workspaceReturnArea} (${options.promptText.trim().length <= 1 ? 'drops this letter' : 'keeps what you typed'})`, options.width, { fg: activeTokens().textMuted })]
+      : []),
+  ],
 });

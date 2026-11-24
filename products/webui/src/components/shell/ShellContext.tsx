@@ -39,7 +39,8 @@ import {
 } from 'react';
 import { useHotkeys } from '../../hooks/useHotkeys';
 import { registerCommand, unregisterCommand } from '../../lib/commands';
-import { PHONE_QUERY, REDUCED_MOTION_QUERY, useMediaQuery } from '../ui/overlay';
+import { PHONE_QUERY, useMediaQuery } from '../ui/overlay';
+import { useReducedMotion } from '../motion/useReducedMotion';
 
 export const SIDEBAR_STORAGE_KEY = 'goodvibes.webui.sidebar';
 export const SIDEBAR_MIN_WIDTH = 220;
@@ -167,7 +168,7 @@ export function useRightPanel(open: boolean, options?: { width?: number; force?:
 
 export function ShellProvider({ children }: { children: ReactNode }) {
   const isPhone = useMediaQuery(PHONE_QUERY);
-  const reducedMotion = useMediaQuery(REDUCED_MOTION_QUERY);
+  const reducedMotion = useReducedMotion();
   const [stored, setStored] = useState<StoredSidebar>(() =>
     typeof window === 'undefined' ? { collapsed: false, pinned: false, width: SIDEBAR_DEFAULT_WIDTH } : readStoredSidebar(),
   );

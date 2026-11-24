@@ -29,7 +29,6 @@ import { homedir } from 'node:os';
 import type { AskChoice, AskPresentation, PermissionPromptRequest } from '@goodvibes/engine/platform/platform/permissions';
 import { decodeBase64, resolveEditText } from '@goodvibes/engine/platform/platform/control-plane/approval-hunk-apply';
 import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
-import { enterAnswer } from '../blocking-permission-input.js';
 import type { HunkSelectionState } from '../hunk-selection.js';
 import { activeTokens } from './theme.js';
 import {
@@ -86,16 +85,15 @@ export function askCardButtons(presentation: AskPresentation, request: Pick<Perm
 }
 
 /**
- * The button the card opens on, which Enter presses: the ask's default
- * (`Yes, once`, or `No` for what cannot be undone). A call the gate holds for
- * the owner because it cannot be taken back (money, a message sent as the
- * owner, an irreversible operator act) also opens on `No`, so Enter never
- * allows it, and Enter never remembers anything.
+ * The button the card opens on, which Enter presses: the ask's default. The
+ * ask's words decide it (permissions/ask-presentation.ts): `No` for what cannot
+ * be undone or weakens a protection (money, a message sent as the owner, an
+ * irreversible operator act, a loosened safety setting, access granted), else
+ * the yes. Enter never remembers anything.
  */
 export function askCardDefaultChoice(presentation: AskPresentation, request: Pick<PermissionPromptRequest, 'attribution' | 'ownerOnly'>): number {
   const buttons = askCardButtons(presentation, request);
   const no = buttons.findIndex((choice) => choice.id === 'no');
-  if (enterAnswer(request) === 'deny' && no >= 0) return no;
   const marked = buttons.findIndex((choice) => choice.default === true);
   return marked >= 0 ? marked : Math.max(0, no);
 }
@@ -315,9 +313,10 @@ function bodyRows(presentation: AskPresentation, request: PermissionPromptReques
   if (state.hunkState) push(hunkRows(state.hunkState, width - 4));
   const consequence = presentation.consequence;
   if (consequence) push(textRows(consequence.text, width, { fg: consequence.tone === 'cannot-undo' ? t.error : t.textMuted }));
+  // Why this is asked is on the card itself, not only behind `d`.
+  if (presentation.why) push(labelled('Why', presentation.why, width, t.textMuted));
   if (state.detailsExpanded) {
     push([
-      ...labelled('Why', presentation.why, width, t.textMuted),
       ...presentation.details.flatMap((detail) => labelled(detail.label, detail.value, width, detail.label === 'Arguments' ? t.textFaint : t.textMuted)),
     ]);
   }
@@ -351,6 +350,7 @@ function cardKeys(presentation: AskPresentation, request: PermissionPromptReques
     ['n', 'no'],
     ['d', state.detailsExpanded ? 'hide details' : 'details'],
   ];
+  // The `d` details are what the call carries (arguments, paths); why it is asked is shown above.
   return { hints, ...(presentation.typeToRefuse ? { tail: 'or type why not' } : {}) };
 }
 
@@ -367,7 +367,7 @@ function keyRows(keys: { hints: KitHint[]; tail?: string | undefined }, width: n
 function drawButton(canvas: SurfaceCanvas, x: number, y: number, label: string, chosen: boolean): number {
   const t = activeTokens();
   const text = ` ${label} `;
-  if (!chosen) return canvas.put(x, y, text, { fg: t.textMuted, bg: t.border });
+  if (!chosen) return canvas.put(x, y, text, { fg: t.text, bg: t.border });
   const end = canvas.put(x, y, text, { fg: t.selectedListItemText, bold: true });
   canvas.grad(x, y, end - x, t.brand, t.brandEnd);
   return end;

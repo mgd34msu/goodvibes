@@ -11,7 +11,13 @@ interface Parent {
 const unavailable = () => new Error('Artifact storage owner changed or became unavailable.');
 const directoryIdentity = (entry: BigIntStats): string => {
   if (!entry.isDirectory()) throw unavailable();
-  return [entry.dev, entry.ino, entry.mode, entry.uid, entry.gid].join(':');
+  // Which directory it is (device, inode, owner), and whether anyone but its
+  // owner may write in it (which would let them swap what is under it). Not the
+  // rest of its mode: a directory made more private (~/.goodvibes going from 755
+  // to 700 when the secrets keyfile is first written beside the store's root)
+  // is the same directory, and must not stop every later upload.
+  const othersMayWrite = (entry.mode & 0o022n) !== 0n && (entry.mode & 0o1000n) === 0n;
+  return [entry.dev, entry.ino, entry.uid, entry.gid, othersMayWrite ? 'others-write' : 'owner-writes'].join(':');
 };
 const leafIdentity = (entry: BigIntStats): string => {
   if (!entry.isFile() || entry.nlink !== 1n || (entry.mode & 0o077n) !== 0n) throw unavailable();

@@ -633,6 +633,11 @@
       "types": "./platform/dist/platform/companion/index.d.ts",
       "import": "./platform/dist/platform/companion/index.js"
     },
+    "./platform/platform/companion/attachment-limits": {
+      "bun": "./platform/src/platform/companion/attachment-limits.ts",
+      "types": "./platform/dist/platform/companion/attachment-limits.d.ts",
+      "import": "./platform/dist/platform/companion/attachment-limits.js"
+    },
     "./platform/platform/config": {
       "bun": "./platform/src/platform/config/index.ts",
       "types": "./platform/dist/platform/config/index.d.ts",
@@ -692,6 +697,11 @@
       "bun": "./platform/src/platform/daemon/index.ts",
       "types": "./platform/dist/platform/daemon/index.d.ts",
       "import": "./platform/dist/platform/daemon/index.js"
+    },
+    "./platform/platform/daemon/lan-https/page": {
+      "bun": "./platform/src/platform/daemon/lan-https/page.ts",
+      "types": "./platform/dist/platform/daemon/lan-https/page.d.ts",
+      "import": "./platform/dist/platform/daemon/lan-https/page.js"
     },
     "./platform/platform/daemon/auto-updater": {
       "bun": "./platform/src/platform/daemon/auto-updater.ts",
@@ -1133,6 +1143,16 @@
       "types": "./platform/dist/platform/providers/provider-names.d.ts",
       "import": "./platform/dist/platform/providers/provider-names.js"
     },
+    "./platform/platform/providers/model-catalog-facts": {
+      "bun": "./platform/src/platform/providers/model-catalog-facts.ts",
+      "types": "./platform/dist/platform/providers/model-catalog-facts.d.ts",
+      "import": "./platform/dist/platform/providers/model-catalog-facts.js"
+    },
+    "./platform/platform/principals/types": {
+      "bun": "./platform/src/platform/principals/types.ts",
+      "types": "./platform/dist/platform/principals/types.d.ts",
+      "import": "./platform/dist/platform/principals/types.js"
+    },
     "./platform/platform/providers/custom-provider-files": {
       "bun": "./platform/src/platform/providers/custom-provider-files.ts",
       "types": "./platform/dist/platform/providers/custom-provider-files.d.ts",
@@ -1222,6 +1242,11 @@
       "bun": "./platform/src/platform/pairing/qr-generator.ts",
       "types": "./platform/dist/platform/pairing/qr-generator.d.ts",
       "import": "./platform/dist/platform/pairing/qr-generator.js"
+    },
+    "./platform/platform/pairing/offer-copy": {
+      "bun": "./platform/src/platform/pairing/offer-copy.ts",
+      "types": "./platform/dist/platform/pairing/offer-copy.d.ts",
+      "import": "./platform/dist/platform/pairing/offer-copy.js"
     },
     "./platform/platform/workspace/daemon-home": {
       "bun": "./platform/src/platform/workspace/daemon-home.ts",
@@ -2957,6 +2982,11 @@
       "bun": "./terminal-shell/src/slash-command-parser.ts",
       "types": "./terminal-shell/dist/slash-command-parser.d.ts",
       "import": "./terminal-shell/dist/slash-command-parser.js"
+    },
+    "./terminal-shell/relay-pairing-ask": {
+      "bun": "./terminal-shell/src/relay-pairing-ask.ts",
+      "types": "./terminal-shell/dist/relay-pairing-ask.d.ts",
+      "import": "./terminal-shell/dist/relay-pairing-ask.js"
     },
     "./terminal-shell/mcp-runtime-commands": {
       "bun": "./terminal-shell/src/mcp-runtime-commands.ts",

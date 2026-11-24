@@ -18,7 +18,9 @@ export { createNativeRequirementProposer, NativeRequirementProposalUnreadable } 
 export type { NativeRequirementProposer, NativeRequirementProposalRequest } from './native-intake-proposer.js';
 import { NATIVE_CONVERSATION_MAX_PROPOSALS, NATIVE_CONVERSATION_MAX_DECISIONS, createNativeConversationCapture,
   nativeConversationProposalRevision, parseNativeConversationCapture, type NativeConversationCapture, type NativeConversationKey,
-  nativeConversationDecisionBinding, type NativeConversationOwner, type NativeConversationStorage } from './native-intake-types.js';
+  nativeConversationDecisionBinding, type NativeConversationOwner, type NativeConversationStorage, type NativeConversationAttachment } from './native-intake-types.js';
+import { resolveAttachments, type CompanionChatArtifactStore } from '../../companion/companion-chat-attachments.js';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '../../companion/attachment-limits.js';
 import { nativeConversationIntakeCaptureRequestSchema, nativeConversationIntakeLookupRequestSchema,
   nativeConversationIntakeTransitionRequestSchema, nativeConversationIntakeResultSchema, nativeConversationIntakeWorkReceiptSchema,
   type NativeConversationIntakeCaptureRequest, type NativeConversationIntakeLookupRequest, type NativeConversationIntakeTransitionRequest,
@@ -93,7 +95,19 @@ export function createNativeConversationIntakeHost(deps: {
   readonly continuation?: NativeConversationContinuationOwner;
   readonly storage: NativeConversationStorage; readonly scopes: NativeExecutionScopeOwner;
   readonly port: JudgmentPort; readonly decisionLog: Pick<DecisionLog, 'get' | 'query'>; readonly proposer: NativeRequirementProposer;
+  /** The artifact store chat attachments live in (artifacts.create); a request's attachments are read from it, and nowhere else. */
+  readonly artifacts?: Pick<CompanionChatArtifactStore, 'get'> | undefined;
 }): NativeConversationIntakeHost {
+  /** The attachments of a request, as the artifact store describes them now: the chat message's own check and limit. */
+  const resolveRequestAttachments = (requested: NativeConversationIntakeCaptureRequest['attachments']): NativeConversationAttachment[] | undefined => {
+    if (!requested) return undefined;
+    if (!deps.artifacts) throw new NativeConversationIntakeError('unavailable', 'This daemon has no artifact store, so a request cannot carry files; send it without them.');
+    let resolved: ReturnType<typeof resolveAttachments>;
+    try { resolved = resolveAttachments(requested, { get: id => deps.artifacts!.get(id), readContent: () => Promise.reject(new Error('not read at capture')) }); }
+    catch (error) { throw new NativeConversationIntakeError('invalid', `${error instanceof Error ? error.message : 'An attachment was refused'}; upload it with artifacts.create and send its artifactId.`); }
+    return resolved.map(attachment => ({ artifactId: attachment.artifactId, ...(attachment.label ? { label: attachment.label } : {}),
+      ...(attachment.filename ? { filename: attachment.filename } : {}), mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes }));
+  };
   const root = realpathSync(deps.projectRoot);
   const lifetime = new AbortController(); const pending = new Set<Promise<unknown>>();
   const captures = new Map<string, Promise<NativeConversationCapture>>();
@@ -175,6 +189,7 @@ export function createNativeConversationIntakeHost(deps: {
       expectedRevision: { work: event.work.revision, criteria: event.work.criteriaRevision, attempt: attempt.revision },
       source: { version: 2, sourceId: source.sourceId, sourceRevision: source.sourceRevision, sessionId: source.sessionId,
         ...(source.continuation ? { continuation: source.continuation } : {}),
+        ...(source.attachments ? { attachments: source.attachments } : {}),
         offsetEncoding: source.extraction.offsetEncoding, proposalRevision: source.extraction.proposalRevision, spans: source.extraction.spans,
         admissionDecisionId: source.extraction.admissionDecisionId, judgmentDecisionIds: source.extraction.judgmentDecisionIds },
       goal: event.work.goal, criteria: event.work.criteria });
@@ -187,7 +202,8 @@ export function createNativeConversationIntakeHost(deps: {
     switch (record.state) {
       case 'captured': return { kind: 'captured', ...common };
       case 'processing': return { kind: 'processing', ...common, stage: record.stage ?? 'routing', recovery: deliveries.get(keyId(record))?.generation === record.generation ? 'pending' : 'required' };
-      case 'turn': if (record.route === 'converse' || record.route === 'answer') return { kind: 'turn', ...common, route: record.route, text: record.text, ...(record.continuation ? { continuation: nativeConversationContinuationSchema.parse(record.continuation) } : {}) }; break;
+      case 'turn': if (record.route === 'converse' || record.route === 'answer') return { kind: 'turn', ...common, route: record.route, text: record.text, ...(record.continuation ? { continuation: nativeConversationContinuationSchema.parse(record.continuation) } : {}),
+        ...(record.attachments ? { attachments: record.attachments.map(attachment => ({ ...attachment })) } : {}) }; break;
       case 'blocked': return { kind: 'blocked', ...common, reason: record.reason === 'unsupported-source' ? 'unsupported-source' : 'missing-context', recovery: 'required', next: 'cancel-and-resubmit' };
       case 'refused': return { kind: 'refused', ...common, reason: record.reason === 'exhausted' ? 'exhausted' : 'semantic' };
       case 'cancelled': return { kind: 'cancelled', ...common };
@@ -375,6 +391,8 @@ export function createNativeConversationIntakeHost(deps: {
     if (!record.proposal || decision.decision.outcome !== 'act') throw new NativeConversationIntakeError('invalid');
     const source = { version: 2 as const, sourceId: record.sourceId, sourceRevision: record.sourceRevision, inputId: record.inputId, sessionId: record.sessionId,
       ...(record.continuation ? { continuation: nativeConversationContinuationSchema.parse(record.continuation) } : {}),
+      // The work carries the request's files by id, so whoever does it receives them (the same artifacts; no copy).
+      ...(record.attachments ? { attachments: record.attachments.map(attachment => ({ ...attachment })) } : {}),
       extraction: { version: 1 as const, offsetEncoding: 'utf16' as const, spans: [...record.proposal.spans], proposalRevision: nativeConversationProposalRevision(record.proposal),
         admissionDecisionId: decision.decision.decisionId, judgmentDecisionIds: [...decision.decision.judgmentDecisionIds] } };
     let published: NativeConversationCapture | undefined;
@@ -422,14 +440,22 @@ export function createNativeConversationIntakeHost(deps: {
   return {
     projectId: deps.projectId,
     capture(input, authority, options = {}) {
+      // Said plainly before the schema check, which would only call the request malformed.
+      const sent = input && typeof input === 'object' && Array.isArray((input as { attachments?: unknown }).attachments) ? (input as { attachments: unknown[] }).attachments.length : 0;
+      if (sent > MAX_ATTACHMENTS_PER_MESSAGE) {
+        return Promise.reject(new NativeConversationIntakeError('invalid', `A request can carry at most ${MAX_ATTACHMENTS_PER_MESSAGE} files, the same as a chat message; this one has ${sent}. Send it with ${MAX_ATTACHMENTS_PER_MESSAGE} or fewer.`));
+      }
       const parsed = nativeConversationIntakeCaptureRequestSchema.safeParse(input);
       if (!parsed.success) return Promise.reject(new NativeConversationIntakeError('invalid'));
       return track(async () => {
-        options.signal?.throwIfAborted(); const current = owner(authority, options); const { continuation: selection, ...original } = parsed.data;
+        options.signal?.throwIfAborted(); const current = owner(authority, options); const { continuation: selection, attachments: requestedAttachments, ...original } = parsed.data;
+        const sameAttachments = (existing: NativeConversationCapture) => isDeepStrictEqual(
+          existing.attachments?.map(attachment => ({ artifactId: attachment.artifactId, ...(attachment.label ? { label: attachment.label } : {}) })),
+          requestedAttachments?.map(attachment => ({ artifactId: attachment.artifactId, ...(attachment.label?.trim() ? { label: attachment.label.trim() } : {}) })));
         if (selection && missingScopes(current.identity.scopes, continuationScopes(selection.selectedDiff)).length > 0) throw new NativeConversationIntakeError('forbidden');
         const key = { principalId: current.identity.principalId, inputId: original.inputId };
         const matches = (existing: NativeConversationCapture) => existing.requestId === original.requestId && existing.text === original.text
-          && isDeepStrictEqual(existing.unsupportedSources, original.unsupportedSources) && existing.continuation?.sessionId === selection?.sessionId
+          && isDeepStrictEqual(existing.unsupportedSources, original.unsupportedSources) && sameAttachments(existing) && existing.continuation?.sessionId === selection?.sessionId
           && isDeepStrictEqual(existing.continuation?.selectedDiff ? nativeSelectedDiffSelector(existing.continuation.selectedDiff) : undefined, selection?.selectedDiff);
         // Replayed capture retains its original checkpoint even when later turns appended.
         const priorValue = deps.storage.current(key), prior = priorValue === null ? null : parseNativeConversationCapture(priorValue);
@@ -445,10 +471,11 @@ export function createNativeConversationIntakeHost(deps: {
         }
         const capture = (async () => {
           if (selection && !deps.continuation) throw new NativeConversationIntakeError('unavailable');
+          const attachments = resolveRequestAttachments(requestedAttachments);
           const continuation = selection ? captureNativeConversationContinuation(await deps.continuation!.capture(selection.sessionId, current.identity.principalId, selection.selectedDiff)) : undefined;
           if (continuation && (continuation.sessionId !== selection?.sessionId || !isDeepStrictEqual(continuation.selectedDiff ? nativeSelectedDiffSelector(continuation.selectedDiff) : undefined, selection?.selectedDiff))) throw new NativeConversationIntakeError('stale');
           const record = createNativeConversationCapture({ projectId: deps.projectId, principalId: current.identity.principalId,
-            ...original, ...(continuation ? { continuation } : {}),
+            ...original, ...(continuation ? { continuation } : {}), ...(attachments ? { attachments } : {}),
             sessionId: deps.sessionId, owner: current.facts, generation: 1, state: 'captured', stage: null, route: null, reason: null,
             proposalsSpent: 0, proposal: null, decisions: [], association: null });
           // Before initial publication another host may have captured this same

@@ -230,6 +230,8 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
       decorate(
         paint({
           width: options.width,
+          // One word for what main is doing, before everything else: an open ask outranks a running turn.
+          state: options.composerPendingRisk === 'approval-wait' ? 'waiting' : options.turnRunning ? 'working' : null,
           asks,
           chips,
           notices: options.unreadNotices && options.unreadNotices > 0 ? { count: options.unreadNotices, key: options.noticesKey } : null,

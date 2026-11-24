@@ -46,8 +46,9 @@ import type { ConfigManager, DaemonConfigPatch } from '@goodvibes/engine/platfor
 import { resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
 import { WEBUI_BINDING_RESULT, WEBUI_ENABLE_RESULT } from '../cli/machine-contracts.js';
 import {
-  explicitPublicBaseUrl, isLoopbackHost, probeStableHostInputs, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, type StableHostInputs,
+  explicitPublicBaseUrl, isLoopbackHost, lanHttpsOriginOf, lanHttpsPort, probeStableHostInputs, publicBaseUrlIsOwnOrigin, resolveControlPlaneOrigin, type StableHostInputs,
 } from '@goodvibes/engine/platform/platform/pairing';
+import { LAN_HTTPS_INSTALL_WORDS, LAN_HTTPS_PAGE_PATH } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
 
 
 export interface WebuiCommandResult {
@@ -75,21 +76,30 @@ export interface WebuiCommandDeps {
 type Posture = 'lan' | 'loopback' | 'unchanged';
 
 interface ParsedWebuiArgs {
-  readonly subcommand: 'enable' | 'disable' | 'status';
+  readonly subcommand: 'enable' | 'disable' | 'status' | 'https';
   readonly bundleDir: string | undefined;
   readonly posture: Posture;
   readonly json: boolean;
+  /** `enable --https`: also turn the LAN https listener on. */
+  readonly https: boolean;
+  /** `https off|status`. */
+  readonly httpsAction: 'off' | 'status' | undefined;
+  /** `https off --forget-certificate`: remove the certificate authority too. */
+  readonly forgetCertificate: boolean;
   readonly errors: readonly string[];
 }
 
 function parseWebuiArgs(argv: readonly string[]): ParsedWebuiArgs {
   const errors: string[] = [];
-  let subcommand: 'enable' | 'disable' | 'status' = 'status';
+  let subcommand: 'enable' | 'disable' | 'status' | 'https' = 'status';
   let bundleDir: string | undefined;
   let lan = false;
   let loopback = false;
   let sawSubcommand = false;
   let json = false;
+  let https = false;
+  let httpsAction: 'off' | 'status' | undefined;
+  let forgetCertificate = false;
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index] ?? '';
@@ -99,6 +109,18 @@ function parseWebuiArgs(argv: readonly string[]): ParsedWebuiArgs {
     }
     if (arg === '--lan') {
       lan = true;
+      continue;
+    }
+    if (arg === '--https') {
+      https = true;
+      continue;
+    }
+    if (arg === '--forget-certificate') {
+      forgetCertificate = true;
+      continue;
+    }
+    if (subcommand === 'https' && sawSubcommand && httpsAction === undefined && (arg === 'off' || arg === 'status')) {
+      httpsAction = arg;
       continue;
     }
     if (arg === '--loopback') {
@@ -133,12 +155,16 @@ function parseWebuiArgs(argv: readonly string[]): ParsedWebuiArgs {
       continue;
     }
     sawSubcommand = true;
-    if (arg === 'enable' || arg === 'disable' || arg === 'status') {
+    if (arg === 'enable' || arg === 'disable' || arg === 'status' || arg === 'https') {
       subcommand = arg;
     } else {
-      errors.push(`unknown subcommand: ${arg} (expected enable, disable or status)`);
+      errors.push(`unknown subcommand: ${arg} (expected enable, disable, status or https)`);
     }
   }
+  if (https && subcommand !== 'enable') errors.push(`--https only applies to 'webui enable', not '${subcommand}'`);
+  if (https && loopback) errors.push('--https serves your network over https, so it cannot go with --loopback');
+  if (subcommand === 'https' && httpsAction === undefined) errors.push("webui https needs 'off' or 'status' (turn it on with: goodvibes-daemon webui enable --lan --https)");
+  if (forgetCertificate && !(subcommand === 'https' && httpsAction === 'off')) errors.push("--forget-certificate only applies to 'webui https off'");
 
   if (lan && loopback) {
     errors.push('--lan and --loopback ask for opposite things; pass one of them');
@@ -154,7 +180,7 @@ function parseWebuiArgs(argv: readonly string[]): ParsedWebuiArgs {
   if (json && subcommand === 'disable') {
     errors.push('--json applies to \'webui status\' and \'webui enable\', not \'disable\'');
   }
-  return { subcommand, bundleDir, posture, json, errors };
+  return { subcommand, bundleDir, posture, json, https, httpsAction, forgetCertificate, errors };
 }
 
 function readString(config: Pick<ConfigManager, 'get'>, key: 'controlPlane.webui.bundleDir' | 'web.publicBaseUrl' | 'web.staticAssetsDir'): string {
@@ -245,7 +271,8 @@ function runWebui(argv: readonly string[], deps: WebuiCommandDeps): WebuiCommand
       exitCode: 2,
       lines: [
         ...parsed.errors.map((error) => `webui: ${error}`),
-        'Usage: goodvibes-daemon webui [enable|disable|status] [--bundle-dir <dir>] [--lan|--loopback] [--json]',
+        'Usage: goodvibes-daemon webui [enable|disable|status] [--bundle-dir <dir>] [--lan|--loopback] [--https] [--json]',
+        '       goodvibes-daemon webui https off|status [--forget-certificate] [--json]',
       ],
     };
   }
@@ -256,6 +283,8 @@ function runWebui(argv: readonly string[], deps: WebuiCommandDeps): WebuiCommand
   const base = deps.baseDirectory ?? process.cwd();
   const probe = deps.probeStableHost ?? probeStableHostInputs;
   const absolute = (path: string): string => (isAbsolute(path) ? path : resolve(base, path));
+
+  if (parsed.subcommand === 'https') return runHttps(parsed, config, probe);
 
   if (parsed.subcommand === 'status') {
     if (parsed.json) {
@@ -357,6 +386,13 @@ function runWebui(argv: readonly string[], deps: WebuiCommandDeps): WebuiCommand
   const getCurrent = (config.get as (key: keyof DaemonConfigPatch) => unknown).bind(config);
   const projected = { get: ((key: keyof DaemonConfigPatch) =>
     Object.hasOwn(values, key) ? values[key] : getCurrent(key)) as ConfigManager['get'] };
+  if (parsed.https) {
+    // https on the network is a second listener beside the plain one; it needs the web UI served to the network.
+    if (projected.get('controlPlane.hostMode') === 'local') {
+      return { exitCode: 2, lines: ['webui: --https serves your network over https, but the web UI is served to this machine only. Nothing was changed.', '  Add --lan:  goodvibes-daemon webui enable --lan --https'] };
+    }
+    values['controlPlane.lanHttps.enabled'] = true;
+  }
   let hostInputs: StableHostInputs | undefined;
   const stableProbe = () => hostInputs ??= probe();
   const serving = servingOrigin(projected, stableProbe);
@@ -387,6 +423,7 @@ function runWebui(argv: readonly string[], deps: WebuiCommandDeps): WebuiCommand
     lines.push('  note: controlPlane.hostMode is not one of local|network|custom; the daemon cannot bind until that is corrected.');
   }
   lines.push(...postureLines(serving.origin, serving.loopback, projected.get('controlPlane.enabled') === true, serving.alternate));
+  if (parsed.https) lines.push(...httpsOnLines(projected, serving.origin));
   // The daemon reads the serving settings per request and rebinds its listener on a host or port change.
   lines.push('  A running daemon applies this within about a second; no restart is needed.');
   if (parsed.json) {
@@ -403,6 +440,44 @@ function runWebui(argv: readonly string[], deps: WebuiCommandDeps): WebuiCommand
     };
   }
   return { exitCode: 0, lines };
+}
+
+/** What `enable --https` (and `https status`) say: the https address, and where each phone trusts it once. */
+function httpsOnLines(config: Pick<ConfigManager, 'get'>, plainOrigin: string): string[] {
+  const port = lanHttpsPort(config);
+  const secure = port === undefined ? undefined : lanHttpsOriginOf(plainOrigin, port);
+  if (!secure) return ['  https on your network: on, once the web UI is served to your network.'];
+  return [
+    `  https on your network: ${secure} (a second listener; ${plainOrigin} keeps working as before)`,
+    `  Each phone trusts it once: open ${plainOrigin}${LAN_HTTPS_PAGE_PATH} on the phone and follow the page (iPhone and Android; it also says how to remove it).`,
+    '  Pairing now gives phones the https address: goodvibes-daemon pair',
+    `  The https address is for browsers. GoodVibes' own programs (the terminal app, the Agent) keep using ${plainOrigin}.`,
+  ];
+}
+
+/** `webui https off` and `webui https status`. */
+function runHttps(parsed: ParsedWebuiArgs, config: WebuiCommandDeps['configManager'], probe: () => StableHostInputs): WebuiCommandResult {
+  const served = servingOrigin(config, probe);
+  if (parsed.httpsAction === 'status') {
+    const on = lanHttpsPort(config) !== undefined;
+    const lines = on ? ['https on your network: on', ...httpsOnLines(config, served.origin)] : ['https on your network: off', '  Turn it on:  goodvibes-daemon webui enable --lan --https'];
+    return { exitCode: 0, lines: parsed.json ? [JSON.stringify({ ok: true, enabled: on, port: Number(config.get('controlPlane.lanHttps.port')), plainUrl: served.origin, ...(on ? { httpsUrl: lanHttpsOriginOf(served.origin, lanHttpsPort(config)!) } : {}) })] : lines };
+  }
+  try {
+    config.setDaemonValues({ 'controlPlane.lanHttps.enabled': false });
+  } catch (error) {
+    return { exitCode: 1, lines: [`webui: could not write settings: ${message(error)}`] };
+  }
+  return {
+    exitCode: 0,
+    lines: [
+      'https on your network: off. The https listener stops within about a second; the plain listener is unchanged.',
+      ...(parsed.forgetCertificate ? [] : ['  The certificate authority is kept, so turning it on again needs nothing new on the phones; remove it too with: goodvibes-daemon webui https off --forget-certificate']),
+      '  To remove the certificate from a phone:',
+      `    iPhone and iPad: ${LAN_HTTPS_INSTALL_WORDS.iphone[3]!.replace(/^To remove it later: /, '')}`,
+      `    Android: ${LAN_HTTPS_INSTALL_WORDS.android[2]!.replace(/^To remove it later: /, '')}`,
+    ],
+  };
 }
 
 function renderStatus(

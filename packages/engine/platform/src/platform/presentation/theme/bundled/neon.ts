@@ -1,17 +1,18 @@
 /**
  * goodvibes-neon, the pre-2026-09 GoodVibes look.
  *
- * Dark mirrors TONE_TOKENS / DIFF_TONES (tones.ts) role for role, plus the
+ * Dark follows TONE_TOKENS / DIFF_TONES (tones.ts) role for role, plus the
  * TUI's transcript and syntax colors (goodvibes-tui src/renderer/code-block.ts
- * and syntax-highlighter.ts), so themeToTones(resolveTheme(neon, 'dark'))
- * reproduces TONE_TOKENS. One documented difference: textFaint (fg.dim and
- * chrome.faint) carries key hints, reasons and times, so it is lifted from
- * #475569 to #87919e, the smallest change that reaches 4.5:1 against the
- * panel and the element surface.
+ * and syntax-highlighter.ts). Light takes TONE_TOKENS_LIGHT's values where
+ * that table defines them (chrome, state.info, reasoning, brand, gradient) and
+ * a slate/Tailwind light scale for the surfaces TONE_TOKENS_LIGHT leaves dark.
  *
- * Light takes TONE_TOKENS_LIGHT's values where that table defines them
- * (chrome, state.info, reasoning, brand, gradient) and a slate/Tailwind light
- * scale for the surfaces TONE_TOKENS_LIGHT leaves dark.
+ * Every colour that carries text reaches 4.5:1 on each surface it is drawn on
+ * (the terminal's own background, panel, element, selection, code and diff
+ * fills): a value that did not carries the smallest lift toward white (dark)
+ * or black (light) that does. The three text levels stay apart: faint at the
+ * floor, muted at least 10 CIELAB L* above it, text at least 10 L* above muted.
+ * The composer placeholder is faint-level text, not a near-invisible slate.
  * Plain data, no module-scope calls.
  */
 
@@ -20,21 +21,19 @@ import type { ThemeJson } from '../types.js';
 export const NEON_THEME: ThemeJson = {
   $schema: 'https://opencode.ai/theme.json',
   theme: {
-    primary: { dark: '#00ffff', light: '#0077aa' },
-    secondary: { dark: '#d000ff', light: '#a21caf' },
-    accent: { dark: '#a855f7', light: '#7c3aed' },
-    error: { dark: '#ef4444', light: '#dc2626' },
-    warning: { dark: '#f59e0b', light: '#b45309' },
-    success: { dark: '#22c55e', light: '#15803d' },
+    primary: { dark: '#00ffff', light: '#006f9e' },
+    secondary: { dark: '#e15cff', light: '#a21caf' },
+    accent: { dark: '#ba79f9', light: '#7c3aed' },
+    error: { dark: '#f36d6d', light: '#ca2323' },
+    warning: { dark: '#f59e0b', light: '#a94e08' },
+    success: { dark: '#22c55e', light: '#147839' },
     info: { dark: '#38bdf8', light: '#0369a1' },
 
-    text: { dark: '#e2e8f0', light: '#0f172a' },
+    text: { dark: '#f7f9fb', light: '#0f172a' },
     textSecondary: { dark: '#cbd5e1', light: '#334155' },
-    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
-    // panel and on elements (published light muted #64748b, faint #4e5c6f / #94a3b8).
-    textMuted: { dark: '#94a3b8', light: '#617187' },
-    textFaint: { dark: '#87919e', light: '#67717f' },
-    textPlaceholder: { dark: '#334155', light: '#cbd5e1' },
+    textMuted: { dark: '#a6b3c4', light: '#455060' },
+    textFaint: { dark: '#8e98a4', light: '#606976' },
+    textPlaceholder: { dark: '#8b939e', light: '#6a6f75' },
     selectedListItemText: { dark: '#0f172a', light: '#ffffff' },
 
     background: 'transparent',
@@ -58,8 +57,8 @@ export const NEON_THEME: ThemeJson = {
     borderSubtle: { dark: '#334155', light: '#e2e8f0' },
 
     brand: { dark: '#00ffff', light: '#0077aa' },
-    brandEnd: { dark: '#d000ff', light: '#7c3aed' },
-    reasoning: { dark: '#a855f7', light: '#7c3aed' },
+    brandEnd: { dark: '#d312ff', light: '#7c3aed' },
+    reasoning: { dark: '#ba79f9', light: '#7c3aed' },
     blocked: { dark: '#f97316', light: '#c2410c' },
     remote: { dark: '#a78bfa', light: '#6d28d9' },
     active: { dark: '#60a5fa', light: '#2563eb' },
@@ -71,7 +70,7 @@ export const NEON_THEME: ThemeJson = {
     panelConversation: { dark: '#93c5fd', light: '#1d4ed8' },
 
     diffAdded: { dark: '#00ff88', light: '#15803d' },
-    diffRemoved: { dark: '#ff4444', light: '#dc2626' },
+    diffRemoved: { dark: '#ff5757', light: '#ca2323' },
     diffContext: 'textMuted',
     diffHunkHeader: { dark: '#88aaff', light: '#4f46e5' },
     diffHighlightAdded: { dark: '#66ffbb', light: '#166534' },
@@ -79,7 +78,7 @@ export const NEON_THEME: ThemeJson = {
     diffAddedBg: { dark: '#12291f', light: '#dcfce7' },
     diffRemovedBg: { dark: '#2a1518', light: '#fee2e2' },
     diffContextBg: 'backgroundPanel',
-    diffLineNumber: 'textFaint',
+    diffLineNumber: { dark: '#8e98a4', light: '#57606b' },
     diffAddedLineNumberBg: { dark: '#0f2019', light: '#c9f0d6' },
     diffRemovedLineNumberBg: { dark: '#22121a', light: '#fbd0d0' },
 
@@ -98,8 +97,8 @@ export const NEON_THEME: ThemeJson = {
     markdownImageText: 'markdownLinkText',
     markdownCodeBlock: 'text',
 
-    syntaxComment: { dark: '#666666', light: '#64748b' },
-    syntaxKeyword: { dark: '#d000ff', light: '#a21caf' },
+    syntaxComment: { dark: '#949494', light: '#617187' },
+    syntaxKeyword: { dark: '#df52ff', light: '#a21caf' },
     syntaxFunction: { dark: '#00ffff', light: '#0077aa' },
     syntaxVariable: { dark: '#ffffff', light: '#0f172a' },
     syntaxString: { dark: '#00ff88', light: '#15803d' },

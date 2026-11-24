@@ -174,13 +174,14 @@ const LABELLED_TEXT_SCHEMA = objectSchema({ label: STRING_SCHEMA, value: STRING_
  */
 export const ASK_PRESENTATION_SCHEMA = objectSchema({
   kind: enumSchema(['run-command', 'answer-command-prompt', 'change-files', 'fetch', 'start-agent', 'hand-off-work', 'change-setting',
-    'mcp-tool', 'other-tool', 'purchase', 'send-message', 'question', 'decision', 'claim', 'queued-action', 'report']),
+    'mcp-tool', 'other-tool', 'purchase', 'send-message', 'question', 'decision', 'claim', 'queued-action', 'report', 'model-price']),
   mark: enumSchema(['ask', 'cannot-undo', 'question']),
   question: STRING_SCHEMA,
   place: objectSchema({ short: STRING_SCHEMA, full: STRING_SCHEMA }, ['short', 'full']),
   subject: objectSchema({ kind: enumSchema(['command', 'paths', 'urls', 'text', 'money']), lines: arraySchema(STRING_SCHEMA) }, ['kind', 'lines']),
   body: STRING_SCHEMA,
   consequence: objectSchema({ text: STRING_SCHEMA, withPlace: STRING_SCHEMA, tone: enumSchema(['plain', 'cannot-undo']) }, ['text', 'withPlace', 'tone']),
+  weakensSafety: BOOLEAN_SCHEMA,
   choices: arraySchema(objectSchema({
     id: STRING_SCHEMA,
     label: STRING_SCHEMA,
@@ -188,6 +189,7 @@ export const ASK_PRESENTATION_SCHEMA = objectSchema({
     default: BOOLEAN_SCHEMA,
     danger: BOOLEAN_SCHEMA,
     value: STRING_SCHEMA,
+    said: STRING_SCHEMA,
   }, ['id', 'label'])),
   remember: objectSchema({
     offered: BOOLEAN_SCHEMA,

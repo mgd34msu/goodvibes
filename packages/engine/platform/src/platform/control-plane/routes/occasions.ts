@@ -30,6 +30,7 @@ import type { GatewayMethodHandler, GatewayMethodInvocation } from '../method-ca
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import { refuseDeclinedRequest } from '../confirmation-gate.js';
 import type { AuthoritySurface } from '../../security/untrusted-content.js';
 import { isProfileSurface, type ProfileSurface } from '../../owner-profile/index.js';
@@ -188,6 +189,15 @@ function interviewAnswer(progress: unknown): { present: boolean; interview: unkn
   return { present: progress !== null, interview: progress };
 }
 
+/** A write to the dates (an occasion, a plan, an answer, a sweep) that completed: every view of them reads them again. */
+function announceDatesChange(handler: GatewayMethodHandler): GatewayMethodHandler {
+  return async (invocation) => {
+    const result = await handler(invocation);
+    noteListChanged({ list: 'dates', change: 'changed' });
+    return result;
+  };
+}
+
 export function registerOccasionsGatewayMethods(
   catalog: GatewayMethodCatalog,
   service: OccasionsGatewayService,
@@ -198,7 +208,7 @@ export function registerOccasionsGatewayMethods(
   const nativeMethods = [...profileMethods, 'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
     'occasions.interview.record', 'occasions.sweep'];
   const attach = (id: string, handler: GatewayMethodHandler): void => {
-    attachHandler(catalog, id, nativeMethods.includes(id) ? nativeProfileMutation(catalog, id, handler, native?.host, native?.target, profileMethods.includes(id)) : handler);
+    attachHandler(catalog, id, nativeMethods.includes(id) ? nativeProfileMutation(catalog, id, announceDatesChange(handler), native?.host, native?.target, profileMethods.includes(id)) : handler);
   };
   if (native) registerNativeProfileTargets(catalog, [...nativeMethods, 'occasions.list', 'occasions.plans.list', 'occasions.state',
     'occasions.pending', 'occasions.interview.get', 'occasions.gifts'], native.target);

@@ -61,6 +61,8 @@ export interface SessionViewsDeps {
     readonly mainModel: () => string;
     /** The composer's text right now (the view's Esc hint depends on it). */
     readonly promptText: () => string;
+    /** The keys bound to next-session / previous-session, drawn at the end of the session row. */
+    readonly sessionKeys?: (() => { readonly next: string; readonly previous: string }) | undefined;
     readonly requestRender: () => void;
     readonly now?: (() => number) | undefined;
     /** Process output poll interval (ms); 0 disables the timer (tests poll by hand). */
@@ -510,7 +512,8 @@ export class SessionViews implements SessionViewControls {
                 : s.mark === 'run' ? '◐' : s.mark === 'idle' ? '●' : s.mark === 'ok' ? '✓' : s.mark === 'err' ? '✕' : s.mark === 'cancel' ? '○' : '◌';
             return { mark: glyph, markFg, name: s.name, color, current: sameTarget(s.target, this.focus.current) };
         });
-        return renderSessionChips(width, chips, (index, start, end) => { this.chipTargets.push({ start, end, target: sessions[index]!.target }); });
+        const keys = this.deps.sessionKeys?.();
+        return renderSessionChips(width, chips, (index, start, end) => { this.chipTargets.push({ start, end, target: sessions[index]!.target }); }, keys);
     }
     /** The session's own color: brand for main, the lane color for an agent, success for a process. */
     colorOf(target: SessionTarget): string {

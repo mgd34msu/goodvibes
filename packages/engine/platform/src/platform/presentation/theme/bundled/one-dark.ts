@@ -1,9 +1,12 @@
 /**
  * one-dark, dark only (Atom One Dark, github.com/atom/atom one-dark-syntax).
  *
- * Authored from the official published palette. Values that miss a contrast
- * floor against the panel carry the smallest adjustment that reaches it; each
- * one is noted beside its token with the published value.
+ * Authored from the official published palette. Every colour that carries text
+ * reaches 4.5:1 on each surface it is drawn on (background, panel, element,
+ * menu, selection, diff fills): a published value that does not carries the
+ * smallest lift toward white that does. The three text levels stay apart:
+ * faint at the floor, muted at least 10 CIELAB L* above it, text at least 10 L*
+ * above muted.
  * Plain data, no module-scope calls.
  */
 
@@ -12,64 +15,62 @@ import type { ThemeJson } from '../types.js';
 export const ONE_DARK_THEME: ThemeJson = {
   $schema: 'https://opencode.ai/theme.json',
   theme: {
-    primary: '#61afef',
-    secondary: '#c678dd',
-    accent: '#d19a66',
-    error: '#e06c75',
+    primary: '#6fb6f0',
+    secondary: '#d59be6',
+    accent: '#d7a678',
+    error: '#ea9aa0',
     warning: '#e5c07b',
     success: '#98c379',
-    info: '#56b6c2',
-    text: '#abb2bf',
-    // dark: published #7f848e is 4.10:1 on the panel; adjusted to reach 4.5:1.
-    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
-    // panel and on elements (published #878b95 and #5c6370).
-    textMuted: '#9498a1',
-    textFaint: '#9399a1',
+    info: '#65bdc7',
+    text: '#e7e9ec',
+    textMuted: '#caccd0',
+    textFaint: '#acb0b7',
     selectedListItemText: '#282c34',
     background: '#282c34',
     backgroundPanel: '#21252b',
     backgroundElement: '#2c313a',
     backgroundMenu: '#2c313a',
+    backgroundSelected: '#344557',
     border: '#3e4451',
     borderActive: '#5c6370',
     borderSubtle: '#2c313a',
-    reasoning: '#c678dd',
-    diffAdded: '#98c379',
-    diffRemoved: '#e06c75',
+    reasoning: '#d59be6',
+    diffAdded: '#9bc57d',
+    diffRemoved: '#e8949a',
     diffContext: 'textMuted',
     diffHunkHeader: '#61afef',
-    diffHighlightAdded: '#98c379',
-    diffHighlightRemoved: '#be5046',
+    diffHighlightAdded: '#9bc57d',
+    diffHighlightRemoved: '#db9d97',
     diffAddedBg: '#414d43',
     diffRemovedBg: '#503a42',
     diffContextBg: 'backgroundPanel',
-    diffLineNumber: 'textFaint',
+    diffLineNumber: '#aeb2b8',
     diffAddedLineNumberBg: '#3b483c',
     diffRemovedLineNumberBg: '#4b353b',
     markdownText: 'text',
-    markdownHeading: '#e06c75',
+    markdownHeading: '#e37981',
     markdownLink: '#61afef',
     markdownLinkText: '#56b6c2',
     markdownCode: '#98c379',
-    markdownBlockQuote: '#5c6370',
-    markdownEmph: '#c678dd',
+    markdownBlockQuote: '#9398a1',
+    markdownEmph: '#c77bde',
     markdownStrong: 'text',
     markdownHorizontalRule: '#5c6370',
-    markdownListItem: '#e06c75',
+    markdownListItem: '#e37981',
     markdownListEnumeration: '#d19a66',
     markdownImage: 'markdownLink',
     markdownImageText: 'markdownLinkText',
     markdownCodeBlock: 'text',
-    syntaxComment: '#5c6370',
-    syntaxKeyword: '#c678dd',
+    syntaxComment: '#9398a1',
+    syntaxKeyword: '#c77bde',
     syntaxFunction: '#61afef',
-    syntaxVariable: '#e06c75',
+    syntaxVariable: '#e37981',
     syntaxString: '#98c379',
     syntaxNumber: '#d19a66',
     syntaxType: '#e5c07b',
     syntaxOperator: '#56b6c2',
     syntaxPunctuation: '#abb2bf',
-    syntaxProperty: '#e06c75',
+    syntaxProperty: '#e37981',
     syntaxBuiltin: '#e5c07b',
   },
 };

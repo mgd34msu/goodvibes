@@ -37,6 +37,8 @@ export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
     context?: import('./native/native-conversation-input.js').ProductInputContext,
   ) => void;
   stopSpokenOutput?: () => void;
+  /** `/voice wake-again`: start listening for the wake word again after it stopped itself; says what happened. */
+  listenForWakeAgain?: () => Promise<string>;
   pasteFromClipboard?: () => {
     pasted: boolean;
     kind: 'image' | 'text' | 'none';

@@ -49,6 +49,10 @@ export interface VoiceCaptureShellDeps {
   readonly submitTurn: (text: string) => void;
   readonly notify: (message: string) => void;
   readonly render: () => void;
+  /** The terminal's focus-in reports (the platform focus tracker). */
+  readonly subscribeFocusGained?: (listener: () => void) => () => void;
+  /** `/voice wake-again` is hung here (commandContext.listenForWakeAgain). */
+  readonly commandContext?: { listenForWakeAgain?: () => Promise<string> };
 }
 
 /**
@@ -74,7 +78,9 @@ export function installVoiceCapture(deps: VoiceCaptureShellDeps): () => VoiceCap
     submitTurn: (text) => deps.submitTurn(text),
     notify: deps.notify,
     render: deps.render,
+    ...(deps.subscribeFocusGained ? { subscribeFocusGained: deps.subscribeFocusGained } : {}),
   });
+  if (deps.commandContext) deps.commandContext.listenForWakeAgain = capture.listenForWakeAgain;
   deps.unsubs.push(...capture.unsubs);
   return capture.status;
 }

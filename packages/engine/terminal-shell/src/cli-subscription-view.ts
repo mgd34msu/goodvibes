@@ -2,6 +2,7 @@ import { cliCommandDone, cliCommandRefusal, yesNo, formatJsonOrText, type CliCom
 import {
   getSubscriptionProviderConfig,
   listAvailableSubscriptionProviders,
+  readAuthorizationInput,
   type SubscriptionManager,
   type ServiceRegistry,
   type SecretsManager,
@@ -9,7 +10,6 @@ import {
 } from '@goodvibes/engine/platform/platform/config';
 import { inspectProviderAuth } from '@goodvibes/engine/platform/platform/runtime/security';
 import { hasCommandFlag } from './cli-arguments.js';
-import { readAuthorizationInput } from './settings-subscriptions.js';
 import { openBrowser } from './cli-environment.js';
 
 interface SubscriptionRuntime {

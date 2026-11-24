@@ -1,13 +1,15 @@
 /**
  * The account button and its menu (design doc "Glass and elevation" specimen and
  * the deep dive's "Account menu"). Replaces the bottom status strip: who you
- * are, the settings dialog (and its devices and people sections), check-ins,
- * theme, the connection to your daemon in plain words with its latency, and
- * sign out. Admin and Providers are no longer pages: they are the Account and
+ * are, "Finish setting up" while a recommended setup step is left, the
+ * settings dialog (and its devices and people sections), check-ins, theme, the
+ * connection to your daemon in plain words with its latency, "N waiting for
+ * you" (opens Work on those), what is running, and sign out. Admin and Providers are no longer pages: they are the Account and
  * Models and providers sections of the settings dialog.
  */
 import { useState } from 'react';
-import { BellRing, ChevronDown, History, LogOut, Settings, Smartphone, Sparkles, SunMoon, Users } from 'lucide-react';
+import { BellRing, ChevronDown, History, ListChecks, LogOut, Settings, Smartphone, Sparkles, SunMoon, Users } from 'lucide-react';
+import { useSetupChecklist } from '../settings/SetupChecklist';
 import { useToastHistory, type ToastRecord } from '../../lib/toast';
 import { Row, RowList } from '../ui/Row';
 import { Sheet } from '../ui/Sheet';
@@ -70,6 +72,9 @@ export interface AccountMenuProps {
   health: HealthSummary;
   /** What Work counts as running right now. */
   running: number;
+  /** What Work counts as waiting for you: shown first, and opens Work on those. */
+  waiting: number;
+  onReviewWaiting: () => void;
   /** Rail form: only the avatar shows; the name moves to a tooltip. */
   compact?: boolean;
   /** Open the settings dialog, on a section when one is named. */
@@ -77,13 +82,15 @@ export interface AccountMenuProps {
   onSignOut: () => void;
 }
 
-export function AccountMenu({ name, health, running, compact = false, onOpenSettings, onSignOut }: AccountMenuProps) {
+export function AccountMenu({ name, health, running, waiting, onReviewWaiting, compact = false, onOpenSettings, onSignOut }: AccountMenuProps) {
   const { theme, setTheme } = useTheme();
   const tone = connectionTone(health);
   const phrase = connectionPhrase(health);
   const latency = latencyPhrase(health.latencyMs);
   const accountLabel = `Account: ${name}. ${phrase}`;
   const notices = useToastHistory();
+  // Recommended setup steps neither done nor skipped (Settings > General's checklist).
+  const setupLeft = useSetupChecklist(false).left;
   const [noticesOpen, setNoticesOpen] = useState(false);
 
   return (
@@ -111,6 +118,9 @@ export function AccountMenu({ name, health, running, compact = false, onOpenSett
       }}
     >
       <MenuMeta>{name} · signed in on this browser</MenuMeta>
+      {setupLeft > 0 && (
+        <MenuItem icon={<ListChecks />} hint={`${String(setupLeft)} left`} onSelect={() => onOpenSettings('general')}>Finish setting up</MenuItem>
+      )}
       <MenuItem icon={<Settings />} hint="Ctrl ," onSelect={() => onOpenSettings()}>Settings</MenuItem>
       <MenuItem icon={<Smartphone />} onSelect={() => onOpenSettings('devices')}>Devices and pairing</MenuItem>
       <MenuItem icon={<Users />} onSelect={() => onOpenSettings('people')}>People and channels</MenuItem>
@@ -140,6 +150,11 @@ export function AccountMenu({ name, health, running, compact = false, onOpenSett
       >
         {phrase}
       </MenuItem>
+      {waiting > 0 && (
+        <MenuItem icon={<StatusDot tone="warn" />} onSelect={onReviewWaiting}>
+          {waiting} waiting for you
+        </MenuItem>
+      )}
       <div role="none" className="gv-menu__text shell-account__activity">
         <span className="shell-account__spacer" aria-hidden="true" />
         <span>{activityPhrase(health, running)}</span>

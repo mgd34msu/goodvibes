@@ -6,6 +6,7 @@
  */
 import { PersistentStore } from '../state/persistent-store.js';
 import type { CiWatchSubscription } from './types.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 
 interface CiWatchSnapshot extends Record<string, unknown> {
   version: 1;
@@ -31,7 +32,9 @@ export class CiWatchStore {
     return validateSnapshot(await this.store.load()).subscriptions;
   }
 
+  /** Every watch change (created, its state, deleted) is written here, then announced (runtime/list-changes.ts). */
   async save(subscriptions: readonly CiWatchSubscription[]): Promise<void> {
     await this.store.persist({ version: 1, subscriptions: [...subscriptions] });
+    noteListChanged({ list: 'ci-watches', change: 'changed' });
   }
 }

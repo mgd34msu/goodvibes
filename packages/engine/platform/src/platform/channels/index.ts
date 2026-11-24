@@ -72,6 +72,8 @@ export type { ChannelHealthAlert, ChannelHealthWatcherDeps } from './health-watc
 export type { UpsertRouteBindingInput } from './route-manager.js';
 export { RouteBindingManager } from './route-manager.js';
 export { SurfaceRegistry } from './surface-registry.js';
+/** What a channel message's sender is called when no person or device is known for it (the principals registry owns the words). */
+export { UNKNOWN_SENDER_LABEL } from '../principals/types.js';
 export type { ChannelPlugin } from './plugin-registry.js';
 export { ChannelPluginRegistry } from './plugin-registry.js';
 export { ChannelPolicyManager, channelSenderActor, isChannelOwner } from './policy-manager.js';

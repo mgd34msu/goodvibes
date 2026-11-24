@@ -9,18 +9,20 @@ export interface ProviderOption {
 }
 
 /**
- * Configured providers first, then unconfigured, alphabetical within each
- * group. Every provider list the operator picks from (composer picker,
+ * In three bands, alphabetical within each: a provider whose sign-in expired or
+ * is about to (it needs the person), then the configured ones, then the ones not
+ * set up. Every provider list the operator picks from (composer picker,
  * Providers sidebar) orders this way: the provider someone can actually use
- * must not sit below a scroll of forty they cannot.
+ * must not sit below a scroll of forty they cannot, and one that needs a new
+ * sign-in must not sit among those never set up.
  */
 export function sortProvidersConfiguredFirst(options: readonly ProviderOption[]): ProviderOption[] {
-  return [...options].sort((a, b) => {
-    const aConfigured = deriveProviderStatus(a.value).configured;
-    const bConfigured = deriveProviderStatus(b.value).configured;
-    if (aConfigured !== bConfigured) return aConfigured ? -1 : 1;
-    return a.label.localeCompare(b.label, undefined, { sensitivity: 'base' });
-  });
+  const band = (option: ProviderOption): number => {
+    const status = deriveProviderStatus(option.value);
+    if (status.freshness === 'expired' || status.freshness === 'expiring') return 0;
+    return status.configured ? 1 : 2;
+  };
+  return [...options].sort((a, b) => band(a) - band(b) || a.label.localeCompare(b.label, undefined, { sensitivity: 'base' }));
 }
 
 export interface ModelOption {

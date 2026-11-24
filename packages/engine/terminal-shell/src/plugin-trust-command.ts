@@ -54,9 +54,25 @@ export function pluginTrustConfirmation(manager: PluginTrustControls | undefined
   };
 }
 
-async function restartLine(restarting: Promise<{ ok: boolean; error?: string }> | undefined): Promise<string> {
+/** Starts one switched-on plugin that is not running (the manager's `enable`); absent where plugins do not run. */
+export type PluginStart = (name: string) => Promise<{ ok: boolean; error?: string }>;
+
+async function restartLine(
+  manager: Pick<PluginManager, 'list'>,
+  name: string,
+  restarting: Promise<{ ok: boolean; error?: string }> | undefined,
+  start: PluginStart | undefined,
+): Promise<string> {
   const elsewhere = 'Other GoodVibes apps apply it the next time they start the plugin.';
-  if (!restarting) return `It applies when the plugin next starts. ${elsewhere}`;
+  if (!restarting) {
+    // A switched-on plugin that is not running (its tier kept it from starting) is started now at the new tier.
+    const status = manager.list().find((plugin) => plugin.name === name);
+    if (!start || !status?.enabled || status.active || status.quarantined) return `It applies when the plugin next starts. ${elsewhere}`;
+    const started = await start(name);
+    return started.ok
+      ? `It was started at the new tier. ${elsewhere}`
+      : `It did not start: ${started.error ?? 'unknown reason'}`;
+  }
   const restarted = await restarting;
   return restarted.ok
     ? `The running plugin was started again at the new tier. ${elsewhere}`
@@ -69,12 +85,12 @@ async function restartLine(restarting: Promise<{ ok: boolean; error?: string }> 
 // ---------------------------------------------------------------------------
 
 /** Record a trust tier; `trusted` uses the signed grant when the signature verifies, else records the owner's override in the note. */
-export async function trustPlugin(manager: PluginTrustControls, name: string, tier: PluginTrustTierName, userNote: string | undefined): Promise<string> {
+export async function trustPlugin(manager: PluginTrustControls, name: string, tier: PluginTrustTierName, userNote: string | undefined, start?: PluginStart): Promise<string> {
   let note = userNote || undefined;
   const effect = PLUGIN_TIER_EFFECT[tier];
   if (tier === 'trusted') {
     const signed = manager.trustSigned(name);
-    if (signed.ok) return `Plugin '${name}' elevated to 'trusted' via signed manifest${signed.fingerprint ? ` (fingerprint: ${signed.fingerprint})` : ''}: ${effect}\n${await restartLine(signed.restarting)}`;
+    if (signed.ok) return `Plugin '${name}' elevated to 'trusted' via signed manifest${signed.fingerprint ? ` (fingerprint: ${signed.fingerprint})` : ''}: ${effect}\n${await restartLine(manager, name, signed.restarting, start)}`;
     // The owner's answer covers a signature that does not verify; a closed manager,
     // an unknown plugin or an unsaved record is not that, and is a refusal.
     if (signed.signatureRejected !== true) throw commandRefusal(signed.error ?? `the trust tier of '${name}' was not saved`, 'Nothing changed; fix the reason and run the line again.');
@@ -82,7 +98,7 @@ export async function trustPlugin(manager: PluginTrustControls, name: string, ti
   }
   const result = manager.trust(name, tier, note);
   if (!result.ok) throw commandRefusal(result.error ?? `the trust tier of '${name}' was not saved`, 'Nothing changed; fix the reason and run the line again.');
-  return `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(result.restarting)}`;
+  return `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(manager, name, result.restarting, start)}`;
 }
 
 export function savePluginPublisherKey(manager: PluginTrustControls, name: string, keyPath: string, command = 'plugin'): string {
@@ -141,7 +157,7 @@ export async function reloadPlugins(manager: PluginLifecycleControls, command = 
   const lines = [`Done. ${summary.reloaded} plugin(s) reloaded${summary.failed > 0 ? `, ${summary.failed} failed` : ''}.`];
   for (const { name: failed, reason } of summary.loadFailed ?? []) lines.push(`  ${failed}: did not start, ${reason}`);
   for (const busy of summary.notDrained) lines.push(`  ${busy}: not reloaded, calls into it were still running; it keeps its current version. Run /${command} reload again once they finish.`);
-  for (const held of summary.quarantined ?? []) lines.push(`  ${held}: not loaded, it is quarantined. Run /${command} lift ${held}, then /${command} reload.`);
+  for (const held of summary.quarantined ?? []) lines.push(`  ${held}: not loaded, it is quarantined. /${command} lift ${held} starts it.`);
   for (const stuck of summary.cleanupFailed ?? []) lines.push(`  ${stuck}: stopping its earlier copy reported an error; restart to clear anything that copy left behind.`);
   return lines.join('\n');
 }
@@ -159,7 +175,7 @@ export async function quarantinePlugin(manager: PluginLifecycleControls, name: s
       next: ['Restart to clear anything the running instance left behind'],
     }));
   }
-  return `Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /${command} lift ${name} and then /${command} reload.`;
+  return `Plugin '${name}' quarantined and stopped.\nReason: ${reason}\nIt will not load until you run /${command} lift ${name}, which starts it again.`;
 }
 
 /**
@@ -326,14 +342,22 @@ function pluginActions<Ctx extends CommandActionContext>(manager: PluginManagerO
     },
     {
       id: 'lift', label: 'Lift a plugin\'s quarantine', word: 'lift', inputs: [PLUGIN],
-      sentence: '{plugin} may load again (after a reload), until you change it.', done: '',
+      sentence: '{plugin} may load again, and starts now if it is switched on, until you change it.', done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'quarantine',
       ownerOnly: { reason: 'it lets a quarantined plugin load again', instead: `Ask the owner to lift it with /${command} lift.` },
       operator: TERMINAL_ONLY, example: { plugin: 'jira' },
       async run(values, ctx) {
-        const result = controlsOf(manager, ctx).liftQuarantine(values.plugin!);
-        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${values.plugin}' quarantine was not lifted.`, undefined, 'NOT_DONE');
-        return `Plugin '${values.plugin}' quarantine lifted; it can load again. Run /${command} reload to load it.`;
+        const plugins = controlsOf(manager, ctx);
+        const name = values.plugin!;
+        const result = plugins.liftQuarantine(name);
+        if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${name}' quarantine was not lifted.`, undefined, 'NOT_DONE');
+        const status = plugins.list().find((plugin) => plugin.name === name);
+        if (!status?.enabled) return `Plugin '${name}' quarantine lifted. It is switched off, so it was not started; /${command} enable ${name} starts it.`;
+        if (status.active) return `Plugin '${name}' quarantine lifted; it is running.`;
+        const started = await plugins.enable(name);
+        return started.ok
+          ? `Plugin '${name}' quarantine lifted and the plugin started.`
+          : `Plugin '${name}' quarantine lifted, but it did not start: ${started.error ?? 'unknown reason'}`;
       },
     },
     {
@@ -342,7 +366,10 @@ function pluginActions<Ctx extends CommandActionContext>(manager: PluginManagerO
         textInput({ id: 'note', label: 'Note', help: 'Why you chose it', why: 'your own words', typed: { tail: true }, optional: { default: '', means: 'no note' } })],
       sentence: '{plugin} is set to the {tier} tier on every app of this machine until you change it; a trusted tier without a valid signature is recorded in its trust note.', done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'none', operator: TERMINAL_ONLY, example: { plugin: 'jira', tier: 'limited' },
-      async run(values, ctx) { return trustPlugin(controlsOf(manager, ctx), values.plugin!, values.tier as PluginTrustTierName, values.note); },
+      async run(values, ctx) {
+        const plugins = controlsOf(manager, ctx);
+        return trustPlugin(plugins, values.plugin!, values.tier as PluginTrustTierName, values.note, (name) => plugins.enable(name));
+      },
     },
     {
       id: 'trust-key', label: 'Save a plugin publisher\'s key', word: 'trust-key',

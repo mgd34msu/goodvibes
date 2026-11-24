@@ -28,8 +28,8 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
     rawKey(state, token) {
       // cycle-permission-mode (Shift+Tab by default; the tokenizer reads the
       // xterm back-tab CSI Z as tab-with-shift). Only when the composer owns
-      // focus: modal/picker routes and the session chips run earlier and keep
-      // their reverse-tab.
+      // focus: modal/picker routes run earlier and keep their reverse-tab; the
+      // session row switches with next-session / previous-session instead.
       if (state.keybindingsManager.lookup(token) === 'cycle-permission-mode') {
         void cycleMode(state);
         return true;

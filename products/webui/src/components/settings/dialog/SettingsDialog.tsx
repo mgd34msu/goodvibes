@@ -64,6 +64,7 @@ import {
   AllSettingsSection,
   CheckinsSection,
   CredentialsSection,
+  DecisionModelsSection,
   DevicesSection,
   MemorySection,
   NetworkSection,
@@ -385,6 +386,7 @@ function SectionContent({
     case 'devices': return <DevicesSection onOpenView={onOpenView} />;
     case 'people': return <PeopleSection />;
     case 'models': return <ModelsSection />;
+    case 'decision-models': return <DecisionModelsSection />;
     case 'credentials': return <CredentialsSection />;
     case 'usage': return <UsageSection />;
     case 'voice': return <VoiceSection />;

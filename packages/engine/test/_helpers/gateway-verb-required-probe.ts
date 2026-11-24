@@ -85,6 +85,7 @@ import { registerOwnerInboxGatewayMethods } from '../../platform/src/platform/co
 import { registerPowerGatewayMethods } from '../../platform/src/platform/control-plane/routes/power.js';
 import { registerPrincipalsGatewayMethods } from '../../platform/src/platform/control-plane/routes/principals.js';
 import { registerPushGatewayMethods } from '../../platform/src/platform/control-plane/routes/push.js';
+import { registerProviderSignInGatewayMethods } from '../../platform/src/platform/control-plane/routes/provider-sign-in.js';
 import { registerRewindGatewayMethods } from '../../platform/src/platform/control-plane/routes/rewind.js';
 import { createConversationRewindHostBroker, registerRewindConversationHostGatewayMethods } from '../../platform/src/platform/control-plane/routes/rewind-conversation-hosts.js';
 import { registerRuntimeMetricsGatewayMethods } from '../../platform/src/platform/control-plane/routes/runtime-metrics.js';
@@ -121,6 +122,14 @@ function stubDeps(): never {
     apply() { return Promise.resolve({}); },
     construct() { return stubDeps(); },
     has() { return true; },
+  }) as never;
+}
+
+/** A relay reachability stub whose registration has rested at `registered`. */
+function registeredRelayStub(): never {
+  const inner = stubDeps() as object;
+  return new Proxy(inner, {
+    get(target, property) { return property === 'status' ? 'registered' : Reflect.get(target, property); },
   }) as never;
 }
 
@@ -168,9 +177,12 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['power', (catalog) => registerPowerGatewayMethods(catalog, stubDeps())],
   ['principals', (catalog) => registerPrincipalsGatewayMethods(catalog, stubDeps())],
   ['push', (catalog) => registerPushGatewayMethods(catalog, stubDeps())],
+  ['provider-sign-in', (catalog) => registerProviderSignInGatewayMethods(catalog, stubDeps())],
   // The accessor shape the daemon passes: the controller is built at start and
   // dropped at stop, so the verbs take a function rather than an instance.
-  ['relay', (catalog) => registerRelayGatewayMethods(catalog, () => stubDeps(), stubDeps())],
+  // Its registration reads `registered`: a mint waits for a registration on its
+  // way to rest, and a stub's status never would, so the probe would never return.
+  ['relay', (catalog) => registerRelayGatewayMethods(catalog, () => registeredRelayStub(), stubDeps())],
   ['rewind', (catalog) => registerRewindGatewayMethods(catalog, stubDeps(), () => [])],
   // A real broker rather than a stub: it holds no I/O and no timers until a
   // request is raised, and the probe's point is to run the handler the daemon
@@ -248,6 +260,7 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerOwnerInboxGatewayMethods',
   'registerPowerGatewayMethods',
   'registerPrincipalsGatewayMethods',
+  'registerProviderSignInGatewayMethods',
   'registerPushGatewayMethods',
   'registerRelayGatewayMethods',
   'registerRewindConversationHostGatewayMethods',

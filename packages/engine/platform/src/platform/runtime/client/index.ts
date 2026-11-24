@@ -79,6 +79,8 @@ export { createWireSessionDispatch, readSurfaceAgentOutcome } from './session-di
 export type { SessionInputChangeHandlers, SessionInputsWireClient, SurfaceAgentOutcome, WireSessionDispatch, WireSessionDispatchOptions } from './session-dispatch.js';
 export { SESSION_UPDATE_DOMAIN, SESSION_UPDATE_WIRE_EVENT, createSessionInputChangeSubscriber, inputChangeSessionId } from './session-input-updates.js';
 export type { SessionInputChangeSubscriberOptions } from './session-input-updates.js';
+export { LIST_CHANGE_DOMAIN, LIST_CHANGE_WIRE_EVENT, listChangeOf, subscribeDaemonListChanges } from './list-change-updates.js';
+export type { ListChangeSubscriberOptions } from './list-change-updates.js';
 
 export { createConversationRewindHost } from './conversation-rewind-host.js';
 export type { ConversationRewindHostClient, ConversationRewindHostOptions } from './conversation-rewind-host.js';

@@ -1,8 +1,14 @@
 import {
+  drawModelWorkspaceDetail,
+  modelWorkspaceFilterRow,
   modelWorkspaceKey as modelKey,
+  modelWorkspaceListAge,
+  modelWorkspaceTabs,
+  modelWorkspaceTargetLine,
   modelWorkspaceTargetSummary,
   modelWorkspaceProviderRows,
-  modelWorkspaceSignIn,
+  modelWorkspaceTier,
+  MODEL_WORKSPACE_UNKNOWN_KIND,
 } from '@goodvibes/engine/terminal-shell/model-workspace-facts';
 import { modelPickerTargetLabel } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 /**
@@ -10,9 +16,10 @@ import { modelPickerTargetLabel } from '@goodvibes/engine/terminal-shell/model-p
  *
  *   ✦ Models                                                      esc
  *
- *    Main chat   Side work   Tool work   Spoken replies   Search index   Decision model
+ *    Main chat   Other jobs (optional) ▸
  *
  *   ▏opus                                                  6 of 5,582
+ *   ctrl+t price: any   ctrl+k needs: nothing   ctrl+a every model   …
  *
  *   ✦ pinned                               ┌ element inset ──────────┐
  *   ● Claude Opus 5.5  anthropic    1.0M     Claude Opus 5.5
@@ -21,9 +28,11 @@ import { modelPickerTargetLabel } from '@goodvibes/engine/terminal-shell/model-p
  *   ✦ lm studio                              Quality  ▰▰▰▰▰▰▱▱▱▱ 0.61
  *     qwen3-coder       lmstudio    128K     Cost     $15 / $75 per 1M
  *
- *   ⏎ use for Main chat   tab next target   ctrl+f pin   ctrl+r refresh
+ *   ⏎ use for Main chat   tab next job   ctrl+f pin   ctrl+r refresh
  *
- * The targets are tabs. A model target lists only models the catalog says read
+ * The targets are tabs: Main chat, and the optional jobs behind one tab until
+ * one is chosen (model-workspace-facts.ts, shared with the Agent). The filter
+ * keys sit under the search field with what each is set to. A model target lists only models the catalog says read
  * and write text; models it does not describe come last, marked. The search
  * index and the decision model list their own entries. The list is grouped
  * Pinned, Recent, then by
@@ -51,13 +60,12 @@ import {
   type SurfaceLayer,
 } from './surface-kit.ts';
 import { drawList, type KitListResult, type KitRow } from './surface-kit-list.ts';
-import { meter, inset, insetPut, insetWrap, tabs, type KitInset } from './surface-kit-parts.ts';
-
+import { inset, insetPut, insetWrap, tabs, type KitInset } from './surface-kit-parts.ts';
 /**
  * Rows the picker's chrome takes (title, tabs, search, padding, hints); the
  * key route subtracts it from the viewport height for page-sized moves.
  */
-export const MODEL_PICKER_CHROME_LINES = 7;
+export const MODEL_PICKER_CHROME_LINES = 8;
 
 // ---------------------------------------------------------------------------
 // Formatting
@@ -72,22 +80,9 @@ const targetSummary = (info: ModelPickerTargetInfo): string => modelWorkspaceTar
 
 const targetLabelFor = modelPickerTargetLabel;
 
-/** Said on a model the catalog does not describe, beside its provider and in its detail. */
-const UNKNOWN_KIND_NOTE = 'kind unknown';
-
 function isTargetModel(info: ModelPickerTargetInfo | null, model: ModelDefinition): boolean {
   if (!info || !info.enabled) return false;
   return info.model === model.registryKey || (info.model === model.id && (!info.provider || info.provider === model.provider));
-}
-
-function capabilityNames(model: ModelDefinition): string[] {
-  const caps = model.capabilities ?? {};
-  return [
-    caps.toolCalling ? 'tools' : '',
-    caps.multimodal ? 'vision' : '',
-    caps.reasoning ? 'reasoning' : '',
-    caps.codeEditing ? 'code' : '',
-  ].filter(Boolean);
 }
 
 // ---------------------------------------------------------------------------
@@ -115,10 +110,13 @@ function modelRows(picker: ModelPickerModal, compact = false): KitRow[] {
     const selected = index === picker.selectedIndex;
     const where = compact && selected ? modelKey(model) : model.provider;
     const why = picker.recommendedWhy(model);
+    const tier = modelWorkspaceTier(model);
     rows.push({
       label: model.displayName || model.id,
-      desc: why !== undefined ? `${where} · ${why}` : picker.textWork(model) === 'unknown' ? `${where} · ${UNKNOWN_KIND_NOTE}` : where,
-      right: formatContext(model.contextWindow),
+      desc: [where, why ?? (picker.textWork(model) === 'unknown' ? MODEL_WORKSPACE_UNKNOWN_KIND : undefined)].filter(Boolean).join(' · '),
+      // The price tier beside the context, so a free model is told apart without opening it.
+      right: tier ? `${formatContext(model.contextWindow)} · ${tier}` : formatContext(model.contextWindow),
+      rightFg: tier === 'free' ? t.success : undefined,
       mark: current ? '●' : undefined,
       markFg: t.brand,
       current,
@@ -197,7 +195,7 @@ function filterSummary(picker: ModelPickerModal): string {
   const parts: string[] = [];
   if (picker.categoryFilter !== 'all') parts.push(`${picker.categoryFilter} only`);
   if (picker.capabilityFilter !== 'none') parts.push(`needs ${picker.capabilityFilter}`);
-  if (picker.availableOnly) parts.push('available only');
+  if (picker.availableOnly) parts.push('only models you can use');
   if (picker.benchmarkSort !== 'none') parts.push(`sorted by ${picker.benchmarkSort}`);
   if (picker.groupBy !== 'provider') parts.push(`grouped by ${picker.groupBy}`);
   return parts.join(' · ');
@@ -211,60 +209,9 @@ function kv(canvas: ModalFrame['canvas'], p: KitInset, y: number, key: string, v
 }
 
 function drawModelDetail(f: ModalFrame, picker: ModelPickerModal, p: KitInset): void {
-  const t = activeTokens();
-  const c = f.canvas;
   const model = picker.getSelected();
-  let y = p.top;
-  if (!model) {
-    y = insetWrap(c, p, p.l, y, 'Nothing is selected.', { fg: t.textMuted });
-  } else {
-    y = insetWrap(c, p, p.l, y, model.displayName || model.id, { fg: t.text, bold: true });
-    y = insetWrap(c, p, p.l, y, modelKey(model), { fg: t.textFaint });
-    y++;
-    const serves = picker.targetInfos.filter((info) => isTargetModel(info, model)).map((info) => targetLabelFor(info.target));
-    const configured = picker.configuredProviders.has(model.provider);
-    y = kv(c, p, y, 'Provider', model.provider);
-    if (picker.textWork(model) === 'unknown')
-      y = kv(c, p, y, 'Kind', `${UNKNOWN_KIND_NOTE}: the model catalog does not say what it reads and writes`, t.warning);
-    if (model.tier) y = kv(c, p, y, 'Tier', model.tier);
-    if (serves.length > 0) y = kv(c, p, y, 'Serves', serves.join(' · '));
-    const target = picker.getSelectedTargetInfo();
-    if (target && !isTargetModel(target, model)) y = kv(c, p, y, 'Now', `${targetLabelFor(target.target)}: ${targetSummary(target)}`);
-    y = kv(c, p, y, 'Status', configured ? 'configured' : 'not configured', configured ? t.success : t.warning);
-    const signIn = modelWorkspaceSignIn(picker.configuredViaMap.get(model.provider));
-    if (configured && signIn) y = kv(c, p, y, 'Sign-in', signIn);
-    const unreachable = picker.unreachableProviders.get(model.provider);
-    if (unreachable !== undefined) y = kv(c, p, y, 'Health', `unreachable: ${unreachable}`, t.warning);
-    if (picker.isPinned(model)) y = kv(c, p, y, 'Pinned', 'yes');
-    y++;
-    // Meters only where the data exists.
-    if (model.contextWindow && y <= p.bottom) {
-      insetPut(c, p, p.l, y, 'Context', { fg: t.textMuted });
-      const end = meter(c, p.l + 12, y, Math.min(1, model.contextWindow / 1_000_000), t.brand, p.bg);
-      insetPut(c, p, end + 2, y++, formatContext(model.contextWindow), { fg: t.textFaint });
-    }
-    const score = picker.benchmarkScore(model);
-    if (score !== null && y <= p.bottom) {
-      insetPut(c, p, p.l, y, 'Quality', { fg: t.textMuted });
-      const end = meter(c, p.l + 12, y, score, t.success, p.bg);
-      insetPut(c, p, end + 2, y++, score.toFixed(2), { fg: t.textFaint });
-    }
-    if (model.pricing && y <= p.bottom) {
-      y = kv(c, p, y, 'Cost', `$${model.pricing.input} in · $${model.pricing.output} out per 1M tokens`);
-    }
-    const caps = capabilityNames(model);
-    if (caps.length > 0 && y <= p.bottom) {
-      let cx = p.l;
-      for (const cap of caps) {
-        if (cx + cap.length + 2 > p.r + 1) break;
-        cx = c.put(cx, y, ` ${cap} `, { fg: t.text, bg: t.border }) + 1;
-      }
-      y += 2;
-    }
-    if (model.description && y <= p.bottom) y = insetWrap(c, p, p.l, y, model.description, { fg: t.textMuted }) + 1;
-    if (picker.isLocalModel(model) && y <= p.bottom)
-      y = insetWrap(c, p, p.l, y, 'Local model: space sets a context cap.', { fg: t.textFaint }) + 1;
-  }
+  const listAge = model ? modelWorkspaceListAge(picker.listReading(model.provider), Date.now()) : undefined;
+  const y = drawModelWorkspaceDetail(f, picker, p, { listAge });
   drawTargetFooter(f, picker, p, y);
 }
 
@@ -276,10 +223,6 @@ function drawTargetFooter(f: ModalFrame, picker: ModelPickerModal, p: KitInset, 
   if (target && picker.mode !== 'model') {
     for (const l of wrapLines(`${target.label}: ${targetSummary(target)}`, width)) lines.push({ text: l, fg: t.textMuted });
     if (target.description) for (const l of wrapLines(target.description, width)) lines.push({ text: l, fg: t.textFaint });
-  }
-  if (picker.mode === 'model') {
-    const chords = FILTER_HINTS.map(([key, action]) => `${key} ${action}`).join(' · ');
-    for (const l of wrapLines(chords, width)) lines.push({ text: l, fg: t.textFaint });
   }
   // Pinned to the bottom of the inset when there is room, else right after the content.
   let y = Math.max(fromY, p.bottom - lines.length + 1);
@@ -370,16 +313,7 @@ function drawContextCap(f: ModalFrame, picker: ModelPickerModal, top: number, x0
 // Hints
 // ---------------------------------------------------------------------------
 
-/** The filter chords of the model list (shown in the detail inset, or in the hints without one). */
-const FILTER_HINTS: readonly KitHint[] = [
-  ['ctrl+t', 'price'],
-  ['ctrl+k', 'capability'],
-  ['ctrl+a', 'available'],
-  ['ctrl+b', 'benchmark sort'],
-  ['ctrl+g', 'group'],
-];
-
-function pickerHints(picker: ModelPickerModal, withFilters: boolean): KitHint[] {
+function pickerHints(picker: ModelPickerModal): KitHint[] {
   const target = picker.getSelectedTargetInfo()?.label ?? targetLabelFor(picker.target);
   switch (picker.mode) {
     case 'effort':
@@ -399,21 +333,21 @@ function pickerHints(picker: ModelPickerModal, withFilters: boolean): KitHint[] 
       return [
         ['↑↓', 'move'],
         ['⏎', `use for ${target}`],
-        ['tab', 'next target'],
+        ['tab', 'next job'],
       ];
     case 'provider':
       return [
         ['↑↓', 'move'],
         ['⏎', 'choose provider'],
-        ['tab', 'next target'],
+        ['tab', 'next job'],
       ];
     default:
+      // The filter keys are under the search field, each with what it is set to.
       return [
         ['⏎', `use for ${target}`],
-        ['tab', 'next target'],
+        ['tab', 'next job'],
         ['ctrl+f', 'pin'],
         ['ctrl+r', 'refresh catalog'],
-        ...(withFilters ? FILTER_HINTS : []),
       ];
   }
 }
@@ -440,21 +374,29 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
           : undefined;
   const inner = modalInnerWidth(standardModalWidth(screenWidth));
   const sideBySide = inner >= 60;
-  const f = beginModal(screenWidth, screenHeight, { title: 'Models', crumbs, hints: pickerHints(picker, !sideBySide) });
+  const f = beginModal(screenWidth, screenHeight, { title: 'Models', crumbs, hints: pickerHints(picker) });
 
-  // Targets as tabs; the active tab carries the gradient. A target that is off says so in the detail beside the list
-  // ("Now  Side work: disabled"), so all six names fit on one row at 120 columns.
-  const labels =
-    picker.targetInfos.length > 0
-      ? picker.targetInfos.map((info) => info.label)
-      : [targetLabelFor(picker.target)];
-  tabs(f.canvas, f.l, f.top, labels, picker.targetInfos.length > 0 ? picker.targetIndex : 0, f.r, (index) => {
-    const target = picker.targetInfos[index];
-    if (target) picker.setTarget(target.target);
-  });
+  // Targets as tabs; the active tab carries the gradient. Main chat, and the optional jobs behind one tab
+  // until one of them is chosen; then they are listed, each marked "(off)" when it is off.
+  let body = f.top + 2;
+  if (picker.targetInfos.length > 0) {
+    const shown = modelWorkspaceTabs(picker);
+    tabs(f.canvas, f.l, f.top, shown.labels, shown.active, f.r, (index) => {
+      const target = picker.targetInfos[shown.targetAt(index)];
+      if (target) picker.setTarget(target.target);
+    });
+    const about = modelWorkspaceTargetLine(picker.getSelectedTargetInfo());
+    if (about) {
+      // What the chosen job does, in at most two rows.
+      const rows = wrapLines(about, f.r - f.l + 1).slice(0, 2);
+      rows.forEach((text, k) => f.canvas.put(f.l, f.top + 1 + k, text, { fg: activeTokens().textMuted }));
+      body += rows.length;
+    }
+  } else {
+    tabs(f.canvas, f.l, f.top, [targetLabelFor(picker.target)], 0, f.r);
+  }
 
   const searchable = picker.mode === 'model' || picker.mode === 'provider';
-  let body = f.top + 2;
   if (searchable) {
     // Out of the models this target can use: an image, video or speech model is not counted.
     const total = picker.mode === 'model' ? picker.models.filter((model) => picker.textWork(model) !== 'other').length : picker.providers.length;
@@ -467,6 +409,12 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
     const count = filters ? `${filters} · ${counted}` : counted;
     searchRow(f, body, picker.query, picker.mode === 'model' ? 'Search models' : 'Search providers', count);
     body += 2;
+    if (picker.mode === 'model') {
+      // Each filter key with what it is set to; two rows when one does not hold them.
+      const rows = wrapLines(modelWorkspaceFilterRow(picker), f.r - f.l + 1).slice(0, 2);
+      rows.forEach((text, k) => f.canvas.put(f.l, body - 1 + k, text, { fg: activeTokens().textFaint }));
+      body += rows.length;
+    }
   }
 
   const x1 = sideBySide ? f.l + Math.floor(inner * 0.5) - 1 : f.r;

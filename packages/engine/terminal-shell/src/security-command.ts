@@ -29,6 +29,7 @@ import {
   type SandboxSessionRegistry,
 } from '@goodvibes/engine/platform/platform/runtime/sandbox';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import type { McpIsolationChange } from '@goodvibes/engine/platform/platform/mcp';
 import { commandRefusal, refuseModelWriteOutsideWorkingDirectory } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
@@ -36,6 +37,16 @@ import type { ActionDescription, CommandActionContext, CommandReport, InputDescr
 import { REPLACE_FILE_INPUT, choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
 
 type AttackPathInput = Parameters<typeof buildMcpAttackPathReview>[0];
+
+/** The answer to a change of MCP containment: what runs how from now on, which servers restarted, which restart after their call. */
+function describeIsolationChange(change: McpIsolationChange | null, headline: string): string {
+  if (change === null) return headline;
+  const lines = [headline];
+  if (change.restarted.length > 0) lines.push(`Restarted now: ${change.restarted.join(', ')}.`);
+  if (change.afterCall.length > 0) lines.push(`Restarted as soon as the call in progress ends: ${change.afterCall.join(', ')}.`);
+  if (change.restarted.length === 0 && change.afterCall.length === 0) lines.push('No MCP server that runs on this machine needed restarting.');
+  return lines.join('\n');
+}
 
 /** What each app reads and does for `/security`. */
 export interface SecurityCommandPolicy<Ctx> {
@@ -70,8 +81,12 @@ export interface SecurityCommandPolicy<Ctx> {
   } | undefined;
   /** The policy-bundle workflow's context (prints through `ctx.print`). */
   readonly policyContext?: ((ctx: Ctx) => PolicyCommandContext) | undefined;
-  /** The settings the sandbox actions read, and the one they write. */
-  readonly sandboxConfig: (ctx: Ctx) => ConfigManagerLike & { setMcpIsolation(mode: 'contained' | 'disabled'): void };
+  /**
+   * The settings the sandbox actions read, and the one they write. Saving
+   * `sandbox.mcpIsolation` restarts the running MCP servers under it; the
+   * answer is what that change did, or null where no MCP servers run here.
+   */
+  readonly sandboxConfig: (ctx: Ctx) => ConfigManagerLike & { setMcpIsolation(mode: 'contained' | 'disabled'): McpIsolationChange | null };
   /** The sandbox session registry, where this app has one. */
   readonly sandboxSessions?: ((ctx: Ctx) => SandboxSessionRegistry | undefined) | undefined;
   readonly resolvePath: (ctx: Ctx, path: string) => string;
@@ -349,26 +364,25 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
     }),
     {
       id: 'contain-mcp', label: 'Run MCP servers inside the sandbox', word: 'contain-mcp', inputs: [],
-      sentence: 'Each MCP server starts inside its own process boundary when it next connects, until you change it.',
+      sentence: 'Each MCP server runs inside its own process boundary, and the running ones are restarted inside it, until you change it.',
       done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'host-mcp',
       operator: { terminalOnly: 'The web UI sets sandbox.mcpIsolation on its settings screen.' }, example: {},
       async run(_values, ctx) {
         const config = policy.sandboxConfig(ctx);
-        config.setMcpIsolation('contained');
+        const change = config.setMcpIsolation('contained');
         return buildSandboxReview(config).host.secureSandboxReady
-          ? 'MCP servers start inside their own bubblewrap boundary when they next connect (/mcp reload).'
+          ? describeIsolationChange(change, 'MCP servers run inside their own bubblewrap boundary from now on.')
           : 'Saved, but this machine has no bubblewrap: a stdio MCP server will not start until bubblewrap is installed or MCP servers run as host processes again.';
       },
     },
     {
       id: 'host-mcp', label: 'Run MCP servers as host processes', word: 'host-mcp', inputs: [],
-      sentence: 'MCP servers start as ordinary processes of this machine, with no boundary, when they next connect, until you change it.',
+      sentence: 'MCP servers run as ordinary processes of this machine, with no boundary, and the running ones are restarted that way, until you change it.',
       done: '', touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'contain-mcp',
       ownerOnly: { reason: 'it takes the process boundary away from MCP servers', instead: 'Ask the owner: /security host-mcp.' },
       operator: { terminalOnly: 'The web UI sets sandbox.mcpIsolation on its settings screen.' }, example: {},
       async run(_values, ctx) {
-        policy.sandboxConfig(ctx).setMcpIsolation('disabled');
-        return 'MCP servers run as host processes when they next connect (/mcp reload).';
+        return describeIsolationChange(policy.sandboxConfig(ctx).setMcpIsolation('disabled'), 'MCP servers run as host processes from now on.');
       },
     },
     readAction<Ctx>({

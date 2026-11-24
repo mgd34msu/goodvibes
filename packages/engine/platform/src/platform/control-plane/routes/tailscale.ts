@@ -20,6 +20,7 @@ import {
 } from '../../remote-access/tailscale.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { logger } from '../../utils/logger.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 
 export interface TailscaleGatewayDeps {
   /** Injectable command runner (tests never touch a real tailscale). */
@@ -37,11 +38,13 @@ export interface TailscaleGatewayDeps {
    * value it replaced and a stop leaves web.publicBaseUrl as it is, saying so.
    */
   readonly getPublicBaseUrl?: (() => string) | undefined;
+  /** Checks that the served https address answers; the default makes one request (verifyHttpsAnswers). */
+  readonly verifyHttps?: ((url: string) => Promise<{ readonly ok: boolean; readonly detail: string }>) | undefined;
 }
 
 function requirePrincipal(invocation: GatewayMethodInvocation): void {
   if (!invocation.context.principalId) {
-    throw new GatewayVerbError('Tailscale verbs require an authenticated principal', 'UNAUTHENTICATED', 401);
+    throw new GatewayVerbError('Sign in first: Tailscale settings need a signed-in user or a paired device', 'UNAUTHENTICATED', 401);
   }
 }
 
@@ -86,8 +89,10 @@ function createServeRunHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler
       if (previous !== undefined) receipt = { ...attempt, previousPublicBaseUrl: previous };
     }
     const receiptRecorded = record(deps, 'tailscale.serve.run', receipt);
+    // One request to the https address the serve reports, so the person learns whether it really answers.
+    const answers = receipt.ok && receipt.url ? await (deps.verifyHttps ?? verifyHttpsAnswers)(receipt.url) : undefined;
     let publicBaseUrlUpdated = false;
-    if (receipt.ok && receipt.url) {
+    if (receipt.ok && receipt.url && answers?.ok === true) {
       try {
         deps.setPublicBaseUrl(receipt.url);
         publicBaseUrlUpdated = true;
@@ -97,8 +102,26 @@ function createServeRunHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler
         });
       }
     }
-    return { receipt, publicBaseUrlUpdated, receiptRecorded };
+    // The serve state changed (or a failed attempt is now the last one on record): every Tailscale view reads it again.
+    noteListChanged({ list: 'tailscale', change: 'changed' });
+    return { receipt, publicBaseUrlUpdated, receiptRecorded, ...(answers ? { answers } : {}) };
   };
+}
+
+/**
+ * Whether the daemon answers at `url` over https: one GET of its health route
+ * through the tailnet, no retry. A refused, failed or non-2xx answer says why.
+ */
+export async function verifyHttpsAnswers(url: string): Promise<{ readonly ok: boolean; readonly detail: string }> {
+  const target = `${url.replace(/\/+$/, '')}/api/health`;
+  try {
+    const response = await fetch(target, { method: 'GET', redirect: 'manual' });
+    return response.ok
+      ? { ok: true, detail: `${url} answers over https` }
+      : { ok: false, detail: `${url} answered HTTP ${response.status}, so web.publicBaseUrl was not changed` };
+  } catch (error) {
+    return { ok: false, detail: `${url} did not answer over https (${error instanceof Error ? error.message : String(error)}), so web.publicBaseUrl was not changed` };
+  }
 }
 
 function createServeStopHandler(deps: TailscaleGatewayDeps): GatewayMethodHandler {
@@ -129,6 +152,7 @@ function createServeStopHandler(deps: TailscaleGatewayDeps): GatewayMethodHandle
         publicBaseUrlDetail = `web.publicBaseUrl still names ${active.url}: ${reason}; set it with config.set`;
       }
     }
+    noteListChanged({ list: 'tailscale', change: 'changed' });
     return { receipt, publicBaseUrlRestored, publicBaseUrlDetail, receiptRecorded };
   };
 }

@@ -2,14 +2,14 @@ import type { AutonomousToolSource } from '../permissions/autonomous.js';
 import { decideDelegation } from '../agents/delegation-authority.js';
 import { readDelegationRequest } from './delegation-request-context.js';
 import { revalidateNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
-import { admitNativeConversationTurn, failNativeConversationTurn, NativeConversationTurnAdmissionError, readNativeConversationTurnStatus, settleNativeConversationTurn, startNativeConversationTurn, validateNativeConversationTurn, type NativeConversationTurnAdmission } from './native-turn-admission.js';
+import { admitNativeConversationTurn, nativeTurnContent, failNativeConversationTurn, NativeConversationTurnAdmissionError, readNativeConversationTurnStatus, settleNativeConversationTurn, startNativeConversationTurn, validateNativeConversationTurn, type NativeConversationTurnAdmission } from './native-turn-admission.js';
 import { phaseIsCompacting, phaseIsInFlight, phaseIsOccupied, phaseIsStreaming, phaseIsThinking, phaseWithCompacting, phaseWithStreaming, phaseWithThinking, phaseWithoutThinking, type TurnPhase } from './turn-phase.js';
 import { isNativeConversationTurn, markNativeConversationTurnEffectsPossible, nativeConversationTurnCanRetry, NATIVE_TURN_EXECUTION_REFUSAL, withNativeConversationTurn, withoutNativeConversationTurn } from './native-turn-scope.js';
 import { TurnHookOwner, bindTurnHookDispatcher } from '../hooks/turn-ownership.js';
 import { TurnCancellationFence, type TurnCancellationResult } from './turn-cancellation.js';
 import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import { JudgmentError } from '@goodvibes/judgment';
-import { classifyFailure, JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { classifyFailure, JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
 import { decisionModelUse, inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
 import { PlannerJudgmentError } from './adaptive-planner.js';
@@ -60,10 +60,13 @@ import type { RuntimeEventBus, TurnEvent, TurnInputOrigin } from '../runtime/eve
 import { readTurnFailure, turnFailureText, type TurnRefusalReason } from './turn-failure.js';
 import { resolveDefaultModelReadiness } from '../providers/keyless-default.js';
 import { readFallbackOrder } from '../providers/failover.js';
+import { modelPriceTier } from '../providers/model-catalog-facts.js';
+import { keepPaidModel, priceChangeState } from '../providers/batteries/price-change.js';
 import { TurnAttemptRecord, TurnChangeRecord } from './turn-changes.js';
 import { HelperModel } from '../config/helper-model.js';
 import {
   emitPreflightFail,
+  emitProviderWarning,
   emitQueuedMessagesChanged,
   emitStreamEnd,
   emitTurnCancel,
@@ -856,7 +859,7 @@ export class Orchestrator {
       ? admitNativeConversationTurn(options.nativeConversationTurnPermit, text, content, this.nativeConversationProjectId) : undefined;
     if (nativeTurn === null) return;
     options = options ? Object.freeze({ ...options, ...(options.origin ? { origin: Object.freeze({ ...options.origin }) } : {}) }) : undefined;
-    if (nativeTurn && content) content = [{ type: 'text', text }];
+    if (nativeTurn && content && options?.nativeConversationTurnPermit) content = nativeTurnContent(options.nativeConversationTurnPermit, text, content);
 
     if (this.isTurnOccupied) {
       this.queuedMessageSeq += 1;
@@ -1167,6 +1170,9 @@ export class Orchestrator {
       // A model that cannot be asked refuses the turn before any request (the prompt stays as sent).
       const refusal = this.readinessRefusal(providerRegistry);
       if (refusal) throw new TurnNotReadyError(refusal);
+      // A model whose price moved away from free since it was chosen is put to the owner before the first send to it.
+      await this.confirmPriceChange(providerRegistry, signal);
+      signal?.throwIfAborted();
       this.scrollToEnd(this.getViewportHeight());
       this.streamingInputTokens = estimateFreshTurnInputTokens(this.lastInputTokens, estimateConversationTokens(this.conversation.getMessagesForLLM()), text, content);
       this.contractAnswer = options?.answersContractQuestion;
@@ -1534,6 +1540,68 @@ export class Orchestrator {
     this._turnFailed = true;
     this.turnCancellation.end(turnId);
     if (this.runtimeBus) emitTurnError(this.runtimeBus, createEmitterContext(this.currentSessionId, turnId), { ...facts, error: turnFailureText(reading) });
+  }
+
+  /**
+   * The ask before the first send to a model that is no longer free
+   * (providers/model-price-changes.ts): a memory read when nothing changed; a
+   * yes is remembered for this change; a no, or "Choose another model",
+   * refuses the turn before any request with nothing sent.
+   */
+  private async confirmPriceChange(providerRegistry: ReturnType<typeof requireProviderRegistry>, signal: AbortSignal | undefined): Promise<void> {
+    const model = this.safeCurrentModel(providerRegistry);
+    const changes = providerRegistry.priceChanges;
+    const change = model ? changes.pending(model.registryKey) : undefined;
+    if (!model || !change) return;
+    const price = change.tier === 'subscription' ? 'a subscription'
+      : change.pricing ? `$${change.pricing.input} in and $${change.pricing.output} out per 1M tokens` : undefined;
+    const name = model.displayName ?? change.name;
+    const answer = await this.decidePriceChange({ registryKey: model.registryKey, name, provider: model.provider, tier: change.tier, ...(price ? { price } : {}) },
+      providerRegistry, signal);
+    // The change and what decided it are said in every program (the providers' PROVIDER_WARNING), whoever decided.
+    if (this.runtimeBus) {
+      emitProviderWarning(this.runtimeBus, createEmitterContext(this.currentSessionId, 'price-change'), { message: answer.kept
+        ? `${name} is no longer free${price ? ` (about ${price})` : ''}; ${answer.by} kept using it, so this and the next messages are charged.`
+        : `${name} is no longer free${price ? ` (about ${price})` : ''}; ${answer.by} did not keep using it, so nothing was sent. Choose another model with /model.` });
+    }
+    if (answer.kept) { changes.accept(model.registryKey); return; }
+    throw new TurnNotReadyError('model-no-longer-free');
+  }
+
+  /**
+   * Who decides a price change is the mode the person chose, as for any other
+   * decision: Ask me (and Plan) asks the person; YOLO keeps it, as it runs
+   * everything; Jev decides and Just vibes let the decision model decide
+   * (providers/batteries/price-change.ts). Without a working decision model,
+   * Jev decides asks the person (as it does for every decision) and Just vibes
+   * holds it: nothing is sent to the paid model and the turn says so, with no
+   * one waited on.
+   */
+  private async decidePriceChange(question: { readonly registryKey: string; readonly name: string; readonly provider: string; readonly tier: string; readonly price?: string },
+    providerRegistry: ReturnType<typeof requireProviderRegistry>, signal: AbortSignal | undefined): Promise<{ readonly kept: boolean; readonly by: string }> {
+    const mode = this.permissionManager.getMode?.() ?? 'ask-me';
+    const ask = async (): Promise<{ kept: boolean; by: string }> => ({
+      kept: await this.permissionManager.askModelPriceChange(question, signal ? { signal } : undefined) === 'keep', by: 'you',
+    });
+    if (mode === 'yolo') return { kept: true, by: 'YOLO' };
+    if (mode !== 'jev-decides' && mode !== 'just-vibes') return ask();
+    const freeAlternatives = providerRegistry.listModels().filter((entry) => entry.registryKey !== question.registryKey && modelPriceTier(entry) === 'free')
+      .slice(0, 5).map((entry) => entry.displayName ?? entry.id);
+    try {
+      const site = 'core.orchestrator.price-change';
+      const run = await keepPaidModel.run(judgmentPort(site), priceChangeState({ model: question.name, provider: question.provider, nowTier: question.tier,
+        price: question.price ?? 'not listed', freeAlternatives }), { site, ...(signal ? { signal } : {}) });
+      const reading = run.readings.keep;
+      if (reading.outcome === 'act' && (reading.verdict === 'yes' || reading.verdict === 'no')) {
+        run.recordAction(reading.verdict === 'yes' ? 'keep' : 'stop');
+        return { kept: reading.verdict === 'yes', by: 'Jev, the decision model,' };
+      }
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      logger.warn('Orchestrator: the decision model could not decide a price change; the mode\'s fallback decides it', { error: summarizeError(error) });
+    }
+    // The fallback: Jev decides asks the person, as without a decision model; Just vibes holds it (sends nothing, waits for no one).
+    return mode === 'jev-decides' ? ask() : { kept: false, by: 'Just vibes (it holds what it cannot decide)' };
   }
 
   private safeCurrentModel(providerRegistry: ReturnType<typeof requireProviderRegistry>): ModelDefinition | undefined {

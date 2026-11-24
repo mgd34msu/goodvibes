@@ -28,6 +28,9 @@ registry.register(sameFamily);
 // Catalog: how a provider's models are paid for.
 import { catalogProviderAccess } from './batteries/catalog.js';
 registry.register(catalogProviderAccess);
+// A model that stopped being free: keep sending to it, or send nothing (decided in the person's place under Jev decides and Just vibes).
+import { keepPaidModel } from '../providers/batteries/price-change.js';
+registry.register(keepPaidModel);
 
 // Providers: local servers, alternate APIs, reasoning settings, stream labels, stop reasons.
 import { alternateApi, contentPartKind, localServerIdentity, reasoningFamily, reasoningRejection, stopReason } from './batteries/provider.js';

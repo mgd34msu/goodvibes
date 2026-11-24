@@ -2,7 +2,7 @@ import { createOAuthLocalListener, readConnectedDaemonOrigin, resolveDaemonEnabl
 import { getBuiltinSubscriptionProvider, type OAuthProviderConfig } from '@goodvibes/engine/platform/platform/config';
 import { summarizeError, openExternalUrl } from '@goodvibes/engine/platform/platform/utils';
 import { getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers';
-import { readAuthorizationInput } from '@goodvibes/engine/terminal-shell/settings-subscriptions';
+import { readAuthorizationInput } from '@goodvibes/engine/platform/platform/config';
 import { collectOnboardingSnapshotForHandler } from './handler-interactions.ts';
 import { recordFeatureEnablement } from './onboarding/onboarding-feature-units.ts';
 import { handleConnectExistingDaemonForHandler } from './handler-onboarding-daemon-adopt.ts';

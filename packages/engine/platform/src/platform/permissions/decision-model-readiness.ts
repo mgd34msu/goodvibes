@@ -130,8 +130,9 @@ export function describePermissionModeInForce(
  * differs, it leads with what is in force and puts the choice second:
  * `inForce`, then `chosenWhen`, then `because` only when it reports a failure
  * (`failure`): "asking you, for now · Jev decides once a decision model is set".
- * Where that does not fit, `chosenShort` stands for `chosenWhen`: "asking you,
- * for now · you chose Jev decides". Surfaces put "Permissions: " before it.
+ * Where that does not fit, `chosenShort` stands for `chosenWhen`, keeping the
+ * cause: "asking you, for now · Jev decides: no decision model set". Surfaces
+ * put "Permissions: " before it.
  */
 export interface ModeInForceWords {
   /** The chosen mode's label: "Jev decides". */
@@ -140,7 +141,7 @@ export interface ModeInForceWords {
   readonly inForce?: string;
   /** The chosen mode and the condition it waits on: "Jev decides once a decision model is set"; absent when they are the same. */
   readonly chosenWhen?: string;
-  /** The choice in a few words, for where `chosenWhen` does not fit: "you chose Jev decides", "default: Jev decides"; absent when they are the same. */
+  /** The choice and its cause in a few words, for where `chosenWhen` does not fit: "Jev decides: no decision model set"; absent when they are the same. */
   readonly chosenShort?: string;
   /** Why it differs, a few words: "no decision model set", "decision model unreachable"; absent when they are the same. */
   readonly because?: string;
@@ -178,7 +179,7 @@ function chosenWhenWords(why: DecisionModelUnreadyReason): string {
   switch (why.kind) {
     case 'selected': return 'once decision models are on';
     case 'not-set': return 'once a decision model is set';
-    case 'uncalibrated': return 'once you choose it';
+    case 'uncalibrated': return 'once you pick it yourself (not measured on this decision model)';
     case 'failing': return 'once the decision model answers again';
   }
 }
@@ -276,12 +277,11 @@ export function describeModeInForceWords(
   }
   // The shipped default was not chosen by anyone: it is never called the owner's choice.
   const ownChoice = options.explicitlyChosen === true || configManager.isExplicitlySet?.('permissions.mode') !== false;
-  const chosenShort = ownChoice ? `you chose ${chosenLabel}` : `default: ${chosenLabel}`;
   if (why === undefined) {
     // The saved auto-approve switch selects YOLO whatever mode was chosen.
     return {
       chosen: chosenLabel, inForce: 'YOLO, for now', chosenWhen: `${chosenLabel} once the old auto-approve setting is off`,
-      chosenShort, because: 'an old auto-approve setting is on',
+      chosenShort: `${chosenLabel}: old auto-approve on`, because: 'an old auto-approve setting is on',
       sentence: `GoodVibes runs everything without asking for now: an old auto-approve setting is on. Choose a mode in Settings to clear it and use ${chosenLabel}.`,
       asksBefore,
     };
@@ -289,7 +289,10 @@ export function describeModeInForceWords(
   const choiceWords = ownChoice ? `you chose ${chosenLabel}` : `${chosenLabel} is the default here`;
   return {
     chosen: chosenLabel, inForce: 'asking you, for now', chosenWhen: `${chosenLabel} ${chosenWhenWords(why)}`,
-    chosenShort, because: becauseWords(why),
+    // Shortened, the choice keeps its cause, so a narrow status line still says why: "Jev decides: no decision model set".
+    // A failure is drawn after the choice on its own (failure: true), so the choice only says what it waits for.
+    chosenShort: why.kind === 'failing' ? `${chosenLabel}: waits for the decision model` : `${chosenLabel}: ${becauseWords(why)}`,
+    because: becauseWords(why),
     ...(why.kind === 'failing' ? { failure: true } : {}),
     sentence: `GoodVibes asks you for now: ${choiceWords}, but ${becauseSentence(why)}. ${asksBefore}`,
     asksBefore,

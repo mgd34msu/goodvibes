@@ -17,8 +17,8 @@ import type {
 // token scope/rotation audit list under the governance summary) and
 // 'Governance' (policy preflight, MCP/plugin quarantine, latest incident, and
 // the MCP attack-path review). Read-model-backed: buildView reads the snapshot,
-// which shows the last token audit of record and never audits on a read. 'r'
-// runs an audit; 'f' (preflight) routes to `/security preflight`; 'i' opens the
+// which shows the last token audit of record and never audits on a read. Opening
+// the screen runs an audit; 'r' runs another; 'f' (preflight) routes to `/security preflight`; 'i' opens the
 // latest incident (its agent in /agents when it names one, else /health
 // failure latest). Selection-blind port: the earlier view's
 // selected-token scope/rotation detail is folded into each token row label.
@@ -30,6 +30,8 @@ export interface SecurityModalDeps {
     /** Run one token audit of record; absent on a surface that cannot audit. */
     readonly runAudit?: () => { readonly totalTokens: number; readonly findings: number; readonly at: number };
   };
+  /** The daemon's LIST_CHANGED `paired-devices` notices while the screen is open; returns the unsubscribe. */
+  readonly watchPairedDevices?: (onChange: () => void) => () => void;
 }
 
 const BAD: ModalSectionStyle = { fg: MODAL_TONES.bad };
@@ -91,9 +93,31 @@ class SecurityModalSurface implements ConfigModalSurface {
   onOpen(requestRender: () => void): void {
     this.requestRender = requestRender;
     if (!this.unsub) this.unsub = this.deps.readModel.subscribe(() => this.requestRender());
+    // A device paired, renamed or revoked through the daemon audits again with no key (the audit reads the devices).
+    this.unwatch();
+    this.unwatch = this.deps.watchPairedDevices?.(() => { this.audit(); this.requestRender(); }) ?? (() => {});
+    // The token audit is local and free: it runs each time the screen opens (and, in the
+    // runtime, whenever a device is paired), so the rows shown are never left unaudited.
+    this.audit();
   }
 
-  onClose(): void { this.unsub?.(); this.unsub = null; }
+  private unwatch: () => void = () => {};
+
+  private audit(): void {
+    const runAudit = this.deps.readModel.runAudit;
+    if (!runAudit) return;
+    try {
+      runAudit();
+      this.auditFailure = null;
+    } catch (error) {
+      this.auditFailure = error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  /** Why the audit this screen ran when it opened failed; null when it ran. */
+  private auditFailure: string | null = null;
+
+  onClose(): void { this.unsub?.(); this.unsub = null; this.unwatch(); this.unwatch = () => {}; }
 
   private governanceHeader(snapshot: UiSecuritySnapshot): string[] {
     const audit = snapshot.audit;
@@ -113,7 +137,10 @@ class SecurityModalSurface implements ConfigModalSurface {
     const rows: ConfigModalRow[] = [];
 
     if (audit.results.length === 0 && audit.totalTokens > 0) {
-      rows.push(infoRow('unaudited', `${audit.totalTokens} token${audit.totalTokens === 1 ? ' is' : 's are'} registered and not audited yet: press Ctrl+R to audit now.`, WARN));
+      const tokens = `${audit.totalTokens} token${audit.totalTokens === 1 ? ' is' : 's are'} registered and not audited`;
+      rows.push(infoRow('unaudited', this.auditFailure !== null
+        ? `${tokens}: the audit failed (${this.auditFailure}). Ctrl+R audits again.`
+        : typeof this.deps.readModel.runAudit === 'function' ? `${tokens} yet. Ctrl+R audits again.` : `${tokens}: this screen cannot run the audit.`, WARN));
       return { id: 'tokens', label: 'Tokens', header, rows, emptyText: '' };
     }
     if (audit.results.length === 0) {
@@ -135,7 +162,7 @@ class SecurityModalSurface implements ConfigModalSurface {
         ...(resultColor(result) ? { style: resultColor(result)! } : {}),
       });
     }
-    rows.push(infoRow('audit:when', `Last audit ${fmtIso(audit.lastAuditAt)}: press Ctrl+R to audit now`, { fg: MODAL_TONES.dim }));
+    rows.push(infoRow('audit:when', `Last audit ${fmtIso(audit.lastAuditAt)}: audited when this screen opens and when a device is paired; Ctrl+R audits again`, { fg: MODAL_TONES.dim }));
     return { id: 'tokens', label: 'Tokens', header, rows, hints: ['f preflight'] };
   }
 
@@ -185,6 +212,7 @@ class SecurityModalSurface implements ConfigModalSurface {
       if (!runAudit) { ctx.setStatus('This surface cannot run a token audit.'); ctx.requestRender(); return; }
       try {
         const run = runAudit();
+        this.auditFailure = null;
         ctx.setStatus(`Audited ${run.totalTokens} token${run.totalTokens === 1 ? '' : 's'}: ${run.findings === 0 ? 'all in policy' : `${run.findings} with findings`} (${fmtIso(run.at)}).`);
       } catch (error) {
         ctx.setStatus(`The token audit failed: ${error instanceof Error ? error.message : String(error)}.`);

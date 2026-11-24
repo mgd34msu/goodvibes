@@ -307,6 +307,8 @@ export class BoundWorkLedgerModel {
         reading = undefined;
         this.execution.observe(snapshot);
         this.publish({ status: 'ready', snapshot, history: [...this.history], earlierEvents: this.earlier(cursor), cursor, executionAvailable: this.executionBound });
+        // The first snapshot and every ledger change read the execution status shown, with no key.
+        if (this.executionBound && epoch === this.epoch) this.execution.refresh(snapshot);
       }
     } catch (error) {
       this.fail(error, epoch, reading);

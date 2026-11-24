@@ -7,6 +7,7 @@
  * for the next step.
  */
 import { FEATURE_SETTINGS } from '@goodvibes/engine/platform/platform/runtime/state';
+import { mintRelayPairingInOneRun, type RelayTurnOnAnswer } from '@goodvibes/engine/terminal-shell/relay-pairing-ask';
 import { ConnectedHostVerbError, describeConnectedHostVerbError, type AgentDaemonVerbCaller } from './client/daemon-verbs.ts';
 
 /** How the program that prints a relay answer spells each relay action, for the next steps it names. */
@@ -77,7 +78,11 @@ export function relayHostFailure(what: string, error: unknown): RelayHostFailure
   const status = error instanceof ConnectedHostVerbError ? error.status : undefined;
   const notServed = error instanceof ConnectedHostVerbError && status === 404
     && (error.code === undefined || error.code === 'METHOD_NOT_FOUND' || error.code === 'NOT_FOUND');
-  const next = notServed ? 'Update GoodVibes on the connected host; it does not serve the relay verbs yet.' : RELAY_HOST_NEXT;
+  // No relay address anywhere: the relay could not be turned on, and that, not the daemon, is what to fix.
+  const noAddress = error instanceof ConnectedHostVerbError && error.code === 'RELAY_URL_REQUIRED';
+  const next = notServed ? 'Update GoodVibes on the connected host; it does not serve the relay verbs yet.'
+    : noAddress ? 'Pair again and type the relay\'s wss:// address in the "Turn the relay on?" step.'
+      : RELAY_HOST_NEXT;
   return { what, reason, ...(status === undefined ? {} : { status }), next };
 }
 
@@ -142,9 +147,22 @@ export function formatRelayStatus(view: RelayStatusView): string {
   ].join('\n');
 }
 
-/** Mint a one-device relay pairing payload on the host. Throws the verb's error. */
-export async function mintRelayPairing(verbs: AgentDaemonVerbCaller, name: string | undefined): Promise<RelayPairAnswer> {
-  return await verbs.invoke<RelayPairAnswer>('relay.pairing.mint', name ? { name } : {});
+/**
+ * Mint a one-device relay pairing payload on the host, in one run (shared with the terminal app:
+ * terminal-shell/relay-pairing-ask.ts). When the host's relay is off, `ask` puts the platform's
+ * RELAY_TURN_ON_QUESTION (opening on No), with a field for the relay's wss:// address when none is
+ * set; on yes the same `relay.pairing.mint` call saves the address, turns the relay on and waits for
+ * the host's own "registered" answer before it mints. Throws the verb's error.
+ */
+export async function mintRelayPairing(
+  verbs: AgentDaemonVerbCaller,
+  name: string | undefined,
+  options: { readonly ask?: ((configuredUrl: string) => Promise<RelayTurnOnAnswer>) | undefined; readonly url?: string | undefined } = {},
+): Promise<RelayPairAnswer> {
+  return await mintRelayPairingInOneRun<RelayPairAnswer>(
+    <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input),
+    { name, configuredUrl: options.url, ask: options.ask },
+  );
 }
 
 /** The pairing payload as text, or why there is none and what to do. */
@@ -152,13 +170,17 @@ export function relayPairingOutcome(answer: RelayPairAnswer, words: RelayActionW
   | { readonly ok: true; readonly pairing: RelayPairing; readonly text: string }
   | { readonly ok: false; readonly error: string; readonly next: string } {
   if (!answer.pairing) {
-    return {
-      ok: false,
-      error: `The connected host has no live relay registration to pair against (relay status ${answer.status}).`,
-      next: answer.status === 'disabled'
-        ? `Turn the relay on for the host (relay.enabled, relay.url and the relay-connect capability), then run ${words.pair} again.`
-        : `Wait for the host to register with the relay (${words.status} shows registered), then run ${words.pair} again.`,
-    };
+    return answer.status === 'disabled'
+      ? {
+        ok: false,
+        error: 'No relay pairing was made: the relay is off on the connected host, and it was left off.',
+        next: `${words.pair} asks to turn it on when you want devices to reach this machine through the relay.`,
+      }
+      : {
+        ok: false,
+        error: `No relay pairing was made: the connected host could not register with the relay (relay status ${answer.status}).`,
+        next: `${words.status} says why.`,
+      };
   }
   const pairing = answer.pairing;
   return {

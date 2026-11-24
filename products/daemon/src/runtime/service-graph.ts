@@ -28,10 +28,13 @@ import { createDaemonNativeWorkExecutionActivation } from './native-work-executi
 import { createBrowserCheckoutSeamHolder } from './browser-checkout-seam-holder.js';
 import { createDevicePostureServices } from './device-posture-composition.js';
 import { composeUnattendedRunTools } from './unattended-run-tools.js';
+import { installDaemonGoogleRepair } from './google-repair-composition.js';
 import { createClusterServices, startClusterServices } from './cluster-group-composition.js';
 import { GOODVIBES_DAEMON_SURFACE_ROOT } from '../config/surface.js';
 import { resolveNodeIdentity } from '@goodvibes/engine/platform/platform/cluster';
 import { observeNativeStartupPhase } from './startup-observation.js';
+import { emitListChanged, emitNativeRequestChanged, onListChanged } from '@goodvibes/engine/platform/platform/runtime/emitters';
+import { serveDaemonToNetwork } from './serve-to-network.js';
 import type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 export type { RuntimeServicesOptions, RuntimeServices } from './runtime-services-types.js';
 
@@ -183,6 +186,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       presence: [daemonAgentPresence(agentManager, sessionBroker), terminalSessionPresence(sessionBroker)],
     });
     disposalScope.registry.add('owner inbox', () => ownerInbox.dispose());
+    // A Google request that meets no connection, a missing scope, a dead grant or a disabled API repairs it from here.
+    disposalScope.registry.add('google connection repair', installDaemonGoogleRepair({ configManager, secretsManager, homeDirectory, permissionManager, ownerInbox }));
     // Every item carries its words (question, consequence, choices) on the wire, worded with this host's facts.
     const askFactsSource = {
       configManager, homeDirectory, sessionTitle: (id: string) => sessionBroker.getSession(id)?.title,
@@ -250,7 +255,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     // inbox. Both inert until startCluster(), no socket, no key material read;
     // see cluster-group-composition.ts for why they are built together.
     const { clusterGroup, clusterCoordinator } = createClusterServices({ configManager, shellPaths, secretsManager,
-      authorityRecord: graph.authorityRecord, setAuthorityPeers: graph.setAuthorityPeers });
+      authorityRecord: graph.authorityRecord, setAuthorityPeers: graph.setAuthorityPeers,
+      // A group action finished (or not) at start after the restart it needed: said once, in the owner's inbox.
+      tellOwner: (title, detail) => { ownerInbox.postNow({ kind: 'report', key: 'cluster-pending-action', askedBy: 'cluster', title, detail }, 'cluster'); } });
     disposalScope.registry.add('cluster group', () => clusterGroup.stop());
     // In a group, the members' approvals are read and decided through each other: the home node decides
     // (approval-relay.ts). Outside a group nothing is sent and only this daemon's approvals are listed.
@@ -324,6 +331,18 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       daemonReceipts: daemonReceiptStoreAt(daemonReceiptsPath(configManager)),
       relayAvailable: () => configManager.get('relay.enabled') === true,
       pairingWebOrigin: () => resolvePairingWebOrigin(configManager)?.origin,
+      // The owner said yes to serving the web UI to his network from a pairing surface: what
+      // `webui enable --lan` writes, then the daemon's own report that its listener is bound
+      // again (TRANSPORT_CONNECTED, or TRANSPORT_TERMINAL_FAILURE when it could not bind).
+      pairingServeToNetwork: () => serveDaemonToNetwork(configManager, options.runtimeBus),
+      // providers.subscription.signIn.*: the terminal's own sign-in code path, run by the daemon for any client.
+      providerSignIn: {
+        manager: graph.subscriptionManager,
+        service: (provider: string) => graph.serviceRegistry.get(provider),
+        signedIn: (provider: string) => providerRegistry.noteSignInChanged(provider),
+        // providers.apiKey.set: the key goes to the daemon's secret store under the provider's filed key name.
+        apiKeys: { registry: providerRegistry, secrets: secretsManager },
+      },
       disposal: disposalScope.registry,
       runtimeBus: options.runtimeBus,
       sessionPresence: graph.sessionPresence,
@@ -400,10 +419,20 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
         nativeContinuationOwner.assertCurrent(context, principalId, source);
       },
     };
+    // Every committed write to a native request is announced, so a client showing native requests reads them again on it.
+    disposalScope.registry.add('native request change events', knowledgeStore.onNativeRequestChange((change) => {
+      emitNativeRequestChanged(options.runtimeBus, { sessionId: 'system', traceId: `native-request:${change.projectId}:${Date.now()}`, source: 'native-work' }, change);
+    }));
+    // Every change to a list a client shows (memory, checkpoints, CI watches, check-ins, people) is announced the same way.
+    disposalScope.registry.add('list change events', onListChanged((change) => {
+      emitListChanged(options.runtimeBus, { sessionId: 'system', traceId: `list:${change.list}:${Date.now()}`, source: 'list-changes' }, change);
+    }));
     observeNativeStartupPhase('base-native-intake-storage');
     const nativeIntake = createNativeConversationIntakeHost({ projectRoot: workingDirectory, projectId: projectPlanningProjectId,
       sessionId: `native-work:${projectPlanningProjectId}`, storage: await knowledgeStore.openNativeConversationStorage(projectPlanningProjectId),
-      scopes: nativeScopes, port: judgment.port, decisionLog: judgment.decisionLog, proposer: createNativeRequirementProposer(providerRegistry), continuation: continuationOwner });
+      scopes: nativeScopes, port: judgment.port, decisionLog: judgment.decisionLog, proposer: createNativeRequirementProposer(providerRegistry), continuation: continuationOwner,
+      // A request's attachments are the chat upload's artifacts (artifacts.create), read from the daemon's one store.
+      artifacts: graph.artifactStore });
     observeNativeStartupPhase('base-native-intake-ready');
     disposalScope.registry.add('native conversation intake', nativeIntake.close);
     registerNativeConversationIntakeGatewayMethods(gatewayMethods, nativeIntake);

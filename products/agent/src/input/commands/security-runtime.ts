@@ -99,7 +99,14 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
     policyContext,
     sandboxConfig: (ctx) => ({
       get: (key) => ctx.platform.configManager.get(key as Parameters<typeof ctx.platform.configManager.get>[0]),
-      setMcpIsolation: (mode) => ctx.platform.configManager.setDynamic('sandbox.mcpIsolation', mode),
+      setMcpIsolation: (mode) => {
+        // The registry restarts its servers when the setting changes; an unchanged value restarts none.
+        const registry = ctx.extensions.mcpRegistry;
+        const before = registry.mcpIsolationChange();
+        ctx.platform.configManager.setDynamic('sandbox.mcpIsolation', mode);
+        const after = registry.mcpIsolationChange();
+        return after !== before && after !== null ? after : { mode, restarted: [], afterCall: [] };
+      },
     }),
     resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),
     elsewhere: 'the terminal app (goodvibes)',

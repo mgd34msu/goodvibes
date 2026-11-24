@@ -1,6 +1,7 @@
 export { McpRegistry } from './registry.js';
+export { MCP_CREDENTIALS_REFUSED } from '../runtime/mcp/manager.js';
 export { createMcpAutonomousElicitationHandler } from './elicitation-autonomous.js';
-export type { McpReloadResult, McpReloadServerResult, McpServerHealth, RegisteredTool } from './registry.js';
+export type { McpIsolationChange, McpReloadResult, McpReloadServerResult, McpServerHealth, RegisteredTool } from './registry.js';
 export { McpClient } from './client.js';
 export type { McpClientPhase, McpExcludedTool, McpToolCallOptions, McpToolSchema, McpUnansweredQuestion } from './client-types.js';
 export { createMcpApi } from './mcp-api.js';

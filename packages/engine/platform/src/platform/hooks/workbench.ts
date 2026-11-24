@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { writeFileAtomic } from '../utils/atomic-json-store.js';
+import { fileChangeStamp } from '../utils/file-change-stamp.js';
 import { dirname, resolve } from 'node:path';
 import { logger } from '../utils/logger.js';
 import { getHookPointContract } from './contracts.js';
@@ -50,7 +51,7 @@ export interface HooksFileDescription {
 }
 
 /** What the workbench drives on the dispatcher; `setLoadedHooksCheck` is absent on a dispatcher that cannot hold a check. */
-export type WorkbenchHookDispatcher = Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'> & Partial<Pick<HookDispatcher, 'setLoadedHooksCheck'>>;
+export type WorkbenchHookDispatcher = Pick<HookDispatcher, 'clearLoaded' | 'loadFromFile'> & Partial<Pick<HookDispatcher, 'setLoadedHooksCheck' | 'setHooksFileFreshnessCheck'>>;
 
 export interface HookWorkbenchOptions {
   readonly hookDispatcher: WorkbenchHookDispatcher;
@@ -133,7 +134,10 @@ export class HookWorkbench {
   constructor(
     private readonly hookDispatcher: WorkbenchHookDispatcher,
     private readonly hooksFilePathResolver: () => string,
-  ) {}
+  ) {
+    // A hand edit of the hooks file is read before the next hook fires (see reapplyIfChanged).
+    hookDispatcher.setHooksFileFreshnessCheck?.(() => this.reapplyIfChanged());
+  }
 
   getHooksFilePath(): string {
     return this.hooksFilePathResolver();
@@ -266,7 +270,32 @@ export class HookWorkbench {
     if (refusal !== null) throw new Error(`The hooks file ${path} was not changed: it was not loaded because ${refusal}. Fix the file, then retry.`);
   }
 
+  /** The hooks file the last apply read, and its modification time and size then ('absent' when there was none). */
+  private applied: { readonly path: string; readonly stamp: string } | null = null;
+  private reapplying: Promise<void> | null = null;
+
+  /**
+   * Run before hooks fire (the dispatcher's freshness check): when the hooks
+   * file's modification time or size differs from the one last applied, it is
+   * applied again first, under the same trust rule as at start. One stat per
+   * dispatch; nothing watches the file.
+   */
+  async reapplyIfChanged(): Promise<void> {
+    const applied = this.applied;
+    if (applied === null) return;
+    const path = this.getHooksFilePath();
+    if (path === applied.path && fileChangeStamp(path) === applied.stamp) return;
+    this.reapplying ??= this.loadAndApplyManagedHooks(path).catch((error: unknown) => {
+      // A file waiting on the owner's trust stays waiting, as at start.
+      if (error instanceof HooksFileAwaitingTrustError) return;
+      throw error;
+    }).finally(() => { this.reapplying = null; });
+    await this.reapplying;
+  }
+
   async loadAndApplyManagedHooks(path = this.getHooksFilePath()): Promise<void> {
+    // Stamped before the read, so an edit that lands during it is read by the next dispatch.
+    this.applied = { path, stamp: fileChangeStamp(path) };
     const gate = this.trustGate;
     if (gate !== null && existsSync(path)) {
       await gate.load();

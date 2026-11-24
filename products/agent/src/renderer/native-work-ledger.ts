@@ -7,7 +7,7 @@ const safe = (text: string): string => text.replace(/[\u0000-\u001f\u007f-\u009f
 /** The same scrub for values typed as enums or numbers: a ledger read from disk or the daemon is not trusted to honour the type. */
 const plain = (value: unknown): string => safe(String(value));
 export function nativeWorkLedgerLines(state: NativeWorkLedgerState): string[] {
-  const lines = ['Native work ledger · explicit execution controls'];
+  const lines = ['Work recorded on the host · it runs only when you start it'];
   if (state.status !== 'ready') return [...lines, `${plain(state.status)}: ${safe(state.reason)}`];
   lines.push(`Project ${safe(state.snapshot.projectId)} · snapshot ${plain(state.snapshot.cursor)} · history ${plain(state.cursor)}`);
   if (state.reason) lines.push(`Showing the last rows read: ${safe(state.reason)}`);
@@ -35,8 +35,8 @@ export function nativeWorkLedgerLines(state: NativeWorkLedgerState): string[] {
     }
   }
   for (const line of nativeWorkExecutionLines(state.execution)) lines.push(safe(line));
-  lines.push('Controls: /work start|status|cancel|resume <work-id>. Status/cancel retain the observed attempt; resume is explicit. Closing only detaches local requests.');
-  lines.push('Durable history (read only; no execution authority)');
+  lines.push('To act on one: /work start, /work status, /work cancel or /work resume with its id. Nothing resumes on its own; closing this only stops watching.');
+  lines.push('History (read only: nothing here starts anything)');
   const earlier = state.earlierEvents ?? 0;
   if (earlier > 0) lines.push(`${plain(earlier)} earlier events are not shown; the newest ${plain(state.history.length)} follow.`);
   for (const event of state.history) {
@@ -44,8 +44,8 @@ export function nativeWorkLedgerLines(state: NativeWorkLedgerState): string[] {
       lines.push(`#${plain(event.sequence)} import_legacy · ${plain(event.works.length)} work records · ${event.manifest ? `${plain(event.manifest.sources.length)} preserved sources` : 'protected source provenance'}`,
         `  Actor ${safe(event.actorId)} · request ${safe(event.requestId)}`);
       for (const work of event.works) lines.push(`  Work ${safe(work.id)} r${plain(work.revision)} · ${safe(work.title)} · reported ${plain(work.reportedState)} · imported unverified`);
-      if (!event.manifest) { lines.push('  Protected legacy provenance requires read:knowledge authorization.'); continue; }
-      lines.push(`  Legacy preparation ${safe(legacyMigrationPreparationRevision(event.manifest))} · historical approval is not execution authority`);
+      if (!event.manifest) { lines.push('  Where this came from is hidden: showing it needs permission to read knowledge.'); continue; }
+      lines.push(`  Imported from earlier records (${safe(legacyMigrationPreparationRevision(event.manifest))}) · an old approval does not start anything`);
       for (const entity of event.manifest.entities) {
         lines.push(`  Legacy ${plain(entity.kind)} ${safe(entity.id)} · ${plain(entity.fragments.length)} source fragments`);
         for (const fragment of entity.fragments) lines.push(`    Source ${safe(fragment.sourceId)} ${safe(fragment.pointer)}`);

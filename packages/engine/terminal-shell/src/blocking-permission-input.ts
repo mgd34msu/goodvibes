@@ -34,24 +34,6 @@ export function handleSimplePermissionInput(
   return true;
 }
 
-/**
- * Owner-only asks whose effect cannot be taken back: a delete no undo record
- * keeps, an operator action declared irreversible, money spent, a payment
- * step, a message sent as the owner. Enter on such a card answers No.
- */
-const UNDOABLE_NEVER: ReadonlySet<string> = new Set([
-  'unrecoverable-delete', 'irreversible-operator', 'spend-over-limit', 'payment-step', 'new-recipient', 'untrusted-derived-send',
-]);
-
-/**
- * What a bare Enter answers on a permission card. Enter is never the broadest
- * answer (nothing is remembered by it): it allows this one call, and for what
- * cannot be undone it denies.
- */
-export function enterAnswer(request: { readonly ownerOnly?: string | undefined }): 'allow-once' | 'deny' {
-  return request.ownerOnly !== undefined && UNDOABLE_NEVER.has(request.ownerOnly) ? 'deny' : 'allow-once';
-}
-
 /** Typing state of one open card, kept on the pending card itself. */
 export interface CardTypeahead {
   /** When the card was put on screen. */

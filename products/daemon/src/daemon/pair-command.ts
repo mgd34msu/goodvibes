@@ -44,17 +44,20 @@ import {
   buildPairingHandoffLink,
   defaultPairingTokenName,
   formatPairingOffers,
+  lanHttpsPort,
   PAIRING_REACH_FIX,
   pairingReachFromSettings,
   pairingReadySteps,
   pairingThisMachineLines,
   pairingUnreachableLines,
   resolvePairingWebOrigin,
+  SERVE_TO_NETWORK_QUESTION,
   type OriginPosture,
   type PairingHandoffOfferKind,
   type PairingReach,
 } from '@goodvibes/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
+import { LAN_HTTPS_PAGE_PATH } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
 import {
   callDaemonMethod,
   callDaemonRoute,
@@ -82,6 +85,16 @@ export interface PairCommandDeps {
   readonly fetchImpl: DaemonFetch;
   /** Whether this daemon's pairing store records the shared operator token as revoked. Absent: never. */
   readonly sharedTokenRevoked?: (() => boolean) | undefined;
+  /**
+   * `pair --lan`: serve the web UI to the network, as `webui enable --lan`
+   * does (webui-command.ts), writing the same settings. Absent: `--lan` is refused.
+   */
+  readonly serveToNetwork?: (() => { readonly exitCode: number; readonly lines: readonly string[] }) | undefined;
+  /**
+   * Ask the person a yes or no question, opening on No (`[y/N]`); absent when
+   * no one can answer (not a terminal), which answers No.
+   */
+  readonly askYesNo?: ((question: string) => Promise<boolean>) | undefined;
 }
 
 /** The listener `/api/health` reports. */
@@ -134,8 +147,10 @@ async function askLocalDaemon(input: RunPairCommandInput, token: string, named: 
 }
 
 export interface PairCommandFlags extends RemoteCommandFlags {
-  /** `-y`/`--yes`: consent to minting a new per-device token on a remote daemon. */
+  /** `-y`/`--yes`: consent to minting a new per-device token on a remote daemon, or to serving the web UI to the network with `--lan`. */
   readonly yes: boolean;
+  /** `--lan`: serve the web UI to the network first, then print the code for a phone (this machine's daemon only). */
+  readonly lan?: boolean | undefined;
 }
 
 export interface RunPairCommandInput extends PairCommandDeps {
@@ -198,7 +213,7 @@ interface PairingHandoffCreateResult {
  * `named` is that `--host` already resolved, so its address and port are used
  * as given.
  */
-async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonTarget): Promise<DaemonCommandResult> {
+async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonTarget, servedNow = false): Promise<DaemonCommandResult> {
   const { flags } = input;
   const port = named === undefined ? flags.port : targetPort(named);
   if (port !== undefined && (!Number.isInteger(port) || port < 1 || port > 65535)) {
@@ -250,7 +265,9 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
   }
   // A local reprint writes no token and no setting of its own. With no daemon
   // answering, the binding comes from settings, or from --port when given.
-  const bound = answer.kind === 'serving' ? answer.bound
+  // Just after `--lan` wrote the network binding, the daemon's answer still
+  // names the bind it is leaving, so the settings it is moving to decide.
+  const bound = answer.kind === 'serving' && !servedNow ? answer.bound
     : port === undefined ? undefined
       : { ...resolveRuntimeEndpointBinding(input.configManager, 'controlPlane'), port };
   const origin = resolvePairingWebOrigin(input.configManager, undefined, bound);
@@ -296,6 +313,16 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
         }, null, 2)],
       };
     }
+    // The one real question, asked in place: on yes the daemon is served to the network and the code made in this run.
+    if (!servedNow && await askToServe(input)) {
+      if (answer.kind === 'serving') {
+        const target = named !== undefined ? { baseUrl: named.baseUrl, token, isLocal: true } : localTarget(input, token);
+        if (target) return runRemoteMint(input, target, true, true);
+      }
+      const served = input.serveToNetwork?.();
+      if (served && served.exitCode !== 0) return { exitCode: served.exitCode, lines: served.lines };
+      return runLocalReprint(input, named, true);
+    }
     return { exitCode: 0, lines: [...thisMachine.lines, ...(fromFiles.length > 0 ? ['', ...fromFiles] : [])] };
   }
 
@@ -331,7 +358,7 @@ async function runLocalReprint(input: RunPairCommandInput, named?: RemoteDaemonT
     exitCode: 0,
     lines: [
       'Pair a phone',
-      ...pairingReadySteps(origin.origin, offers),
+      ...pairingReadySteps(origin.origin, offers, lanCertificatePage(input.configManager, origin.origin)),
       '',
       ...banner.lines,
       ...(fromFiles.length > 0 ? ['', ...fromFiles] : []),
@@ -362,11 +389,43 @@ export function thisMachineSignIn(
     deepLink,
     lines: [
       ...pairingThisMachineLines(origin, reach, 'goodvibes-daemon pair'),
+      '  Or both steps in one run: goodvibes-daemon pair --lan -y',
       '',
       `  ${deepLink}`,
       `  Sign-in code: ${token}  (to paste on the web UI's sign-in page, under Other ways to sign in)`,
     ],
   };
+}
+
+/**
+ * With the LAN https listener on, the page on the plain address where a phone
+ * installs the GoodVibes certificate before it opens the https `origin`.
+ */
+function lanCertificatePage(config: Pick<ConfigManager, 'get'>, origin: string): string | undefined {
+  if (lanHttpsPort(config) === undefined) return undefined;
+  let url: URL;
+  try { url = new URL(origin); } catch { return undefined; }
+  if (url.protocol !== 'https:') return undefined;
+  const plainPort = resolveRuntimeEndpointBinding(config, 'controlPlane').port;
+  return `http://${url.hostname}:${plainPort}${LAN_HTTPS_PAGE_PATH}`;
+}
+
+/** Ask it (opening on No: it opens this machine to the network); false with no one to ask. */
+async function askToServe(input: RunPairCommandInput): Promise<boolean> {
+  if (input.flags.json || !input.askYesNo) return false;
+  return input.askYesNo(SERVE_TO_NETWORK_QUESTION);
+}
+
+/** This machine's own daemon as a target for `token`, at its bind address. */
+function localTarget(input: RunPairCommandInput, token: string): RemoteDaemonTarget | undefined {
+  const resolved = resolveLocalDaemonTarget({
+    token,
+    ...(input.flags.port === undefined ? {} : { port: input.flags.port }),
+    configManager: input.configManager,
+    daemonHomeDir: input.daemonHomeDir,
+    readToken: input.readToken,
+  });
+  return resolved.ok ? resolved.target : undefined;
 }
 
 /** The plan a minting `pair` prints before it will act, absent `-y`. Nothing is called yet. */
@@ -395,19 +454,21 @@ function mintPlanResult(target: RemoteDaemonTarget, json: boolean, why: readonly
 }
 
 /** The minting form, once `-y` has consented: mint and render. `local`: the daemon is this machine's own. */
-async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTarget, local = false): Promise<DaemonCommandResult> {
+async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTarget, local = false, serveToNetwork = false): Promise<DaemonCommandResult> {
   const { flags } = input;
 
   // No token is minted that a phone could not open: that daemon's own answer
   // about the address a code would carry (pairing.posture.get mints nothing;
   // the daemon decides from its settings). No answer leaves the mint to say
-  // what went wrong, as before.
-  const posture = await callDaemonMethod<{ readonly posture: OriginPosture }>(target, 'pairing.posture.get', { input: {} }, input.fetchImpl);
+  // what went wrong, as before. With the owner's yes to serving the network,
+  // the daemon does that and mints in the same call.
+  const posture = serveToNetwork ? undefined : await callDaemonMethod<{ readonly posture: OriginPosture }>(target, 'pairing.posture.get', { input: {} }, input.fetchImpl);
   // This machine's own daemon serving only this machine: the token is minted
   // for a browser here, and printed as such, with no QR.
   let forThisMachine: PairingReach | undefined;
-  if (posture.ok) {
+  if (posture?.ok) {
     const reach = posture.data.posture.reach;
+    if (reach !== undefined && !reach.otherDevices && !local && await askToServe(input)) return runRemoteMint(input, target, local, true);
     if (reach !== undefined && !reach.otherDevices && local) forThisMachine = reach;
     else if (reach !== undefined && !reach.otherDevices) {
       const pairAgain = local ? 'goodvibes-daemon pair -y' : `goodvibes-daemon pair --host ${target.baseUrl} -y`;
@@ -423,7 +484,7 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   }
 
   const outcome = await callDaemonMethod<PairingHandoffCreateResult>(
-    target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName(), ...(forThisMachine !== undefined ? { forThisMachine: true } : {}) } }, input.fetchImpl,
+    target, 'pairing.handoff.create', { input: { name: defaultPairingTokenName(), ...(forThisMachine !== undefined ? { forThisMachine: true } : {}), ...(serveToNetwork ? { serveToNetwork: true } : {}) } }, input.fetchImpl,
   );
   if (!outcome.ok) return failure(outcome.error, outcome.fix, flags.json, outcome.code);
 
@@ -528,8 +589,51 @@ async function runRemoteMint(input: RunPairCommandInput, target: RemoteDaemonTar
   return { exitCode: 0, lines: [mintedLine, '', ...banner.lines] };
 }
 
+/**
+ * `pair --lan`: the two steps a phone needs in one run. Serving the web UI to
+ * the network widens who can reach the daemon and stays until it is narrowed
+ * again, so it is stated first and done only with `-y`; then the code is made
+ * from the settings just written.
+ */
+async function runPairForNetwork(input: RunPairCommandInput, named: RemoteDaemonTarget | undefined): Promise<DaemonCommandResult> {
+  const { flags } = input;
+  if (input.serveToNetwork === undefined) {
+    return failure('pair --lan cannot change this daemon\'s settings from here', 'run goodvibes-daemon webui enable --lan, then goodvibes-daemon pair', flags.json);
+  }
+  if (!flags.yes) {
+    const plan = [
+      'pair --lan: this will serve the web UI to your network (every device on it can reach the sign-in page;',
+      'only a device with a code signs in), then print the code for the phone.',
+      'It stays served to your network until you run: goodvibes-daemon webui enable --loopback',
+      '',
+      'Nothing has been changed. Re-run with -y (or --yes) to do it.',
+    ];
+    return flags.json
+      ? { exitCode: 0, lines: [JSON.stringify({ ok: true, data: { confirmed: false, plan } }, null, 2)] }
+      : { exitCode: 0, lines: plan };
+  }
+  const served = input.serveToNetwork();
+  if (served.exitCode !== 0) return { exitCode: served.exitCode, lines: served.lines };
+  const paired = await runLocalReprint(input, named, true);
+  return flags.json ? paired : { exitCode: paired.exitCode, lines: [...served.lines, '', ...paired.lines] };
+}
+
 export async function runPairCommand(input: RunPairCommandInput): Promise<DaemonCommandResult> {
   const { flags } = input;
+  if (flags.lan === true) {
+    const host = flags.host?.trim();
+    if (host === undefined || host === '') return runPairForNetwork(input, undefined);
+    const resolved = resolveRemoteDaemonTarget({
+      flags: { host, ...(flags.port === undefined ? {} : { port: flags.port }), ...(flags.token === undefined ? {} : { token: flags.token }) },
+      configManager: input.configManager, daemonHomeDir: input.daemonHomeDir, readToken: input.readToken,
+    });
+    if (!resolved.ok) return failure(resolved.error, resolved.fix, flags.json, resolved.code);
+    if (!resolved.target.isLocal) {
+      return failure('pair --lan serves this machine\'s web UI to its network, so it takes no --host for another machine',
+        `on that machine run goodvibes-daemon pair --lan -y, or here goodvibes-daemon pair --host ${host} -y`, flags.json);
+    }
+    return runPairForNetwork(input, resolved.target);
+  }
 
   // A named host is resolved by the same rule every remote-capable command
   // uses, so `127.0.0.1`, `localhost:3421`, `[::1]` and `http://127.0.0.1:3421`

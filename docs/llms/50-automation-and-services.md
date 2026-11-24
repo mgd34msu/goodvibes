@@ -547,6 +547,8 @@ The Agent keeps local events, subscribes to ICS feeds, and connects Google or Mi
 
 `/calendar change` and `/calendar status` are the terminal app's (the daemon's calendar) and are refused here saying so.
 
+A subscribed feed is read at the Agent's start and again whenever the calendar is read (`/calendar upcoming`, `/calendar all`, and the same reads by the assistant) and the feed is older than its `--every` interval (conditional requests; a feed that cannot be read keeps its last events, its status says why). `/calendar refresh` reads every feed now, whatever its age. There is no timer: a feed nobody reads is not fetched.
+
 Connecting a calendar account over OAuth needs your own OAuth client id: no client id ships with the product. Steps:
 
 1. Register a free OAuth app (Google Cloud Console for Google, the Azure portal for Microsoft) and copy its client id. A desktop or public-client app needs no secret.
@@ -633,8 +635,9 @@ Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar
 | --- | --- |
 | "This browser or app may not be secure" | Sign in by hand in the window that opened, then re-run. |
 | IMAP `AUTHENTICATIONFAILED` | The app password is wrong or revoked. Delete the `goodvibes-agent` entry at the app passwords page and re-run. |
-| Worked, then broke about a week later | The OAuth app is in Testing. Publish it, then `/google reauthorize`. |
-| A missing scope or dead credential is reported | `/google reauthorize`. |
+| Worked, then broke about a week later | The OAuth app is in Testing. Publish it; the next Google request starts a fresh consent by itself. |
+| Google is not connected, a scope is missing, or the credential is dead | The request that meets it starts a consent asking for every scope at once and shows its link (in the owner inbox from the daemon, on screen in the Agent); approve it and the request is sent again when the consent completes. One consent at a time: other requests join the open one. `/google reauthorize` starts one by hand. |
+| An API is not enabled on the Cloud project | Enabling it is put to your mode (asked under Ask me, decided by Jev under Jev decides as `google.enable-apis`), run with the gcloud signed in on this machine, then the request is sent again. Without gcloud the answer says so and names the command. |
 | A send was refused | `/google waiting` lists refused sends; `/google approve <n>` shows one, asks and sends it exactly as shown, typed by the owner. |
 
 Re-running any step is safe: each step checks what already exists and skips it.
@@ -976,6 +979,7 @@ When a request names no provider, a configured `local` provider is used first, t
 /voice off
 /voice wake-status
 /voice wake-setup [--with-speech-to-text]
+/voice wake-again      listen for the wake word again after it stopped by itself
 /voice export <file>
 /voice inspect <file>
 /voice import <file>
@@ -1020,7 +1024,7 @@ Turning it on from nothing (terminal app):
 /settings set voice.wake.enabled true
 ```
 
-In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/settings set`, a model's settings call) runs the same setup plan as `/voice wake-setup`: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The Agent's follow-up line is `(yes: /voice wake-setup --with-speech-to-text installs it now)`. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
+In both the terminal app and the Agent, turning on `voice.wake.enabled` from anywhere (the settings workspace, `/settings set`, a model's settings call) runs the same setup plan as `/voice wake-setup`: it fetches missing wake models and prints the plan. In the Agent the same write also turns on `voice.wake.surfaces.agent` (off by default) and says so, because the switch alone would open no microphone there; the terminal app's row `voice.wake.surfaces.tui` is on by default. The Agent's follow-up line is `(yes: /voice wake-setup --with-speech-to-text installs it now)`. While wake runs, the terminal footer shows the listening marker (`voice.wake.indicator`). When listening stops by itself (the recorder kept failing after its own restarts), it starts again when the terminal regains focus or the wake input device setting changes; `/voice wake-again` starts it at once. `ui.voiceEnabled` (always-speak) is not needed for wake. The `voice.wake.*` settings belong to each app, not the daemon: the Agent keeps its own `voice.wake.enabled`, set with `/settings set voice.wake.enabled true` there.
 
 The `voice.wake.*` settings, by group:
 
@@ -1085,7 +1089,7 @@ The daemon can buy things for the owner with a stored card, inside budgets the o
 
 Purchases are off, and every budget is `0`. With the defaults, a checkout that adds any tax, fee or paid delivery is refused outright (the daily overage budget of 0 cannot cover it), and one that adds nothing asks you first (the daily item budget and the per-purchase ceiling of 0 send every purchase to you). Set the amounts below before the first purchase.
 
-1. Turn purchases on, choosing how they run. In Settings (both terminal programs: the `Let GoodVibes make purchases` row; the web UI: Settings, payments) turning it on asks which of two ways, and nothing is preselected: `Ask me before every purchase` (Nothing is bought until you approve it, naming the shop, the item and the most it may cost; `payments.confirmEveryPurchase` on) or `Buy, and give me <N> minutes to stop it` (A purchase within your budgets at a shop you can get your money back from goes ahead unless you say stop within N minutes; if the notice cannot reach you, it still goes ahead; `payments.confirmEveryPurchase` off, N is `payments.windows.vetoMinutes`). Both settings are written in one update. From a command line: `/settings set payments.confirmEveryPurchase true` (or `false`), then `/settings set payments.enabled true`. A choice already saved stays as it is until you pick another.
+1. Turn purchases on, choosing how they run. In Settings (both terminal programs: the `Let GoodVibes make purchases` row; the web UI: Settings, payments) turning it on asks which of two ways, and nothing is preselected: `Ask me before every purchase (recommended)` (The safer way: nothing is bought until you approve it, naming the shop, the item and the most it may cost; `payments.confirmEveryPurchase` on) or `Buy, and give me <N> minutes to stop it` (A purchase within your budgets at a shop you can get your money back from goes ahead unless you say stop within N minutes; if the notice cannot reach you, it still goes ahead; `payments.confirmEveryPurchase` off, N is `payments.windows.vetoMinutes`). Both settings are written in one update. From a command line: `/settings set payments.confirmEveryPurchase true` (or `false`), then `/settings set payments.enabled true`. A choice already saved stays as it is until you pick another. While a stop window runs, its card (the terminal's `/questions`, the web UI's Work list, a chat channel) says so on its face: `Inside your daily budget. It goes ahead when the time runs out, even if this notice never reached you.`, with `Stop it` selected.
 2. Add a card (each field hidden, sent to the daemon after the last field): `/payments add-card`. Fields: label, kind (`virtual` or `real`), number, expiry, security code (3 or 4 digits), cardholder name. The answer is `[payments] Card stored on the selected daemon: <label> ...`. A virtual card with an issuer cap is recommended: the issuer enforces its cap even when this software is wrong. The terminal apps cannot record the cap; the web UI's card form (Settings, payments) has an optional "Issuer cap" field, and the operator method `payments.cards.create` takes `issuerCapMinorUnits`. A recorded cap is your declaration; a purchase whose full total is over it is refused (`card-limit-exceeded`) before any window. A card cannot be edited: to change its cap, remove it (`/payments remove-card <card>`) and add it again. Adding the same card again (the same label, number and expiry, for example after an answer that did not arrive) returns the card already stored and stores no second copy. A card number (and a security code asked for with `payments.cvvHandling` `prompt`) is taken only from a connection that reaches the daemon from its own machine, over https (`controlPlane.tls`, or a trusted proxy that ended TLS), or over a Tailscale address; over plain http on the local network (a LAN address or a `.local` name) the daemon refuses it with `403` `CARD_ENTRY_TRANSPORT` before reading it, and the web UI shows that reason instead of the card form or the code field.
 3. Set the addresses: `/payments address` in either program (it asks which, then the fields: `name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`), or the settings workspace (`/settings payments.shippingAddress`).
 4. Set the currency and budgets:

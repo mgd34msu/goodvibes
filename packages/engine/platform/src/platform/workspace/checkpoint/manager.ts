@@ -38,6 +38,7 @@ import { summarizeError } from '../../utils/error-display.js';
 import { JsonFileStore, JsonFileStoreParseError } from '../../state/json-file-store.js';
 import { captureQuarantineSource, quarantineCorruptFile } from '../../utils/atomic-json-store.js';
 import type { RuntimeEventBus } from '../../runtime/events/index.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import type { TurnEvent } from '../../../events/turn.js';
 import type { AgentEvent } from '../../../events/agents.js';
 import { RetentionPolicy, DEFAULT_RETENTION_CONFIG, type RetentionConfig, type RetentionClass, type RetentionPruneReason } from '../../runtime/retention/index.js';
@@ -994,8 +995,10 @@ export class WorkspaceCheckpointManager {
     }
   }
 
+  /** Every checkpoint made, pruned or removed is written here, then announced (runtime/list-changes.ts). */
   private async persistManifest(): Promise<void> {
     await this.manifestStore.save({ checkpoints: Array.from(this.checkpoints.values()) });
     this.manifestSignature = await this.readManifestSignature();
+    noteListChanged({ list: 'checkpoints', change: 'changed' });
   }
 }

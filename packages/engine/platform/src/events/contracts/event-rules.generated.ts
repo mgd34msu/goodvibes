@@ -820,6 +820,11 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     targetId: { kind: 'string' },
     pageCount: { kind: 'number' },
   },
+  LIST_CHANGED: {
+    list: { kind: 'enum', values: ['calendar', 'check-ins', 'checkpoints', 'ci-watches', 'dates', 'mail', 'memory', 'paired-devices', 'people', 'relay', 'tailscale', 'telegram-intake', 'voice'] },
+    change: { kind: 'enum', values: ['changed', 'created', 'deleted'] },
+    id: { kind: 'string', optional: true },
+  },
   LLM_REQUEST_STARTED: {
     turnId: { kind: 'string' },
     provider: { kind: 'string' },
@@ -928,6 +933,10 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     from: { kind: 'string' },
     to: { kind: 'string' },
     provider: { kind: 'string' },
+  },
+  NATIVE_REQUEST_CHANGED: {
+    projectId: { kind: 'string' },
+    store: { kind: 'enum', values: ['execution', 'intake', 'work-ledger'] },
   },
   OPS_AGENT_CANCELLED: {
     agentId: { kind: 'string' },
@@ -1465,7 +1474,7 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     ] },
     fallbackOrderSet: { kind: 'boolean', optional: true },
     fallbackNote: { kind: 'string', optional: true },
-    refusal: { kind: 'enum', values: ['daemon-unreachable', 'no-model', 'no-provider', 'workspace-not-registered'], optional: true },
+    refusal: { kind: 'enum', values: ['daemon-unreachable', 'model-no-longer-free', 'no-model', 'no-provider', 'workspace-not-registered'], optional: true },
   },
   TURN_SUBMITTED: {
     turnId: { kind: 'string' },

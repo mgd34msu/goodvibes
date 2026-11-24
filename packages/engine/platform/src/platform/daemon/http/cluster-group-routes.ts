@@ -21,6 +21,7 @@ import type {
   JoinGroupResult,
   JoinKeyResult,
   NodesResult,
+  RenameGroupResult,
   SettingDecisionResult,
 } from '../../cluster/group-operations.js';
 import type { DiscoveredGroup } from '../../cluster/group-runtime.js';
@@ -29,18 +30,20 @@ import type { DiscoveredGroup } from '../../cluster/group-runtime.js';
 export interface ClusterGroupVerbs {
   status(): Promise<GroupOperationResult<GroupStatusReport>> | GroupOperationResult<GroupStatusReport>;
   create(input: { name?: string; passphrase?: string }): Promise<GroupOperationResult<CreateGroupResult>>;
-  join(input: { groupId: string; joinKey: string }): Promise<GroupOperationResult<JoinGroupResult>>;
+  /** `turnOnSharing`: the owner's yes to turning sharing on when it is off; the join then finishes after a restart. */
+  join(input: { groupId: string; joinKey: string; turnOnSharing?: boolean }): Promise<GroupOperationResult<JoinGroupResult>>;
   key(): Promise<GroupOperationResult<JoinKeyResult>> | GroupOperationResult<JoinKeyResult>;
   nodes(): Promise<GroupOperationResult<NodesResult>> | GroupOperationResult<NodesResult>;
   groups(): Promise<GroupOperationResult<readonly DiscoveredGroup[]>> | GroupOperationResult<readonly DiscoveredGroup[]>;
-  forget(nodeId: string): Promise<GroupOperationResult<ForgetNodeResult>>;
-  rotate(input: { immediate?: boolean }): Promise<GroupOperationResult<RotateKeyResult>>;
+  /** `turnOnSharing` on forget, rotate, rename, publish and accept: as for join, the action then finishes after a restart. */
+  forget(nodeId: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<ForgetNodeResult>>;
+  rotate(input: { immediate?: boolean; turnOnSharing?: boolean }): Promise<GroupOperationResult<RotateKeyResult>>;
   leave(): Promise<GroupOperationResult<{ groupId: string; groupName: string }>>;
-  rename(name: string): Promise<GroupOperationResult<{ groupId: string; groupName: string }>>;
+  rename(name: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<RenameGroupResult>>;
   /** Send this machine's value of a shared setting that differs from the group's (`cluster status` lists them). */
-  publish(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
+  publish(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Take the group's value of such a setting here. */
-  accept(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
+  accept(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
 }
 
 /** The router services this dispatcher needs. */
@@ -88,7 +91,14 @@ function respond<T>(result: GroupOperationResult<T>): Response {
   return Response.json({ ok: false, error: result.error, fix: result.fix,
     ...(result.failure === undefined ? {} : { failure: result.failure }),
     ...(result.terminal === undefined ? {} : { terminal: result.terminal }),
+    // A group action while sharing is off: the client asks the owner and sends it again with turnOnSharing.
+    ...(result.failure === 'sharing-off' ? { code: 'CLUSTER_SHARING_OFF' } : {}),
   }, { status: 409 });
+}
+
+/** The owner's yes to turning sharing on, when the body carries it. */
+function turnOnSharingOf(body: Record<string, unknown>): { turnOnSharing?: boolean } {
+  return body['turnOnSharing'] === true ? { turnOnSharing: true } : {};
 }
 
 function readString(body: Record<string, unknown>, key: string): string | undefined {
@@ -158,7 +168,7 @@ export async function dispatchClusterGroupRoutes(
           { status: 400 },
         );
       }
-      return respond(await verbs.join({ groupId, joinKey }));
+      return respond(await verbs.join({ groupId, joinKey, ...(body['turnOnSharing'] === true ? { turnOnSharing: true } : {}) }));
     }
     case '/api/cluster/forget': {
       const body = await context.parseJsonBody(request);
@@ -174,7 +184,7 @@ export async function dispatchClusterGroupRoutes(
           { status: 400 },
         );
       }
-      return respond(await verbs.forget(nodeId));
+      return respond(await verbs.forget(nodeId, turnOnSharingOf(body)));
     }
     case '/api/cluster/rename': {
       const body = await context.parseJsonBody(request);
@@ -186,12 +196,12 @@ export async function dispatchClusterGroupRoutes(
           { status: 400 },
         );
       }
-      return respond(await verbs.rename(name));
+      return respond(await verbs.rename(name, turnOnSharingOf(body)));
     }
     case '/api/cluster/rotate': {
       const body = await context.parseJsonBody(request);
       if (body instanceof Response) return body;
-      return respond(await verbs.rotate({ immediate: body['immediate'] === true }));
+      return respond(await verbs.rotate({ immediate: body['immediate'] === true, ...turnOnSharingOf(body) }));
     }
     case '/api/cluster/leave':
       return respond(await verbs.leave());
@@ -207,7 +217,7 @@ export async function dispatchClusterGroupRoutes(
           { status: 400 },
         );
       }
-      return respond(verb === 'publish' ? await verbs.publish(settingPath) : await verbs.accept(settingPath));
+      return respond(verb === 'publish' ? await verbs.publish(settingPath, turnOnSharingOf(body)) : await verbs.accept(settingPath, turnOnSharingOf(body)));
     }
     default:
       return null;

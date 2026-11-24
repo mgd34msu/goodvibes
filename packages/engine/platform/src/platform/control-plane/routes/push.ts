@@ -32,7 +32,7 @@ export type PushGatewayService = Pick<
 function requirePrincipal(invocation: GatewayMethodInvocation): string {
   const principalId = invocation.context.principalId;
   if (!principalId) {
-    throw new GatewayVerbError('Push verbs require an authenticated principal', 'UNAUTHENTICATED', 401);
+    throw new GatewayVerbError('Sign in first: push notifications need a signed-in user or a paired device', 'UNAUTHENTICATED', 401);
   }
   return principalId;
 }
@@ -48,7 +48,7 @@ function requirePrincipal(invocation: GatewayMethodInvocation): string {
 function requireOperatorAuthority(invocation: GatewayMethodInvocation): void {
   if (invocation.context.admin !== true) {
     throw new GatewayVerbError(
-      'Push notifications carry operator-only approval and run details, so only an admin principal can register a device; this principal is not an admin',
+      'Push notifications carry operator-only approval and run details, so only an admin can register a device for them; this sign-in or paired device is not an admin',
       'FORBIDDEN',
       403,
     );

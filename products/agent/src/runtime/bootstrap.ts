@@ -74,6 +74,7 @@ import { flushPendingChannelRows } from '../agent/channel-outbox-flush.ts';
 import { formatChannelProfileRouteSyncReport } from '../agent/channel-profile-routing.ts';
 import { createDaemonOperatorInvoke, resolveDaemonOperatorConnection } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
 import { retryFailedTurn, wireFailedTurnActions } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
+import { announceDaemonAttached } from './daemon-attach-signal.ts';
 
 // ── Bootstrap context type ──────────────────────────────────────────────────
 
@@ -626,6 +627,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
             at: Date.now(),
           }]);
         });
+        // Readers that failed because the daemon did not answer (the workspace's reports) read again now.
+        announceDaemonAttached();
         return services.consumeDaemonReceipts();
       },
       onDetach: () => {

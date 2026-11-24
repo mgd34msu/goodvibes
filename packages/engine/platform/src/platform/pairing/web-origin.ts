@@ -131,6 +131,30 @@ function webBindHost(config: Pick<ConfigManager, 'get'>): string {
 type BoundListener = { readonly host: string; readonly port: number; readonly scheme?: 'http' | 'https' };
 
 /**
+ * The port of the daemon's LAN https listener (`controlPlane.lanHttps.*`,
+ * daemon/lan-https), when it is switched on; undefined when it is off.
+ */
+export function lanHttpsPort(configManager: { get(key: string): unknown }): number | undefined {
+  if (configManager.get('controlPlane.lanHttps.enabled') !== true) return undefined;
+  const port = Number(configManager.get('controlPlane.lanHttps.port'));
+  return Number.isInteger(port) && port > 0 && port <= 65535 ? port : undefined;
+}
+
+/**
+ * The LAN https origin beside a plain `http://<lan address>:<port>` origin:
+ * the same host on the LAN https port. Undefined for a loopback host (this
+ * machine is already a secure context) or an origin that is not plain http.
+ */
+export function lanHttpsOriginOf(origin: string, port: number): string | undefined {
+  let url: URL;
+  try { url = new URL(origin); } catch { return undefined; }
+  if (url.protocol !== 'http:') return undefined;
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host === '::1' || host.startsWith('127.')) return undefined;
+  return `https://${url.hostname}:${port}`;
+}
+
+/**
  * A user-set public URL, or '' when the setting is empty or the placeholder
  * older releases shipped. The one reading of the setting every caller uses.
  */
@@ -247,12 +271,16 @@ function derivedPairingWebOrigin(
 ): PairingWebOrigin {
   if (configManager.get('controlPlane.webui.serve') === true) {
     const served = resolveControlPlaneOrigin(configManager, probe, boundControlPlane);
+    // With the daemon's own LAN certificate on (webui https), another device opens the https listener beside the plain one.
+    const lan = lanHttpsPort(configManager);
+    const secure = (origin: string): string => (lan !== undefined ? lanHttpsOriginOf(origin, lan) ?? origin : origin);
+    const origin = secure(served.origin);
     return {
-      origin: served.origin,
+      origin,
       resolvedHost: served.resolvedHost,
-      httpOnLan: isHttpOnLan(served.origin),
+      httpOnLan: isHttpOnLan(origin),
       fromPublicBaseUrl: false,
-      ...(served.alternateOrigin ? { alternateOrigin: served.alternateOrigin } : {}),
+      ...(served.alternateOrigin ? { alternateOrigin: secure(served.alternateOrigin) } : {}),
     };
   }
   const binding = webBinding(configManager);

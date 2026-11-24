@@ -114,6 +114,8 @@ export interface HostedSessionCompositionInput {
   readonly triggers?: HostedSessionManagerOptions['triggers'];
   /** Whether a principal id is one this daemon knows; sessions.hosted.share refuses any other. Absent: every id is accepted. */
   readonly isKnownPrincipal?: ((principalId: string) => boolean) | undefined;
+  /** The daemon's artifact store (artifacts.create), where a native request's attachments are read for its turn. */
+  readonly artifacts?: HostedSessionManagerOptions['artifacts'];
 }
 
 /** The default prompt: what this session is, stated plainly. */
@@ -176,6 +178,7 @@ export function composeHostedSessions(input: HostedSessionCompositionInput): Hos
     ...(input.cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken: input.cloudflareAuthToken }),
     ...(input.ownerQuestions === undefined ? {} : { ownerQuestions: input.ownerQuestions }),
     ...(input.triggers === undefined ? {} : { triggers: input.triggers }),
+    ...(input.artifacts === undefined ? {} : { artifacts: input.artifacts }),
     ...(input.options.workPlan === undefined ? {} : { workPlan: input.options.workPlan }),
     isWorkspaceUsable: input.options.isWorkspaceUsable ?? isExistingDirectory,
     allowedWorkspaceRoots: () => allowedWorkspaceRoots(input.shellPaths.workingDirectory, sharedWorkspaceRegisterPath(input.shellPaths)),
@@ -232,6 +235,7 @@ export function composeHostedSessionsForFacade(
     ...(cloudflareAuthToken === undefined ? {} : { cloudflareAuthToken }),
     ...(runtimeServices.ownerInbox === undefined ? {} : { ownerQuestions: runtimeServices.ownerInbox }),
     ...(runtimeServices.triggerManager === undefined ? {} : { triggers: runtimeServices.triggerManager }),
+    artifacts: runtimeServices.artifactStore,
     // A session is shared only with a principal a credential of this daemon authenticates as.
     isKnownPrincipal: (principalId) => {
       if (principalId === LOCAL_OWNER_PRINCIPAL) return true;

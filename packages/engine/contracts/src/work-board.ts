@@ -24,6 +24,19 @@ export type BoardRefType = 'ask' | 'agent' | 'schedule' | 'trigger' | 'session' 
 export type BoardAction = 'open' | 'stop' | 'answer' | 'pause' | 'resume';
 export type BoardTone = 'needs-you' | 'working' | 'quiet' | 'done' | 'failed';
 
+/**
+ * Why a waiting ask comes before the others: a purchase window that runs out,
+ * an action that can't be undone, a change that weakens a safety setting.
+ */
+export interface BoardUrgency {
+  readonly kind: 'countdown' | 'cannot-undo' | 'weakens';
+  /** "Goes ahead in 8 min" | "Waits until 14:05" | "Can't be undone" | "Weakens a safety setting" */
+  readonly label: string;
+  /** A countdown's window: asked at `from`, runs out at `until`. */
+  readonly from?: number | undefined;
+  readonly until?: number | undefined;
+}
+
 export interface BoardRow {
   readonly ref: { readonly type: BoardRefType; readonly id: string };
   readonly group: BoardGroup;
@@ -36,6 +49,8 @@ export interface BoardRow {
   /** "15s": the right-hand column of a running row in the terminal. */
   readonly right?: string | undefined;
   readonly tone: BoardTone;
+  /** A waiting ask that comes first, and why. */
+  readonly urgency?: BoardUrgency | undefined;
   readonly actions: readonly BoardAction[];
   /** The node a sub-agent works under, so a list can indent it under its parent. */
   readonly parentId?: string | undefined;
@@ -88,6 +103,10 @@ export interface WorkBoardAsk {
     readonly kind: string;
     /** One line for lists: "Turn the sandbox off?" */
     readonly title: string;
+    /** 'cannot-undo' for an action that can't be taken back. */
+    readonly mark?: string | undefined;
+    /** The ask changes a setting so that it protects less. */
+    readonly weakensSafety?: boolean | undefined;
     readonly consequence?: { readonly text: string; readonly tone: string } | undefined;
     readonly countdown?: { readonly verb: string; readonly at: number } | undefined;
     readonly origin?: { readonly sessionTitle?: string | undefined; readonly by: string } | undefined;
@@ -259,8 +278,42 @@ function clause(text: string): string {
   return trimmed.charAt(0).toLowerCase() + trimmed.slice(1);
 }
 
+type UrgencyFacts = Pick<WorkBoardAsk, 'askedAt'> & { readonly presentation: Pick<WorkBoardAsk['presentation'], 'countdown' | 'mark' | 'weakensSafety'> };
+
+/** Why an ask comes first, when it does: its countdown, then can't-undo, then a weakened safety setting. */
+export function askUrgency(ask: UrgencyFacts, now: number): BoardUrgency | undefined {
+  const p = ask.presentation;
+  if (p.countdown) {
+    const label = p.countdown.verb === 'goes ahead'
+      ? `Goes ahead in ${Math.max(0, Math.ceil((p.countdown.at - now) / 60_000))} min`
+      : `Waits until ${new Date(p.countdown.at).getHours()}:${String(new Date(p.countdown.at).getMinutes()).padStart(2, '0')}`;
+    return { kind: 'countdown', label, from: ask.askedAt, until: p.countdown.at };
+  }
+  if (p.mark === 'cannot-undo') return { kind: 'cannot-undo', label: 'Can\'t be undone' };
+  if (p.weakensSafety === true) return { kind: 'weakens', label: 'Weakens a safety setting' };
+  return undefined;
+}
+
+function urgencyRank(ask: UrgencyFacts): number {
+  const p = ask.presentation;
+  return p.countdown ? 0 : p.mark === 'cannot-undo' ? 1 : p.weakensSafety === true ? 2 : 3;
+}
+
+/**
+ * The order asks wait in, on every surface: a countdown first (the soonest to
+ * run out first), then what can't be undone, then what weakens a safety
+ * setting, then the rest, newest first.
+ */
+export function compareAsksByUrgency(a: UrgencyFacts, b: UrgencyFacts): number {
+  const rank = urgencyRank(a) - urgencyRank(b);
+  if (rank !== 0) return rank;
+  if (a.presentation.countdown && b.presentation.countdown) return a.presentation.countdown.at - b.presentation.countdown.at;
+  return b.askedAt - a.askedAt;
+}
+
 function askRow(ask: WorkBoardAsk, now: number, who?: string | undefined): BoardRow {
   const p = ask.presentation;
+  const urgency = askUrgency(ask, now);
   // A purchase says where it came from: its chat, or the schedule or standing authorisation that began it.
   const from = p.origin?.sessionTitle !== undefined
     ? p.kind === 'purchase' ? `From "${p.origin.sessionTitle}"` : `Asked by ${p.origin.by} in "${p.origin.sessionTitle}"`
@@ -280,6 +333,7 @@ function askRow(ask: WorkBoardAsk, now: number, who?: string | undefined): Board
     ...(who !== undefined ? { who } : {}),
     meta: { short: [p.kind === 'purchase' ? undefined : agoWords(ask.askedAt, now), countdown].filter(Boolean).join(' · '), full: parts.join(' · ') },
     tone: 'needs-you',
+    ...(urgency ? { urgency } : {}),
     actions: ['answer', 'open'],
   };
 }
@@ -370,7 +424,8 @@ function headlineOf(waiting: number, running: number): string {
 
 /**
  * The work board from what the surface holds. A `system` node goes to the
- * services count, and is a row only while it is stalled or failed. A `you`
+ * services count, and is a row only while it is stalled or failed. Asks wait
+ * in the order compareAsksByUrgency gives. A `you`
  * node is running in a working state; waiting for the person through its ask
  * (never twice: a node whose ask is listed is not listed again); scheduled
  * while an idle or paused schedule, trigger, hook action or watcher; finished
@@ -382,7 +437,7 @@ export function readWorkBoard(sources: WorkBoardSources, now: number): WorkBoard
   // An ask from an agent names it: "Helper agent · Run bun test?".
   const whoOf = (agentId: string | undefined): string | undefined => agentId === undefined ? undefined
     : sources.nodes.find((node) => node.id === agentId || node.sessionRef?.agentId === agentId)?.label;
-  const waiting: BoardRow[] = asks.map((ask) => askRow(ask, now, whoOf(ask.agentId)));
+  const waiting: BoardRow[] = [...asks].sort(compareAsksByUrgency).map((ask) => askRow(ask, now, whoOf(ask.agentId)));
   const askAgents = new Set(asks.flatMap((ask) => (ask.agentId !== undefined ? [ask.agentId] : [])));
   const askSessions = new Set(asks.flatMap((ask) => (ask.sessionId !== undefined ? [ask.sessionId] : [])));
   const running: BoardRow[] = [];

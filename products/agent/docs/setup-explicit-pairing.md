@@ -39,10 +39,17 @@ before the migration request; when that happens after the attempt marker was
 written, the marker is released, so the next preview starts fresh and sends
 nothing on its own.
 
-Inside the interactive Agent, `/setup pair` remains read-only. The owner can type
-`/setup pair --apply` (optionally `--name "Device name"`) to preview the selected
-host and administrative scope, then enter the displayed fresh exact phrase.
-Only direct terminal command input opens that operation. Model/harness calls,
+Inside the interactive Agent, the owner types `/setup pair` (optionally
+`--name "Device name"`; `--apply` is accepted and changes nothing there): it
+shows the selected host and what pairing allows, then asks for the displayed
+fresh exact phrase in the same step. Every message is in plain words (a "key"
+for the credential; no "principal", "migration" or "remint" on screen); the
+status ids in JSON output are unchanged. The phrase is kept rather than a `y`:
+input typed before the question appears is discarded either way, but a `y`
+pressed by habit once it is shown would answer a yes/no question, while the
+random phrase can only be typed after reading it, for access that lasts until
+it is revoked. Only direct terminal command input opens
+that operation; any other caller gets the read-only summary. Model/harness calls,
 including `confirm:true`, nested commands, `--yes` and inline phrases cannot
 create or replace a credential. No confirmation answer enters normal chat,
 input history or model submission. The disclosure and phrase remain in the

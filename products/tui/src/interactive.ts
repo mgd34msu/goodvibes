@@ -20,6 +20,8 @@ import { resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/
 import { UIFactory } from './renderer/ui-factory.ts';
 import { resolveThrobberActivity } from './renderer/throbber.ts';
 import { SPINNER_FRAMES } from './renderer/ui-primitives.ts';
+/** The throbber's mark when motion is reduced (display.reduceMotion). */
+const STILL_SPINNER = '●';
 import { ActivityAnimation } from './core/activity-animation.ts';
 import { InputHandler } from './input/handler.ts';
 import type { ContentPart } from '@goodvibes/engine/platform/platform/providers';
@@ -827,6 +829,11 @@ async function main(prepared: PreparedShellCliRuntime) {
     mainBusy: () => orchestrator.isThinking || orchestrator.isTurnInFlight,
     mainModel: () => lastHeaderModel,
     promptText: () => input.prompt,
+    sessionKeys: () => ({
+      // An unbound key gives '', and the chips row shows its default key.
+      next: keycapLabel(ctx.services.keybindingsManager.getComboLabel('next-session')) ?? '',
+      previous: keycapLabel(ctx.services.keybindingsManager.getComboLabel('previous-session')) ?? '',
+    }),
     requestRender: () => render(),
   });
   sessionViews = views;
@@ -894,6 +901,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     commandContext,
     unsubs,
     buffer: input,
+    subscribeFocusGained: (listener) => ctx.services.focusTracker.onFocusGained(listener),
     // Speech is sent as said; only typed composer text has a grammar.
     submitInput: submission.submitSpeech,
     notify: (m) => {
@@ -951,6 +959,7 @@ async function main(prepared: PreparedShellCliRuntime) {
           lastGitInfoRef.value,
           undefined,
           activeModel.divergenceNote,
+          isExternalDaemon() ? 'daemon connected' : 'this computer',
         );
     const chipsRow = views.chips(width);
     if (chipsRow) headerLines.push(chipsRow);
@@ -1055,9 +1064,12 @@ async function main(prepared: PreparedShellCliRuntime) {
       now: throbberNow,
     });
     activityAnimation.setActive(throbberActivity !== null && !orchestrator.isThinking);
-    const activityFrame = orchestrator.isThinking ? orchestrator.thinkingFrame : activityAnimation.frame;
+    // display.reduceMotion: the spinner is one still mark and its colour does not sweep; the elapsed time still counts.
+    const reduceMotion = configManager.get('display.reduceMotion') === true;
+    conversation.workTree.reduceMotion = reduceMotion;
+    const activityFrame = reduceMotion ? 0 : orchestrator.isThinking ? orchestrator.thinkingFrame : activityAnimation.frame;
     const throbber = throbberActivity
-      ? { spinner: SPINNER_FRAMES[activityFrame % SPINNER_FRAMES.length]!, frame: activityFrame, activity: throbberActivity }
+      ? { spinner: reduceMotion ? STILL_SPINNER : SPINNER_FRAMES[activityFrame % SPINNER_FRAMES.length]!, frame: activityFrame, activity: throbberActivity }
       : null;
     const footerLines = buildShellFooter({
       width,
@@ -1347,6 +1359,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     getPinned: ctx._getPinned,
     render,
     trustPromptRef,
+    // The daemon reads every provider's list on start and says so: an open picker shows it then.
+    onProvidersChanged: (listener) => uiServices.events.providers?.on('PROVIDERS_CHANGED', listener) ?? (() => {}),
   });
 
   // One owner of the user turn and its failover retries, read by the turn-end

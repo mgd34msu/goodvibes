@@ -200,22 +200,31 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         return result(await runSessionsCommand({ ...remote, flags: { ...remoteFlags, all: cli.flags.all }, args: cli.commandArgs }));
       }
       case 'pair': {
-        const [{ runPairCommand }, { readLegacySharedRevoked, pairingOriginUsesStableHost, refreshStableHostInputs }, { controlPlaneStorePath }, { createShellPathService }] = await Promise.all([
+        const [{ runPairCommand }, { readLegacySharedRevoked, pairingOriginUsesStableHost, refreshStableHostInputs }, { controlPlaneStorePath }, { createShellPathService }, { runWebuiCommand }] = await Promise.all([
           import('../daemon/pair-command.js'),
           import('@goodvibes/engine/platform/platform/pairing'),
           import('@goodvibes/engine/platform/platform/control-plane'),
           import('@goodvibes/engine/platform/platform/runtime/shell'),
+          import('../daemon/webui-command.js'),
         ]);
         // The Tailscale and `.local` rungs are slow facts gathered asynchronously;
         // without them this one-shot command would print the DHCP address while
-        // the running daemon offers the stable name.
-        if (pairingOriginUsesStableHost(config)) await refreshStableHostInputs();
+        // the running daemon offers the stable name. `--lan` moves to the network
+        // binding, which is read through the same ladder.
+        if (cli.flags.lan || pairingOriginUsesStableHost(config)) await refreshStableHostInputs();
         return result(await runPairCommand({ ...remote,
           version: VERSION,
           // A token the environment sets is not the stored shared token, so its revocation does not apply to it.
           sharedTokenRevoked: () => envDaemonToken === undefined && readLegacySharedRevoked(controlPlaneStorePath(createShellPathService({ workingDirectory, homeDirectory }),
             GOODVIBES_DAEMON_SURFACE_ROOT, 'pairing-tokens.json')),
-          flags: { ...remoteFlags, yes: cli.flags.yes } }));
+          serveToNetwork: () => runWebuiCommand(['enable', '--lan'], { configManager: config, baseDirectory: workingDirectory }),
+          // The ordinary ask of a terminal command, opening on No; with no terminal to answer it, No.
+          ...(process.stdin.isTTY ? { askYesNo: async (question: string) => {
+            const { createInterface } = await import('node:readline/promises');
+            const rl = createInterface({ input: process.stdin, output: process.stdout });
+            try { return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim()); } finally { rl.close(); }
+          } } : {}),
+          flags: { ...remoteFlags, yes: cli.flags.yes, lan: cli.flags.lan } }));
       }
       case 'mcp': {
         const { runMcpCommand } = await import('../daemon/mcp-command.js');
@@ -233,8 +242,17 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const args = cli.commandArgs;
         if (!args.includes('disable') && !args.includes('--loopback')
           && (args.includes('--lan') || controlPlaneOriginUsesStableHost(config))) await refreshStableHostInputs();
-        return result(runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory }),
-          cli.commandArgs.includes('--json') ? stdout : undefined);
+        const answer = runWebuiCommand(cli.commandArgs, { configManager: config, baseDirectory: workingDirectory });
+        // `webui https off --forget-certificate`: the certificate authority is removed from the daemon's secret store too.
+        if (answer.exitCode === 0 && args.includes('https') && args.includes('off') && args.includes('--forget-certificate')) {
+          const [{ createRuntimeSecretsManager }, { forgetLanAuthority }] = await Promise.all([
+            import('@goodvibes/engine/platform/platform/config'), import('@goodvibes/engine/platform/platform/daemon'),
+          ]);
+          await forgetLanAuthority(createRuntimeSecretsManager({ projectRoot: workingDirectory, globalHome: homeDirectory,
+            surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }));
+          return result({ exitCode: 0, lines: [...answer.lines, '  The certificate authority is removed: turning https on again makes a new one, which each phone installs again.'] });
+        }
+        return result(answer, cli.commandArgs.includes('--json') ? stdout : undefined);
       }
       case 'listener': {
         const { runListenerCommand } = await import('../daemon/listener-command.js');

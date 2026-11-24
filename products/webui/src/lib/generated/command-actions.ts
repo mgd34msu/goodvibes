@@ -3580,7 +3580,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Subscribe to a calendar feed",
           "word": "subscribe",
           "line": "/calendar subscribe <feed address> [--name <name>] [--every <read every>] [--allow-private-host]",
-          "sentence": "The feed is read now and on each refresh, its events shown read-only beside yours, until you change it.",
+          "sentence": "Read now. It is read again whenever your calendar is shown and this feed is more than {every} minutes old; its events show read-only beside yours, until you change it.",
           "done": "",
           "touches": "another-machine",
           "lasts": "kept",
@@ -3617,7 +3617,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "every",
               "label": "Read every",
-              "help": "Minutes between reads, at least 15",
+              "help": "Minutes after which the feed is read again when your calendar is read, at least 15",
               "kind": "number",
               "required": {
                 "default": "60",
@@ -22352,8 +22352,23 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "title": "Permissions",
       "summary": "See which permission settings are in force, and the rules that decide calls without asking",
       "group": "Permissions",
-      "report": "show",
+      "report": "mode",
       "actions": [
+        {
+          "id": "mode",
+          "label": "See what GoodVibes asks you about now, and why",
+          "word": "mode",
+          "line": "/permissions mode",
+          "sentence": "Shows the permission mode in force, what it does, why it differs from the one you chose, and the setting that changes it.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Done from a terminal app."
+          },
+          "inputs": []
+        },
         {
           "id": "show",
           "label": "See the permission settings in force",
@@ -23557,7 +23572,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Lift a plugin's quarantine",
           "word": "lift",
           "line": "/plugin lift <plugin>",
-          "sentence": "{plugin} may load again (after a reload), until you change it.",
+          "sentence": "{plugin} may load again, and starts now if it is switched on, until you change it.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
@@ -24533,7 +24548,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "risk": "none",
           "undoneBy": "sign-out",
           "operator": {
-            "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+            "terminalOnly": "This command runs in a terminal app; any client of the daemon, the web app among them, starts and finishes a sign-in with providers.subscription.signIn.begin and providers.subscription.signIn.finish."
           },
           "inputs": [
             {
@@ -24614,7 +24629,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "risk": "none",
           "undoneBy": "sign-out",
           "operator": {
-            "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+            "terminalOnly": "This command runs in a terminal app; any client of the daemon, the web app among them, starts and finishes a sign-in with providers.subscription.signIn.begin and providers.subscription.signIn.finish."
           },
           "inputs": [
             {
@@ -24654,7 +24669,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "risk": "none",
           "undoneBy": "sign-in",
           "operator": {
-            "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+            "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
           },
           "inputs": [
             {
@@ -24683,7 +24698,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+            "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
           },
           "inputs": [
             {
@@ -24917,7 +24932,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             "instead": "Ask the owner to run /provider export <file>."
           },
           "operator": {
-            "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+            "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
           },
           "inputs": [
             {
@@ -24969,7 +24984,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+            "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
           },
           "inputs": [
             {
@@ -24997,7 +25012,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "risk": "cannot-be-undone",
           "riskWords": "cannot be undone",
           "operator": {
-            "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+            "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
           },
           "inputs": [
             {
@@ -26710,7 +26725,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "ask",
           "label": "Research a question",
           "word": "ask",
-          "line": "/research ask [--sources <sources>] <what to find out...>",
+          "line": "/research ask <what to find out...> [--sources <sources>]",
           "sentence": "The question \"{request}\" goes to the conversation, where the Agent researches it on the web and answers; nothing is added to Agent Knowledge.",
           "done": "",
           "touches": "reads",
@@ -26742,7 +26757,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "current, primary or official sources where there are some"
               },
               "typed": {
-                "flag": "--sources"
+                "flag": "--sources",
+                "untilNextFlag": true
               }
             }
           ]
@@ -26792,10 +26808,10 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "start-run",
           "label": "Start a research run",
           "word": "start-run",
-          "line": "/research start-run [--title <name>] [--goal <outcome>] [--plan <plan>] [--next <next steps>] [--sources <known sources>] [--note <note>] <question...>",
-          "sentence": "A research run \"{title}\" for the question \"{question}\" is kept, visible and resumable, until you change it; nothing runs in the background.",
+          "line": "/research start-run <question...> [--title <name>] [--goal <outcome>] [--plan <plan>] [--next <next steps>] [--sources <known sources>] [--note <note>]",
+          "sentence": "A research run \"{title}\" for the question \"{question}\" is kept and started: it collects public web sources into your research queue now, and stays visible and resumable until you change it.",
           "done": "",
-          "touches": "this-machine",
+          "touches": "another-machine",
           "lasts": "kept",
           "risk": "none",
           "ownerOnly": {
@@ -26814,7 +26830,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "freeTextReason": "a name you choose",
               "required": true,
               "typed": {
-                "flag": "--title"
+                "flag": "--title",
+                "untilNextFlag": true
               }
             },
             {
@@ -26839,7 +26856,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "the question answered"
               },
               "typed": {
-                "flag": "--goal"
+                "flag": "--goal",
+                "untilNextFlag": true
               }
             },
             {
@@ -26853,7 +26871,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none yet"
               },
               "typed": {
-                "flag": "--plan"
+                "flag": "--plan",
+                "untilNextFlag": true
               }
             },
             {
@@ -26867,7 +26886,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none yet"
               },
               "typed": {
-                "flag": "--next"
+                "flag": "--next",
+                "untilNextFlag": true
               }
             },
             {
@@ -26881,7 +26901,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--sources"
+                "flag": "--sources",
+                "untilNextFlag": true
               }
             },
             {
@@ -26895,7 +26916,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--note"
+                "flag": "--note",
+                "untilNextFlag": true
               }
             }
           ]
@@ -26904,7 +26926,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "add-source",
           "label": "Add a source to the queue",
           "word": "add-source",
-          "line": "/research add-source [--title <source>] [--question <for the question>] [--url <address>] [--publisher <publisher>] [--published <published>] [--evidence <evidence>] [--credibility <how far to trust it>] [--score <score>] [--tags <tags>] [--note <note>] <summary...>",
+          "line": "/research add-source <summary...> [--title <source>] [--question <for the question>] [--url <address>] [--publisher <publisher>] [--published <published>] [--evidence <evidence>] [--credibility <how far to trust it>] [--score <score>] [--tags <tags>] [--note <note>]",
           "sentence": "Source \"{title}\" (\"{summary}\") is kept in this project's research queue for \"{question}\", until you change it; no report is saved and nothing goes to Agent Knowledge.",
           "done": "",
           "touches": "this-machine",
@@ -26926,7 +26948,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "freeTextReason": "your own words",
               "required": true,
               "typed": {
-                "flag": "--title"
+                "flag": "--title",
+                "untilNextFlag": true
               }
             },
             {
@@ -26937,7 +26960,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "freeTextReason": "your own words",
               "required": true,
               "typed": {
-                "flag": "--question"
+                "flag": "--question",
+                "untilNextFlag": true
               }
             },
             {
@@ -26962,7 +26986,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--url"
+                "flag": "--url",
+                "untilNextFlag": true
               }
             },
             {
@@ -26976,7 +27001,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "not given"
               },
               "typed": {
-                "flag": "--publisher"
+                "flag": "--publisher",
+                "untilNextFlag": true
               }
             },
             {
@@ -26990,7 +27016,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "not given"
               },
               "typed": {
-                "flag": "--published"
+                "flag": "--published",
+                "untilNextFlag": true
               }
             },
             {
@@ -27004,7 +27031,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--evidence"
+                "flag": "--evidence",
+                "untilNextFlag": true
               }
             },
             {
@@ -27067,7 +27095,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "research"
               },
               "typed": {
-                "flag": "--tags"
+                "flag": "--tags",
+                "untilNextFlag": true
               }
             },
             {
@@ -27081,7 +27110,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--note"
+                "flag": "--note",
+                "untilNextFlag": true
               }
             }
           ]
@@ -27112,7 +27142,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "freeTextReason": "your own words",
               "required": true,
               "typed": {
-                "flag": "--title"
+                "flag": "--title",
+                "untilNextFlag": true
               }
             },
             {
@@ -27123,7 +27154,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "freeTextReason": "your own words",
               "required": true,
               "typed": {
-                "flag": "--question"
+                "flag": "--question",
+                "untilNextFlag": true
               }
             },
             {
@@ -27134,7 +27166,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               "freeTextReason": "your sources",
               "required": true,
               "typed": {
-                "flag": "--sources"
+                "flag": "--sources",
+                "untilNextFlag": true
               }
             },
             {
@@ -27148,7 +27181,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "built from the summary and findings"
               },
               "typed": {
-                "flag": "--report"
+                "flag": "--report",
+                "untilNextFlag": true
               }
             },
             {
@@ -27162,7 +27196,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--summary"
+                "flag": "--summary",
+                "untilNextFlag": true
               }
             },
             {
@@ -27176,7 +27211,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--findings"
+                "flag": "--findings",
+                "untilNextFlag": true
               }
             },
             {
@@ -27190,7 +27226,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--gaps"
+                "flag": "--gaps",
+                "untilNextFlag": true
               }
             },
             {
@@ -27204,7 +27241,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "none"
               },
               "typed": {
-                "flag": "--recommendations"
+                "flag": "--recommendations",
+                "untilNextFlag": true
               }
             },
             {
@@ -27218,7 +27256,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "not given"
               },
               "typed": {
-                "flag": "--method"
+                "flag": "--method",
+                "untilNextFlag": true
               }
             },
             {
@@ -27311,7 +27350,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
                 "defaultMeans": "research"
               },
               "typed": {
-                "flag": "--tags"
+                "flag": "--tags",
+                "untilNextFlag": true
               }
             }
           ]
@@ -30402,7 +30442,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Run MCP servers inside the sandbox",
           "word": "contain-mcp",
           "line": "/security contain-mcp",
-          "sentence": "Each MCP server starts inside its own process boundary when it next connects, until you change it.",
+          "sentence": "Each MCP server runs inside its own process boundary, and the running ones are restarted inside it, until you change it.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
@@ -30418,7 +30458,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "label": "Run MCP servers as host processes",
           "word": "host-mcp",
           "line": "/security host-mcp",
-          "sentence": "MCP servers start as ordinary processes of this machine, with no boundary, when they next connect, until you change it.",
+          "sentence": "MCP servers run as ordinary processes of this machine, with no boundary, and the running ones are restarted that way, until you change it.",
           "done": "",
           "touches": "this-machine",
           "lasts": "kept",
@@ -33367,6 +33407,65 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "summary": "Set GoodVibes up, one topic at a time",
       "group": "Settings",
       "actions": [
+        {
+          "id": "checklist",
+          "label": "See what is set up",
+          "word": "checklist",
+          "line": "/setup checklist",
+          "sentence": "Shows which of the things most people set once are done, and the line that sets each one that is not.",
+          "done": "",
+          "touches": "reads",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Done from a terminal app."
+          },
+          "inputs": []
+        },
+        {
+          "id": "skip",
+          "label": "Skip a topic for now",
+          "word": "skip",
+          "line": "/setup skip <topic>",
+          "sentence": "{topic} is left off the list of what is left to set up; it stays in /setup.",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Done from a terminal app."
+          },
+          "inputs": [
+            {
+              "id": "topic",
+              "label": "Topic",
+              "help": "The topic to leave off the list of what is left",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "model",
+                  "label": "Choose a model"
+                },
+                {
+                  "value": "how-it-works",
+                  "label": "How GoodVibes works with you"
+                },
+                {
+                  "value": "safety",
+                  "label": "Safety and sandboxing"
+                },
+                {
+                  "value": "history",
+                  "label": "History and privacy"
+                }
+              ],
+              "required": true,
+              "typed": {
+                "position": 1
+              }
+            }
+          ]
+        },
         {
           "id": "model",
           "label": "Choose a model",
@@ -37428,6 +37527,21 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           ]
         },
         {
+          "id": "wake-again",
+          "label": "Listen for the wake word again",
+          "word": "wake-again",
+          "line": "/voice wake-again",
+          "sentence": "Listening for the wake word starts again after it stopped by itself (it also starts again when this terminal regains focus).",
+          "done": "",
+          "touches": "this-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "Voice runs in the terminal app."
+          },
+          "inputs": []
+        },
+        {
           "id": "export",
           "label": "Save your voice settings to a file",
           "word": "export",
@@ -37561,16 +37675,16 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
     },
     {
       "name": "work",
-      "title": "Native work",
-      "summary": "Work on the host: open it, start, cancel or resume it, submit it from a file, recover input, import old records, and ask for work",
+      "title": "Work",
+      "summary": "Work on the host: open it, ask for new work with what done means, start, check, stop or resume it, submit it from a file, recover input, import old records",
       "group": "Agents and work",
       "actions": [
         {
           "id": "open",
-          "label": "Open native work",
+          "label": "Open the work view",
           "word": "open",
           "line": "/work open [<project>]",
-          "sentence": "Opens the native work view, at the project named.",
+          "sentence": "Opens the work view, at the project named.",
           "done": "",
           "touches": "reads",
           "lasts": "not-a-change",
@@ -37623,6 +37737,44 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           ]
         },
         {
+          "id": "new",
+          "label": "Ask for new work, and say what done means",
+          "word": "new",
+          "line": "/work new [--done-when <done when>] <what you want done...>",
+          "sentence": "\"{goal}\" is sent to the host as new work, done when: {criteria}. It is kept here until the host has it.",
+          "done": "",
+          "touches": "another-machine",
+          "lasts": "not-a-change",
+          "risk": "none",
+          "operator": {
+            "terminalOnly": "It runs through this terminal app's link to the host."
+          },
+          "inputs": [
+            {
+              "id": "criteria",
+              "label": "Done when",
+              "help": "What must be true when it is done, one per line (1 to 100)",
+              "kind": "long-text",
+              "freeTextReason": "what done means",
+              "required": true,
+              "typed": {
+                "flag": "--done-when"
+              }
+            },
+            {
+              "id": "goal",
+              "label": "What you want done",
+              "help": "In your own words",
+              "kind": "long-text",
+              "freeTextReason": "your own words for the work",
+              "required": true,
+              "typed": {
+                "tail": true
+              }
+            }
+          ]
+        },
+        {
           "id": "start",
           "label": "Start a piece of work",
           "word": "start",
@@ -37651,7 +37803,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         },
         {
           "id": "status",
-          "label": "See a piece of work",
+          "label": "Check on a piece of work",
           "word": "status",
           "line": "/work status <work>",
           "sentence": "Shows where work {work} stands on the host.",
@@ -37678,10 +37830,10 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         },
         {
           "id": "cancel",
-          "label": "Cancel a piece of work",
+          "label": "Stop a piece of work",
           "word": "cancel",
           "line": "/work cancel <work>",
-          "sentence": "Work {work} is cancelled on the host.",
+          "sentence": "Work {work} is stopped on the host.",
           "done": "",
           "touches": "another-machine",
           "lasts": "not-a-change",
@@ -37706,7 +37858,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         },
         {
           "id": "resume",
-          "label": "Resume a piece of work",
+          "label": "Resume a piece of work after a stop",
           "word": "resume",
           "line": "/work resume <work>",
           "sentence": "Work {work} goes on from where it stopped on the host.",
@@ -37735,7 +37887,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "submit-file",
           "label": "Submit work from a file",
           "word": "submit-file",
-          "line": "/work submit-file <file>",
+          "line": "/work submit-file <file...>",
           "sentence": "The work described in {path} is sent to the host; it is kept here until the host has it.",
           "done": "",
           "touches": "another-machine",
@@ -37748,12 +37900,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "path",
               "label": "File",
-              "help": "A JSON file describing the work",
+              "help": "A JSON file with \"goal\" and \"criteria\"",
               "kind": "path",
               "freeTextReason": "a file on this machine",
               "required": true,
               "typed": {
-                "position": 1
+                "tail": true
               }
             }
           ]
@@ -40049,13 +40201,13 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "terminalOnly": "The curated catalog is on this machine."
     },
     "subscriptions.available": {
-      "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+      "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
     },
     "subscriptions.pending": {
-      "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+      "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
     },
     "subscriptions.stored": {
-      "terminalOnly": "Subscription sign-ins are made and kept by a terminal app on this machine."
+      "terminalOnly": "Subscription sign-ins are kept on the daemon's machine; this is done from a terminal app there."
     },
     "tasks": {
       "method": "tasks.list",

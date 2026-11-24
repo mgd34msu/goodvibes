@@ -8,7 +8,7 @@ import { isFeatureGateEnabled, requireFeatureGate } from '../runtime/feature-fla
 import { SERVICE_MANAGEMENT_FEATURE_FLAG } from '../runtime/feature-flags/flags.js';
 import { currentProcessSignals, resolveDaemonExecInvocation } from './daemon-exec-invocation.js';
 import { buildManagedDaemonServiceDefinition } from './managed-service-definition.js';
-export { MANAGED_SERVICE_DESCRIPTION } from './managed-service-definition.js';
+export { MANAGED_SERVICE_DESCRIPTION, isProductServiceDefinition } from './managed-service-definition.js';
 import { resolveGoodVibesHomeOwnership } from '../config/goodvibes-home.js';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 
@@ -722,6 +722,11 @@ export class PlatformServiceManager {
    */
   refresh(): ManagedServiceStatus {
     return this.drive(this.installFlow(false));
+  }
+
+  /** The same rewrite as `refresh`, with every command run asynchronously: the daemon's own answer to a saved service setting. */
+  refreshAsync(): Promise<ManagedServiceStatus> {
+    return this.driveAsync(this.installFlow(false));
   }
 
   uninstall(): ManagedServiceStatus {

@@ -7,7 +7,8 @@
  *             2 columns of padding
  *   current   filled in the session's own color, dark bold text
  *   others    on the surface fill, muted name, the mark in its status color
- *   right     `tab next   shift+tab prev` keycaps ending at width-4
+ *   right     `alt+n next   alt+p prev` keycaps (the keys bound to
+ *             next-session / previous-session) ending at width-4
  *
  * Shown only when there is more than one session (the caller decides).
  * Chips that do not fit are left out whole and counted in a faint "+N".
@@ -35,7 +36,7 @@ const CHIP_PAD = 2;
 const CHIP_GAP = 1;
 /** Longest name a chip shows before it is cut with an ellipsis. */
 const NAME_MAX = 24;
-const HINTS: readonly KitHint[] = [['tab', 'next'], ['shift+tab', 'prev']];
+const DEFAULT_KEYS = { next: 'alt+n', previous: 'alt+p' } as const;
 
 function put(line: Line, x: number, endX: number, text: string, style: { fg: string; bg: string; bold?: (boolean) | undefined }): number {
   let cx = x;
@@ -54,8 +55,14 @@ function chipWidth(chip: SessionChip): number {
   return CHIP_PAD * 2 + getDisplayWidth(chip.mark) + 1 + getDisplayWidth(truncateDisplay(chip.name, NAME_MAX));
 }
 
-export function renderSessionChips(width: number, chips: readonly SessionChip[], onChip?: ((index: number, start: number, end: number) => void) | undefined): Line {
+export function renderSessionChips(
+  width: number,
+  chips: readonly SessionChip[],
+  onChip?: ((index: number, start: number, end: number) => void) | undefined,
+  keys: { readonly next: string; readonly previous: string } = DEFAULT_KEYS,
+): Line {
   const t = activeTokens();
+  const HINTS: readonly KitHint[] = [[keys.next || DEFAULT_KEYS.next, 'next'], [keys.previous || DEFAULT_KEYS.previous, 'prev']];
   const line = createEmptyLine(width);
   for (const cell of line) cell.bg = '';
   const rightEdge = width - 3; // exclusive: right-aligned text ends at width-4

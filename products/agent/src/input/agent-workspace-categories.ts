@@ -3,6 +3,12 @@ import { actRow, settingAction } from './agent-workspace-category-actions.ts';
 import { AGENT_WORKSPACE_HOST_CATEGORY } from './agent-workspace-host-category.ts';
 import { AGENT_WORKSPACE_ONBOARDING_DETAIL_CATEGORIES } from './agent-workspace-onboarding-categories.ts';
 import { THEME_MODE_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
+import { GATE_PRESETS } from '@goodvibes/engine/platform/platform/gate/presets';
+
+/** The "When GoodVibes asks" row: each mode in one line of what it does, from the presets' own short lines. */
+const MODE_ROW_DETAIL = (['ask-me', 'jev-decides', 'just-vibes', 'yolo', 'plan'] as const)
+  .map((name) => `${GATE_PRESETS[name].label}: ${GATE_PRESETS[name].short}.`)
+  .join(' ');
 
 // Listed in AGENT_WORKSPACE_GROUP_ORDER: the everyday work first, setting up after.
 export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = freezeDeclaration(inGroupOrder([
@@ -11,9 +17,9 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     group: 'START',
     label: 'Home',
     summary: 'Everything the assistant can do, grouped by what you want to get done.',
-    detail: 'Pick the lane that matches what you want, or just close this and type. Every page here is also reachable later.',
+    detail: 'Pick what you want to do, or just type to ask the assistant.',
     actions: [
-      { id: 'chat', label: 'Just start typing', detail: 'Close this workspace and ask for anything, research, reminders, email, documents, or scheduling. Typing any letter here does the same, and the letter lands in the composer; Esc on what you typed, before it is sent, comes back to the area and row you left (a single stray letter is dropped, anything longer stays in the composer).', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
+      { id: 'chat', label: 'Just start typing', detail: 'Ask the assistant for anything: research, reminders, email, documents or scheduling.', kind: 'guidance', commandBehavior: 'exit', safety: 'safe' },
       actRow('assistant-setup-lane', 'setup'),
       { id: 'assistant-personal-ops-lane', label: 'Inbox, calendar & reminders', detail: 'Daily personal operations in one place.', targetCategoryId: 'personal-ops', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-research-docs-lane', label: 'Research something', detail: 'Web research with visible runs, sources, and saved reports.', targetCategoryId: 'research', kind: 'workspace', safety: 'safe' },
@@ -111,7 +117,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     detail: 'Choose when GoodVibes asks to set who decides consequential actions. The rest stay at safe defaults unless you change them.',
     actions: [
       // Top-level approval policy
-      settingAction({ id: 'permissions-mode', label: 'When GoodVibes asks', detail: 'Choose Ask me, Jev decides, Just vibes or YOLO. Plan is a separate read-only posture.', key: 'permissions.mode' }),
+      settingAction({ id: 'permissions-mode', label: 'When GoodVibes asks', detail: MODE_ROW_DETAIL, key: 'permissions.mode' }),
       // Common per-tool overrides for file and shell work
       settingAction({ id: 'permissions-read', label: 'File reads', detail: 'deny refuses file reads; prompt leaves each read to the execution mode; allow also runs reads without asking when no decision model works.', key: 'permissions.tools.read' }),
       settingAction({ id: 'permissions-write', label: 'File writes', detail: 'deny refuses file writes; prompt leaves each write to the execution mode (ask-me runs an undoable change inside the workspace without asking); allow also runs writes without asking when no decision model works.', key: 'permissions.tools.write' }),
@@ -293,7 +299,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     group: 'CAPABILITIES',
     label: 'Tools & MCP',
     summary: 'The tool servers the assistant can use, and the secrets they need.',
-    detail: 'Configure and inspect task tools from the Agent TUI. Adding or changing tools requires typed confirmation; normal chat still chooses tools serially in the main conversation.',
+    detail: 'Configure and inspect task tools from the Agent. Save in the MCP screen writes a server and reloads the runtime; normal chat still chooses tools serially in the main conversation.',
     actions: [
       actRow('mcp-tools-server', 'mcp see-tools'),
       actRow('mcp-add-server', 'mcp add-server'),

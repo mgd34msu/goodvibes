@@ -1011,6 +1011,7 @@ const ROUTE_CODE_MEANINGS: Readonly<Record<string, string>> = {
   BATCH_ERROR: 'A batch request failed for a reason other than its input; the message says why',
   BROWSER_ELEMENT_STALE: 'The page changed under the element reference, so nothing was done; take a new snapshot and use a current reference',
   BROWSER_REQUEST_FAILED: 'The browser failed the request; the message is its error',
+  CLUSTER_SHARING_OFF: 'A machine-group action was refused because sharing inbound work with the group is switched off on this machine; nothing was changed; send it again with turnOnSharing true (the owner\'s yes), and it is kept and finishes when the daemon restarts',
   CLOUDFLARE_ERROR: 'A Cloudflare operation failed; the message names the step, what was done before it, and that nothing was rolled back',
   COMPANION_CHAT_CLIENT_RATE_LIMIT: 'This client has sent its limit of companion chat messages in the last minute; wait the seconds the message names',
   COMPANION_CHAT_SESSION_RATE_LIMIT: 'This chat session has sent its limit of messages in the last minute; wait the seconds the message names, or start a new session',

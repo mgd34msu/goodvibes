@@ -3,7 +3,7 @@ import { CONFIG_SCHEMA, decisionModelSet, decisionModelSettings, localOwnerActor
 import { DECISION_MODEL_PROFILES, captureJudgmentBackendSettings, validEndpointURL, type DecisionModelProfile } from '@goodvibes/judgment';
 import type { OpenSelection, SelectionItem } from './selection-modal.js';
 import type { ModelPickerChoice } from './model-picker-types.js';
-import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
+import { gatePresetLabel, presetForMode } from '@goodvibes/engine/platform/platform/gate/presets';
 import { purchaseModeChoices } from '@goodvibes/engine/platform/platform/payments/browser';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 
@@ -164,9 +164,9 @@ export function openSettingsChoice(
   if (action === 'decision-policy' || action === 'permission-mode') {
     const key = action === 'decision-policy' ? 'judgment.policy' : 'permissions.mode';
     const values = CONFIG_SCHEMA.find(setting => setting.key === key)?.enumValues ?? [];
-    open(action === 'decision-policy' ? 'Decision models' : 'Execution permissions',
-      // The default policy reads "Hybrid (default)"; only the bare value is stored.
-      values.map(value => ({ id: value, label: key === 'permissions.mode' ? gatePresetLabel(value) : value === 'Hybrid' ? 'Hybrid (default)' : value, detail: POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
+    open(action === 'decision-policy' ? 'Decision models' : 'When GoodVibes asks',
+      // The default policy reads "Hybrid (default)"; only the bare value is stored. A mode's row says what it does.
+      values.map(value => ({ id: value, label: key === 'permissions.mode' ? gatePresetLabel(value) : value === 'Hybrid' ? 'Hybrid (default)' : value, detail: key === 'permissions.mode' ? presetForMode(value).short : POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
       { preSelectId: String(config.get(key)), allowSearch: true },
       result => { if (!result) return;
         if (key === 'permissions.mode' && setExecutionMode) { if (current()) { setExecutionMode(result.item.id); changed(); } }

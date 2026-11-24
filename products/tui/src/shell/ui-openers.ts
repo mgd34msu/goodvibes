@@ -1,5 +1,6 @@
 import { createModelPickerCommandOpeners } from '@goodvibes/engine/terminal-shell/model-picker-open';
 import { shortcutGroups } from '../renderer/shortcut-groups.ts';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createSettingsWorkspaceOpener } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
 import { modelPickerCatalogServices } from '@goodvibes/engine/terminal-shell/model-picker-targets';
 import { createCommonShellUiOpeners } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
@@ -39,7 +40,7 @@ import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { classifyServiceSettingChange } from '@goodvibes/engine/terminal-shell/service-setting-change';
 import { takeAppliedThemeMessage } from '../renderer/theme-mode-config.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
-import { buildFirstOpenItems, decodeFirstOpenChoice, selfRecordWorkspaceRegistration } from '../cli/tui-startup.ts';
+import { buildFirstOpenItems, decodeFirstOpenChoice, readFolderTrustFacts, selfRecordWorkspaceRegistration } from '../cli/tui-startup.ts';
 import type { SettingsDaemonCredentialWriter } from '../input/settings-modal-secrets.ts';
 import type { DaemonOwnedConfigWriter } from '../input/settings-modal-mutations.ts';
 import { WorkspaceTrustDecisionUnsettledError, type WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -80,6 +81,8 @@ type WireShellUiOpenersOptions = {
   homeDirectory: string;
   getConfiguredProviderIds: () => string[];
   getPinned: () => Promise<string[]>;
+  /** Hear PROVIDERS_CHANGED, so an open model picker shows a fresh list when it arrives. */
+  onProvidersChanged?: ((listener: () => void) => () => void) | undefined;
   render: () => void;
   /** Trust-at-consequence-time bridge, patched here with the real modal-driving implementation. */
   trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean };
@@ -151,7 +154,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
   // request is refused and the next non-read request asks again.
   trustPromptRef.requestTrustDecision = () =>
     new Promise((resolve, reject) => {
-      const { title, items } = buildFirstOpenItems();
+      const { title, items } = buildFirstOpenItems(readFolderTrustFacts(workingDirectory, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')));
       if (!commandContext.openSelection) {
         reject(new WorkspaceTrustDecisionUnsettledError());
         return;
@@ -245,6 +248,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     }),
     picker: input.modelPicker,
     render,
+    ...(options.onProvidersChanged ? { onModelsChanged: options.onProvidersChanged } : {}),
     listModels: () => providerRegistry.getSelectableModels().filter((m) => providerRegistry.has(m.provider)),
     listProviders: () => [...new Set(providerRegistry.listModels().map((m) => m.provider))].filter((id) => providerRegistry.has(id)),
     currentModelId: getCurrentModelForPickerTarget,
@@ -398,6 +402,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       // The keyboard shortcuts, the list's last group, from the live key table.
       shortcuts: () => paletteShortcuts(commandContext.workspace?.keybindingsManager),
       describe: (id) => (id === 'model' ? commandContext.session.runtime.model || undefined : undefined),
+      // Suggested's counts, kept beside input history, and only where history is kept.
+      usageFile: configManager.get('behavior.saveHistory') === false ? undefined : commandContext.workspace?.shellPaths?.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'palette-usage.json'),
       // A command gone since the palette opened, or one that refuses, says so like a typed one.
       run: (name, args) => runPickedCommand(commandContext.executeCommand, name, [...args], (message) => commandContext.print(message)),
       fill: (name) => {

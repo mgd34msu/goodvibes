@@ -48,6 +48,7 @@ import { evaluateOutwardEffect } from '../../security/untrusted-content.js';
 import { isSendToOwnerOnly } from '../../security/owner-identity.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { attachHandler } from './attach-handler.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 
 /** One inbox message, in the shape `email.inbox.list` advertises. */
 export interface EmailGatewayMessageSummary {
@@ -388,7 +389,10 @@ export function createEmailInboxUpdateHandler(service: EmailGatewayService): Gat
     }
     const uidValidity = readUidValidity(params.uidValidity);
     if (!service.updateMessage) return unsupported('changing a message');
-    return service.updateMessage({ uid, action: action as EmailGatewayMessageAction, uidValidity });
+    const result = await service.updateMessage({ uid, action: action as EmailGatewayMessageAction, uidValidity });
+    // Read, unread, archived or trashed: every view of the mailbox reads it again.
+    noteListChanged({ list: 'mail', change: 'changed', id: String(uid) });
+    return result;
   };
 }
 

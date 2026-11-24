@@ -122,7 +122,7 @@ export function serviceSettingsIssues(facts: CliServiceSettingsFacts): CliServic
       summary: 'The daemon service is not restarted after a failure.',
       cause: 'service.restartOnFailure is false.',
       impact: 'A daemon that crashes stays down until it is started again.',
-      action: 'goodvibes-daemon config set service.restartOnFailure true, then goodvibes-daemon refresh-service',
+      action: 'goodvibes-daemon config set service.restartOnFailure true (the daemon service rewrites its definition with it; it takes effect at the next daemon start)',
     });
   }
   return issues;

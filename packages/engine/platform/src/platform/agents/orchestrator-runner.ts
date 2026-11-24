@@ -1,4 +1,5 @@
 import type { ChatRequest } from '../providers/interface.js';
+import { buildProviderUserContent } from '../companion/companion-chat-attachments.js';
 import { decisionModelUse, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { prepareDecisionRouterTurn, describeDecisionRoute, chatWithDecisionRoute } from '../providers/decision-router.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
@@ -577,7 +578,11 @@ async function runAgentTaskWithPolicy(context: AgentOrchestratorRunContext, reco
       : 0;
 
     conversation = session.conversation;
-    conversation.addUserMessage(record.task);
+    // The task, with the native request's files when it carried any (the chat attachment path: small text and images inline, the rest named as not read).
+    const taskContent = context.taskAttachments
+      ? await buildProviderUserContent(record.task, context.taskAttachments.attachments, context.taskAttachments.artifacts)
+      : record.task;
+    conversation.addUserMessage(taskContent);
     if (decisionRoute) conversation.addNotice(describeDecisionRoute(decisionRoute.info), { level: 'info', kind: 'operational' });
     const wake = record.resumeSteer ? Object.freeze({ ...record.resumeSteer }) : undefined;
     record.resumeSteer = undefined;

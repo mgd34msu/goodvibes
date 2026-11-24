@@ -270,10 +270,12 @@ export type {
 export { ProviderSetupReadings, classifyProviderSetup, describeProviderSetup, providerSetupFrom, providerSetupState } from './provider-setup.js';
 export type { ProviderSetupClass, ProviderSetupClassification, ProviderSetupFacts, ProviderSetupReadOptions } from './provider-setup.js';
 
-export { installCatalogModelFacts, catalogTextWork } from './model-catalog-facts.js';
+export { installCatalogModelFacts, catalogTextWork, modelPriceTier, MODEL_PRICE_TIER_WORDS } from './model-catalog-facts.js';
 export { recommendModels, MAX_RECOMMENDED } from './model-recommendations.js';
 export type { RecommendationCandidate } from './model-recommendations.js';
-export type { CatalogTextWork } from './model-catalog-facts.js';
+export type { CatalogTextWork, ModelPriceTier } from './model-catalog-facts.js';
+export { ModelPriceChanges, MODEL_PRICE_CHANGES_FILE } from './model-price-changes.js';
+export type { ModelPriceChange } from './model-price-changes.js';
 export { ModelFamilyReadings, modelFamilyReadings } from './model-family.js';
 export type { ModelFamily, ModelFamilyInput } from './model-family.js';
 

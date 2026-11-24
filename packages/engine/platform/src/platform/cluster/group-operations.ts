@@ -45,6 +45,7 @@ import {
 } from './group-store.js';
 import type { ClusterGroupSettings } from './group-settings.js';
 import { summarizeError } from '../utils/error-display.js';
+import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 import { grantGeneration, type AdmissionFailure } from './group-admissions.js';
 import { authorityKey, emptyAuthorityRecord, type AnyAuthorityEntry } from './authority-record.js';
 import type { AdmissionGrant } from './group-membership.js';
@@ -77,13 +78,14 @@ export type GroupOperationResult<T> =
      * self-resolving) from "replies arrived that I could not verify" (worth
      * telling the operator, but not proof of anything).
      */
-    readonly failure?: AdmissionFailure | MembershipOperationFailure;
+    /** `sharing-off`: a join while `cluster.enabled` is off, without the owner's yes to turning it on (`turnOnSharing`). */
+    readonly failure?: AdmissionFailure | MembershipOperationFailure | 'sharing-off';
   };
 
 function failed(
   error: string,
   fix: string,
-  options: { readonly terminal?: boolean; readonly failure?: AdmissionFailure | MembershipOperationFailure } = {},
+  options: { readonly terminal?: boolean; readonly failure?: AdmissionFailure | MembershipOperationFailure | 'sharing-off' } = {},
 ): GroupOperationResult<never> {
   return {
     ok: false,
@@ -209,6 +211,8 @@ export interface GroupOperationsContext {
   readonly electionSecret?: (() => 'none' | 'set' | 'unavailable') | undefined;
   /** The authority record, for `cluster publish|accept user:<name>` (owner decision D2). */
   readonly authorityRecord?: AuthorityRecordFile | undefined;
+  /** Saves `cluster.enabled` true, for a join the owner said yes to while sharing was off; applied at the next start. */
+  readonly enableSharing?: (() => void) | undefined;
 }
 
 /**
@@ -357,14 +361,115 @@ export interface JoinGroupInput {
   readonly groupId: string;
   readonly joinKey: string;
   readonly timeoutMs?: number | undefined;
+  /**
+   * The owner's yes, asked by the caller (opening on No), to turn sharing on
+   * (`cluster.enabled`) when it is off: the join is stored as pending, sharing
+   * is set on, and the join finishes at the daemon's next start.
+   */
+  readonly turnOnSharing?: boolean | undefined;
 }
 
-export interface JoinGroupResult {
+export interface JoinGroupResult extends PendingRestartFields {
   readonly groupId: string;
   readonly groupName: string;
   readonly memberCount: number;
-  /** Set when the machine joined but something after joining did not complete. */
+  /** Set when the machine joined but something after joining did not complete; for a pending join, what happens next. */
   readonly warning?: string;
+}
+
+/**
+ * The secret-store name of a group action that finishes at the daemon's next
+ * start: one the owner asked for while sharing was off, kept while sharing is
+ * turned on and the daemon restarts to bring the group up. A secret because a
+ * join carries its join key.
+ */
+export const PENDING_GROUP_ACTION_SECRET_KEY = daemonSecretKeyFor('cluster.pendingAction');
+
+/** A group action stored to finish at the next start. */
+export type PendingGroupAction =
+  | { readonly kind: 'join'; readonly groupId: string; readonly joinKey: string; readonly at: number }
+  | { readonly kind: 'forget'; readonly nodeId: string; readonly at: number }
+  | { readonly kind: 'rotate'; readonly immediate: boolean; readonly at: number }
+  | { readonly kind: 'rename'; readonly name: string; readonly at: number }
+  | { readonly kind: 'publish' | 'accept'; readonly path: string; readonly at: number };
+
+/** The pending action, or null; an unreadable or malformed one reads as null. */
+export async function readPendingGroupAction(secrets: ClusterSecretStore): Promise<PendingGroupAction | null> {
+  let raw: string | null;
+  try { raw = await secrets.get(PENDING_GROUP_ACTION_SECRET_KEY); } catch { return null; }
+  if (!raw) return null;
+  let parsed: Record<string, unknown>;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (typeof value !== 'object' || value === null) return null;
+    parsed = value as Record<string, unknown>;
+  } catch { return null; }
+  const at = parsed['at'];
+  if (typeof at !== 'number') return null;
+  const text = (key: string): string | null => (typeof parsed[key] === 'string' ? parsed[key] as string : null);
+  switch (parsed['kind']) {
+    case 'join': {
+      const groupId = text('groupId'), joinKey = text('joinKey');
+      return groupId !== null && joinKey !== null ? { kind: 'join', groupId, joinKey, at } : null;
+    }
+    case 'forget': { const nodeId = text('nodeId'); return nodeId !== null ? { kind: 'forget', nodeId, at } : null; }
+    case 'rotate': return { kind: 'rotate', immediate: parsed['immediate'] === true, at };
+    case 'rename': { const name = text('name'); return name !== null ? { kind: 'rename', name, at } : null; }
+    case 'publish':
+    case 'accept': { const path = text('path'); return path !== null ? { kind: parsed['kind'], path, at } : null; }
+    default: return null;
+  }
+}
+
+/** Forget the pending action. */
+export async function clearPendingGroupAction(secrets: ClusterSecretStore): Promise<void> {
+  await secrets.delete(PENDING_GROUP_ACTION_SECRET_KEY);
+}
+
+/** What a group action answers once it is kept to finish after the restart that brings the group up. */
+export interface PendingRestartFields {
+  /** True when the action is stored and finishes after the daemon restarts (sharing was just turned on). */
+  readonly pending?: true;
+  /** For a pending action: the daemon restarting itself, or started by hand (the person restarts it), or its restart refused. */
+  readonly restart?: 'restarting' | 'by-hand' | 'failed';
+  /** For a pending action: what happens next, in the person's words. */
+  readonly warning?: string;
+}
+
+/** The words a group action with sharing off answers when the caller did not bring the owner's yes. */
+export const SHARING_OFF_FOR_JOIN = 'sharing inbound work with your other machines is switched off on this machine';
+export const SHARING_OFF_JOIN_FIX = 'join again and answer yes to turning sharing on (or pass --yes): the join is kept and finishes when the daemon restarts';
+/** The same refusal for forget, rotate, rename, publish and accept. */
+export const SHARING_OFF_ACTION_FIX = 'run it again and answer yes to turning sharing on (or pass --yes): it is kept and finishes when the daemon restarts';
+
+/**
+ * Keep an action asked for while sharing is off: written and read back before
+ * anything else changes, then sharing is set on. A stop after the write leaves
+ * the action for the next start, which drops it (and says so) when sharing was
+ * never set, and finishes it when it was.
+ */
+async function keepForRestart(context: GroupOperationsContext, action: PendingGroupAction): Promise<GroupOperationResult<null>> {
+  if (!context.enableSharing) return failed(SHARING_OFF_FOR_JOIN, SHARING_OFF_ACTION_FIX, { failure: 'sharing-off' });
+  await context.secrets.set(PENDING_GROUP_ACTION_SECRET_KEY, JSON.stringify(action));
+  const stored = await readPendingGroupAction(context.secrets);
+  if (stored === null || JSON.stringify(stored) !== JSON.stringify(action)) {
+    return failed('the action could not be kept in this daemon\'s secret store, so sharing was not turned on', 'check the secret store, then run it again');
+  }
+  context.enableSharing();
+  return { ok: true, data: null };
+}
+
+/** The refusal (or the kept action) of a group action asked for while sharing is off. */
+async function whileSharingOff<T>(
+  context: GroupOperationsContext,
+  turnOnSharing: boolean | undefined,
+  action: PendingGroupAction,
+  placeholder: T,
+): Promise<GroupOperationResult<T & PendingRestartFields>> {
+  if (turnOnSharing !== true) return failed(SHARING_OFF_FOR_JOIN, SHARING_OFF_ACTION_FIX, { failure: 'sharing-off' });
+  const kept = await keepForRestart(context, action);
+  if (!kept.ok) return kept;
+  return { ok: true, data: { ...placeholder, pending: true } };
 }
 
 /**
@@ -385,10 +490,13 @@ async function joinGroupOwned(
   owner: ClusterMembershipOperation,
 ): Promise<GroupOperationResult<JoinGroupResult>> {
   if (!context.settings.enabled) {
-    return failed(
-      'sharing inbound work with your other machines is switched off on this machine',
-      'turn it on first: `config set cluster.enabled true`, then restart the daemon',
-    );
+    const groupId = input.groupId.trim();
+    const joinKey = normalizeJoinKey(input.joinKey ?? '');
+    if (input.turnOnSharing !== true || !context.enableSharing) return failed(SHARING_OFF_FOR_JOIN, SHARING_OFF_JOIN_FIX, { failure: 'sharing-off' });
+    if (groupId.length === 0 || joinKey.length === 0) return failed('a group id and a join key are both required', 'run `cluster join` again and give both');
+    const kept = await keepForRestart(context, { kind: 'join', groupId, joinKey, at: Math.trunc(context.now()) });
+    if (!kept.ok) return kept;
+    return { ok: true, data: { groupId, groupName: '', memberCount: 0, pending: true } };
   }
   // A machine that still holds this same group's membership may join it again
   // with the current join key: that is how a machine that was removed while it
@@ -559,7 +667,7 @@ export function groupNodes(context: GroupOperationsContext): GroupOperationResul
   };
 }
 
-export interface ForgetNodeResult {
+export interface ForgetNodeResult extends PendingRestartFields {
   readonly nodeId: string;
   readonly displayName: string;
   readonly memberCount: number;
@@ -602,20 +710,21 @@ export interface ForgetNodeResult {
 export function forgetNode(
   context: GroupOperationsContext,
   nodeId: string,
+  options: { readonly turnOnSharing?: boolean | undefined } = {},
 ): Promise<GroupOperationResult<ForgetNodeResult>> {
-  return membershipOperation(context, owner => forgetNodeOwned(context, nodeId, owner));
+  return membershipOperation(context, owner => forgetNodeOwned(context, nodeId, owner, options.turnOnSharing));
 }
 
 async function forgetNodeOwned(
   context: GroupOperationsContext,
   nodeId: string,
   owner: ClusterMembershipOperation,
+  turnOnSharing?: boolean,
 ): Promise<GroupOperationResult<ForgetNodeResult>> {
   if (!context.settings.enabled) {
-    return failed(
-      'sharing inbound work with your other machines is switched off on this machine, so a removal would not reach the group',
-      'turn it on first: `config set cluster.enabled true`, then restart the daemon',
-    );
+    // A removal must reach the group: it is kept, sharing is turned on, and it finishes once the group is up.
+    return whileSharingOff(context, turnOnSharing, { kind: 'forget', nodeId, at: Math.trunc(context.now()) },
+      { nodeId, displayName: nodeId, memberCount: 0, keyGeneration: 0 });
   }
   const state = context.runtime.groupState;
   if (!state || !context.runtime.keyMaterial) {
@@ -689,7 +798,7 @@ async function forgetNodeOwned(
   };
 }
 
-export interface RotateKeyResult {
+export interface RotateKeyResult extends PendingRestartFields {
   readonly groupId: string;
   readonly keyGeneration: number;
   readonly memberCount: number;
@@ -717,7 +826,7 @@ export interface RotateKeyResult {
  */
 export function rotateGroupKey(
   context: GroupOperationsContext,
-  input: { readonly immediate?: boolean | undefined } = {},
+  input: { readonly immediate?: boolean | undefined; readonly turnOnSharing?: boolean | undefined } = {},
 ): Promise<GroupOperationResult<RotateKeyResult>> {
   const captured = { ...input };
   return membershipOperation(context, owner => rotateGroupKeyOwned(context, captured, owner));
@@ -725,7 +834,7 @@ export function rotateGroupKey(
 
 async function rotateGroupKeyOwned(
   context: GroupOperationsContext,
-  input: { readonly immediate?: boolean | undefined },
+  input: { readonly immediate?: boolean | undefined; readonly turnOnSharing?: boolean | undefined },
   owner: ClusterMembershipOperation,
 ): Promise<GroupOperationResult<RotateKeyResult>> {
   const material = context.runtime.keyMaterial;
@@ -736,10 +845,9 @@ async function rotateGroupKeyOwned(
     );
   }
   if (!context.settings.enabled) {
-    return failed(
-      'sharing inbound work with your other machines is switched off on this machine',
-      'turn it on first: `config set cluster.enabled true`, then restart the daemon',
-    );
+    // The new key must reach the group: it is kept, sharing is turned on, and it is replaced once the group is up.
+    return whileSharingOff(context, input.turnOnSharing, { kind: 'rotate', immediate: input.immediate === true, at: Math.trunc(context.now()) },
+      { groupId: material.groupId, keyGeneration: 0, memberCount: 0, immediate: input.immediate === true, acceptedGenerations: [] });
   }
   const immediate = input.immediate === true;
   context.runtime.assertMembershipOperation(owner);
@@ -798,7 +906,7 @@ async function leaveGroupOwned(context: GroupOperationsContext, owner: ClusterMe
   return { ok: true, data: result };
 }
 
-export interface RenameGroupResult {
+export interface RenameGroupResult extends PendingRestartFields {
   readonly groupId: string;
   readonly groupName: string;
 }
@@ -814,6 +922,7 @@ export interface RenameGroupResult {
 export function renameGroupTo(
   context: GroupOperationsContext,
   displayName: string,
+  options: { readonly turnOnSharing?: boolean | undefined } = {},
 ): Promise<GroupOperationResult<RenameGroupResult>> {
   return membershipOperation(context, async (owner): Promise<GroupOperationResult<RenameGroupResult>> => {
     const state = context.runtime.groupState;
@@ -822,10 +931,9 @@ export function renameGroupTo(
       return failed('this machine is not in a group', 'create a group with `cluster create` first');
     }
     if (!context.settings.enabled) {
-      return failed(
-        'sharing inbound work with your other machines is switched off on this machine, so a new name would not reach the group',
-        'turn it on first: `config set cluster.enabled true`, then restart the daemon',
-      );
+      // A new name must reach the group: it is kept, sharing is turned on, and it is given once the group is up.
+      return whileSharingOff(context, options.turnOnSharing, { kind: 'rename', name: displayName, at: Math.trunc(context.now()) },
+        { groupId: material.groupId, groupName: displayName });
     }
     context.runtime.assertMembershipOperation(owner);
     const groupName = await context.runtime.renameGroup(displayName);
@@ -834,7 +942,7 @@ export function renameGroupTo(
 }
 
 /** What `cluster publish` or `cluster accept` did with one shared setting. */
-export interface SettingDecisionResult {
+export interface SettingDecisionResult extends PendingRestartFields {
   readonly path: string;
   /** `held` when this machine does not hold the group's settings yet: the value is sent once it does. */
   readonly decision: 'published' | 'held' | 'accepted';
@@ -851,15 +959,15 @@ export async function decideLocalSetting(
   context: GroupOperationsContext,
   path: string,
   decision: 'publish' | 'accept',
+  options: { readonly turnOnSharing?: boolean | undefined } = {},
 ): Promise<GroupOperationResult<SettingDecisionResult>> {
   if (!context.runtime.groupState || !context.runtime.keyMaterial) {
     return failed('this machine is not in a group', 'there is no group setting to send to or take from; `cluster create` or `cluster join` first');
   }
   if (!context.settings.enabled) {
-    return failed(
-      'sharing inbound work with your other machines is switched off on this machine, so nothing reaches or comes from the group',
-      'turn it on first: `config set cluster.enabled true`, then restart the daemon',
-    );
+    // Nothing reaches or comes from the group while sharing is off: the decision is kept and made once the group is up.
+    return whileSharingOff(context, options.turnOnSharing, { kind: decision, path, at: Math.trunc(context.now()) },
+      { path, decision: decision === 'publish' ? 'published' as const : 'accepted' as const });
   }
   try {
     // `user:<name>`: a username held by separate accounts made on different
@@ -1001,14 +1109,15 @@ export interface ClusterGroupVerbSurface {
   key(): GroupOperationResult<JoinKeyResult>;
   nodes(): GroupOperationResult<NodesResult>;
   groups(): GroupOperationResult<readonly DiscoveredGroup[]>;
-  forget(nodeId: string): Promise<GroupOperationResult<ForgetNodeResult>>;
-  rotate(input: { immediate?: boolean }): Promise<GroupOperationResult<RotateKeyResult>>;
+  /** `turnOnSharing` on these five: the owner's yes to turning sharing on when it is off; the action then finishes after a restart. */
+  forget(nodeId: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<ForgetNodeResult>>;
+  rotate(input: { immediate?: boolean; turnOnSharing?: boolean }): Promise<GroupOperationResult<RotateKeyResult>>;
   leave(): Promise<GroupOperationResult<LeaveGroupResult>>;
-  rename(name: string): Promise<GroupOperationResult<RenameGroupResult>>;
+  rename(name: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<RenameGroupResult>>;
   /** Send this machine's value of a shared setting to the group. */
-  publish(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
+  publish(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
   /** Take the group's value of a shared setting here. */
-  accept(path: string): Promise<GroupOperationResult<SettingDecisionResult>>;
+  accept(path: string, options?: { turnOnSharing?: boolean }): Promise<GroupOperationResult<SettingDecisionResult>>;
 }
 
 /**
@@ -1029,11 +1138,11 @@ export function createClusterGroupVerbs(context: GroupOperationsContext): Cluste
     key: () => joinKeyForGroup(context),
     nodes: () => groupNodes(context),
     groups: () => groupsOnTheNetwork(context),
-    forget: (nodeId) => forgetNode(context, nodeId),
+    forget: (nodeId, options) => forgetNode(context, nodeId, options),
     rotate: (input) => rotateGroupKey(context, input),
     leave: () => leaveGroup(context),
-    rename: (name) => renameGroupTo(context, name),
-    publish: (path) => decideLocalSetting(context, path, 'publish'),
-    accept: (path) => decideLocalSetting(context, path, 'accept'),
+    rename: (name, options) => renameGroupTo(context, name, options),
+    publish: (path, options) => decideLocalSetting(context, path, 'publish', options),
+    accept: (path, options) => decideLocalSetting(context, path, 'accept', options),
   };
 }

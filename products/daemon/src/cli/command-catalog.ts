@@ -71,6 +71,7 @@ export type DaemonCliFlagField =
   | 'yes'
   | 'check'
   | 'all'
+  | 'lan'
   | 'provider'
   | 'model'
   | 'hostname'
@@ -518,7 +519,7 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     name: 'pair',
     aliases: ['qr', 'qrcode'],
     summary: 'Print the pairing link and QR code again, or mint one on a remote daemon.',
-    usage: 'goodvibes-daemon pair [--json] [--host <http(s)://name>] [--port <n>] [--token <t>] [-y]',
+    usage: 'goodvibes-daemon pair [--json] [--lan] [--host <http(s)://name>] [--port <n>] [--token <t>] [-y]',
     detail: [
       'LOCAL FORM (no --host, or one naming this machine): print the same pairing',
       'block a daemon prints once at startup: the web origin, the offers a new',
@@ -546,9 +547,15 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
       'non-interactive answer. Without -y',
       'nothing is changed. An unreachable daemon, a rejected token, and a daemon too',
       'old to serve the mint verb are each refused by name, never a stack trace.',
+      '',
+      '--lan (local form only) does both steps a phone needs in one run: it serves the',
+      'web UI to your network, as goodvibes-daemon webui enable --lan does, then prints',
+      'the code for the phone. Serving to the network is stated first and needs -y;',
+      'without it nothing is changed. Undo it with goodvibes-daemon webui enable --loopback.',
     ],
     flags: [
       JSON_FLAG,
+      { tokens: ['--lan'], field: 'lan', kind: 'boolean', summary: 'Serve the web UI to your network first (needs -y), then print the code for a phone.' },
       ...REMOTE_TARGET_FLAGS,
       YES_FLAG,
     ],
@@ -937,6 +944,7 @@ function createDefaultFlags(): DaemonCliFlags {
     yes: false,
     check: false,
     all: false,
+    lan: false,
     provider: undefined,
     model: undefined,
     hostname: undefined,

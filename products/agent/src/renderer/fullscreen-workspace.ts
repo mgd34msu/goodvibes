@@ -17,8 +17,9 @@
  * category rail, the context rows and the control rows are plain rows. This
  * frame lays them into the standard modal geometry over the dimmed screen:
  * the rail on the left (✦ group headers, the selected area as the gradient
- * or in the brand color when focus is on the actions), an element panel on
- * the right holding the context above and the controls below, and the
+ * or in the brand color when focus is on the actions; a folded group as its
+ * heading and count), an element panel on the right holding the controls
+ * above and the context below, and the
  * footer's key/action pairs as keycap hints. Rows arrive pre-wrapped to the
  * widths getFullscreenWorkspaceMetrics reports, so nothing is clipped.
  */
@@ -60,6 +61,8 @@ export interface WorkspaceRow {
   readonly fg?: string;
   readonly bg?: string;
   readonly kind?: 'group' | 'item' | 'more' | 'empty';
+  /** A group heading whose areas are not listed (it opens when the selection moves into it). */
+  readonly folded?: boolean;
 }
 
 export interface FullscreenWorkspaceRenderOptions {
@@ -154,10 +157,10 @@ export function getFullscreenWorkspaceMetrics(options: Pick<
   // below the controls' minimum.
   const maxContextRows = Math.max(2, Math.min(Math.round(panelRows * 0.5), panelRows - Math.min(MIN_CONTROL_ROWS, Math.max(4, panelRows - 2)) - 1));
   const minContextRows = clamp(options.minContextRows ?? 10, 2, maxContextRows);
-  // On a short screen the context keeps at least six rows (the controls keep
-  // four), so what the selected row does stays readable; taller screens are
-  // unchanged.
-  const shortScreenFloor = Math.min(6, Math.max(2, panelRows - 5));
+  // On a short screen the context keeps at least four rows (the rows to choose
+  // from, drawn first, keep the rest), so what the selected row does stays
+  // readable; taller screens are unchanged.
+  const shortScreenFloor = Math.min(4, Math.max(2, panelRows - 6));
   const contextRows = Math.max(shortScreenFloor, clamp(
     Math.max(Math.round(panelRows * (options.contextRatio ?? 0.4)), options.contextNeed ?? 0),
     Math.min(minContextRows, maxContextRows),
@@ -170,7 +173,8 @@ export function getFullscreenWorkspaceMetrics(options: Pick<
 function rowFg(row: WorkspaceRow, fallback: string): string {
   if (row.fg) return row.fg;
   if (row.kind === 'group') return WORKSPACE_PALETTE.subtitle;
-  if (row.kind === 'more') return WORKSPACE_PALETTE.dim;
+  // A "more" marker is read, not decoration: muted text, never the border colour.
+  if (row.kind === 'more') return WORKSPACE_PALETTE.muted;
   return fallback;
 }
 
@@ -214,7 +218,11 @@ export function renderFullscreenWorkspace(options: FullscreenWorkspaceRenderOpti
   let y = f.top;
   for (const row of options.leftRows) {
     if (y > f.bottom) break;
-    if (row.kind === 'group') {
+    if (row.kind === 'group' && row.folded === true) {
+      // A folded group: its heading and how many areas it holds, marked as closed.
+      canvas.put(railX0 - MODAL_MARK_INSET, y, GLYPHS.navigation.collapsed, { fg: t.textMuted });
+      canvas.put(railX0, y, row.text.trim().toLowerCase(), { fg: t.accent });
+    } else if (row.kind === 'group') {
       canvas.put(railX0 - MODAL_MARK_INSET, y, '✦', { fg: t.brandEnd });
       canvas.put(railX0, y, row.text.trim().toLowerCase(), { fg: t.accent, bold: true });
     } else if (row.text.length > 0) {
@@ -233,7 +241,7 @@ export function renderFullscreenWorkspace(options: FullscreenWorkspaceRenderOpti
     y++;
   }
 
-  // Element panel: context above, controls below.
+  // Element panel: controls above, context below.
   const panelX = railX1 + 3;
   const p = panel(canvas, panelX, f.top, f.r + 2 - panelX + 1, f.bottom - f.top + 1);
   const sx = p.l;
@@ -255,32 +263,39 @@ export function renderFullscreenWorkspace(options: FullscreenWorkspaceRenderOpti
   const contextRows = wrapRows(options.contextRows);
   const controlRows = wrapRows(options.controlRows);
   // Context longer than its share says how much it leaves out instead of stopping silently.
-  const contextOverflow = contextRows.length > metrics.contextRows;
-  const contextShown = contextOverflow ? metrics.contextRows - 1 : metrics.contextRows;
-  for (let k = 0; k < contextShown && py <= p.bottom; k++, py++) {
-    const row = contextRows[k];
-    if (!row || row.text.length === 0) continue;
-    canvas.put(sx, py, row.text, { fg: rowFg(row, WORKSPACE_PALETTE.text), bold: row.bold });
-  }
-  if (contextOverflow && py <= p.bottom) {
-    canvas.put(sx, py++, `${contextRows.length - contextShown} more lines`, { fg: t.textFaint });
-  }
-  py++;
-  const controlOverflow = controlRows.length > metrics.controlRows;
-  const controlShown = controlOverflow ? metrics.controlRows - 1 : metrics.controlRows;
-  for (let k = 0; k < controlShown && py <= p.bottom; k++, py++) {
-    const row = controlRows[k];
-    if (!row || row.text.length === 0) continue;
-    const text = panelText(row.text).replace(/\s+$/, '');
-    if (row.selected) {
-      canvas.grad(sx - MODAL_MARK_INSET, py, sr - sx + 1 + 2 * MODAL_MARK_INSET, t.brand, t.brandEnd);
-      canvas.put(sx, py, text, { fg: t.selectedListItemText, bold: true });
-    } else {
-      canvas.put(sx, py, text, { fg: rowFg(row, WORKSPACE_PALETTE.text), bold: row.bold });
+  const drawContext = (): void => {
+    const contextOverflow = contextRows.length > metrics.contextRows;
+    const contextShown = contextOverflow ? metrics.contextRows - 1 : metrics.contextRows;
+    for (let k = 0; k < contextShown && py <= p.bottom; k++, py++) {
+      const row = contextRows[k];
+      if (!row || row.text.length === 0) continue;
+      canvas.put(sx, py, row.text, { fg: rowFg(row, WORKSPACE_PALETTE.text), bold: row.bold });
     }
-  }
-  if (controlOverflow && py <= p.bottom) {
-    canvas.put(sx, py, `${controlRows.length - controlShown} more lines`, { fg: t.textFaint });
-  }
+    if (contextOverflow && py <= p.bottom) {
+      canvas.put(sx, py++, `${contextRows.length - contextShown} more lines`, { fg: t.textMuted });
+    }
+  };
+  const drawControls = (): void => {
+    const controlOverflow = controlRows.length > metrics.controlRows;
+    const controlShown = controlOverflow ? metrics.controlRows - 1 : metrics.controlRows;
+    for (let k = 0; k < controlShown && py <= p.bottom; k++, py++) {
+      const row = controlRows[k];
+      if (!row || row.text.length === 0) continue;
+      const text = panelText(row.text).replace(/\s+$/, '');
+      if (row.selected) {
+        canvas.grad(sx - MODAL_MARK_INSET, py, sr - sx + 1 + 2 * MODAL_MARK_INSET, t.brand, t.brandEnd);
+        canvas.put(sx, py, text, { fg: t.selectedListItemText, bold: true });
+      } else {
+        canvas.put(sx, py, text, { fg: rowFg(row, WORKSPACE_PALETTE.text), bold: row.bold });
+      }
+    }
+    if (controlOverflow && py <= p.bottom) {
+      canvas.put(sx, py++, `${controlRows.length - controlShown} more lines`, { fg: t.textMuted });
+    }
+  };
+  // The rows to choose from come first; what the area and the selected row are follows below them.
+  drawControls();
+  py++;
+  drawContext();
   return finishModal(f);
 }

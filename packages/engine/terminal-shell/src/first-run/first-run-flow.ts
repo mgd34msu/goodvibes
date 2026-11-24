@@ -13,7 +13,7 @@
  * splash): step 3's lines are drawn under the splash (splash-additions.ts).
  */
 import type { ConfigManager, OAuthProviderConfig, SecretsManager, SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
-import { createOAuthLocalListener, getSubscriptionProviderConfig } from '@goodvibes/engine/platform/platform/config';
+import { createOAuthLocalListener, getSubscriptionProviderConfig, readAuthorizationInput } from '@goodvibes/engine/platform/platform/config';
 import { resolveDefaultModelReadiness, type ModelDefinition, type ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import { localScanState } from '@goodvibes/engine/platform/platform/discovery';
 import { logger, openExternalUrl, summarizeError } from '@goodvibes/engine/platform/platform/utils';
@@ -21,10 +21,12 @@ import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SurfaceLayer } from '../renderer/surface-kit.js';
 import { renderChooseStep, renderSignInStep, type SignInStepView } from '../renderer/first-run.js';
-import { readAuthorizationInput } from '../settings-subscriptions.js';
 import { copyToClipboard } from '../clipboard.js';
 import { readFirstRunOffers, FIRST_SCREEN_PROVIDERS, LOCAL_OFFER_NAME, type DiscoveryView, type FirstRunOffers, type ProviderFact, type ProviderOffer, type ProviderRegistryView } from './offers.js';
 import { setFirstRunScreen } from './splash-state.js';
+
+/** How often first run looks again for a model server on this computer while it has found none. */
+const LOOK_AGAIN_EVERY_MS = 2_000;
 
 type SelectedModel = { readonly id: string; readonly provider: string; readonly displayName: string; readonly registryKey: string };
 
@@ -147,6 +149,8 @@ export class FirstRunModal implements SurfaceModal {
   private pickerOpened = false;
   private frameNo = 0;
   private spinner: ReturnType<typeof setInterval> | null = null;
+  /** While "no model server on this computer" shows: look again (loopback only) every two seconds. */
+  private lookAgain: ReturnType<typeof setInterval> | null = null;
 
   constructor(private readonly deps: FirstRunDeps, private readonly resumeProvider?: string | undefined) {}
 
@@ -187,6 +191,7 @@ export class FirstRunModal implements SurfaceModal {
     setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn });
     this.deps.redrawConversation?.();
     this.stopSpinner();
+    this.stopLookingAgain();
     this.host?.close(this, 'done');
     this.deps.renderRequest();
   }
@@ -402,6 +407,31 @@ export class FirstRunModal implements SurfaceModal {
     this.spinner = null;
   }
 
+  /**
+   * The step that found no model server looks for one by itself: every two seconds while it
+   * shows, the app's scan of this computer (loopback addresses only) runs again, and the
+   * step shows the models the moment one answers. It stops when a server is found, the step
+   * is left or first run closes.
+   */
+  private startLookingAgain(): void {
+    if (this.lookAgain) return;
+    this.lookAgain = setInterval(() => {
+      if (this.finished || this.step.kind !== 'local' || this.localModels().length > 0) {
+        this.stopLookingAgain();
+        this.deps.renderRequest();
+        return;
+      }
+      if (localScanState() !== 'running') this.deps.scanThisComputer?.();
+      this.deps.renderRequest();
+    }, LOOK_AGAIN_EVERY_MS);
+    (this.lookAgain as { unref?: () => void }).unref?.();
+  }
+
+  private stopLookingAgain(): void {
+    if (this.lookAgain) clearInterval(this.lookAgain);
+    this.lookAgain = null;
+  }
+
   // -- step 2: a model on this computer ----------------------------------
 
   private localModels(): readonly { readonly model: SelectedModel; readonly label: string; readonly detail: string }[] {
@@ -481,12 +511,14 @@ export class FirstRunModal implements SurfaceModal {
     if (step.kind === 'choose') return false;
     if (step.kind === 'browser') step.close?.();
     this.stopSpinner();
+    this.stopLookingAgain();
     this.step = { kind: 'choose' };
     return true;
   }
 
   onClose(reason: SurfaceModalCloseReason): void {
     this.stopSpinner();
+    this.stopLookingAgain();
     const step = this.step;
     if (step.kind === 'browser') step.close?.();
     if (!this.finished) {
@@ -526,10 +558,15 @@ export class FirstRunModal implements SurfaceModal {
     }
     const models = this.localModels();
     step.selected = Math.min(step.selected, Math.max(0, models.length - 1));
+    // The first look shows "Looking…"; once it found nothing, the looks that follow keep the
+    // "found none" text steady instead of flickering between the two.
+    const scanning = localScanState() === 'running';
+    if (models.length === 0 && !this.finished && !scanning) this.startLookingAgain();
+    else if (models.length > 0) this.stopLookingAgain();
     return {
       kind: 'local', name: LOCAL_OFFER_NAME,
       models: models.map((entry) => ({ label: entry.label, detail: entry.detail })),
-      selected: step.selected, none: models.length === 0, scanning: localScanState() === 'running', error: step.error,
+      selected: step.selected, none: models.length === 0, scanning: scanning && this.lookAgain === null, error: step.error,
     };
   }
 }

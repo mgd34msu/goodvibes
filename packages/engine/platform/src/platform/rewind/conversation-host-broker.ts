@@ -259,8 +259,8 @@ export class ConversationRewindHostBroker implements RewindConversationPort {
     const owner = existing ? this.hostPrincipals.get(existing.hostId) : undefined;
     if (existing && owner !== undefined && owner !== input.principalId) {
       throw new ConversationRewindHostError(
-        `Session ${JSON.stringify(input.sessionId)} is already hosted by a surface registered by another principal. `
-        + 'Only that principal can replace it; until its lease lapses or it releases the session, rewind is served by that surface.',
+        `Session ${JSON.stringify(input.sessionId)} is already hosted by a surface another sign-in or device registered. `
+        + 'Only that sign-in or device can replace it; until its lease lapses or it releases the session, rewind is served by that surface.',
         'held-by-another-principal',
         'sessionId',
       );

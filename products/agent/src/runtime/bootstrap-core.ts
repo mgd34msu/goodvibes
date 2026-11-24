@@ -66,6 +66,7 @@ import { registerAgentRuntimeEvents } from './agent-runtime-events.ts';
 import { installAgentOrchestratorDependencies } from './agent-orchestrator-deps.ts';
 import { moveLiveSession, type LiveSessionBindingDeps } from './live-session-binding.ts';
 import { createStartupNotices, type StartupNotices } from './startup-notices.ts';
+import { installAgentGoogleRepair } from './google-repair.ts';
 
 export interface BootstrapCoreState {
   readonly userSessionId: string;
@@ -328,6 +329,13 @@ export async function initializeBootstrapCore(
     `Saved approvals could not be loaded from ${services.shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'approvals.jsonl')}; approval requests will fail until the file is repaired or removed`,
     () => approvalBroker.start(),
   );
+  // A Google request in this process that meets no connection, a missing scope,
+  // a dead grant or a disabled API repairs it from that request; the consent
+  // link is shown here at once.
+  bootstrapUnsubs.push(installAgentGoogleRepair({
+    configManager, secretsManager: services.secretsManager, homeDirectory, permissionManager,
+    notify: (text) => { systemMessageRouterRef.value?.high(text); },
+  }));
   // The session's one Google connection (made when the google tool was
   // registered) refreshes once now, so a revoked grant is said at start rather
   // than by the first call that fails. Not connected says nothing.
@@ -335,7 +343,8 @@ export async function initializeBootstrapCore(
   if (googleConnection !== undefined) {
     startupNotices.guard('The Google account could not be checked', async () => {
       const check = await googleConnection.checkAtBoot();
-      if (check.needsReauthorization) startupNotices.report(`[Startup] ${check.detail} Run /google connect to connect the account again.`);
+      // The fact only: the first request that needs Google opens the consent (runtime/google-repair.ts).
+      if (check.needsReauthorization) startupNotices.report(`[Startup] ${check.detail}`);
     });
   }
   startupNotices.guard(

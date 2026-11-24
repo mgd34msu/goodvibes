@@ -58,6 +58,13 @@ export interface PairingHandoffDeps {
   readonly webOrigin?: (() => string | undefined) | undefined;
   /** Whether a phone can open that origin, from the daemon's settings (`pairingReachFromSettings`); absent ⇒ not judged. */
   readonly reach?: ((origin: string) => PairingReach) | undefined;
+  /**
+   * Serve the web UI to the network (what `goodvibes-daemon webui enable --lan`
+   * writes) and resolve once the daemon's own listener reports it is bound
+   * again; the caller asked the owner first (`serveToNetwork: true`). Absent:
+   * the request is refused as before.
+   */
+  readonly serveToNetwork?: (() => Promise<void>) | undefined;
 }
 
 /** The daemon's answer about the address a pairing code carries: the decision, with the steps when a phone could not open it. */
@@ -77,7 +84,7 @@ function pairingPosture(deps: PairingHandoffDeps, origin: string): OriginPosture
 function requirePrincipal(invocation: GatewayMethodInvocation): string {
   const principalId = invocation.context.principalId;
   if (!principalId) {
-    throw new GatewayVerbError('Pairing hand-off verbs require an authenticated principal', 'UNAUTHENTICATED', 401);
+    throw new GatewayVerbError('Sign in first: handing off a pairing needs a signed-in user or a paired device', 'UNAUTHENTICATED', 401);
   }
   return principalId;
 }
@@ -133,9 +140,18 @@ function createHandoffCreateHandler(deps: PairingHandoffDeps): GatewayMethodHand
     // No code is made that a phone could not open. A client pairing itself
     // (fromSharedToken) or a code asked for a browser on this machine
     // (forThisMachine) is not for another device, so it is not judged.
-    const webOrigin = deps.webOrigin?.();
+    if (params.serveToNetwork !== undefined && typeof params.serveToNetwork !== 'boolean') {
+      throw new GatewayVerbError('serveToNetwork must be true or false', 'INVALID_ARGUMENT', 400, 'serveToNetwork');
+    }
+    let webOrigin = deps.webOrigin?.();
     if (webOrigin && !fromSharedToken && params.forThisMachine !== true) {
-      const reach = reachAnswer(deps, webOrigin);
+      let reach = reachAnswer(deps, webOrigin);
+      // The owner said yes to serving the web UI to his network: the daemon does it, waits for its listener, and pairs in the same call.
+      if (reach !== undefined && !reach.otherDevices && params.serveToNetwork === true && deps.serveToNetwork) {
+        await deps.serveToNetwork();
+        webOrigin = deps.webOrigin?.() ?? webOrigin;
+        reach = reachAnswer(deps, webOrigin);
+      }
       if (reach !== undefined && !reach.otherDevices) {
         throw new GatewayVerbError(
           `No pairing code was made: a phone could not open it yet (${reach.reason ?? 'the daemon serves only its own machine'}). `
@@ -226,6 +242,24 @@ function createPostureGetHandler(deps: PairingHandoffDeps): GatewayMethodHandler
     }
     // With no origin supplied the answer is about the address a pairing code carries, so it says whether a phone can open it.
     return { posture: supplied === undefined ? pairingPosture(deps, origin) : describeOriginPosture(origin) };
+  };
+}
+
+/**
+ * pairing.serve.network, the owner's yes to serving the web UI to his network:
+ * the daemon does it and answers once its listener is bound again, with the
+ * posture of the address a pairing code now carries.
+ */
+function createServeNetworkHandler(deps: PairingHandoffDeps): GatewayMethodHandler {
+  return async (invocation) => {
+    requirePrincipal(invocation);
+    if (!deps.serveToNetwork) {
+      throw new GatewayVerbError('This daemon cannot change how it is served from here; on its machine run goodvibes-daemon webui enable --lan', 'UNAVAILABLE', 409);
+    }
+    await deps.serveToNetwork();
+    const origin = deps.webOrigin?.();
+    if (!origin) throw new GatewayVerbError('The web UI is served to the network, but no web origin is configured', 'ORIGIN_UNKNOWN', 404);
+    return { posture: pairingPosture(deps, origin) };
   };
 }
 
@@ -321,6 +355,7 @@ const HANDOFF_HANDLER_FACTORIES: Readonly<Record<string, (deps: PairingHandoffDe
   'pairing.handoff.create': createHandoffCreateHandler,
   'pairing.handoff.complete': createHandoffCompleteHandler,
   'pairing.posture.get': createPostureGetHandler,
+  'pairing.serve.network': createServeNetworkHandler,
 };
 
 /**

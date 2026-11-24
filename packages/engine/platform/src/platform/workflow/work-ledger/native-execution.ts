@@ -251,7 +251,8 @@ export function createNativeWorkExecutionHost(deps: {
         || request.input.projectRoot !== projectRoot || request.input.sessionId !== deps.sessionId || request.input.ask !== work.title
         || !isDeepStrictEqual(request.input.selectedModel, model) || source.goal !== work.goal || !isDeepStrictEqual(source.criteria, work.criteria)
         || (work.source !== null && (source.sourceId !== work.source.sourceId || source.sourceRevision !== work.source.sourceRevision
-          || !isDeepStrictEqual(source.continuation, work.source.version === 2 ? work.source.continuation : undefined)))) throw new NativeWorkExecutionError('stale');
+          || !isDeepStrictEqual(source.continuation, work.source.version === 2 ? work.source.continuation : undefined)
+          || !isDeepStrictEqual(source.attachments, work.source.version === 2 ? work.source.attachments : undefined)))) throw new NativeWorkExecutionError('stale');
       return request;
     }
     // Reuse the existing ledger identity for the criteria key, including after
@@ -261,7 +262,9 @@ export function createNativeWorkExecutionHost(deps: {
     const key = { workId: target.workId, criteriaId: 'criteria-v2:' + work.id, criteriaRevision: String(target.criteriaRevision), attemptId: target.attemptId };
     const source = captureNativeContractSource({ sourceId: work.source?.sourceId ?? randomUUID(), sourceRevision: work.source?.sourceRevision ?? randomUUID(), inputRevision: randomUUID(),
       criteriaId: key.criteriaId, criteriaRevision: key.criteriaRevision, goal: work.goal, criteria: work.criteria,
-      ...(work.source?.version === 2 && work.source.continuation ? { continuation: work.source.continuation } : {}) });
+      ...(work.source?.version === 2 && work.source.continuation ? { continuation: work.source.continuation } : {}),
+      // The request's files, by id, for whoever does the work.
+      ...(work.source?.version === 2 && work.source.attachments ? { attachments: work.source.attachments.map(attachment => ({ ...attachment })) } : {}) });
     if (sourceActionId !== undefined && !/^[0-9a-f]{64}$/.test(sourceActionId)) throw new NativeWorkExecutionError('invalid');
     const binding = { sourceId: source.sourceId, inputRevision: source.inputRevision, actionId: sourceActionId ?? randomBytes(32).toString('hex'), actionRevision: randomUUID(),
       authorityId: randomUUID(), authorityRevision: 'owner-commitment-pending', scopeId: randomUUID(), scopeRevision: randomUUID() };

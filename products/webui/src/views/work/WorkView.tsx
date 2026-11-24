@@ -6,8 +6,14 @@
  * rows, their words and every count are the work board's (work-items.ts over
  * contracts/src/work-board.ts); this view draws them and opens a row's detail.
  *
+ * Waiting for you lists the most urgent first (the board's order): a purchase
+ * window by the time it runs out, with a clock pill, a bar of the time spent
+ * and its "Stop it" on the row; then what can't be undone; then what weakens a
+ * safety setting, each with its pill; then the rest, newest first.
+ *
  * Header: "Work" and, while anything waits, the chip "2 waiting for you", then
- * "New". A search narrows the rows; Show switches to the fleet archive. On
+ * "New". A search narrows the rows; Show switches to only what waits for you
+ * (`?tab=waiting`, the chat banner's "Review N") or to the fleet archive. On
  * desktop the first row waiting for you opens in the detail by itself; on a
  * phone the detail is a full-screen pane with Back. An ask opens its card
  * (ApprovalDetail, ux A2.5).
@@ -20,7 +26,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Archive, History, Inbox, ListChecks, RefreshCw, Search } from 'lucide-react';
+import { Archive, Clock, History, Inbox, ListChecks, RefreshCw, Search, TriangleAlert } from 'lucide-react';
 import type { BoardRow } from '@goodvibes/engine/contracts';
 import { client as platformClient } from '../../lib/goodvibes';
 import { firstArray, firstString } from '../../lib/object';
@@ -30,7 +36,7 @@ import { WORK } from '../../components/shell/nav';
 import { parseFleetFocusFromHash, stripFleetFocusFragment } from '../../lib/push/fleet-focus-link';
 import { formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
-import { approvalAsk } from '../../lib/asks';
+import { approvalAsk, isAnswerable } from '../../lib/asks';
 import { isClosedStatus } from '../../lib/sessions-union';
 import { useOpenAsks } from '../../hooks/useOpenAsks';
 import {
@@ -80,7 +86,8 @@ const WORKSPACE_CHECKPOINTS_KEY = 'workspace:checkpoints';
 /** The project work plan detail. */
 const WORK_PLAN_KEY = 'workspace:work-plan';
 
-type ShowScope = 'active' | 'archived';
+/** Active work, only what waits for you (the chat banner's "Review N" opens it), or the archive. */
+type ShowScope = 'active' | 'waiting' | 'archived';
 
 export interface WorkViewProps {
   tab?: string;
@@ -116,23 +123,65 @@ function useNow(fast: boolean): number {
   return now;
 }
 
-function BoardRowItem({ row, selected, child, onSelect }: { row: BoardRow; selected: boolean; child: boolean; onSelect: () => void }) {
+/** A row's own quick answer: "Stop it" on a purchase that goes ahead by itself. */
+interface RowAnswer {
+  readonly label: string;
+  readonly run: () => void;
+  readonly busy: boolean;
+}
+
+/** How far a countdown has run, 0 to 1, for the bar under its row. */
+function countdownSpent(from: number | undefined, until: number | undefined, now: number): number | undefined {
+  if (from === undefined || until === undefined || until <= from) return undefined;
+  return Math.min(1, Math.max(0, (now - from) / (until - from)));
+}
+
+function BoardRowItem({ row, selected, child, onSelect, answer, now }: {
+  row: BoardRow; selected: boolean; child: boolean; onSelect: () => void;
+  answer?: RowAnswer | undefined; now: number;
+}) {
+  const urgency = row.urgency;
+  const spent = urgency?.kind === 'countdown' ? countdownSpent(urgency.from, urgency.until, now) : undefined;
+  const className = ['work-row', 'work-row--board', child ? 'work-row--child' : '', urgency ? `work-row--${urgency.kind}` : ''].filter(Boolean).join(' ');
+  const title = urgency ? (
+    <span className="work-row__titled">
+      <span className={`work-row__pill work-row__pill--${urgency.kind}`}>
+        {urgency.kind === 'countdown' ? <Clock aria-hidden="true" /> : <TriangleAlert aria-hidden="true" />}
+        {urgency.label}
+      </span>
+      <span>{row.title}</span>
+    </span>
+  ) : row.title;
+  const meta = row.meta.full || spent !== undefined ? (
+    <>
+      {row.meta.full}
+      {spent !== undefined && (
+        <span className="work-row__bar" aria-hidden="true"><span style={{ width: `${Math.round(spent * 100)}%` }} /></span>
+      )}
+    </>
+  ) : undefined;
   return (
     <Row
-      className={child ? 'work-row work-row--board work-row--child' : 'work-row work-row--board'}
+      className={className}
       selected={selected}
       onSelect={onSelect}
-      title={row.title}
-      meta={row.meta.full || undefined}
-      aria-label={[row.title, row.meta.full].filter(Boolean).join(', ')}
+      title={title}
+      meta={meta}
+      aria-label={[urgency?.label, row.title, row.meta.full].filter(Boolean).join(', ')}
+      trailing={answer ? (
+        <Button size="sm" variant="secondary" disabled={answer.busy} onClick={answer.run}>{answer.label}</Button>
+      ) : undefined}
     />
   );
 }
 
-function BoardGroup({ label, rows, selectedKey, onOpen, action }: {
+function BoardGroup({ label, rows, selectedKey, onOpen, action, answerFor, now }: {
   label: string; rows: readonly BoardRow[]; selectedKey: string; onOpen: (key: string) => void;
   /** The group's own management, beside its heading (the Scheduled group opens the schedules screen). */
   action?: { readonly label: string; readonly run: () => void } | undefined;
+  /** A row's quick answer, when it has one. */
+  answerFor?: ((row: BoardRow) => RowAnswer | undefined) | undefined;
+  now: number;
 }) {
   if (rows.length === 0) return null;
   const ids = new Set(rows.map((row) => row.ref.id));
@@ -152,6 +201,8 @@ function BoardGroup({ label, rows, selectedKey, onOpen, action }: {
               child={row.parentId !== undefined && ids.has(row.parentId)}
               selected={key === selectedKey}
               onSelect={() => onOpen(key)}
+              answer={answerFor?.(row)}
+              now={now}
             />
           );
         })}
@@ -173,7 +224,8 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
   const phone = useMediaQuery(PHONE_QUERY);
   const [query, setQuery] = useState('');
   const [schedulesOpen, setSchedulesOpen] = useState(false);
-  const [scope, setScope] = useState<ShowScope>('active');
+  const [scope, setScope] = useState<ShowScope>(tab === 'waiting' ? 'waiting' : 'active');
+  const waitingOnly = scope === 'waiting';
   const [archiving, setArchiving] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
 
@@ -272,7 +324,15 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
     contracts: data.contractRecords,
   }, now), [asks, data.nodes, data.attemptGroups, data.sessionRecords, chatTitles, data.hostedRecords, data.taskRecords, data.watchRecords, data.contractRecords, now]);
   const board = work.board;
-  const archive = useMemo(() => (archived ? archivedRows(data.nodes, now) : []), [archived, data.nodes, now]);
+  // A purchase that goes ahead by itself can be stopped from its row: the same choice the card's "Stop it" sends.
+  const answerFor = (row: BoardRow): RowAnswer | undefined => {
+    if (row.urgency?.kind !== 'countdown') return undefined;
+    const ask = asks.find((entry) => entry.key === row.ref.id);
+    const stop = ask?.presentation.countdown?.verb === 'goes ahead' ? ask.presentation.choices.find((choice) => choice.id === 'object') : undefined;
+    if (!ask || !stop || !isAnswerable(ask)) return undefined;
+    return { label: stop.label, busy: askActions.busy, run: () => { void askActions.choose(ask, stop); } };
+  };
+  const archive =useMemo(() => (archived ? archivedRows(data.nodes, now) : []), [archived, data.nodes, now]);
   const filter = (rows: readonly BoardRow[]) => rows.filter((row) => matchesQuery(row, query));
   const groups = {
     waiting: filter(board.groups.waiting),
@@ -449,7 +509,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
   const anyRows = archived
     ? groups.archive.length > 0
     : groups.waiting.length + groups.running.length + groups.scheduled.length + groups.finished.length + groups.unhealthy.length > 0;
-  const nothingAtAll = !data.firstLoad && data.failures.length === 0 && !anyRows && (archived || openSessions.length === 0);
+  const nothingAtAll = !waitingOnly && !data.firstLoad && data.failures.length === 0 && !anyRows && (archived || openSessions.length === 0);
 
   const list = (
     <div className="work-board">
@@ -480,12 +540,22 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
 
       {data.firstLoad && <SkeletonRows count={6} label="Loading work" />}
 
-      {!data.firstLoad && !archived && (
+      {!data.firstLoad && waitingOnly && (
+        groups.waiting.length > 0
+          ? <BoardGroup label="Waiting for you" rows={groups.waiting} selectedKey={selectedKey} onOpen={openItem} answerFor={answerFor} now={now} />
+          : (
+            <EmptyState icon={<Inbox />} action={<Button onClick={() => setScope('active')}>Show all work</Button>}>
+              Nothing is waiting for you.
+            </EmptyState>
+          )
+      )}
+
+      {!data.firstLoad && !archived && !waitingOnly && (
         <>
-          <BoardGroup label="Waiting for you" rows={groups.waiting} selectedKey={selectedKey} onOpen={openItem} />
-          <BoardGroup label="Running now" rows={groups.running} selectedKey={selectedKey} onOpen={openItem} />
-          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} action={seeSchedules ? { label: seeSchedules, run: () => setSchedulesOpen(true) } : undefined} />
-          <BoardGroup label="Finished" rows={groups.finished} selectedKey={selectedKey} onOpen={openItem} />
+          <BoardGroup label="Waiting for you" rows={groups.waiting} selectedKey={selectedKey} onOpen={openItem} answerFor={answerFor} now={now} />
+          <BoardGroup label="Running now" rows={groups.running} selectedKey={selectedKey} onOpen={openItem} now={now} />
+          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} action={seeSchedules ? { label: seeSchedules, run: () => setSchedulesOpen(true) } : undefined} now={now} />
+          <BoardGroup label="Finished" rows={groups.finished} selectedKey={selectedKey} onOpen={openItem} now={now} />
 
           <div className="work-services">
             <button
@@ -558,7 +628,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
       )}
 
       {!data.firstLoad && archived && (
-        <BoardGroup label="Archive" rows={groups.archive} selectedKey={selectedKey} onOpen={openItem} />
+        <BoardGroup label="Archive" rows={groups.archive} selectedKey={selectedKey} onOpen={openItem} now={now} />
       )}
 
       {nothingAtAll && (
@@ -639,6 +709,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
               placement="bottom-end"
               options={[
                 { value: 'active', label: 'Active' },
+                { value: 'waiting', label: 'Waiting for you' },
                 { value: 'archived', label: 'Archive' },
               ]}
             />

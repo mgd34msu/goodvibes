@@ -12,7 +12,9 @@ import {
   showRememberedRules,
   type PermissionsCommandContext,
 } from '@goodvibes/engine/platform/platform/gate/policy';
+import { describeModeInForceWords, modeInForceLine, type ModeInForceWords } from '@goodvibes/engine/platform/platform/permissions';
 import type { TerminalCommandRegistry } from './command-registry.js';
+import type { CommandReport } from './command-actions/types.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext } from './command-actions/types.js';
@@ -34,6 +36,30 @@ const RULES = defineList<unknown>({
   operator: { method: 'permissions.rules.list', input: {}, rows: { from: 'rules', value: 'id', label: 'description', state: 'effect' } },
 });
 
+/**
+ * The one step that puts the chosen mode in force, from why it is not: the
+ * setting that fixes it, opened by its `/settings open` line.
+ */
+function causeFix(words: ModeInForceWords): { readonly sentence: string; readonly label: string; readonly line: string } | undefined {
+  const because = words.because ?? '';
+  if (because === 'no decision model set') return { sentence: 'No decision model is set up, so GoodVibes asks you itself.', label: 'Choose a decision model', line: '/settings open judgment.model' };
+  if (because === 'decision models switched off') return { sentence: 'Decision models are switched off, so GoodVibes asks you itself.', label: 'Turn decision models on', line: '/settings open judgment.policy' };
+  if (because === 'not measured yet') return { sentence: `${words.chosen} is only the default here and has not been measured on your decision model.`, label: `Choose ${words.chosen} yourself, or another mode`, line: '/settings open permissions.mode' };
+  if (because === 'an old auto-approve setting is on') return { sentence: 'An old auto-approve setting runs everything without asking.', label: 'Choose a mode (this clears it)', line: '/settings open permissions.mode' };
+  if (because.startsWith('decision model')) return { sentence: 'The decision model is not answering, so GoodVibes asks you itself.', label: 'Choose another decision model', line: '/settings open judgment.model' };
+  return undefined;
+}
+
+/** What `/permissions mode` reports: the mode in force, why it differs from the choice, and the one fix. */
+export function permissionModeReport(words: ModeInForceWords): CommandReport {
+  const fix = words.inForce ? causeFix(words) : undefined;
+  return {
+    verdict: words.inForce ? 'attention' : 'ok',
+    headline: `Permissions: ${modeInForceLine(words)}. ${words.sentence} To choose another mode: /settings open permissions.mode.`,
+    items: fix ? [{ sentence: fix.sentence, fix: { label: fix.label, line: fix.line } }] : [],
+  };
+}
+
 /** Register `/permissions` with where this app keeps its rules. */
 export function registerPermissionsCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, deps: PermissionsDeps<Ctx>): void {
   depsOf = deps as PermissionsDeps<unknown>;
@@ -43,8 +69,15 @@ export function registerPermissionsCommand<Ctx extends CommandActionContext>(reg
     title: 'Permissions',
     summary: 'See which permission settings are in force, and the rules that decide calls without asking',
     group: 'Permissions',
-    report: 'show',
+    report: 'mode',
     actions: [
+      readAction<Ctx>({
+        id: 'mode', label: 'See what GoodVibes asks you about now, and why', word: 'mode',
+        sentence: 'Shows the permission mode in force, what it does, why it differs from the one you chose, and the setting that changes it.',
+        readsOnlyThisMachine: true,
+        rowValue: async (ctx) => modeInForceLine(describeModeInForceWords(deps(ctx).configManager)),
+        async run(_values, ctx) { return permissionModeReport(describeModeInForceWords(deps(ctx).configManager)); },
+      }),
       readAction<Ctx>({
         id: 'show', label: 'See the permission settings in force', word: 'show',
         sentence: 'Shows the permission mode and settings in force, where each comes from, and how many rules there are.',

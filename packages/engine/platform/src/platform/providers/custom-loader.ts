@@ -109,6 +109,12 @@ export interface LoadCustomProvidersOptions {
    * and its credentials path.
    */
   reservedNames?: ReadonlySet<string> | undefined;
+  /**
+   * Where a provider's model list is stored between starts (the same store and
+   * age every built-in provider keeps), so it shows the list it read last until
+   * the fresh read answers.
+   */
+  modelsCachePath?: ((providerName: string) => string) | undefined;
 }
 
 /**
@@ -237,6 +243,7 @@ export async function loadCustomProviders(
     // The variable the file names is the provider's key route, so its status names
     // that variable (not a name derived from the provider id that nothing sets).
     const authEnvVars = cfg.apiKeyEnv ? [cfg.apiKeyEnv] : [];
+    const modelsCachePath = options.modelsCachePath?.(cfg.name);
 
     let provider: RegistrableProvider;
     try {
@@ -249,6 +256,7 @@ export async function loadCustomProviders(
           models: modelIds,
           authEnvVars,
           ...(cfg.defaultHeaders ? { defaultHeaders: cfg.defaultHeaders } : {}),
+          ...(modelsCachePath ? { modelsCachePath } : {}),
         });
       } else {
         provider = new OpenAICompatProvider({
@@ -260,6 +268,7 @@ export async function loadCustomProviders(
           authEnvVars,
           ...(cfg.defaultHeaders ? { defaultHeaders: cfg.defaultHeaders } : {}),
           reasoningFormat: cfg.reasoningFormat ?? 'none',
+          ...(modelsCachePath ? { modelsCachePath } : {}),
         });
       }
     } catch (err) {

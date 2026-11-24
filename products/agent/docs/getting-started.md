@@ -65,16 +65,22 @@ runs the three steps again).
 
 ## The Agent workspace
 
-`Ctrl+G` (or `/agent`) opens the Agent workspace; `Ctrl+P`, `?` and `/help`
-open the list of every command and key instead. The workspace is a set of
-pages, each a list of rows. A row changes a setting, opens the shared model
-picker, or opens the guided form of the slash command that does it, the same
-form the command opens when you type it. The side pane says what the selected
-row does and shows that command's own report, with the time it was read.
-Browsing the workspace never reaches the network: a report that reads a
-mailbox, a provider or the daemon is "not read yet" until you ask with
-`Ctrl+R`. The title row names the Agent home you are in and the account the
-chat model uses.
+`Ctrl+G` (or `/agent`, or a click on `ctrl+g workspace` at the right end of
+the status bar) opens the Agent workspace; `Ctrl+P`, `?` and `/help` open the
+list of every command and key instead. The workspace is a set of pages, each a
+list of rows. A row changes a setting, opens the shared model picker, or opens
+the guided form of the slash command that does it, the same form the command
+opens when you type it. Under the rows, the pane says what the selected row
+does and shows that command's own report, with the time it was read.
+Reports are read by themselves: what is waiting at every start, each area's
+reports as soon as you open it (the pane says "reading…" until they arrive),
+and `Ctrl+R` reads everything again now. A reading of something that changes
+on its own (the host, a mailbox, a provider) says "may be out of date" once
+it is more than 5 minutes old. The title row names the Agent home you are in,
+the model and provider it answers with, and the daemon it works with. On a
+small screen the groups you are not in fold to their name and count; moving
+into one opens it. Typing a letter takes you to the composer to ask the
+assistant, and a line above the composer says Esc brings you back.
 
 The pages are listed everyday work first, setting up after:
 

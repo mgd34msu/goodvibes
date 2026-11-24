@@ -3,10 +3,19 @@
  * one provider's row from the daemon's providers and models lists, and the
  * sentence `models.refresh`'s answer is said in.
  */
+import { MODEL_PRICE_TIER_WORDS, type ModelPriceTier } from '@goodvibes/engine/platform/platform/providers/model-catalog-facts';
 import { asRecord } from './object';
 import { deriveProviderStatus } from './provider-status';
 import type { ModelOption, ProviderOption } from './provider-models';
 import type { PickerModel, PickerProvider } from '../views/chat/ModelPicker';
+
+/**
+ * A model's price tier in the platform's words (models.list `priceTier`: "free",
+ * "paid", "subscription", "price not known"); undefined from a daemon that sends none.
+ */
+export function priceTierWords(tier: unknown): string | undefined {
+  return typeof tier === 'string' && Object.hasOwn(MODEL_PRICE_TIER_WORDS, tier) ? MODEL_PRICE_TIER_WORDS[tier as ModelPriceTier] : undefined;
+}
 
 /** The effort levels a model offers to choose from (two or more), from its models.list entry. */
 function effortLevelsOf(value: unknown): string[] {
@@ -19,8 +28,8 @@ function effortLevelsOf(value: unknown): string[] {
  * One provider as the menu shows it. Only models that can hold a conversation
  * are listed (`textWork` from the model catalog; `other` is left out, a model
  * the catalog does not describe is kept and marked), as the terminal's Main
- * chat tab does. A provider signed in only by a subscription is connected from
- * a terminal: its action is the command to copy.
+ * chat tab does. A provider not connected opens Settings, Models and providers;
+ * one signed in only by a subscription says "Sign in in Settings".
  */
 export function pickerProviderOf(provider: ProviderOption, options: readonly ModelOption[]): PickerProvider {
   const status = deriveProviderStatus(provider.value);
@@ -36,6 +45,7 @@ export function pickerProviderOf(provider: ProviderOption, options: readonly Mod
       providerId: option.providerId,
       efforts: provider.id === 'decision-router' ? [] : effortLevelsOf(value),
       kindUnknown: textWork !== 'text',
+      ...(priceTierWords(value.priceTier) ? { price: priceTierWords(value.priceTier) } : {}),
       ...(typeof value.recommended === 'string' && value.recommended ? { recommended: value.recommended } : {}),
     });
   }
@@ -48,7 +58,8 @@ export function pickerProviderOf(provider: ProviderOption, options: readonly Mod
     models,
     ...(typeof modelList.listedAt === 'number' ? { listedAt: modelList.listedAt } : {}),
     ...(typeof modelList.error === 'string' ? { listError: modelList.error } : {}),
-    connect: subscriptionOnly ? { kind: 'command', command: `/provider sign-in ${signInId}` } : { kind: 'settings' },
+    // Connected in Settings, Models and providers: a subscription is signed in to there, from this page.
+    connect: { kind: 'settings', subscription: subscriptionOnly && signInId.length > 0 },
   };
 }
 
@@ -66,7 +77,8 @@ interface RefreshReport {
 /** What a refresh did, in the words the terminal's /model refresh uses. */
 export function modelRefreshSentence(reports: readonly RefreshReport[]): string {
   const lines = reports.filter((report) => report.notAsked !== true).map((report) => {
-    if (report.error) return `${report.label}: could not be read (${report.error}); ${report.models} models from ${report.source === 'cache' ? 'its last list' : 'the built-in catalog'}`;
+    // Why it was not read is said once, on the provider's row in the menu.
+    if (report.error) return `${report.label}: not read now; its row says why`;
     const changes = [report.added.length > 0 ? `${report.added.length} new` : '', report.removed.length > 0 ? `${report.removed.length} retired` : ''].filter(Boolean);
     return `${report.label}: ${report.models} models found${changes.length > 0 ? ` (${changes.join(', ')})` : ''}`;
   });

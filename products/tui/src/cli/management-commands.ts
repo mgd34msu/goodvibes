@@ -11,7 +11,14 @@ import {
   PAIRING_HANDOFF_OFFER_KINDS,
   type PairingHandoffOfferKind,
 } from '@goodvibes/engine/platform/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingNoWebUiLines, pairingPostureNotice, pairingReadySteps, pairingThisMachineLines, pairingUnreachableLines, type OriginPosture } from '@goodvibes/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingNoWebUiLines, pairingPostureNotice, pairingReadySteps, pairingThisMachineLines, pairingUnreachableLines, SERVE_TO_NETWORK_QUESTION, type OriginPosture } from '@goodvibes/engine/platform/platform/pairing';
+
+/** The ordinary ask of a terminal command, opening on No (`[y/N]`). */
+async function askYesNoOnTerminal(question: string): Promise<boolean> {
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try { return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim()); } finally { rl.close(); }
+}
 import { defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
 import { formatHttpOrigin, pairingOriginUsesStableHost, refreshStableHostInputs, resolvePairingWebOrigin, resolveWebUiOrigin, stableUrlHostForBindHost } from '@goodvibes/engine/platform/platform/pairing';
 import { formatRuntimeEndpointBinding, resolveRuntimeEndpointBinding } from '@goodvibes/engine/terminal-shell';
@@ -149,7 +156,7 @@ function refusalCode(error: unknown): string | undefined {
 async function pairingReadiness(
   daemonVerbs: DaemonVerbCaller,
   pairCommand: string,
-): Promise<{ readonly kind: 'phone' } | { readonly kind: 'thisMachine'; readonly lines: readonly string[] } | { readonly kind: 'none'; readonly lines: readonly string[] }> {
+): Promise<{ readonly kind: 'phone' } | { readonly kind: 'thisMachine' | 'none'; readonly lines: readonly string[]; readonly servable?: true }> {
   let posture: OriginPosture;
   try {
     posture = (await daemonVerbs.invoke<{ readonly posture: OriginPosture }>('pairing.posture.get', {})).posture;
@@ -161,9 +168,10 @@ async function pairingReadiness(
   // serves only its own machine gives nothing a browser here could open.
   const reach = posture.reach;
   if (reach !== undefined && !reach.otherDevices) {
+    // Serving the daemon's web UI to its network would let a phone open it (`servable`).
     return daemonVerbs.probe().thisMachine === false
-      ? { kind: 'none', lines: pairingUnreachableLines(posture.origin, reach, pairCommand) }
-      : { kind: 'thisMachine', lines: pairingThisMachineLines(posture.origin, reach, pairCommand) };
+      ? { kind: 'none', lines: pairingUnreachableLines(posture.origin, reach, pairCommand), servable: true }
+      : { kind: 'thisMachine', lines: pairingThisMachineLines(posture.origin, reach, pairCommand), servable: true };
   }
   return { kind: 'phone' };
 }
@@ -176,7 +184,12 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<{ reado
   // first whether another device can reach the address it would carry. When
   // only this machine can, the code is made for a browser on this machine,
   // said so, with no QR.
-  const readiness = await pairingReadiness(daemonVerbs, 'goodvibes pair');
+  const asked = await pairingReadiness(daemonVerbs, 'goodvibes pair');
+  // Phones cannot reach the daemon yet: the one real question, asked in place (opening on No); on yes the
+  // daemon serves its web UI to the network and the code is made in the same request.
+  const serveToNetwork = asked.kind !== 'phone' && asked.servable === true && process.stdin.isTTY === true
+    && await askYesNoOnTerminal(SERVE_TO_NETWORK_QUESTION);
+  const readiness = serveToNetwork ? { kind: 'phone' as const } : asked;
   if (readiness.kind === 'none') return { output: readiness.lines.join('\n'), exitCode: 1 };
   const forThisMachine = readiness.kind === 'thisMachine';
   const output = await (async (): Promise<string> => {
@@ -197,6 +210,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<{ reado
       name,
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
       ...(forThisMachine ? { forThisMachine: true } : {}),
+      ...(serveToNetwork ? { serveToNetwork: true } : {}),
     });
     const link = result.deepLink ?? result.fragment;
     const offerKinds = result.offers.map((o) => o.kind);

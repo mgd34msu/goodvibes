@@ -9,8 +9,12 @@
  * topics it can open (its own form for each) and any actions only it has; a
  * topic a program does not pass is not listed there.
  */
-import type { ActionDescription, ActionValues, CommandDescription, FirstScreenGroup, InputDescription } from './command-actions/types.js';
-import { doAction } from './described-command-kit.js';
+import type { ActionDescription, ActionValues, CommandDescription, CommandReport, FirstScreenGroup, InputDescription } from './command-actions/types.js';
+import { doAction, readAction } from './described-command-kit.js';
+import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
+import { writeFileAtomic } from '@goodvibes/engine/platform/platform/utils';
+import { readFileSync } from 'node:fs';
 
 export type SetupTopicId =
   | 'model'
@@ -92,6 +96,61 @@ export interface SetupCommandOptions<Ctx> {
   readonly elsewhere: (id: SetupTopicId | SetupExtraId, label: string) => string;
   /** A right-hand dim note for a row (`Agent only`), read when the list opens. */
   readonly notes?: Partial<Record<SetupTopicId | SetupExtraId, string>> | undefined;
+  /** This program's settings, read when the list opens: the checklist's done marks and count. */
+  readonly settings?: ((ctx: Ctx) => SetupSettings | undefined) | undefined;
+  /** The recommended topics the person chose to skip for now, kept by the program. */
+  readonly skipped?: { read(ctx: Ctx): ReadonlySet<string>; skip(ctx: Ctx, id: SetupTopicId): void } | undefined;
+}
+
+/** The settings the checklist reads. */
+export type SetupSettings = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>;
+
+/** One checklist line: whether a recommended topic is done, and what is set when it is. */
+export interface SetupChecklistItem {
+  readonly id: SetupTopicId;
+  readonly done: boolean;
+  /** What is set (`rt-1`, `Ask me`, `sandbox on`), or what is missing. */
+  readonly note: string;
+}
+
+/** The topics most people set once, in order: the checklist and its count are these. */
+export const RECOMMENDED_SETUP_TOPICS: readonly SetupTopicId[] = ['model', 'how-it-works', 'safety', 'history'];
+
+/**
+ * The skipped topics kept in one small JSON file (`setup-skipped.json` beside
+ * the program's input history): read when `/setup` opens, written on a skip.
+ */
+export function setupSkipFile<Ctx>(pathOf: (ctx: Ctx) => string | undefined): NonNullable<SetupCommandOptions<Ctx>['skipped']> {
+  const read = (ctx: Ctx): ReadonlySet<string> => {
+    const path = pathOf(ctx);
+    if (!path) return new Set();
+    try {
+      const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+      return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []);
+    } catch { return new Set(); }
+  };
+  return {
+    read,
+    skip(ctx, id) {
+      const path = pathOf(ctx);
+      if (!path) return;
+      writeFileAtomic(path, `${JSON.stringify([...new Set([...read(ctx), id])])}\n`, { mkdirp: true });
+    },
+  };
+}
+
+/** The checklist from the settings in force: a few settings reads, no request. */
+export function readSetupChecklist(settings: SetupSettings): SetupChecklistItem[] {
+  const text = (key: string): string => { try { return String(settings.get(key as never) ?? '').trim(); } catch { return ''; } };
+  const flag = (key: string): boolean => { try { return settings.get(key as never) === true; } catch { return false; } };
+  const model = text('provider.model');
+  const modeChosen = settings.isExplicitlySet?.('permissions.mode') === true;
+  return [
+    { id: 'model', done: model.length > 0, note: model || 'no model chosen yet' },
+    { id: 'how-it-works', done: modeChosen, note: modeChosen ? `${gatePresetLabel(text('permissions.mode'))}, chosen` : 'when GoodVibes asks: the default, not chosen yet' },
+    { id: 'safety', done: flag('sandbox.enabled'), note: flag('sandbox.enabled') ? 'sandbox on' : 'sandbox off' },
+    { id: 'history', done: settings.isExplicitlySet?.('behavior.saveHistory') === true, note: flag('behavior.saveHistory') ? 'conversations are saved' : 'conversations are not saved' },
+  ];
 }
 
 const PAIR_INPUTS: readonly InputDescription[] = [
@@ -115,8 +174,51 @@ const ADD_PROVIDER_INPUTS: readonly InputDescription[] = [
 export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>): CommandDescription<Ctx> {
   const runOf = (id: SetupTopicId | SetupExtraId, label: string): SetupRun<Ctx> =>
     options.runs[id] ?? (async () => options.elsewhere(id, label));
-  const rowValue = (id: SetupTopicId | SetupExtraId) => async (): Promise<string> => options.notes?.[id] ?? '';
+  const checklist = (ctx: Ctx): SetupChecklistItem[] => {
+    const settings = options.settings?.(ctx);
+    return settings ? readSetupChecklist(settings) : [];
+  };
+  const skippedOf = (ctx: Ctx): ReadonlySet<string> => options.skipped?.read(ctx) ?? new Set();
+  // A recommended topic's row says whether it is done: `✓ rt-1`, `skipped for now`, or what is missing.
+  const rowValue = (id: SetupTopicId | SetupExtraId) => async (ctx: Ctx): Promise<string> => {
+    const item = checklist(ctx).find((entry) => entry.id === id);
+    if (!item) return options.notes?.[id] ?? '';
+    if (item.done) return `✓ ${item.note}`;
+    return skippedOf(ctx).has(id) ? 'skipped for now' : item.note;
+  };
+  const progress = (ctx: Ctx): { done: number; total: number; open: SetupChecklistItem[] } => {
+    const items = checklist(ctx);
+    const skipped = skippedOf(ctx);
+    return { done: items.filter((item) => item.done).length, total: items.length, open: items.filter((item) => !item.done && !skipped.has(item.id)) };
+  };
   const actions: ActionDescription<Ctx>[] = [];
+  if (options.settings) {
+    actions.push(readAction<Ctx>({
+      id: 'checklist', label: 'See what is set up', word: 'checklist', readsOnlyThisMachine: true,
+      sentence: 'Shows which of the things most people set once are done, and the line that sets each one that is not.',
+      rowValue: async (ctx) => { const p = progress(ctx); return `${p.done} of ${p.total} set up`; },
+      async run(_values, ctx): Promise<CommandReport> {
+        const p = progress(ctx);
+        return {
+          verdict: p.open.length === 0 ? 'ok' : 'attention',
+          headline: `${p.done} of ${p.total} set up.`,
+          items: p.open.map((item) => ({ sentence: `${SETUP_TOPICS[item.id].label}: ${item.note}.`, fix: { label: SETUP_TOPICS[item.id].label, line: `/setup ${SETUP_TOPICS[item.id].word}` } })),
+        };
+      },
+    }));
+    if (options.skipped) {
+      const skippable = RECOMMENDED_SETUP_TOPICS.map((id) => ({ value: id, label: SETUP_TOPICS[id].label }));
+      actions.push(doAction<Ctx>({
+        id: 'skip', label: 'Skip a topic for now', word: 'skip',
+        inputs: [{ id: 'topic', label: 'Topic', help: 'The topic to leave off the list of what is left', kind: 'choice', choices: skippable, required: true, typed: { position: 1 } }],
+        sentence: '{topic} is left off the list of what is left to set up; it stays in /setup.', example: { topic: 'safety' },
+        async run(values, ctx) {
+          options.skipped!.skip(ctx, values.topic as SetupTopicId);
+          return `${SETUP_TOPICS[values.topic as SetupTopicId]?.label ?? values.topic} is skipped for now; /setup ${values.topic} still opens it.`;
+        },
+      }));
+    }
+  }
   for (const id of Object.keys(SETUP_TOPICS) as SetupTopicId[]) {
     const words = SETUP_TOPICS[id];
     if (id === 'add-provider') {
@@ -144,12 +246,14 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
     }),
   );
   const rows: (string | FirstScreenGroup)[] = [
+    ...(options.settings ? ['checklist'] : []),
     'model', 'sign-in', 'add-provider', 'store-key',
     { label: 'Reach GoodVibes from elsewhere…', actions: REACH_GROUP },
     'chat-apps', 'who-signs-in', 'how-it-works',
     { label: 'Features and switches…', actions: FEATURE_GROUP },
     'history', 'import-settings',
     'pair', 'unpair',
+    ...(options.settings && options.skipped ? ['skip'] : []),
     'first-run',
   ];
   return {

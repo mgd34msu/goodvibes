@@ -43,6 +43,7 @@ import {
 } from '../../security/untrusted-content.js';
 import type { CalendarGatewayService } from './calendar.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 
 /** The slice of the verb-group deps this composition needs. */
 export interface CalendarCompositionDeps {
@@ -209,18 +210,24 @@ export function createDaemonCalendarGatewayService(
       throw error;
     }
   };
+  // A write the calendar accepted: every view of the calendar reads it again.
+  const written = async <T>(change: 'created' | 'changed' | 'deleted', run: () => Promise<T>): Promise<T> => {
+    const result = await explained(run);
+    noteListChanged({ list: 'calendar', change });
+    return result;
+  };
   return {
     // async, so a refusal from `select` reaches the caller as a rejection like
     // every other failure of these verbs rather than as a synchronous throw.
     listEvents: (input) => explained(async () => select().listEvents(input)),
     getEvent: (eventId, calendarId) => explained(async () => select().getEvent(eventId, calendarId)),
-    createEvent: (input) => explained(async () => select().createEvent(input)),
-    updateEvent: (eventId, changes, calendarId) => explained(async () => {
+    createEvent: (input) => written('created', async () => select().createEvent(input)),
+    updateEvent: (eventId, changes, calendarId) => written('changed', async () => {
       const backend = select();
       if (!backend.updateEvent) throw unsupported('update events');
       return backend.updateEvent(eventId, changes, calendarId);
     }),
-    deleteEvent: (eventId, calendarId) => explained(async () => {
+    deleteEvent: (eventId, calendarId) => written('deleted', async () => {
       const backend = select();
       if (!backend.deleteEvent) throw unsupported('delete events');
       return backend.deleteEvent(eventId, calendarId);
@@ -231,6 +238,6 @@ export function createDaemonCalendarGatewayService(
       return backend.listCalendars();
     }),
     exportIcs: (input) => explained(async () => select().exportIcs(input)),
-    importIcs: (icsContent, calendarId, options) => explained(async () => select().importIcs(icsContent, calendarId, options)),
+    importIcs: (icsContent, calendarId, options) => written('changed', async () => select().importIcs(icsContent, calendarId, options)),
   };
 }

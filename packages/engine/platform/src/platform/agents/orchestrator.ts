@@ -2,7 +2,7 @@ import type { LocalhostFetchApproval } from '../runtime/permissions/localhost-fe
 import { createCapturedCodeContext } from './captured-code-context.js';
 import { admitCapturedRegistryContext, type CapturedRegistryContext } from '../tools/registry-tool/captured-source.js';
 import { join } from 'node:path';
-import { getContractActionSource, getContractActionPort, type ContractActionPort } from '../tools/agent/contract-binding.js';
+import { getContractActionSource, getContractActionPort, getSourceAttachments, type ContractActionPort } from '../tools/agent/contract-binding.js';
 import { createCapturedExecNodeRuntimeAdmission } from '../tools/exec/captured-exec-runtime-input.js';
 import { createCapturedExecBunRuntimeAdmission } from '../tools/exec/captured-bun-runtime-input.js';
 import {
@@ -151,6 +151,8 @@ type AgentOrchestratorToolDeps = {
   readonly ownerQuestions?: import('../tools/query/index.js').QuestionInbox | (() => import('../tools/query/index.js').QuestionInbox) | undefined;
   /** Starts the contracts the agent and workflow tools hand work to (registerAllTools). */
   readonly contractRunner: Pick<import('../contract/runner.js').ContractRunner, 'start' | 'list' | 'get'>;
+  /** The artifact store a native request's files are read from, for the agents that do its work. */
+  readonly artifacts?: Pick<import('../companion/companion-chat-attachments.js').CompanionChatArtifactStore, 'readContent'> | undefined;
   readonly sessionOrchestration: import('../sessions/orchestration/index.js').CrossSessionTaskRegistry;
   readonly archetypeLoader?: import('./archetypes.js').ArchetypeLoader | undefined;
   readonly configManager?: ConfigManager | undefined;
@@ -1092,6 +1094,11 @@ export class AgentOrchestrator {
         getContractActionPort(record),
         surface,
       );
+      // A native request's files reach the agents that do its work, read through the chat attachment path.
+      // Kept with the contract's source getter (whichever runner owns the contract), else read from this runner's contract.
+      const attachments = getSourceAttachments(autonomousSource)
+        ?? (record.contractId ? this.toolDeps?.contractRunner.get(record.contractId)?.nativeSource?.attachments : undefined);
+      if (attachments && attachments.length > 0) context = { ...context, taskAttachments: { attachments, artifacts: this.toolDeps?.artifacts ?? null } };
       await runAgentTask(context, record);
     } finally {
       try {

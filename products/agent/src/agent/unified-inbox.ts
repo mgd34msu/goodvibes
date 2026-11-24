@@ -20,7 +20,7 @@
 
 import { readTriageViewText, type AgentWorkspaceChannelTriage } from '../input/agent-workspace-channel-triage.ts';
 import type { DaemonInvokeFailureKind, DaemonOperatorInvoke } from '@goodvibes/engine/terminal-shell/agent-turn/daemon-operator-client';
-import { UNKNOWN_PRINCIPAL_LABEL } from './principal-attribution.ts';
+import { UNKNOWN_SENDER_LABEL } from '@goodvibes/engine/platform/platform/channels';
 import { renderForModel, untrustedFrom } from './untrusted-content.ts';
 import type { Page } from '@goodvibes/engine/errors';
 
@@ -71,7 +71,7 @@ export interface UnifiedInboxRouteBindingItem {
   readonly surfaceId: string | null;
   /** Resolved sender principal, when the channel identity maps to one. Never a guess. */
   readonly principal: { readonly id: string; readonly name: string; readonly kind: string } | null;
-  /** Human-facing sender label, the resolved principal's "name (id)", or "unknown principal". */
+  /** Human-facing sender label, the resolved principal's "name (id)", or the platform's UNKNOWN_SENDER_LABEL. */
   readonly principalLabel: string;
   readonly sessionPolicy: string | null;
   readonly threadPolicy: string | null;
@@ -326,7 +326,7 @@ function toRouteBindingItem(raw: Record<string, unknown>): UnifiedInboxRouteBind
     surfaceKind: readString(raw, 'surfaceKind', 'unknown'),
     surfaceId: readStringOrNull(raw, 'surfaceId'),
     principal: toPrincipalOrNull(raw),
-    principalLabel: readString(raw, 'principalLabel', UNKNOWN_PRINCIPAL_LABEL),
+    principalLabel: readString(raw, 'principalLabel', UNKNOWN_SENDER_LABEL),
     sessionPolicy: readStringOrNull(raw, 'sessionPolicy'),
     threadPolicy: readStringOrNull(raw, 'threadPolicy'),
     deliveryGuarantee: readStringOrNull(raw, 'deliveryGuarantee'),
@@ -343,7 +343,7 @@ function toInboundMessageItem(raw: Record<string, unknown>): UnifiedInboxInbound
     id: readString(raw, 'id', 'inbound'),
     provider: readString(raw, 'provider', 'unknown'),
     messageKind: readString(raw, 'kind', 'unknown'),
-    from: readString(raw, 'from', UNKNOWN_PRINCIPAL_LABEL),
+    from: readString(raw, 'from', UNKNOWN_SENDER_LABEL),
     fromAddress: readStringOrNull(raw, 'fromAddress'),
     subject: readStringOrNull(raw, 'subject'),
     bodyPreview: readString(raw, 'bodyPreview'),

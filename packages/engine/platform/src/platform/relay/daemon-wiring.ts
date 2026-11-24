@@ -14,6 +14,7 @@ import type { SerializedRelayIdentity } from '@goodvibes/engine/transport-core/r
 import { isRelayTunneledRequest } from '@goodvibes/engine/daemon-api';
 import { refusal, refusalErrorBody } from '@goodvibes/engine/errors';
 import { createRelayReachability, type RelayReachability } from './reachability.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import type { RelayCodeStore } from './relay-codes.js';
 import { RELAY_CODE_HEADER } from '@goodvibes/engine/transport-core/relay';
 import type { StepUpService } from './step-up-service.js';
@@ -265,5 +266,8 @@ export function buildDaemonRelayReachability(
       error: (m, f) => logger.warn(`relay: ${m}`, f),
     },
   });
+  // Each status change (connecting, registered, not answering, refused) is announced, so a screen
+  // waiting on a relay pairing reads relay.reachability.get's words again.
+  reachability.onStatusChange(() => noteListChanged({ list: 'relay', change: 'changed' }));
   return reachability;
 }

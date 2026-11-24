@@ -12,6 +12,7 @@
 export {
   createRelayReachability,
   isRelayReachabilityEnabled,
+  RELAY_TURN_ON_QUESTION,
   type RelayReachability,
   type RelayReachabilityOptions,
   type RelayReachabilityConfig,
@@ -19,6 +20,7 @@ export {
   type RelayIdentityStore,
 } from './reachability.js';
 
+export { describeRelayStatus } from './status-words.js';
 export { buildDaemonRelayReachability, relayRequestFactsFrom, type RelayRequestFacts } from './daemon-wiring.js';
 
 export {

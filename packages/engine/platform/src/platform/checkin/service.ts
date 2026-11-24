@@ -34,6 +34,7 @@ import { isQuietHours, parseQuietHours } from './quiet-hours.js';
 import { readConsumerSetting } from '../config/profile-fallback.js';
 import { deliveryChannelProblem } from '../channels/delivery/types.js';
 import type { CheckinReceiptStore } from './receipts.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import {
   CHECKIN_CONFIG_KEYS,
   type CheckinConfig,
@@ -287,6 +288,7 @@ export class CheckinService {
     this.settingsChanged();
     // Joins the sync the subscriptions queued for these writes: one sync per update.
     await this.syncScheduledJob();
+    noteListChanged({ list: 'check-ins', change: 'changed' });
     return this.getConfig();
   }
 

@@ -15,6 +15,7 @@ export const coreConfigDefaults = {
     showReasoningSummary: false,
     showTokenSpeed: false,
     showToolPreview: false,
+    reduceMotion: false,
   },
   provider: {
     decisionRouter: DEFAULT_DECISION_ROUTER_SETTINGS,
@@ -243,6 +244,13 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     appliesWhen: 'now',
     type: 'boolean',
     description: 'Show partial tool call preview while streaming',
+  },
+  {
+    key: 'display.reduceMotion',
+    label: 'Reduce motion',
+    appliesWhen: 'now',
+    type: 'boolean',
+    description: 'Stops the terminal programs\' moving parts: the working spinner shows a still mark and an elapsed time, and running rows stop spinning. Answers still arrive as they are written unless "Show answers as they are written" is off',
   },
   {
     key: 'provider.decisionRouter',

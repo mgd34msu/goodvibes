@@ -215,3 +215,13 @@ export const queryKeys = {
   occasionsGifts: (occasionId: string) => ['occasions', 'gifts', occasionId] as const,
 };
 
+/**
+ * How a list the daemon sends no change event for stays current without a click:
+ * read again each time its view is opened and when the window or tab regains
+ * focus, keeping the rows on screen until the fresh answer arrives. The app's
+ * default leaves focus re-reads off (a re-read that costs a model call or money
+ * must never run on focus); these reads cost neither. When a list gains an
+ * event, the event moves it and this stays as the fallback.
+ */
+export const NO_EVENT_LIST_FRESHNESS = { refetchOnMount: 'always', refetchOnWindowFocus: true, refetchOnReconnect: true } as const;
+

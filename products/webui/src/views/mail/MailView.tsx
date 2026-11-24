@@ -31,7 +31,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-q
 import { AlertCircle, AlertTriangle, Archive, FileText, Inbox, Mail, MailOpen, Pencil, RefreshCw, Reply, Trash2 } from 'lucide-react';
 import { client as platformClient, IntentKey, isPressRefused, MAY_HAVE_BEEN_DONE } from '../../lib/goodvibes';
 import type { EmailDraftCreateInput, EmailSendInput, EmailUnreadableMessage } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { errorCode, formatError, isDaemonUnreachableError } from '../../lib/errors';
 import ErrorBoundary from '../../components/feedback/ErrorBoundary';
 import { useToast } from '../../lib/toast';
@@ -211,6 +211,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
       if (last.messages.length === 0 || loaded >= (pages[0]?.total ?? 0)) return undefined;
       return Math.min(...last.messages.map((message) => message.uid));
     },
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   // Each listed message carries the daemon's triage label (email.inbox.list joins
   // its inbox mirror by account and mailbox generation); normal mail has no mark.
@@ -228,6 +229,7 @@ export function MailView({ tabs }: MailViewProps = {}) {
   // oldest shown (by UID), so every draft in the folder is reachable here.
   const drafts = useInfiniteQuery({
     queryKey: ['email', 'drafts'] as const,
+    ...NO_EVENT_LIST_FRESHNESS,
     initialPageParam: undefined as number | undefined,
     queryFn: ({ pageParam }) => {
       // `before` is on email.drafts.list's schema; the generated input type gains it when the contract is regenerated.

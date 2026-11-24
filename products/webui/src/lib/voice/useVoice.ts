@@ -34,7 +34,7 @@ import {
   type UtteranceAudioArtifact,
 } from '@goodvibes/engine/platform/platform/voice/capture';
 import { client as platformClient } from '../goodvibes';
-import { queryKeys } from '../queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../queries';
 import { asRecord } from '../object';
 import { getClientLifetime, isClientLifetimeCurrent, subscribeClientLifetime } from '../client-lifetime';
 import { coalesceForSpeech } from './request-policy';
@@ -62,6 +62,7 @@ export function useVoiceStatus(): { availability: VoiceAvailability; isLoading: 
     queryKey: ['voice', 'status'],
     queryFn: () => platformClient.operator.voice.status(),
     staleTime: 30_000,
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   const availability = useMemo(() => deriveVoiceAvailability(query.data), [query.data]);
   return { availability, isLoading: query.isLoading };

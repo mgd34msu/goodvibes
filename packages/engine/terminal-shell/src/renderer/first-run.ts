@@ -285,7 +285,7 @@ function signInBody(view: SignInStepView, inner: number): { readonly lines: Styl
     wrap([{ text: view.scanning ? 'Looking for models on this computer…' : 'GoodVibes found no model server on this computer.' }]);
     if (!view.scanning) {
       blank();
-      wrap([{ text: 'Start one (Ollama, LM Studio or llama.cpp), then press ⏎ to look again.', tone: 'dim' }]);
+      wrap([{ text: 'Start one (Ollama, LM Studio or llama.cpp): it continues by itself when one starts.', tone: 'dim' }]);
     }
     if (error.length > 0) { blank(); lines.push(...error); }
     return { lines, hints: [['⏎', 'look again'], BACK_HINT] };

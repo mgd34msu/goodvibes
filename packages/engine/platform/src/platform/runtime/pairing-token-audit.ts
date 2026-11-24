@@ -137,13 +137,15 @@ export function auditPairingTokens(
 }
 
 /**
- * Make the paired devices the auditor's token source, audit now and then every
- * `intervalMs`. Any other audit of record (the Security screen's `r`) also reads
- * the devices first. The returned function stops the timer and drops the source.
- * A failing audit is logged and the timer keeps running.
+ * Make the paired devices the auditor's token source, audit now, whenever the
+ * pairings change (a device paired, a rename, a revoke) and then every
+ * `intervalMs`. Any other audit of record (the Security screen opening, or its
+ * `r`) also reads the devices first. The returned function stops the timer,
+ * the change listener and drops the source. A failing audit is logged and the
+ * timer keeps running.
  */
 export function startPairingTokenAudit(
-  pairingTokens: Pick<PairingTokenManager, 'list'>,
+  pairingTokens: Pick<PairingTokenManager, 'list'> & Partial<Pick<PairingTokenManager, 'onChange'>>,
   auditor: ApiTokenAuditor,
   options: {
     readonly intervalMs?: number;
@@ -157,10 +159,12 @@ export function startPairingTokenAudit(
     catch (error) { logger.warn('pairing token audit failed', { error: error instanceof Error ? error.message : String(error) }); }
   };
   run();
+  const unwatch = pairingTokens.onChange?.(run);
   const schedule = options.setInterval ?? ((fn, ms) => { const timer = setInterval(fn, ms); timer.unref?.(); return timer; });
   const cancel = options.clearInterval ?? ((handle) => clearInterval(handle as ReturnType<typeof setInterval>));
   const handle = schedule(run, options.intervalMs ?? PAIRING_TOKEN_AUDIT_INTERVAL_MS);
   return () => {
+    unwatch?.();
     cancel(handle);
     auditor.setTokenSource(undefined);
   };

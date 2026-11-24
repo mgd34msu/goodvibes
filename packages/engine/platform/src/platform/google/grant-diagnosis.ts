@@ -40,7 +40,12 @@ export interface GrantDiagnosisInput {
   readonly credentialOrigin: 'secret-store' | 'gmail-mcp' | null;
 }
 
-const REAUTHORIZE_OFFER = 'Say the word and I will start a fresh consent';
+/**
+ * The one action that renews a grant: a fresh consent asking for every scope,
+ * started by the request that met the dead grant (connection-repair.ts); that
+ * request is sent again once the person approves.
+ */
+const REAUTHORIZE_OFFER = 'A fresh consent asking for every scope starts at once: approve the link it shows, and the request continues';
 
 function normalize(account: string | null): string | null {
   const trimmed = account?.trim().toLowerCase();
@@ -92,7 +97,7 @@ async function diagnoseOwnedInvalidGrant(original: GrantDiagnosisInput): Promise
       problem:
         'Google reports this refresh token as expired or revoked. That happens when the account\'s access to the app was removed at '
         + 'https://myaccount.google.com/permissions, when the password was changed, or when a token issued under a Testing app aged out.',
-      fix: `${REAUTHORIZE_OFFER} for you to approve. Nothing is deleted until you say so.`,
+      fix: `${REAUTHORIZE_OFFER}. Nothing is deleted until you say so.`,
       needsReauthorization: true,
     };
   }
@@ -115,7 +120,7 @@ async function diagnoseOwnedInvalidGrant(original: GrantDiagnosisInput): Promise
         'Google attributes this credential’s expiry to the Testing app token lifetime.',
       fix:
         'Check the app at https://console.cloud.google.com/auth/audience. If it is still in Testing, set publishing status to "In production", '
-        + `then ${REAUTHORIZE_OFFER.toLowerCase()}.`,
+        + 'then approve the fresh consent link that starts at once; the request continues after it.',
       needsReauthorization: true,
     };
   }

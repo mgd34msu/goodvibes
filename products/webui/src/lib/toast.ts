@@ -8,6 +8,7 @@ import {
   createElement,
   type ReactNode,
 } from 'react';
+import { motionReduced } from './ui-preferences';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -146,9 +147,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const dismiss = useCallback((id: string) => {
     dispatch({ type: 'DISMISS', id });
     // Under reduced motion, skip the exit animation and purge immediately.
-    const reducedMotion =
-      typeof window !== 'undefined' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reducedMotion = motionReduced();
     const delay = reducedMotion ? 0 : TOAST_EXIT_DURATION_MS;
     setTimeout(() => dispatch({ type: 'PURGE', id }), delay);
   }, []);

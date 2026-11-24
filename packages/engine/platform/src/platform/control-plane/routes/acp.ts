@@ -20,7 +20,7 @@ export interface AcpGatewayDeps {
 
 function requirePrincipal(invocation: GatewayMethodInvocation): void {
   if (!invocation.context.principalId) {
-    throw new GatewayVerbError('ACP verbs require an authenticated principal', 'UNAUTHENTICATED', 401);
+    throw new GatewayVerbError('Sign in first: connecting an outside coding agent needs a signed-in user or a paired device', 'UNAUTHENTICATED', 401);
   }
 }
 

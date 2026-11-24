@@ -47,39 +47,118 @@ import { actionResultColor, type AgentWorkspaceContextLine as ContextLine } from
 import { workspacePaneLines } from './agent-workspace-context-lines.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION } from '../input/agent-workspace-onboarding-finish.ts';
 import { AGENT_WORKSPACE_GROUP_TITLES } from '../input/agent-workspace-types.ts';
+import { formatDigestTime } from '../core/away-digest.ts';
 
+/** Consecutive areas under one heading; Home's section has no heading. */
+interface RailSection {
+  readonly title: string;
+  readonly entries: { readonly category: AgentWorkspaceCategory; readonly index: number }[];
+}
+
+function railSections(categories: readonly AgentWorkspaceCategory[]): RailSection[] {
+  const sections: RailSection[] = [];
+  categories.forEach((category, index) => {
+    const title = AGENT_WORKSPACE_GROUP_TITLES[category.group];
+    const last = sections[sections.length - 1];
+    if (last && last.title === title) last.entries.push({ category, index });
+    else sections.push({ title, entries: [{ category, index }] });
+  });
+  return sections;
+}
+
+/**
+ * The rows of `count` items to show in `budget` rows with `selected` among
+ * them: a row on each side that has more is a marker, so the markers never
+ * hide the selected item.
+ */
+function railWindow(count: number, selected: number, budget: number): { start: number; end: number } {
+  if (count <= budget) return { start: 0, end: count };
+  const room = Math.max(1, budget - 2);
+  const start = Math.max(0, Math.min(selected - Math.floor(room / 2), count - room));
+  const end = start + room;
+  if (start === 0) return { start, end: Math.min(count, budget - 1) };
+  if (end >= count) return { start: Math.max(0, count - (budget - 1)), end: count };
+  return { start, end };
+}
+
+/** A plainly readable "more" marker (muted text, never the dim border colour). */
+function moreRow(glyph: string, count: number, areas: boolean): WorkspaceRow {
+  return { text: `${glyph} ${count} more${areas ? ` ${count === 1 ? 'area' : 'areas'}` : ''}`, kind: 'more', fg: PALETTE.muted };
+}
+
+/** Windowed `items`, with a marker on each side that has more; `areas` when every item is an area. */
+function windowedItems(items: readonly WorkspaceRow[], selected: number, budget: number, areas: boolean): WorkspaceRow[] {
+  const { start, end } = railWindow(items.length, selected, budget);
+  return [
+    ...(start > 0 ? [moreRow(GLYPHS.navigation.moreAbove, start, areas)] : []),
+    ...items.slice(start, end),
+    ...(end < items.length ? [moreRow(GLYPHS.navigation.moreBelow, items.length - end, areas)] : []),
+  ];
+}
+
+/**
+ * The area column. Every group heading stays on screen at every size. When
+ * every area does not fit, the groups the selection is not in fold to their
+ * heading and how many areas they hold ("Memory & habits (6)"), the everyday
+ * group staying open first while there is room; moving the selection into a
+ * folded group opens it. Only when the open group alone is taller than the
+ * column does it scroll, with a "more areas" marker on the side that has more.
+ */
 function buildLeftRows(workspace: AgentWorkspace, height: number): WorkspaceRow[] {
-  const rows: WorkspaceRow[] = [];
-  let selectedRenderedIndex = 0;
-  let lastGroup = '';
-  workspace.categories.forEach((category, index) => {
-    if (category.group !== lastGroup) {
-      rows.push({ text: AGENT_WORKSPACE_GROUP_TITLES[category.group], kind: 'group', bold: true });
-      lastGroup = category.group;
-    }
+  const sections = railSections(workspace.categories);
+  const selectedSection = Math.max(0, sections.findIndex((section) => section.entries.some((entry) => entry.index === workspace.selectedCategoryIndex)));
+  const itemRow = (category: AgentWorkspaceCategory, index: number): WorkspaceRow => {
     const selected = index === workspace.selectedCategoryIndex;
-    if (selected) selectedRenderedIndex = rows.length;
-    const marker = selected ? GLYPHS.navigation.selected : ' ';
-    rows.push({
-      text: `  ${marker} ${category.label}`,
+    return {
+      text: `  ${selected ? GLYPHS.navigation.selected : ' '} ${category.label}`,
       selected: selected && workspace.focusPane === 'categories',
       kind: 'item',
       fg: selected ? PALETTE.text : PALETTE.muted,
       bold: selected,
+    };
+  };
+  const rowsFor = (open: ReadonlySet<number>): { rows: WorkspaceRow[]; items: { from: number; to: number } } => {
+    const rows: WorkspaceRow[] = [];
+    let items = { from: 0, to: 0 };
+    sections.forEach((section, s) => {
+      const expanded = section.title === '' || open.has(s);
+      if (section.title !== '') {
+        rows.push(expanded
+          ? { text: section.title, kind: 'group', bold: true }
+          : { text: `${section.title} (${section.entries.length})`, kind: 'group', folded: true });
+      }
+      if (!expanded) return;
+      const from = rows.length;
+      for (const entry of section.entries) rows.push(itemRow(entry.category, entry.index));
+      if (s === selectedSection) items = { from, to: rows.length };
     });
-  });
+    return { rows, items };
+  };
 
-  const visible = Math.max(1, height);
-  const window = stableWindow(rows.length, selectedRenderedIndex, visible);
-  const visibleRows = rows.slice(window.start, window.end);
-  if (window.start > 0 && visibleRows.length > 0) {
-    visibleRows[0] = { text: `${GLYPHS.navigation.moreAbove} ${window.start} more`, kind: 'more', fg: PALETTE.dim, dim: true };
+  let layout = rowsFor(new Set(sections.map((_, s) => s)));
+  if (layout.rows.length > height) {
+    const open = new Set([selectedSection]);
+    const daily = (s: number): number => (workspace.categories[sections[s]!.entries[0]!.index]?.group === 'DAY-TO-DAY' ? 0 : 1);
+    const others = sections.map((_, s) => s).filter((s) => s !== selectedSection && sections[s]!.title !== '').sort((a, b) => daily(a) - daily(b) || a - b);
+    for (const s of others) {
+      if (rowsFor(new Set([...open, s])).rows.length <= height) open.add(s);
+    }
+    layout = rowsFor(open);
   }
-  if (window.end < rows.length && visibleRows.length > 0) {
-    visibleRows[visibleRows.length - 1] = { text: `${GLYPHS.navigation.moreBelow} ${rows.length - window.end} more`, kind: 'more', fg: PALETTE.dim, dim: true };
+
+  let visibleRows = layout.rows;
+  if (visibleRows.length > height) {
+    const { from, to } = layout.items;
+    const fixed = visibleRows.length - (to - from);
+    const budget = height - fixed;
+    const selectedInSection = visibleRows.slice(from, to).findIndex((row) => row.bold === true);
+    visibleRows = budget >= 3
+      ? [...visibleRows.slice(0, from), ...windowedItems(visibleRows.slice(from, to), Math.max(0, selectedInSection), budget, true), ...visibleRows.slice(to)]
+      : windowedItems(visibleRows, Math.max(0, visibleRows.findIndex((row) => row.kind === 'item' && row.bold === true)), Math.max(1, height), false);
   }
+  visibleRows = visibleRows.slice(0, height);
   while (visibleRows.length < height) visibleRows.push({ text: '', kind: 'empty' });
-  return visibleRows.slice(0, height);
+  return visibleRows;
 }
 
 /** The right-hand column of an action row: the line it runs, or what kind of row it is. */
@@ -121,6 +200,11 @@ function onboardingActionColumns(workspace: AgentWorkspace, action: AgentWorkspa
 function settingNow(workspace: AgentWorkspace, action: AgentWorkspaceAction): string {
   const shown = workspace.settingActionDisplay(action);
   return shown ? `now ${shown.currentValue}` : actionCommand(action);
+}
+
+/** The second column of an action row: what it runs, or a setting's value now. */
+function commandColumn(workspace: AgentWorkspace, action: AgentWorkspaceAction): string {
+  return action.kind === 'setting' ? settingNow(workspace, action) : actionCommand(action);
 }
 
 function shouldRenderOnboardingSettingsTable(actions: readonly AgentWorkspaceAction[]): boolean {
@@ -188,7 +272,8 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
     text: settingTable
       ? `  ${padDisplay(workspace.actionSearchActive ? 'Result' : 'Setting', labelWidth)}  ${padDisplay('Default', valueWidth)}  ${padDisplay('Current', valueWidth)}`
       : `  ${padDisplay(workspace.actionSearchActive ? 'Result' : 'Action', labelWidth)}  ${padDisplay('Command', commandWidth)}`,
-    fg: PALETTE.muted,
+    // The pane the arrow keys move in has its heading in the accent colour; the other stays muted.
+    fg: workspace.focusPane === 'actions' ? PALETTE.subtitle : PALETTE.muted,
     bold: true,
   });
 
@@ -201,6 +286,11 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
   // list gives up the room the result needs instead of the result being cut off
   // the bottom. Anything the result still cannot fit is reachable by scrolling.
   const chromeRows = workspace.actionSearchActive ? 3 : 2;
+  // A result says when it arrived: a reading taken earlier is not mistaken for one taken now.
+  if (workspace.lastActionResult !== workspace.resultAtFor) {
+    workspace.resultAtFor = workspace.lastActionResult;
+    workspace.resultAt = Date.now();
+  }
   const resultRows = workspace.lastActionResult
     ? buildActionResultRows(workspace.lastActionResult, {
       onboarding,
@@ -209,6 +299,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
       palette: resultPalette(),
       moreAbove: GLYPHS.navigation.moreAbove,
       moreBelow: GLYPHS.navigation.moreBelow,
+      ...(workspace.lastActionResult.kind === 'guidance' || workspace.lastActionResult.kind === 'recap' ? {} : { at: formatDigestTime(workspace.resultAt) }),
     })
     : [];
   // Rows the action list and the result share, once the pane's own headers, the
@@ -239,7 +330,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
     visible -= 1;
     window = stableWindow(allActions.length, workspace.selectedActionIndex, visible);
   }
-  if (window.start > 0) rows.push({ text: `${GLYPHS.navigation.moreAbove} ${window.start} more action(s) above`, kind: 'more', fg: PALETTE.dim, dim: true });
+  if (window.start > 0) rows.push({ text: `${GLYPHS.navigation.moreAbove} ${window.start} more above`, kind: 'more', fg: PALETTE.muted });
 
   for (let index = window.start; index < window.end; index += 1) {
     const action = allActions[index]!;
@@ -259,8 +350,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
         rows.push({
           text: `  ${sep}`,
           kind: 'item',
-          fg: PALETTE.dim,
-          dim: true,
+          fg: PALETTE.muted,
         });
       }
       const finishDetail = actionCommand(action);
@@ -279,7 +369,7 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
       const [first = '', ...rest] = labelRows(columns ? columns.setting : label);
       const text = columns
         ? `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(columns.defaultValue, valueWidth)}  ${padDisplay(columns.currentValue, valueWidth)}`
-        : `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(action.kind === 'setting' ? settingNow(workspace, action) : actionCommand(action), commandWidth)}`;
+        : `${marker} ${padDisplay(first, labelWidth)}  ${padDisplay(commandColumn(workspace, action), commandWidth)}`;
       const style = {
         selected: selected && workspace.focusPane === 'actions',
         fg: action.safety === 'blocked' ? PALETTE.warn : selected ? PALETTE.text : PALETTE.info,
@@ -290,11 +380,12 @@ function buildActionRows(workspace: AgentWorkspace, width: number, height: numbe
     }
   }
 
-  if (window.end < allActions.length) rows.push({ text: `${GLYPHS.navigation.moreBelow} ${allActions.length - window.end} more action(s) below`, kind: 'more', fg: PALETTE.dim, dim: true });
+  if (window.end < allActions.length) rows.push({ text: `${GLYPHS.navigation.moreBelow} ${allActions.length - window.end} more below`, kind: 'more', fg: PALETTE.muted });
   if (height > 6) rows.push({ text: '' });
   // Wrapped here, where the rows are budgeted, so the result window below
   // accounts for every row the status takes.
-  for (const line of wrapText(`Status: ${workspace.status}`, Math.max(1, width))) rows.push({ text: line, fg: PALETTE.muted });
+  // No status line until something happened here: the area and its rows say what it is.
+  if (workspace.status.trim() !== '') for (const line of wrapText(`Status: ${workspace.status}`, Math.max(1, width))) rows.push({ text: line, fg: PALETTE.muted });
   // `reservedForResult` shrank the action window; this is what is actually left
   // once the headers, markers and status line have taken their rows. Windowing
   // against the real remainder is what keeps the total within the pane, so the
@@ -319,19 +410,23 @@ function footerText(workspace: AgentWorkspace): string {
   }
   // A printable key closes the workspace into the composer (Esc there comes
   // back), so refresh is Ctrl+R. It is a keycap of its own ([a-z]; plain prose
-  // would be dropped from the hint row) and comes first in every area.
-  const typing = '[a-z] start a message, Esc there comes back here';
-  return workspace.selectedActionCategory.id === 'work' ? (workspace.lastActionResult ? `${typing} · PgUp/PgDn result · Ctrl+PgUp/PgDn ledger · Esc close · Ctrl+R refresh` : `${typing} · PgUp/PgDn ledger · Up/Down actions · Enter open · Esc close · Ctrl+R refresh`) : `${typing} · Up/Down move · Left/Right pane · Enter open · / search · Ctrl+] next area · Ctrl+R refresh`;
+  // would be dropped from the hint row) and comes first in every area. The row
+  // stays short enough for two lines at 80 columns, so the area column keeps its rows.
+  const typing = '[a-z] ask the assistant (Esc comes back)';
+  return workspace.selectedActionCategory.id === 'work' ? (workspace.lastActionResult ? `${typing} · PgUp/PgDn result · Ctrl+PgUp/PgDn history · Enter open · Ctrl+R refresh` : `${typing} · PgUp/PgDn history · Up/Down move · Enter open · Ctrl+R refresh`) : `${typing} · Up/Down move · Left/Right pane · Enter open · / search · Ctrl+R refresh`;
 }
 
 export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, height: number): SurfaceLayer {
+  // The area on screen has its reports read by themselves (once while fresh; held readings are map lookups).
+  if (!workspace.actionSearchActive) workspace.readShownAreaReports();
   const category = workspace.selectedActionCategory;
   const action = workspace.selectedAction;
   const footer = footerText(workspace);
   const baseOptions = {
     width,
     height,
-    leftWidth: width < 90 ? undefined : 22,
+    // Wide enough for the longest folded heading ("tools & knowledge (2)").
+    leftWidth: width < 90 ? 21 : 22,
     contextRatio: 0.4,
     minContextRows: 10,
     footer,
@@ -359,9 +454,9 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
     const visible = contextRows.slice(workspace.workContextScroll, workspace.workContextScroll + count);
     const more = contextRows.length - workspace.workContextScroll - visible.length;
     shownContextRows = [
-      ...(workspace.workContextScroll > 0 ? [{ text: `${GLYPHS.navigation.moreAbove} more above (${workspace.lastActionResult ? 'Ctrl+PgUp' : 'PgUp'})`, fg: PALETTE.dim, dim: true }] : []),
+      ...(workspace.workContextScroll > 0 ? [{ text: `${GLYPHS.navigation.moreAbove} more above (${workspace.lastActionResult ? 'Ctrl+PgUp' : 'PgUp'})`, fg: PALETTE.muted }] : []),
       ...visible,
-      ...(more > 0 ? [{ text: `${GLYPHS.navigation.moreBelow} more below (${workspace.lastActionResult ? 'Ctrl+PgDn' : 'PgDn'})`, fg: PALETTE.dim, dim: true }] : []),
+      ...(more > 0 ? [{ text: `${GLYPHS.navigation.moreBelow} more below (${workspace.lastActionResult ? 'Ctrl+PgDn' : 'PgDn'})`, fg: PALETTE.muted }] : []),
     ];
   }
 
@@ -369,9 +464,9 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
     width,
     height,
     title: 'Agent workspace',
-    // The Agent home and account this session works in; the selected pane shows by its highlight.
+    // The Agent home, model and daemon this session works with; the selected pane shows by its highlight.
     stateLabel: workspace.identity || undefined,
-    leftHeader: 'Operator Areas',
+    leftHeader: 'Areas',
     mainHeader: workspace.actionSearchActive
       ? `Search actions · ${workspace.actions.length} result${workspace.actions.length === 1 ? '' : 's'}`
       : `${category.label} · ${workspace.actions.length} action${workspace.actions.length === 1 ? '' : 's'}`,

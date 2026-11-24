@@ -2,7 +2,8 @@
  * PrincipalsView, read-first admin over the named-identity registry (principals.*)
  * and per-channel profile bindings (channels.profiles.*).
  *
- * Principals: list every principal with its channel identities (principals.list);
+ * Who is who (the principals registry; the screen never says "principal"):
+ * list every person, bot or service with their chat accounts (principals.list);
  * create/update/delete each go through a confirm sheet, these mutate who a channel
  * message resolves to, and delete is permanent (delete-means-delete, an honest
  * `deleted` boolean, never a phantom-removal 200).
@@ -18,10 +19,11 @@
 
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Pencil, Plus, RefreshCw, Trash2, Users } from 'lucide-react';
+import { Pencil, Plus, Trash2, Users } from 'lucide-react';
+import { ReadAt } from '../../components/data-view/ReadAt';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { OperatorMethodInput, OperatorMethodOutput } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { EmptyState } from '../../components/feedback/EmptyState';
 import { ErrorState } from '../../components/feedback/ErrorState';
 import { SkeletonBlock } from '../../components/feedback/SkeletonBlock';
@@ -66,10 +68,10 @@ function parseIdentityDraft(draft: string): {
   return { identities, invalidLines };
 }
 
-/** "no channel identities", "1 channel identity", "3 channel identities". */
+/** "no chat accounts", "1 chat account", "3 chat accounts". */
 function identityCount(count: number): string {
-  if (count === 0) return 'no channel identities';
-  return `${String(count)} channel ${count === 1 ? 'identity' : 'identities'}`;
+  if (count === 0) return 'no chat accounts';
+  return `${String(count)} chat ${count === 1 ? 'account' : 'accounts'}`;
 }
 
 function identitiesToDraft(identities: Principal['identities']): string {
@@ -118,7 +120,7 @@ function PrincipalForm({
           options={PRINCIPAL_KINDS.map((k) => ({ value: k, label: k }))}
         />
       </Field>
-      <Field label="Channel identities" help={'One per line, written "channel:value".'} error={identitiesError}>
+      <Field label="Chat accounts" help={'One per line, the chat app then the account: "slack:U123ABC".'} error={identitiesError}>
         <Textarea
           value={identitiesDraft}
           onChange={(e) => setIdentitiesDraft(e.target.value)}
@@ -145,6 +147,7 @@ function PrincipalsSection() {
   const list = useQuery({
     queryKey: queryKeys.principals,
     queryFn: () => platformClient.operator.principals.list(),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   const principals = list.data?.principals ?? [];
   const unavailable = list.isError && isMethodUnavailableError(list.error);
@@ -156,9 +159,9 @@ function PrincipalsSection() {
     onSuccess: async () => {
       setShowCreate(false);
       await invalidate();
-      toast({ title: 'Principal created', tone: 'success' });
+      toast({ title: 'Added', tone: 'success' });
     },
-    onError: (error: unknown) => toast({ title: 'Failed to create principal', description: formatError(error), tone: 'danger' }),
+    onError: (error: unknown) => toast({ title: 'Could not add them', description: formatError(error), tone: 'danger' }),
   });
 
   const update = useMutation({
@@ -167,26 +170,26 @@ function PrincipalsSection() {
     onSuccess: async () => {
       setEditingId('');
       await invalidate();
-      toast({ title: 'Principal updated', tone: 'success' });
+      toast({ title: 'Changes saved', tone: 'success' });
     },
-    onError: (error: unknown) => toast({ title: 'Failed to update principal', description: formatError(error), tone: 'danger' }),
+    onError: (error: unknown) => toast({ title: 'Could not save the changes', description: formatError(error), tone: 'danger' }),
   });
 
   const remove = useMutation({
     mutationFn: (principalId: string) => platformClient.operator.principals.delete(principalId),
     onSuccess: async (result) => {
-      if (!result.deleted) toast({ title: 'Principal already gone', description: 'No principal with that id existed.', tone: 'info' });
+      if (!result.deleted) toast({ title: 'Already removed', description: 'Nobody with that id was on the list.', tone: 'info' });
       await invalidate();
     },
-    onError: (error: unknown) => toast({ title: 'Failed to delete principal', description: formatError(error), tone: 'danger' }),
+    onError: (error: unknown) => toast({ title: 'Could not remove them', description: formatError(error), tone: 'danger' }),
   });
 
   async function handleCreate(input: { name: string; kind: PrincipalKind; identities: OperatorMethodInput<'principals.create'>['identities'] }): Promise<void> {
     const ok = await confirm.ask({
-      title: 'Create this principal?',
+      title: 'Add them to who is who?',
       target: input.name,
-      description: `It is created as a ${input.kind} with ${identityCount(input.identities?.length ?? 0)} mapped.`,
-      confirmLabel: 'Create',
+      description: `They are added as a ${input.kind} with ${identityCount(input.identities?.length ?? 0)}.`,
+      confirmLabel: 'Add',
     });
     if (!ok) return;
     create.mutate(input);
@@ -194,7 +197,7 @@ function PrincipalsSection() {
 
   async function handleUpdate(principal: Principal, input: { name: string; kind: PrincipalKind; identities: OperatorMethodInput<'principals.create'>['identities'] }): Promise<void> {
     const ok = await confirm.ask({
-      title: 'Save changes to this principal?',
+      title: 'Save these changes?',
       target: principal.name,
       description: `Its channel identities are replaced with the ${identityCount(input.identities?.length ?? 0)} listed here.`,
       confirmLabel: 'Save',
@@ -205,10 +208,10 @@ function PrincipalsSection() {
 
   async function handleDelete(principal: Principal): Promise<void> {
     const ok = await confirm.ask({
-      title: 'Delete this principal?',
+      title: 'Remove them from who is who?',
       target: principal.name,
-      description: 'Channel identities mapped to it show as unknown until you map them again.',
-      confirmLabel: 'Delete',
+      description: 'Messages from their chat accounts then show as from someone you have not added yet, until you add those accounts to someone again.',
+      confirmLabel: 'Remove',
       tone: 'danger',
     });
     if (!ok) return;
@@ -218,14 +221,14 @@ function PrincipalsSection() {
   return (
     <SettingsBlock
       className="principals-section"
-      title="Principals"
-      description="Named identities that channel messages are attributed to."
+      title="Who is who"
+      description="The people, bots and services messages from chat apps are said to come from."
       actions={(
         <div className="principals-section__actions">
           <Button size="sm" icon={<Plus aria-hidden="true" />} onClick={() => setShowCreate((v) => !v)}>
-            New principal
+            Add a person, bot or service
           </Button>
-          <IconButton label="Refresh principals" icon={<RefreshCw aria-hidden="true" />} onClick={() => void list.refetch()} />
+          <ReadAt at={list.dataUpdatedAt} onRefresh={() => void list.refetch()} refreshing={list.isFetching} />
         </div>
       )}
     >
@@ -236,21 +239,21 @@ function PrincipalsSection() {
       )}
 
       {list.isPending && <SkeletonBlock variant="text" lines={4} />}
-      {unavailable && <p className="principals-empty" role="note">Principals are unavailable on this daemon.</p>}
+      {unavailable && <p className="principals-empty" role="note">This daemon does not keep a list of who is who.</p>}
       {list.isError && !unavailable && (
-        <ErrorState error={list.error} onRetry={() => void list.refetch()} title="Failed to load principals" />
+        <ErrorState error={list.error} onRetry={() => void list.refetch()} title="Could not read who is who" />
       )}
       {list.isSuccess && principals.length === 0 && (
         <EmptyState
           icon={<Users size={28} />}
-          title="No principals yet"
-          description="Create one to attribute channel messages to a named identity."
-          action={{ label: 'New principal', onClick: () => setShowCreate(true) }}
+          title="Nobody added yet"
+          description="Add a person, bot or service so messages from their chat accounts carry their name."
+          action={{ label: 'Add a person, bot or service', onClick: () => setShowCreate(true) }}
         />
       )}
 
       {principals.length > 0 && (
-        <RowList aria-label="Principals">
+        <RowList aria-label="Who is who">
           {principals.map((principal) => editingId === principal.id ? (
             <li key={principal.id} className="gv-row principals-row principals-row--editing">
               <PrincipalForm
@@ -269,14 +272,14 @@ function PrincipalsSection() {
               meta={[
                 principal.kind,
                 principal.identities.length === 0
-                  ? 'no channel identities'
+                  ? 'no chat accounts'
                   : principal.identities.map((identity) => `${identity.channel}:${identity.value}`).join(', '),
               ].join(' · ')}
               trailing={(
                 <>
                   <IconButton label={`Edit ${principal.name}`} icon={<Pencil aria-hidden="true" />} onClick={() => setEditingId(principal.id)} />
                   <IconButton
-                    label={`Delete ${principal.name}`}
+                    label={`Remove ${principal.name}`}
                     icon={<Trash2 aria-hidden="true" />}
                     onClick={() => void handleDelete(principal)}
                     disabled={remove.isPending}
@@ -361,6 +364,7 @@ function ChannelProfilesSection() {
   const list = useQuery({
     queryKey: queryKeys.channelProfiles,
     queryFn: () => platformClient.operator.channels.profiles.list(),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   const bindings = list.data?.bindings ?? [];
   const unavailable = list.isError && isMethodUnavailableError(list.error);
@@ -409,7 +413,7 @@ function ChannelProfilesSection() {
           <Button size="sm" icon={<Plus aria-hidden="true" />} onClick={() => setShowCreate((v) => !v)}>
             New binding
           </Button>
-          <IconButton label="Refresh channel profiles" icon={<RefreshCw aria-hidden="true" />} onClick={() => void list.refetch()} />
+          <ReadAt at={list.dataUpdatedAt} onRefresh={() => void list.refetch()} refreshing={list.isFetching} />
         </div>
       )}
     >

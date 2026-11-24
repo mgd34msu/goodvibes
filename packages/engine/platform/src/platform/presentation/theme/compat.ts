@@ -5,7 +5,6 @@
  * Every legacy role maps to exactly one theme token (no blending here: the
  * blending lives in the theme's own derived fallbacks, see resolve.ts), so a
  * theme that sets those tokens explicitly reproduces the legacy table exactly.
- * The neon theme does, see test/platform-presentation-theme.test.ts.
  */
 
 import type { ToneTokens } from '../tones.js';

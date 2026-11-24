@@ -7,7 +7,7 @@ import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
 import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
 import { pairingNoWebUiLines, pairingOriginUsesStableHost, pairingReachFromSettings, pairingThisMachineLines, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
-import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName } from '@goodvibes/engine/platform/platform/pairing';
+import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName, PAIRING_HANDOFF_OFFER_KINDS, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
 // ── Providers & Connectivity + Security subset ────────────────────────────────
 import { createServicesModalSurface } from './modals/services-modal.ts';
@@ -31,7 +31,8 @@ import { createWorkPlanModalSurface } from './modals/work-plan-modal.ts';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
 import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo, type PairingModalUnreachable } from './modals/pairing-modal.ts';
 import { createDevicesModalSurface } from './modals/devices-modal.ts';
-import { resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
+import { describeOperatorRpcError, resolveDaemonEndpoint, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
+import { subscribeDaemonListChanges } from '@goodvibes/engine/platform/platform/runtime/client';
 import { revokeSharedTokenOnDaemon } from '../runtime/client/shared-token-revocation.ts';
 import { createPlanningModalSurface } from './modals/planning-modal.ts';
 
@@ -125,7 +126,18 @@ export function registerBuiltinModals(
     : unwiredSurface('hooks-modal', 'Hooks', 'Hook dispatcher/workbench not wired into this session.'));
   manager.registerModalRedirect('hooks', 'hooks-modal');
 
-  manager.registerModalSurface(createSecurityModalSurface({ readModel: ui.readModels.security }));
+  // The daemon's LIST_CHANGED `paired-devices`, followed while the Security or Paired Devices screen is open:
+  // a phone paired, renamed or revoked through the daemon redraws them with no key.
+  const watchPairedDevices = (onChange: () => void): (() => void) => {
+    let closed = false;
+    let stop: (() => void) | null = null;
+    void resolveDaemonEndpoint({ configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory }).then((endpoint) => {
+      if (closed || !endpoint.available) return;
+      stop = subscribeDaemonListChanges({ baseUrl: endpoint.baseUrl, getAuthToken: () => endpoint.token }, ['paired-devices'], onChange);
+    });
+    return () => { closed = true; stop?.(); stop = null; };
+  };
+  manager.registerModalSurface(createSecurityModalSurface({ readModel: ui.readModels.security, watchPairedDevices }));
   manager.registerModalRedirect('security', 'security-modal');
 
   manager.registerModalSurface(createPolicyModalSurface({ policyRuntimeState: deps.policyRuntimeState }));
@@ -170,6 +182,7 @@ export function registerBuiltinModals(
     probeTailscale: () => probePairingTailscale(tailscaleGatewayDeps),
     runTailscaleServe: () => runPairingTailscaleServe(tailscaleGatewayDeps),
     stopTailscaleServe: () => stopPairingTailscaleServe(tailscaleGatewayDeps),
+    serveToNetwork: () => servePairingToNetwork(deps),
   }));
   manager.registerModalRedirect('qr-code', 'pairing-modal');
 
@@ -180,6 +193,7 @@ export function registerBuiltinModals(
     // Resolved per press: the daemon's address and this machine's bearer are read then.
     revokeShared: () => revokeSharedTokenOnDaemon(resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: ui.environment.shellPaths.homeDirectory })),
     copyToClipboard,
+    watchPairedDevices,
   }));
   manager.registerModalRedirect('devices', 'devices-modal');
 
@@ -246,6 +260,44 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
     posture: handoff.posture,
     tokenId: handoff.token.id,
     thisMachineOnly,
+  };
+}
+
+/** pairing.handoff.create's answer, the fields the pairing screen shows. */
+interface PairingHandoffAnswer {
+  readonly token: { readonly id: string; readonly name: string; readonly token: string };
+  readonly offers: readonly { readonly kind: PairingHandoffOfferKind }[];
+  readonly fragment: string;
+  readonly deepLink?: string | undefined;
+  readonly posture?: OriginPosture | undefined;
+}
+
+/**
+ * The owner's yes to SERVE_TO_NETWORK_QUESTION: the daemon serves its web UI to
+ * the network, waits for its own listener to be bound again, and mints the code
+ * for the address phones can open, in one request (pairing.handoff.create
+ * `serveToNetwork`). It throws with the daemon's reason when it cannot.
+ */
+async function servePairingToNetwork(deps: ResolvedBuiltinViewDeps): Promise<PairingModalConnectionInfo> {
+  const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.uiServices.environment.shellPaths.homeDirectory });
+  if (!rpc.available) throw new Error(rpc.reason);
+  let answer: PairingHandoffAnswer;
+  try {
+    answer = await rpc.platformClient.operator.invoke('pairing.handoff.create', {
+      name: defaultPairingTokenName(),
+      offers: [...PAIRING_HANDOFF_OFFER_KINDS],
+      serveToNetwork: true,
+    }) as PairingHandoffAnswer;
+  } catch (error) { throw new Error(describeOperatorRpcError(error)); }
+  const deepLink = answer.deepLink ?? answer.fragment;
+  return {
+    url: answer.posture?.origin ?? deepLink,
+    token: answer.token.token,
+    tokenName: answer.token.name,
+    deepLink,
+    offers: answer.offers.map((offer) => offer.kind),
+    posture: answer.posture,
+    tokenId: answer.token.id,
   };
 }
 

@@ -11,6 +11,7 @@ import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSear
 import { agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, describeAgentWorkspaceTuiSettingsImportPlan, readAgentWorkspaceSettingFacts, type AgentWorkspaceSettingFacts, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
 import { buildAgentWorkspaceSetupPart } from './agent-workspace-snapshot.ts';
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
+import { resolveConnectedHostConnection } from './connected-host-routes.ts';
 import type { AgentWorkspaceAction, AgentWorkspaceActionResult, AgentWorkspaceActionSearchResult, AgentWorkspaceCategory, AgentWorkspaceCategoryGroup, AgentWorkspaceCommandDispatcher, AgentWorkspaceFocusPane, AgentWorkspaceSetupPart } from './agent-workspace-types.ts';
 import { ONBOARDING_COMPLETE_SYNTHETIC_ACTION, shouldShowOnboardingFinishFooter } from './agent-workspace-onboarding-finish.ts';
 import { completeOnboardingAction, onSubscriptionLoginSuccessAction } from './agent-workspace-onboarding-actions.ts';
@@ -24,6 +25,13 @@ export { AGENT_WORKSPACE_MODAL_NAME } from './agent-workspace-types.ts';
 export { buildAgentWorkspaceRuntimeSnapshot } from './agent-workspace-snapshot.ts';
 export { handleAgentWorkspaceToken } from './agent-workspace-token.ts';
 
+/**
+ * How long a report's reading is shared before it is read again, and after
+ * which a reading of something that changes on its own (a host, a mailbox, a
+ * provider) is marked "may be out of date": those change within minutes.
+ */
+export const AGENT_WORKSPACE_REPORT_FRESH_MS = 5 * 60_000;
+
 /** A command's short report as the pane shows it: null lines while it is being read. */
 export interface CommandReportReading {
   readonly command: string;
@@ -32,29 +40,49 @@ export interface CommandReportReading {
   /** The report action's own name. */
   readonly label: string;
   readonly lines: readonly string[] | null;
-  /** The report reaches past this machine (a mailbox, a host, a provider): not run until Ctrl+R asks for it. */
-  readonly waiting?: true;
   /** When the read finished (ms since the epoch); absent while it is not read yet or still reading. */
   readonly readAt?: number;
   /** Why the read failed: the command's refusal or error, in its own words. */
   readonly failed?: string;
+  /**
+   * The connected daemon did not answer (its address): the read failed for that
+   * reason, or `lines` hold only what this computer has. Read again by itself
+   * when the daemon answers again.
+   */
+  readonly daemonUnanswered?: string;
 }
 
+/** Refusal codes that mean the connected daemon did not answer (connected-host-client). */
+const DAEMON_UNANSWERED_CODES: ReadonlySet<string> = new Set(['host_timeout', 'host_unreachable']);
+
 /**
- * "home default · account anthropic": the Agent home (profile) of this session
- * and the provider its chat model signs in to, "(subscription)" when that is a
- * stored sign-in rather than a key. One read of the sign-in store per opening.
+ * "Agent home default · model rt-1 (rtfake) · daemon on this computer": the
+ * Agent home (profile) of this session, the model it answers with and its
+ * provider ("signed in with a subscription" when that is a stored sign-in
+ * rather than a key), and which daemon it works with. One read of the sign-in
+ * store per opening.
  */
 function describeAgentWorkspaceIdentity(context: CommandContext): string {
   const home = agentRuntimeProfileName(context.workspace?.shellPaths?.homeDirectory ?? '') ?? 'default';
   const provider = context.session?.runtime?.provider ?? '';
+  const model = context.session?.runtime?.model ?? '';
   let signedIn = false;
   try {
     signedIn = provider !== '' && context.platform?.subscriptionManager?.hasSignIn?.(provider) === true;
   } catch {
-    // An unreadable sign-in store leaves the account named without how it signs in.
+    // An unreadable sign-in store leaves the provider named without how it signs in.
   }
-  return [`home ${home}`, provider ? `account ${provider}${signedIn ? ' (subscription)' : ''}` : ''].filter(Boolean).join(' · ');
+  const modelName = model.includes(':') ? model.slice(model.indexOf(':') + 1) : model;
+  const providerWords = provider ? `${provider}${signedIn ? ', signed in with a subscription' : ''}` : '';
+  const modelWords = modelName ? `model ${modelName}${providerWords ? ` (${providerWords})` : ''}` : providerWords ? `provider ${providerWords}` : '';
+  let daemon = '';
+  try {
+    const url = context.platform?.configManager?.get('daemon.connectedHost.url');
+    daemon = typeof url === 'string' && url.trim() !== '' ? `daemon at ${url.trim().replace(/^https?:\/\//, '').replace(/\/+$/, '')}` : 'daemon on this computer';
+  } catch {
+    // An unreadable setting leaves the daemon unnamed.
+  }
+  return [`Agent home ${home}`, modelWords, daemon].filter(Boolean).join(' · ');
 }
 
 export class AgentWorkspace {
@@ -62,7 +90,8 @@ export class AgentWorkspace {
   public focusPane: AgentWorkspaceFocusPane = 'actions';
   public selectedCategoryIndex = 0;
   public selectedActionIndex = 0;
-  public status = 'Ready. Choose an operator flow; ordinary assistant work stays in the main conversation.';
+  /** What the last thing done here did; empty (no status line) while nothing has happened. */
+  public status = '';
   /** Only the setup part: the workspace reads its setup steps and onboarding route, nothing else of the snapshot. */
   public runtimeSnapshot: AgentWorkspaceSetupPart | null = null;
   /** The Agent home this session runs in and the account its chat model uses, read when the workspace opens (its header). */
@@ -78,11 +107,21 @@ export class AgentWorkspace {
   /** How many pane rows one PgUp/PgDn moves: as many as the pane shows (set when it is drawn). */
   public contextPageRows = 5;
   public resultScrollFor: AgentWorkspaceActionResult | null = null;
+  /** When the shown result arrived (ms since the epoch), and the result that time belongs to: its title says when. */
+  public resultAt = 0;
+  public resultAtFor: AgentWorkspaceActionResult | null = null;
   private context: CommandContext | null = null;
-  /** Each command's short report, read once per opening when one of its rows is first selected. */
+  /**
+   * Each command's short report, read by itself in the background when an area
+   * holding one of its rows is shown, and shared while fresh: moving between
+   * areas or opening the workspace again does not read the same report again
+   * until it is AGENT_WORKSPACE_REPORT_FRESH_MS old. Ctrl+R reads again now.
+   */
   private readonly reports = new Map<string, CommandReportReading>();
-  /** Reports the owner asked for with Ctrl+R in this opening, run even though they reach past this machine. */
-  private readonly checkNow = new Set<string>();
+  /** The context the held reports were read with; another context starts them afresh. */
+  private reportsFor: CommandContext | null = null;
+  /** Commands a form opened from here may have changed something through; their reports are read again on return. */
+  private readonly actedOn = new Set<string>();
   private dispatchCommand: AgentWorkspaceCommandDispatcher | null = null;
   private _onlyGroup: AgentWorkspaceCategoryGroup | null = null;
   /** The rows a `/setup` topic shows; null shows every row. */
@@ -99,8 +138,9 @@ export class AgentWorkspace {
     this.workContextScroll = 0;
     context.nativeWorkLedger?.open();
     this.dispatchCommand = dispatchCommand;
-    this.reports.clear();
-    this.checkNow.clear();
+    this.keepFreshReports(context);
+    this.lastShownArea = null;
+    this.actedOn.clear();
     this._onlyGroup = onlyGroup ?? null;
     this._onlyActionIds = null;
     this._awaitingRecapDismiss = false;
@@ -111,7 +151,7 @@ export class AgentWorkspace {
     if (this._onboardingState) updateRevealedOnboardingCategories(this._onboardingState, this._revealedOnboardingCategoryIds);
     this.active = true;
     this.focusPane = 'actions';
-    this.status = 'Ready. Choose an operator flow; ordinary assistant work stays in the main conversation.';
+    this.status = '';
     this.lastActionResult = null;
     this.actionSearchActive = false;
     this.actionSearchQuery = '';
@@ -142,10 +182,85 @@ export class AgentWorkspace {
     // has its own asynchronous setup status and does not start one.
     if (this.requestRender) {
       this.readHostSetup(false);
+      // The reports of the area shown are read by themselves, in the background.
+      this.readShownAreaReports();
     }
   }
 
   private requestRender: (() => void) | null = null;
+
+  /** Keep the readings that are finished and fresh for this context; drop the rest so they are read again. */
+  private keepFreshReports(context: CommandContext): void {
+    if (this.reportsFor !== context) {
+      this.reports.clear();
+      this.reportsFor = context;
+      return;
+    }
+    const now = Date.now();
+    for (const [command, reading] of this.reports) {
+      if (reading.readAt === undefined || reading.failed !== undefined || reading.daemonUnanswered !== undefined
+        || now - reading.readAt > AGENT_WORKSPACE_REPORT_FRESH_MS) this.reports.delete(command);
+    }
+  }
+
+  /**
+   * The connected daemon answers again (the adoption edge, runtime/daemon-attach-signal.ts):
+   * every report that failed or fell back because it did not answer is read again, with the
+   * host check and the work list while the workspace is open. No key press, no timer.
+   */
+  daemonAnswered(): void {
+    // Every failed reading goes too: a report that reads a mailbox or a provider through the daemon
+    // failed with it, and one read each is the whole cost.
+    let any = false;
+    for (const [command, reading] of this.reports) {
+      if (reading.daemonUnanswered !== undefined || reading.failed !== undefined) { this.reports.delete(command); any = true; }
+    }
+    if (!this.active || !this.context) return;
+    // A work list that could not be read (its discovery failed) is opened again; a live one is left as it is.
+    if (this.nativeWorkLedgerState.status !== 'ready') this.context.nativeWorkLedger?.open();
+    this.readHostSetup(true);
+    if (any) this.readShownAreaReports();
+    this.requestRender?.();
+  }
+
+  /**
+   * Read, in the background, the report of every row of the area on screen that
+   * has one and is not held yet: the screen is drawn at once with "reading…"
+   * on those and fills in as each arrives. One read per report while fresh.
+   * Only for a workspace a person sees (one that can repaint).
+   */
+  readShownAreaReports(): void {
+    if (!this.requestRender || !this.active) return;
+    // A failed reading is never held as fresh: coming to an area again reads its failed reports again.
+    const shown = this.selectedActionCategory.id;
+    const arrived = shown !== this.lastShownArea;
+    this.lastShownArea = shown;
+    for (const action of this.actions) {
+      const command = this.reportCommandFor(action);
+      if (!command) continue;
+      if (arrived && this.reports.get(command)?.failed !== undefined) this.reports.delete(command);
+      this.commandReport(command);
+    }
+  }
+
+  /** The area whose reports were last read for the screen; arriving at another re-reads its failed ones. */
+  private lastShownArea: string | null = null;
+
+  /**
+   * Read the reports of Home and Work & Approvals at the Agent's start, so what
+   * is waiting is already read when the workspace is first opened. Nothing is
+   * drawn; the readings are held for the opening that follows.
+   */
+  readAtStart(context: CommandContext, requestRender: () => void): void {
+    this.keepFreshReports(context);
+    for (const id of ['home', 'work']) {
+      const category = AGENT_WORKSPACE_CATEGORIES.find((candidate) => candidate.id === id);
+      for (const action of category?.actions ?? []) {
+        const command = this.reportCommandFor(action);
+        if (command) this.commandReport(command, requestRender, context);
+      }
+    }
+  }
 
   /**
    * The setup steps for the connected host read the session's reading of it.
@@ -155,7 +270,8 @@ export class AgentWorkspace {
   private readHostSetup(force: boolean): void {
     const context = this.context;
     if (!context) return;
-    void checkAgentWorkspaceHostSetup(context, { force }).then(() => {
+    // Read again on each opening once the held reading is no longer fresh; Ctrl+R forces it.
+    void checkAgentWorkspaceHostSetup(context, { force, freshMs: AGENT_WORKSPACE_REPORT_FRESH_MS }).then(() => {
       if (this.context !== context || !this.active) return;
       this.runtimeSnapshot = buildAgentWorkspaceSetupPart(context);
       if (this._onlyGroup === 'ONBOARDING') {
@@ -168,6 +284,9 @@ export class AgentWorkspace {
   }
 
   reopen(): void {
+    // Back from a form that changed something: those commands' reports are read again at the next draw.
+    for (const command of this.actedOn) this.reports.delete(command);
+    this.actedOn.clear();
     this.context?.nativeWorkLedger?.open();
     this.active = true;
     this.clampSelection();
@@ -216,6 +335,13 @@ export class AgentWorkspace {
   /** True while typing has taken the person from this workspace to the composer. */
   get leftByTyping(): boolean {
     return this.typedAwayFrom !== null && !this.active;
+  }
+
+  /** The area typing left, by name ("Research"), while Esc leads back to it; null otherwise. */
+  get typedAwayFromArea(): string | null {
+    if (!this.leftByTyping || !this.typedAwayFrom) return null;
+    const id = this.typedAwayFrom.categoryId;
+    return AGENT_WORKSPACE_CATEGORIES.find((category) => category.id === id)?.label ?? null;
   }
 
   /** The person sent or cleared what they typed: Esc no longer leads back here. */
@@ -327,7 +453,7 @@ export class AgentWorkspace {
     this.selectedActionIndex = 0;
     this.focusPane = 'actions';
     this.clampSelection();
-    this.status = `Agent workspace category: ${this.selectedCategory.label}.`;
+    this.status = '';
     this.lastActionResult = null;
   }
 
@@ -374,10 +500,9 @@ export class AgentWorkspace {
       return;
     }
     this.runtimeSnapshot = buildAgentWorkspaceSetupPart(this.context);
+    // Ctrl+R reads every report again now, starting with the area on screen.
     this.reports.clear();
-    // Ctrl+R also checks the selected row's report now, wherever it reads.
-    const selected = this.selectedAction ? this.reportCommandFor(this.selectedAction) : undefined;
-    if (selected) this.checkNow.add(selected);
+    this.readShownAreaReports();
     this.readHostSetup(true);
     this.status = 'Runtime context refreshed; checking the connected host again.';
     this.lastActionResult = { kind: 'refreshed', title: 'Runtime context refreshed', detail: 'Provider, model, session, local memory, runtime endpoint, and Agent knowledge route posture were re-read from the live command context. The connected host is being checked again; its setup steps update when it answers.' };
@@ -408,15 +533,6 @@ export class AgentWorkspace {
     activateAgentWorkspaceSelection(this, requestRender);
   }
 
-  /**
-   * The short report of `command` (its report action: what the command
-   * prints when run bare), for the pane beside a selected row. Read the first
-   * time a row of that command is selected in this opening, by running that
-   * read exactly as the command does, but only when the report reads nothing
-   * past this machine (`readsOnlyThisMachine`); any other waits for Ctrl+R.
-   * Until it lands the reading says so.
-   * Undefined for a command with no report that only reads.
-   */
   /** The command whose report goes with a row: the command it runs, or `/model` for a model picker. */
   reportCommandFor(action: AgentWorkspaceAction): string | undefined {
     if (action.kind === 'act') return action.act?.command;
@@ -424,34 +540,64 @@ export class AgentWorkspace {
     return undefined;
   }
 
-  commandReport(command: string): CommandReportReading | undefined {
-    const known = this.reports.get(command);
-    if (known) return known;
-    const context = this.context;
+  /** The report action a command's rows show beside them: a read that needs nothing filled in and opens no screen. */
+  private reportAction(command: string): ActionDescription<never> | undefined {
     const described = describedCommandByName(command);
     const action = described?.report ? described.actions.find((candidate) => candidate.id === described.report) : undefined;
-    // Only a read that needs nothing filled in, and never one that opens a screen.
-    if (!context || !described || !action || action.id === 'open' || action.touches !== 'reads' || action.lasts !== 'not-a-change'
+    if (!described || !action || action.id === 'open' || action.touches !== 'reads' || action.lasts !== 'not-a-change'
       || action.inputs.some((input) => input.required === true)) return undefined;
+    return action;
+  }
+
+  /**
+   * Where the row's report reads, without reading it: 'here' (stored things on
+   * this computer, which change only when you change them), 'past' (a host, a
+   * mailbox or a provider, which change on their own), or undefined (the row
+   * has no report). Only a 'past' reading is marked when it grows old.
+   */
+  reportReach(action: AgentWorkspaceAction): 'here' | 'past' | undefined {
+    const command = this.reportCommandFor(action);
+    const report = command ? this.reportAction(command) : undefined;
+    if (!report) return undefined;
+    return report.readsOnlyThisMachine === true ? 'here' : 'past';
+  }
+
+  commandReport(command: string, requestRender?: () => void, readWith?: CommandContext): CommandReportReading | undefined {
+    const known = this.reports.get(command);
+    if (known) return known;
+    const context = readWith ?? this.context;
+    const action = this.reportAction(command);
+    if (!context || !action) return undefined;
     const reading: CommandReportReading = { command, line: `/${command}${action.word ? ` ${action.word}` : ''}`, label: action.label, lines: null };
-    // Selecting a row never reaches past this machine: such a report waits for Ctrl+R.
-    if (action.readsOnlyThisMachine !== true && !this.checkNow.has(command)) return { ...reading, waiting: true };
     this.reports.set(command, reading);
     const run = action.run as unknown as (values: Readonly<Record<string, string>>, ctx: CommandContext) => ReturnType<ActionDescription<never>['run']>;
-    void captureCommandPrint(context, () => run({}, context)).then((outcome) => {
-      if (this.context !== context || this.reports.get(command) !== reading) return;
+    // The read runs with a context that also hears "the daemon did not answer" from a list that fell back to this computer.
+    let fellBack: string | undefined;
+    const daemonAddress = (): string => resolveConnectedHostConnection(context).baseUrl;
+    const readContext = Object.create(context, {
+      noteDaemonUnanswered: { value: (daemon: string | undefined) => { fellBack = daemon ?? daemonAddress(); } },
+    }) as CommandContext;
+    void captureCommandPrint(context, () => run({}, readContext)).then((outcome) => {
+      if (this.reportsFor !== context || this.reports.get(command) !== reading) return;
       const readAt = Date.now();
+      const repaint = requestRender ?? this.requestRender;
       if (!outcome.ok) {
         const refused = readRefusal(outcome.error);
-        const why = refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
-        this.reports.set(command, { ...reading, lines: [], readAt, failed: why.replace(/\s+/g, ' ').trim() || 'no reason was given' });
-        this.requestRender?.();
+        if (refused && DAEMON_UNANSWERED_CODES.has(refused.code)) {
+          // Said in plain words by the pane; the refusal's next step is for a model.
+          this.reports.set(command, { ...reading, lines: [], readAt, failed: '', daemonUnanswered: daemonAddress() });
+        } else {
+          const why = refused ? formatRefusal(refused) : outcome.error instanceof Error ? outcome.error.message : String(outcome.error);
+          this.reports.set(command, { ...reading, lines: [], readAt, failed: why.replace(/\s+/g, ' ').trim() || 'no reason was given' });
+        }
+        repaint?.();
         return;
       }
       const returned = outcome.value;
       const text = [...outcome.lines, typeof returned === 'string' ? returned : isCommandReport(returned) ? renderCommandReport(returned) : ''].join('\n');
-      this.reports.set(command, { ...reading, readAt, lines: text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim().length > 0) });
-      this.requestRender?.();
+      const lines = text.split('\n').map((line) => line.trimEnd()).filter((line) => line.trim().length > 0);
+      this.reports.set(command, { ...reading, readAt, lines, ...(fellBack !== undefined ? { daemonUnanswered: fellBack } : {}) });
+      repaint?.();
     });
     return reading;
   }
@@ -460,6 +606,9 @@ export class AgentWorkspace {
   openGuidedAction(target: WorkspaceActionTarget): boolean {
     const context = this.context;
     if (!context?.openSelection) return false;
+    // A change made from this row makes its command's report out of date: it is read again on the way back.
+    const changes = describedCommandByName(target.command)?.actions.find((candidate) => candidate.id === target.action);
+    if (!changes || changes.lasts !== 'not-a-change') this.actedOn.add(target.command);
     this.closeToComposer();
     return openWorkspaceAction(target, context);
   }

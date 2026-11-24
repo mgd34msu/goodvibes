@@ -30,8 +30,8 @@ export type ViewId =
   | 'personal'
   | 'phone';
 
-/** The Work view's kind filter, plus `checkpoints` (a session's Checkpoints tab) and `plan` (the work plan). */
-export type WorkTab = 'all' | 'sessions' | 'agents' | 'processes' | 'checkpoints' | 'plan';
+/** The Work view's kind filter, plus `waiting` (only what waits for you), `checkpoints` (a session's Checkpoints tab) and `plan` (the work plan). */
+export type WorkTab = 'all' | 'waiting' | 'sessions' | 'agents' | 'processes' | 'checkpoints' | 'plan';
 export type LibraryTab = 'memory' | 'knowledge' | 'review';
 export type PersonalTab = 'calendar' | 'mail' | 'occasions';
 

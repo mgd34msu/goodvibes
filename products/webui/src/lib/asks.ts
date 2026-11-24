@@ -14,7 +14,7 @@
  * Pure: projections of the fetched records.
  */
 import type { AskChoice, AskPresentation } from '@goodvibes/engine/platform/platform/permissions';
-import type { WorkBoardAsk } from '@goodvibes/engine/contracts';
+import { compareAsksByUrgency, type WorkBoardAsk } from '@goodvibes/engine/contracts';
 import type { ApprovalRecord } from './goodvibes';
 import { approvalReading, isActionableApproval, type ApprovalReading } from './approvals';
 
@@ -102,7 +102,9 @@ function approvalStandIn(record: ApprovalRecord): AskPresentation {
     kind: 'approval',
     title,
     detail: '',
-    choices: [{ id: 'once', label: 'Yes, once', default: true }, { id: 'no', label: 'No' }],
+    // Without the daemon's words nothing says whether a yes acts once or lasts, so the
+    // stand-in claims neither ("Yes", never "Yes, once") and opens on No.
+    choices: [{ id: 'once', label: 'Yes' }, { id: 'no', label: 'No', default: true }],
     details: [{ label: 'Tool', value: request.tool }, { label: 'Arguments', value: JSON.stringify(request.args) }],
   });
 }
@@ -182,9 +184,9 @@ export function inboxAsks(items: readonly InboxAskItem[]): OpenAsk[] {
   }));
 }
 
-/** Every open ask, newest first. */
+/** Every open ask, in the order the work board lists them: a countdown first, then can't-undo, then a weakened safety setting, then newest first. */
 export function openAsks(approvals: readonly ApprovalRecord[], inboxItems: readonly InboxAskItem[]): OpenAsk[] {
-  return [...approvalAsks(approvals), ...inboxAsks(inboxItems)].sort((a, b) => b.askedAt - a.askedAt);
+  return [...approvalAsks(approvals), ...inboxAsks(inboxItems)].sort(compareAsksByUrgency);
 }
 
 /** An ask as the work board reads it. */
@@ -198,6 +200,8 @@ export function boardAsk(ask: OpenAsk): WorkBoardAsk {
     presentation: {
       kind: p.kind,
       title: p.title,
+      mark: p.mark,
+      ...(p.weakensSafety ? { weakensSafety: true } : {}),
       ...(p.consequence ? { consequence: { text: p.consequence.text, tone: p.consequence.tone } } : {}),
       ...(p.countdown ? { countdown: p.countdown } : {}),
       ...(p.origin ? { origin: p.origin } : {}),

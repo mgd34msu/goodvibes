@@ -20,7 +20,7 @@ Then run `goodvibes-agent`. When no model is ready, it runs the same three-step 
 
 ## A short tour
 
-**The workspace and the commands are one.** `goodvibes-agent` starts on a conversation. The fullscreen workspace opens with `/agent` or `Ctrl+G`; each of its rows names a slash command action and opens the same guided form that command opens, and its side pane says what the selected row does and shows that command's own report. Browsing the workspace never reaches the network: a report that reads a mailbox, a provider or the daemon runs only when you ask for it with `Ctrl+R`. Press `/` inside the workspace to search every action by name, category, command, or detail. `Ctrl+P`, `?` or `/help` opens the one list of every command and key.
+**The workspace and the commands are one.** `goodvibes-agent` starts on a conversation. The fullscreen workspace opens with `/agent` or `Ctrl+G`; each of its rows names a slash command action and opens the same guided form that command opens, and its side pane says what the selected row does and shows that command's own report. The workspace reads its reports by itself: what is waiting is read at every start, each area's reports as soon as it is shown, and the work list stays live; `Ctrl+R` reads everything again now. Press `/` inside the workspace to search every action by name, category, command, or detail. `Ctrl+P`, `?` or `/help` opens the one list of every command and key.
 
 **One assistant, several jobs.** Beyond normal chat, the workspace gives you read-only web research with explicit hand-off into Agent Knowledge, versioned document drafting with blind model comparison, an Inbox & calendar area for inbox/agenda/task/reminder/note requests, and an Operator Runtime view of the connected host's own methods and service posture.
 
@@ -107,28 +107,12 @@ the card field by field, each hidden, and sends it to the selected daemon in one
 the addresses, and "See your cards" (`/payments cards`) lists the cards the
 daemon holds (never the number, CVV or name) and the addresses.
 
-### Native work controls (local Jev implementation)
+### Work on the host
 
-`/work open` discovers the authenticated daemon's native project without legacy
-planning lookup; `/work open <daemon-project-id>` selects it explicitly.
-`/work start|status|cancel|resume <work-id>` operates an existing native work
-item. Commands derive attempt identity and revisions from the live ledger.
-
-Start/resume require an existing active attempt and the daemon's current paired
-operator authority. Execution controls do not create work or edit original criteria. Explicit source
-submission is described below; ordinary text uses the native intake described next. Opening a view never starts or resumes
-execution. Status/cancel retain the last observed attempt across a handoff within
-that view; older attempts cannot be rediscovered after reopening this surface.
-
-Reported work state, verified evidence, execution progress, admitted/current
-revisions and recovery state remain distinct. A lost response leaves the server
-outcome unknown. Closing or replacing host, token or workspace only aborts local
-requests and discards their results; use Cancel to request host cancellation.
-Pending and refused admissions, and cancellation before admission, have no
-execution receipt or progress. They display requested revisions, separately from
-admitted executions. Refused/interrupted admission recovery requires explicit
-resume; a cancelled intent requires a new native attempt.
-No control asks for owner approval or automatically retries/resumes execution.
+`/work open` opens the work view (`/work open <project id>` for another project);
+`/work start`, `status` (check), `cancel` (stop) and `resume <work id>` act on one
+work. Opening the view never starts anything, and no key approves anything for
+you. See [the terminal app's work page](../tui/docs/native-work.md).
 
 ### Ordinary conversation and first-start prerequisites
 
@@ -151,93 +135,40 @@ reached the host; `intake-cancel` discards it so the next input can be sent.
 The intake journal holds only inputs in flight (see below) and never refuses a
 new input for being full.
 
-With connected-host dialing enabled and the shared operator credential configured,
-pair Agent from its live terminal:
+To give Agent its own key for a daemon on another computer (with
+`daemon.connectedHost.url` set and the host's shared operator token given to
+the Agent), type `/setup pair` in the Agent's own terminal. It is one step: the
+Agent checks the host, says what pairing allows (lasting administrator access
+to that host, kept only in this Agent home), and asks you to type the code it
+shows, such as `PAIR 3f9a1c0b2d4e`, then Enter. Enter alone or Esc cancels; a
+different code cancels too and says so (`That is not the code shown…`), and
+each code works once, so `/setup pair` again gives a new one.
+The code is typed rather than a single `y` because the access lasts until you
+revoke it: a `y` pressed by habit can never grant it.
 
-1. Run `/setup pair` to preview the selected host and pairing state.
-2. Run `/setup pair --apply` to review the persistent administrative access being
-   granted, then type the fresh confirmation phrase shown by the terminal.
+Use `--name Agent` to choose the device name. Only you can confirm: a model or
+another command gets the summary and nothing else. Opening Agent or finishing
+setup does not create a key, and pairing does not revoke the shared token. For
+the daemon on the Agent's own computer no pairing is needed: the operator token
+file the Agent already reads is your key there. From a shell,
+`goodvibes-agent setup pair` shows the summary and
+`goodvibes-agent setup pair --apply` asks for the code.
 
-Use `--name Agent` to choose the device name. Pairing invokes
-`pairing.tokens.migrate` once, stores the returned per-device credential privately
-for that host, and verifies its live principal. It requires the existing shared
-operator's `write:control-plane` authority. Model, harness and nested commands
-cannot confirm this grant. Opening Agent or finishing ordinary onboarding does
-not create a credential, and pairing does not revoke the shared token. For the
-daemon on the Agent's own machine no pairing is needed: the operator token file
-the Agent already reads is the owner's credential there.
+If pairing is interrupted, run `/setup pair` again to see where it got to. When
+the host's answer was lost, the same request is repeated and the host answers it
+with the key it already made, never a second one. A key that was kept but not
+yet confirmed by the host is kept and checked with `/setup status`. A key set in
+the environment is used before the saved one; the result says so
+(`paired-shadowed` in JSON) and leaves the environment as it is.
 
-If pairing is interrupted, rerun `/setup pair` to inspect its saved state before
-taking another action. An unknown outcome is preserved for review rather than
-automatically minting another token. A stored but unverified credential is kept
-for verification. Explicit token environment overrides take precedence over the
-host-bound store; a `paired-shadowed` result identifies that condition without
-changing the environment.
+### Asking for work and recovering a lost request
 
-### Explicit native source submission
-
-Both products use the same command contract:
-
-- `/work submit-file <path>` reads a regular UTF-8 JSON file containing exactly
-  `goal` (a string) and `criteria` (an ordered array of strings).
-- `/work submission` looks up the retained request without writing work.
-- `/work submission-retry` first looks up that same request. Only a `not-found`
-  result can lead to replay of the exact retained request.
-- `/work submission-discard` first looks up that same request. When the host
-  has it, its receipt is shown and nothing is dropped; otherwise the retained
-  request is removed and nothing is sent, so a corrected source can be
-  submitted.
-
-Example source file:
-
-```json
-{"goal":"  Deliver the original goal\nwithout rewriting it  ","criteria":["First criterion","Second criterion","First criterion"]}
-```
-
-Decoded goal/criterion strings are preserved verbatim, including whitespace,
-line breaks, order and duplicates. No model generates or changes criteria.
-Blank/whitespace-only values and missing criteria are rejected locally. Each
-string is limited to 20,000 UTF-16 code units; 1–100 criteria are required. Both
-the source file and complete encoded submission must fit 262,144 UTF-8 bytes.
-For paths containing spaces, use a file URL such as
-`file:///tmp/my%20source.json`, which survives both slash-command parsers.
-
-Initial submission generates request/input IDs and captures the live whole-ledger
-revision once. Before sending, the app durably publishes the exact source, IDs and
-revision in its private `native-work-submission.json` journal under its product
-state directory. The journal binds each request to the exact daemon endpoint,
-canonical workspace, project and live server-verified paired principal. It stores
-no bearer token. The conversation intake journal beside it holds only inputs in
-flight: a record exists from submit until the host gives a terminal answer
-(blocked, refused or cancelled, including `/work intake-cancel`), the work receipt
-exists and its execution was requested, the hosted turn finishes, or the local
-turn that was dispatched has ended; then it is removed. It has no record cap and
-never refuses a new input for being full. Corrupt, oversized, symlink-backed or
-unconfirmable state fails closed without a submission. The work-submission
-journal has no record cap (the file is bounded at 2 MiB): a binding is removed
-once its submission has a validated receipt, or when `submission-discard` drops
-it after the host reported it does not have it, and one whose outcome is not
-yet known is never evicted.
-
-After a restart, use `submission` or `submission-retry` to recover the
-original request. Both first look it up using that same identity. Retry does not
-reread the source file, generate new IDs or refresh the revision. Only an explicit
-retry after `not-found` can send the identical durably confirmed request. A
-`not-found` lookup is not proof that a lost in-flight request cannot still arrive.
-A persistence failure sends nothing and retains any uncertain journal publication
-for inspection/recovery; it never deletes or silently replaces that identity.
-Changing credentials to another principal cannot replay the old principal's
-journal. Host, token, project and canonical-workspace changes or cleanup discard
-in-flight results; overlapping submission commands remain single-flight.
-
-A definite stale-ledger conflict permits an explicitly new `submit-file` command
-to capture a new identity/revision. An unresolved retained request must be looked
-up before submitting a new source. Submission/replay never starts execution.
-
-Submission requires an existing paired operator with native ledger read/write
-scopes. It never grants scopes, stores credentials or starts execution. The
-receipt identifies the created work/current attempt and preserves the original
-source; inspect `/work` and use its separate explicit Start control.
+`/work new` asks for new work with what done means, `/work request` in your own
+words, `/work submit-file <path>` from a JSON file (a path with spaces needs no
+quoting). A request whose answer was lost is recovered with `/work submission`,
+`submission-retry` and `submission-discard`; input waiting to be admitted with
+`/work intake` and its steps. The same command in both programs:
+[the terminal app's work page](../tui/docs/native-work.md).
 
 ---
 

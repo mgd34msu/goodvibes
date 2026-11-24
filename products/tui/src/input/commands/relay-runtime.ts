@@ -1,6 +1,7 @@
 import type { CommandContext } from '../command-registry.ts';
 import type { RelayCode } from '@goodvibes/engine/terminal-shell/devices-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { askToTurnOnRelay } from '@goodvibes/engine/terminal-shell/relay-pairing-ask';
 import { generateQrMatrix, renderQrToString } from '@goodvibes/engine/platform/platform/pairing/qr-generator';
 import type { RelayRefusal, RelayStatusReading } from '../../runtime/relay-reachability-bridge.ts';
 
@@ -75,14 +76,28 @@ export async function relayStatus(ctx: CommandContext): Promise<string> {
 
 export async function pairRelay(ctx: CommandContext, name: string | undefined): Promise<string> {
   const cfg = relayConfigured(ctx);
-  if (!cfg.enabled || !cfg.flagOn) throw commandRefusal('Relay is disabled: turn on relay.enabled in /settings open relay first.');
   const externalServices = ctx.platform.externalServices;
   if (!externalServices) throw commandRefusal('Relay pairing is unavailable: background service controller is not running in this build.');
-  const reading = await externalServices.mintRelayPairing(name);
+  // The daemon's relay off: asked in place (opening on No), with the relay's address in the same step when
+  // none is set; yes turns it on and the same call waits for the host to register, then pairs (relay.pairing.mint).
+  const confirm = ctx.confirm;
+  const ask = confirm
+    ? async (configuredUrl: string) => {
+      const said = await askToTurnOnRelay(confirm, configuredUrl);
+      if (said.turnOn) {
+        const address = said.url || configuredUrl;
+        ctx.print(`The relay is on at ${address || 'the address set on the daemon'}, and it is not answering yet. The pairing shows here as soon as it does; you can carry on meanwhile.`);
+      }
+      return said;
+    }
+    : undefined;
+  const reading = await externalServices.mintRelayPairing(name, { ask, configuredUrl: cfg.url });
   if (!reading.minted) {
     throw commandRefusal('reason' in reading
       ? `Relay pairing could not be minted: the daemon could not be asked (${reading.reason}). Check the daemon with /status.`
-      : `Relay pairing could not be minted: the daemon has no live relay registration yet (state: ${reading.status}). Run /devices relay-status, and try again once it reads registered.`);
+      : reading.status === 'disabled'
+        ? 'No relay pairing was made: the relay is off on the daemon, and it was left off.'
+        : `Relay pairing could not be minted: the relay ${reading.status === 'refused' ? 'refused the daemon\'s registration' : 'registration did not succeed'} (state: ${reading.status}). /devices relay-status says why.`);
   }
   const qrMatrix = generateQrMatrix(reading.minted.encoded);
   return [

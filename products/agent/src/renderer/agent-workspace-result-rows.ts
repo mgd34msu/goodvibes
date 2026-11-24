@@ -49,12 +49,14 @@ export function buildActionResultRows(
     readonly palette: ResultRowPalette;
     readonly moreAbove: string;
     readonly moreBelow: string;
+    /** When the result arrived, as the title shows it ("14:02"). */
+    readonly at?: string;
   },
 ): readonly ResultRow[] {
   // No leading blank row: in a short pane that blank is a line of the report
   // that does not get shown. The status line above already separates them.
   const rows: ResultRow[] = [
-    { text: `${options.onboarding ? 'Result' : 'Action Result'}: ${result.title}`, fg: options.titleColor, bold: true },
+    { text: `${options.onboarding ? 'Result' : 'Action Result'}: ${result.title}${options.at ? ` · ${options.at}` : ''}`, fg: options.titleColor, bold: true },
   ];
 
   // For recap results, skip the detail body, the checkmarked lines below carry
@@ -176,8 +178,7 @@ export function windowResultRows(
     windowed.push({
       text: `${options.moreAbove} ${clamped} more line(s) above, PageUp`,
       kind: 'more',
-      fg: options.palette.dim,
-      dim: true,
+      fg: options.palette.muted,
     });
   }
   windowed.push(...rows.slice(clamped, end));
@@ -185,8 +186,7 @@ export function windowResultRows(
     windowed.push({
       text: `${options.moreBelow} ${hidden} more line(s) below, PageDown`,
       kind: 'more',
-      fg: options.palette.dim,
-      dim: true,
+      fg: options.palette.muted,
     });
   }
   return windowed;

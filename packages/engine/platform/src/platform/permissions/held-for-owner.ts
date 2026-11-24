@@ -20,7 +20,12 @@ export interface HeldForOwnerCall {
   readonly summary: string;
   readonly reason: string;
   readonly heldAt: number;
+  /** The owner-only kind it was held as (gate/classify.ts), when it is one. */
+  readonly ownerOnly?: string | undefined;
 }
+
+/** Inbox item metadata naming the owner-only kind a held call was held as; its card opens on No for the kinds that do (ask-presentation.ts). */
+export const HELD_OWNER_ONLY_METADATA = 'ownerOnly';
 
 interface HeldEntry extends HeldForOwnerCall {
   /** Identifies the exact call (tool, arguments, session); a repeat is held once. */
@@ -53,7 +58,7 @@ export class HeldForOwnerLedger {
   }
 
   /** Hold one call; the same exact call held again keeps its first id. */
-  hold(call: { readonly key: string; readonly toolName: string; readonly summary: string; readonly reason: string },
+  hold(call: { readonly key: string; readonly toolName: string; readonly summary: string; readonly reason: string; readonly ownerOnly?: string | undefined },
     approve: () => void): HeldForOwnerCall {
     for (const entry of this.entries.values()) if (entry.key === call.key) return view(entry);
     const entry: HeldEntry = { ...call, id: `h${(++this.sequence).toString()}`, heldAt: Date.now(), approve };
@@ -97,7 +102,7 @@ export class HeldForOwnerLedger {
 }
 
 function view(entry: HeldEntry): HeldForOwnerCall {
-  return { id: entry.id, toolName: entry.toolName, summary: entry.summary, reason: entry.reason, heldAt: entry.heldAt };
+  return { id: entry.id, toolName: entry.toolName, summary: entry.summary, reason: entry.reason, heldAt: entry.heldAt, ...(entry.ownerOnly !== undefined ? { ownerOnly: entry.ownerOnly } : {}) };
 }
 
 const processLedger = new HeldForOwnerLedger();
@@ -111,6 +116,7 @@ export function processHeldForOwner(): HeldForOwnerLedger {
 export interface HeldForOwnerInbox {
   postNow(item: { readonly kind: 'queued-action'; readonly title: string; readonly detail?: string | undefined;
     readonly options?: readonly string[] | undefined; readonly key?: string | undefined; readonly expiresAt?: number | undefined;
+    readonly metadata?: Readonly<Record<string, string | number | boolean>> | undefined;
   }): { readonly item: { readonly id: string } };
   listNow(filter: { readonly status: 'open'; readonly kinds: readonly ['queued-action']; readonly limit: number }): readonly { readonly id: string; readonly key?: string | undefined }[];
   waitForAnswer(id: string, signal?: AbortSignal): Promise<{ readonly status: string; readonly answer?: { readonly option?: string | undefined; readonly text?: string | undefined } | undefined }>;
@@ -150,7 +156,8 @@ export function bridgeHeldForOwnerToInbox(ledger: HeldForOwnerLedger, inbox: Hel
     try {
       itemId = inbox.postNow({ kind: 'queued-action', key: `${boot}${call.id}`, title: `Held for you: ${call.toolName}`,
         detail: `${call.summary}\n${call.reason}\nApprove to allow this exact call for the session; it runs when the work carries on.`,
-        options: ['approve', 'dismiss'], expiresAt: Date.now() + HELD_ITEM_LIFETIME_MS }).item.id;
+        options: ['approve', 'dismiss'], expiresAt: Date.now() + HELD_ITEM_LIFETIME_MS,
+        ...(call.ownerOnly !== undefined ? { metadata: { [HELD_OWNER_ONLY_METADATA]: call.ownerOnly } } : {}) }).item.id;
     } catch { return; }
     items.set(call.id, itemId);
     inbox.waitForAnswer(itemId, lifetime.signal).then((settled) => {

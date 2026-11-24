@@ -6,6 +6,7 @@ import type { GatewayMethodCatalog } from '../control-plane/method-catalog.js';
 import type { GatewayMethodInvocation } from '../control-plane/method-catalog-shared.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/native-error-summary.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { PAIRED_OWNER_REQUIRED, requireNativeOwner } from '../control-plane/routes/native-owner.js';
 import { readInvocationParams } from '../control-plane/routes/invocation-params.js';
@@ -77,6 +78,8 @@ export function registerDelegatedTelegramCommands(catalog: GatewayMethodCatalog,
             result = operation === 'cancel' ? await host.cancel(ref, authority) : await host.status(ref, authority, operation === 'read');
           }
           invocation.signal?.throwIfAborted(); assertCurrent(); owner(invocation);
+          // A chat configured, released or revoked, or a message decided or cancelled: the intake views read it again.
+          if (operation !== 'status' && operation !== 'read' && operation !== 'list') noteListChanged({ list: 'telegram-intake', change: 'changed' });
           return delegatedTelegramResultSchemas[operation].parse(result);
         });
       } catch (error) {

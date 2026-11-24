@@ -12,7 +12,7 @@
  * Pure and deterministic: the same palette and mode always produce the same file.
  */
 
-import { ansiToHex, ensureContrast, isHexColor, mixHex, normalizeHex, relativeLuminance, tint } from './color.js';
+import { ansiToHex, contrastRatio, ensureContrast, isHexColor, mixHex, normalizeHex, relativeLuminance, tint } from './color.js';
 import type { TerminalPalette, ThemeJson, ThemeMode } from './types.js';
 
 /**
@@ -23,7 +23,9 @@ import type { TerminalPalette, ThemeJson, ThemeMode } from './types.js';
 const FLOOR_TEXT = 7;
 const FLOOR_MUTED = 4.5;
 const FLOOR_FAINT = 4.5;
-const FLOOR_STATUS = 3;
+const FLOOR_STATUS = 4.5;
+/** Muted's contrast over faint's: the two text levels stay visibly apart (about 10 CIELAB L* at these levels). */
+const MUTED_STEP = 1.35;
 
 function slot(palette: TerminalPalette, index: number, pair: number): string {
   const own = palette.ansi[index];
@@ -64,11 +66,14 @@ export function generateSystemTheme(palette: TerminalPalette, mode: ThemeMode): 
   const element = ramp(3);
 
   const text = ensureContrast(rawFg, panel, FLOOR_TEXT);
-  const textMuted = ensureContrast(ensureContrast(mixHex(bg, text, 0.62), panel, FLOOR_MUTED), element, FLOOR_MUTED);
   const textFaint = ensureContrast(ensureContrast(mixHex(bg, text, 0.4), panel, FLOOR_FAINT), element, FLOOR_FAINT);
+  // Muted sits a visible step above faint (MUTED_STEP times faint's contrast on the element), never past text.
+  const mutedFloor = Math.min(contrastRatio(textFaint, element) * MUTED_STEP, contrastRatio(text, element));
+  const textMuted = ensureContrast(ensureContrast(mixHex(bg, text, 0.62), panel, FLOOR_MUTED), element, Math.max(FLOOR_MUTED, mutedFloor));
 
+  // Status colours are read as text (a reason, an error line), so they meet the text floor on both surfaces.
   const status = (index: number, pair: number): string =>
-    ensureContrast(slot(palette, index, pair), panel, FLOOR_STATUS);
+    ensureContrast(ensureContrast(slot(palette, index, pair), panel, FLOOR_STATUS), element, FLOOR_STATUS);
 
   const red = status(1, 9);
   const green = status(2, 10);

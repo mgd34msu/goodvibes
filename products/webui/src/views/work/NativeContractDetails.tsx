@@ -1,7 +1,6 @@
 /** Native records are informational receipts, never executable instructions or permission. */
 import type { ReactNode } from 'react';
 import { DetailSection, Disclosure, Facts } from '../../components/data-view/DataView';
-import { Button } from '../../components/ui/Button';
 import type { ContractRecord } from './ContractTree';
 
 type Source = NonNullable<ContractRecord['nativeSource']>;
@@ -129,31 +128,31 @@ function SemanticDecisions({ decisions }: { decisions: Decisions }) {
 function DurableAdmission({ admission }: { admission: Admission }) {
   const { input } = admission;
   const execution = admission.schemaVersion === 2 ? admission.execution : undefined;
-  return <Disclosure summary="Durable admission provenance">
-    <Empty>This admission receipt records an input and execution placement. It is not permission to run work.</Empty>
+  return <Disclosure summary="How this work was accepted">
+    <Empty>This record says what was asked and where the work was set to run when it was accepted. It is not permission to run work.</Empty>
     <Facts items={[
-      { label: 'Admission schema version', value: admission.schemaVersion }, { label: 'Contract id', value: admission.contractId },
+      { label: 'Record format', value: admission.schemaVersion }, { label: 'Contract id', value: admission.contractId },
       { label: 'Owner agent id', value: admission.ownerAgentId }, { label: 'Payload revision', value: admission.payloadRevision },
       { label: 'Work id', value: admission.key.workId }, { label: 'Criteria id', value: admission.key.criteriaId },
       { label: 'Criteria revision', value: admission.key.criteriaRevision }, { label: 'Attempt id', value: admission.key.attemptId },
     ]} />
-    <Disclosure summary="Admission binding"><BindingDetails binding={admission.binding} /></Disclosure>
-    <DetailSection title="Recorded execution placement">{execution ? <>
+    <Disclosure summary="What it was accepted for"><BindingDetails binding={admission.binding} /></Disclosure>
+    <DetailSection title="Where it was set to run">{execution ? <>
       <Facts items={[{ label: 'Isolation', value: execution.isolation }]} />
       {execution.isolation === 'worktree' && <Facts items={[
         { label: 'Branch', value: execution.branch }, { label: 'Worktree path', value: execution.worktreePath }, { label: 'Base branch', value: execution.baseBranch },
       ]} />}
-    </> : <Empty>No execution placement recorded.</Empty>}</DetailSection>
-    <Disclosure summary="Admission input">
-      <DetailSection title="Admission ask"><Text>{input.ask}</Text></DetailSection>
+    </> : <Empty>Where it runs was not recorded.</Empty>}</DetailSection>
+    <Disclosure summary="What was asked">
+      <DetailSection title="The ask"><Text>{input.ask}</Text></DetailSection>
       <Facts items={[
         { label: 'Session id', value: input.sessionId }, { label: 'Origin', value: input.origin }, { label: 'Project root', value: input.projectRoot },
         { label: 'Parent agent id', value: input.parentAgentId }, { label: 'Requested isolation', value: input.isolation },
         { label: 'Token ceiling', value: input.budget?.maxTokens }, { label: 'Cost ceiling (USD)', value: input.budget?.maxCostUsd },
       ]} />
-      {input.nativeSource && <Disclosure summary="Admission native source"><SourceDetails source={input.nativeSource} /></Disclosure>}
+      {input.nativeSource && <Disclosure summary="Where the ask came from"><SourceDetails source={input.nativeSource} /></Disclosure>}
       {input.proposedUnits !== undefined && <DetailSection title={`Proposed units (${input.proposedUnits.length})`}>
-        {input.proposedUnits.length === 0 ? <Empty>No proposed units recorded.</Empty> : <ol className="contract-tree__list" aria-label="Admission proposed units">{input.proposedUnits.map((unit, i) => <li key={i}>
+        {input.proposedUnits.length === 0 ? <Empty>No proposed units recorded.</Empty> : <ol className="contract-tree__list" aria-label="Proposed units">{input.proposedUnits.map((unit, i) => <li key={i}>
           <Text>{unit.task}</Text><Facts items={[{ label: 'Template', value: unit.template }]} />
         </li>)}</ol>}
       </DetailSection>}
@@ -175,11 +174,12 @@ function InputSnapshot({ snapshot, onShowFiles }: { snapshot: Snapshot; onShowFi
       { label: 'Input commit', value: snapshot.inputCommit }, { label: 'Dirty at capture', value: String(snapshot.dirty) },
       { label: 'Exclusions', value: <Ids values={snapshot.exclusions} /> },
     ]} />
-    {snapshot.version !== 3 && files === undefined && <DetailSection title="Captured files">
-      <Empty>This older receipt also lists each captured file; the list is not loaded.</Empty>
-      {onShowFiles && <Button size="sm" variant="ghost" onClick={onShowFiles}>Show captured files</Button>}
-    </DetailSection>}
-    {files !== undefined && <Disclosure summary={`Captured files (${files.length})`}>
+    {/* An older record's file list is read when its disclosure is opened. */}
+    {snapshot.version !== 3 && files === undefined && <Disclosure summary="Captured files" onOpen={onShowFiles}>
+      <Empty>{onShowFiles ? 'Reading the captured files…' : 'This older record also lists each captured file; this page cannot read the list.'}</Empty>
+    </Disclosure>}
+    {/* An older record's list arrives because its disclosure was opened: it stays open. */}
+    {files !== undefined && <Disclosure summary={`Captured files (${files.length})`} defaultOpen={snapshot.version !== 3}>
       {files.length === 0 ? <Empty>No captured files recorded.</Empty> : <ul className="contract-tree__list" aria-label="Captured files">
         {files.map((file, i) => <li key={`${file.path}-${i}`}>
           <Facts items={[

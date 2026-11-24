@@ -248,19 +248,21 @@ In the terminal app and the Agent, an ask appears as the same card. Its title is
 
 | Key | Action |
 | --- | --- |
-| `y` | Yes, once. |
+| `y` | Yes: `Yes, once` for a call that acts once, or the button that says what a lasting change does (below). |
 | `a` | `Yes, and remember (choose what)`: opens the remember choices (when the ask offers them); the web UI's ask card has the same button. Enter never remembers. |
 | Up, Down, `1` to `9`, Enter | In the remember choices: move, pick, and allow and remember with that choice. Esc goes back. |
 | `n` | No. |
 | `d` | Details: why you are asked, the tool, the folder, the sandbox, the decision, effects, review reasons, the checklist and the raw arguments. |
 | Left, Right, Tab | Choose a button. |
-| Enter | Press the chosen button. The card opens on `Yes, once`, or on `No` for what cannot be undone and for owner-only asks whose effect cannot be taken back (money spent, a payment step, a message sent as you), so Enter never allows those and never remembers anything. |
+| Enter | Press the chosen button. The card opens on the yes, or on `No` for what cannot be undone, for owner-only asks whose effect cannot be taken back (money spent, a payment step, a message sent as you, a delete nothing restores, an irreversible operator action), and for asks that weaken a protection (a security, judgment or payment setting loosened; access granted to a person, device, tool server or hook), so Enter never allows those and never remembers anything. The web UI's card makes the same button its main one, and a call `just-vibes` held for one of those reasons opens on `No` in `/questions` and the web UI. |
 | Any other typing | Starts `Why not:`; Enter refuses with that reason, Esc goes back. |
 | Space, `a`, Up, Down, PgUp, PgDn | In a multi-edit edit (`Apply selected`): keep or leave out a change, keep all, move, scroll. |
 | Tab | When you were typing a draft, Tab answers the request and keeps your draft. |
 | Ctrl+C | No, and stop the turn. |
 
-A call that cannot be undone, and a request that offers no remembering (a channel request, a one-call boundary ask), offer only `Yes, once` and `No`, with `always asks · can't be remembered` beside them; to let such a call run without asking, add a permission rule with `/permissions`. A command waiting on its terminal for input shows its prompt and a masked answer field: Enter sends the answer, Esc clears it and then declines. A denial is the call's answer: the model is told the call was refused (with your reason) and the turn goes on. The same keys answer a turn that runs on the daemon.
+`Yes, once` approves this one call; the next one asks again. A yes whose effect lasts after the call never says "once": the button says what it does and the sentence under the question says how long it lasts. A settings change is saved to your settings file: `Turn off "Run commands in a sandbox"?` reads `This weakens a safety setting. Saved to your settings: it stays off until you turn it back on.` with the buttons `Yes, switch it off until I turn it back on`, `Yes, and remember (choose what)` and `No` (selected); turning a setting on reads `Yes, switch it on until I turn it off`, another value `Yes, change it until I change it back`, a reset `Yes, reset it to its default`. A tool server's trust or role reads `Yes, change its trust until I change it back` (or `its role`), letting a held server work again `Yes, let it work again`, a hook `Yes, add the hook until I remove it` (or turn it on, off, remove it), an automation the `workflow` tool adds `Yes, keep it running until I remove it`, a loosened setting put to you from another sign-in `Yes, make this change until I change it back`, and a contract change `Yes, change what it requires`. Once answered, the web UI's card folds to the choice's own line (`You said yes once`, `You switched it off; it stays off until you turn it back on`), and a chat channel says `Approved by <who>.` for a lasting change (`Approved once by <who>.` for a single call).
+
+A call that cannot be undone, and a request that offers no remembering (a channel request, a one-call boundary ask), offer only the yes and `No`, with `always asks · can't be remembered` beside them; to let such a call run without asking, add a permission rule with `/permissions`. A command waiting on its terminal for input shows its prompt and a masked answer field: Enter sends the answer, Esc clears it and then declines. A denial is the call's answer: the model is told the call was refused (with your reason) and the turn goes on. The same keys answer a turn that runs on the daemon.
 
 A question an agent of this chat left for you (the `query` tool's `ask`) appears as `A question for you`, pinned above the composer on rows of its own (nothing of the conversation shows beside it), with the first option selected; an option may be a short phrase (`Hi there`), and `/questions answer <id> <option> [note]` matches the longest option the answer starts with. Up and Down choose an option, `1` to `9` pick one, Enter answers (the last option, `Something else…`, opens a one-line answer), and Esc answers later (it stays in `/questions` and the web UI). These keys reach the card while the composer is empty; typing goes to the composer. The answer goes through the owner inbox and the card shows `Answered: <option>` once.
 
@@ -733,7 +735,7 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 | --- | --- |
 | `trusted` | All tools may run, subject to the permission mode and rules. |
 | `restricted` | Only reads run. Every write, command and delegation is refused, in every mode including `yolo`. |
-| undecided | Reads run. Calls settled without asking run. The first call that would ask you raises the trust question instead: "New workspace: choose a trust level", with "Trust this workspace" ("Trusting this folder lets its own hooks and MCP servers run and lets GoodVibes change files in it. It approves nothing: each action still follows your setting for when GoodVibes asks.") and "Keep restricted (read-only)" ("GoodVibes can read this folder but cannot change files or run commands in it, and the folder's own hooks and MCP servers stay off, until you trust it."). Choosing trust forwards the original ask to you. Dismissing the question (Esc) records nothing: that call is refused, the workspace stays undecided, and the next call that would ask raises the question again. |
+| undecided | Reads run. Calls settled without asking run. The first call that would ask you raises the trust question instead, titled with the folder (`Trust ~/projects/garden-planner?`), with "Trust this workspace" (it names the folder's own files that trusting lets run, `This folder has a hooks file (hooks.json) and tool servers (MCP: .goodvibes/mcp.json).`, or `This folder has no hooks file or tool servers (MCP) of its own.`, then "Trusting it lets them run and lets GoodVibes change files here. It approves nothing: each action still follows your setting for when GoodVibes asks.") and "Keep restricted (read-only)" ("GoodVibes can read this folder but cannot change files or run commands in it, and the folder's own hooks and MCP servers stay off, until you trust it."); both end "Change it later with /security trust-folder or /security restrict-folder." Choosing trust forwards the original ask to you. Dismissing the question (Esc) records nothing: that call is refused, the workspace stays undecided, and the next call that would ask raises the question again. |
 
 ```text
 /security folder                     show the level, whether it is decided, and the registration
@@ -776,7 +778,7 @@ Where bubblewrap is missing, on macOS, and on native Windows, the exec path runs
 | `sandbox.workspaceWritable` | `[]` | Absolute paths only; a relative path is refused. From the next command. |
 | `sandbox.egressAllowlist` | `[]` | Command names, for example `["git","npm"]`; `["*"]` counts every command as listed (the decision model must still read a need). From the next command. |
 | `sandbox.judgment` | `annotate` | `off`: plain asks. `annotate`: a model verdict with reasons annotates a sandbox escalation ask; you still decide. `auto-approve`: also approves looks-safe verdicts. Never auto-denies. |
-| `sandbox.mcpIsolation` | `disabled` | `disabled`: stdio MCP servers run as host processes. `contained`: each runs in its own bubblewrap boundary (workspace writable, system files and its own install read-only, `$HOME` and `/tmp` private, host network shared). Applies when a server next connects (`/mcp reload`). On a host without bubblewrap a contained server does not start. |
+| `sandbox.mcpIsolation` | `disabled` | `disabled`: stdio MCP servers run as host processes. `contained`: each runs in its own bubblewrap boundary (workspace writable, system files and its own install read-only, `$HOME` and `/tmp` private, host network shared). A change restarts the running stdio servers under it: at once when idle, and a server in the middle of a call as soon as that call ends; `/security contain-mcp` and `host-mcp` say which were restarted and which restart after their call. On a host without bubblewrap a contained server does not start. |
 
 How the sandbox affects asks: in `ask-me`, a call asked about only because of where it could reach (for example a command that might send secrets out) runs without asking when it runs inside the sandbox; the decision records that the sandbox settled it, not you. A call asked for any other reason (owner-only, irreversible, security-weakening, obfuscated) is asked whether contained or not. An `exec` call carrying `file_ops`, a malformed `cmd_base64`, or a working directory other than the session's is always shown to you.
 
@@ -789,8 +791,8 @@ The `repl` tool is registered only where the sandbox is available; each evaluati
 /security sandbox-profiles
 /security sandbox-presets                        each preset, what it sets and its notes
 /security sandbox-probe
-/security contain-mcp                            MCP servers start inside their own boundary
-/security host-mcp                               MCP servers start as host processes (loosens a protection: asks first, only you)
+/security contain-mcp                            MCP servers run inside their own boundary; running ones restart inside it
+/security host-mcp                               MCP servers run as host processes; running ones restart that way (loosens a protection: asks first, only you)
 /health check sandbox                            the boundary on this host, checked
 /security sandbox-sessions
 /security start-sandbox <command|mcp-server> [--host] [name]

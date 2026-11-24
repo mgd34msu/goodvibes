@@ -10,7 +10,7 @@ export { handleMcpWorkspaceToken } from '@goodvibes/engine/terminal-shell/mcp-wo
 import {
   MCP_WORKSPACE_MODAL_NAME,
   formToServerConfig,
-  serverConfigToForm as makeForm,
+  serverConfigToForm,
   type McpWorkspaceServerRow,
   type McpWorkspaceRow,
   type McpWorkspaceFormBase,
@@ -21,43 +21,32 @@ export {
   type McpWorkspaceRow,
   type McpWorkspaceActionRow,
 } from '@goodvibes/engine/terminal-shell/mcp-workspace-model';
-export interface McpWorkspaceForm extends McpWorkspaceFormBase {
-  confirm: string;
-}
+export type McpWorkspaceForm = McpWorkspaceFormBase;
 
-import type { McpServerConfig } from '@goodvibes/engine/platform/platform/mcp';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
-import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
+import { requireMcpApi, requireReadModels, requireShellPaths } from './commands/runtime-services.ts';
 
-/** The one strict confirm rule: only yes (or y, true) confirms; a blank never does. */
-function isAffirmative(value: string): boolean {
-  return /^(y|yes|true)$/i.test(value.trim());
-}
+export type McpWorkspaceMode = PlatformMcpWorkspaceMode;
 
-export type McpWorkspaceMode = PlatformMcpWorkspaceMode<'reload-confirm'>;
-
-export type McpWorkspaceFormField = PlatformMcpWorkspaceFormField<'confirm'>;
-
-function serverConfigToForm(server?: McpServerConfig): McpWorkspaceForm {
-  return { ...makeForm(server), confirm: '' };
-}
+export type McpWorkspaceFormField = PlatformMcpWorkspaceFormField;
 
 // The workspace form edits stdio (command-launched) servers only, so the
 // converted config always carries a command; streamable-HTTP (url) servers
 // from the platform's widened McpServerConfig appear in the list but are managed
-// through the /mcp command line.
+// through the /mcp command line. Save is the ask and a reload runs at once, as
+// in the terminal app: a reload is reversible and asks nothing of the owner.
 
-export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspaceForm, 'reload-confirm'> {
+export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspaceForm> {
   constructor() {
     super({
       api: requireMcpApi,
       formStatus: {
-        add: 'Draft an MCP server. Type yes on the Confirm field, then press Enter on Save server.',
-        edit: (name, _scope, hasLaunch) =>
+        add: 'Add an MCP server. Choose project or global scope, then save and reload.',
+        edit: (name, scope, hasLaunch) =>
           hasLaunch
-            ? 'Editing ' + name + '. Type yes on the Confirm field, then press Enter on Save server to update it.'
-            : 'Viewing ' + name + '. Runtime status exists, but no launch config was found.',
+            ? 'Editing ' + name + '. Saving writes a ' + scope + ' config entry and reloads the live runtime.'
+            : 'Editing ' + name + '. Runtime status exists, but no launch config was found; enter command details before saving.',
         remove: (name, scope) =>
           'Confirm removal of ' + name + ' from ' + scope + ' MCP config. Press Enter or y to remove; Esc or n cancels.',
       },
@@ -65,13 +54,17 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
       createForm: serverConfigToForm,
       showToolStatusOnOpen: false,
       requestRender: (context) => context.renderRequest(),
+      connections: (context) => {
+        const mcp = requireReadModels(context).mcp;
+        return { connected: () => mcp.getSnapshot().connectedServerNames, subscribe: (listener) => mcp.subscribe(listener) };
+      },
     });
   }
   protected publishStatus(text: string): void {
     this.status = text;
   }
 
-  private statusValue = 'Ready. Inspect MCP servers and tools. Config writes/reloads require explicit workspace confirmation.';
+  private statusValue = 'Ready. Add, edit, remove, reload, and inspect MCP servers without restarting the Agent.';
   private statusToneValue: 'info' | 'warning' | 'error' = 'info';
   public get status(): string {
     return this.statusValue;
@@ -104,14 +97,14 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
       {
         type: 'action',
         id: 'add',
-        label: 'Add or update server',
-        detail: `Open a confirmed Agent workspace form to save an MCP server in ${this.form.scope} scope.`,
+        label: 'Add server',
+        detail: `Write a server through the platform config manager. Default scope: ${this.form.scope}.`,
       },
       {
         type: 'action',
         id: 'reload',
         label: 'Reload runtime',
-        detail: 'Confirm an MCP runtime reload from this workspace after external config edits.',
+        detail: 'Reconnect all MCP servers from global, Claude, and project config files.',
       },
       {
         type: 'action',
@@ -131,28 +124,14 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
     return [
       ...buildMcpWorkspaceFormFields(this.form),
       {
-        id: 'confirm',
-        label: 'Confirm',
-        value: this.form.confirm,
-        help: 'Type yes to save this MCP server to its config file.',
-        editable: true,
-      },
-      {
         id: 'save',
-        label: 'Save server',
+        label: 'Save and reload',
         value: '',
-        help: 'Save the confirmed MCP server and reload the MCP runtime.',
+        help: 'Write the selected scope config and reconnect the live MCP runtime.',
         editable: false,
       },
       { id: 'cancel', label: 'Cancel', value: '', help: 'Return to the MCP server browser without changing config.', editable: false },
     ];
-  }
-
-  requestReload(): void {
-    this.lastError = null;
-    this.mode = 'reload-confirm';
-    this.status = 'Confirm MCP runtime reload. Press Enter or y to reload; Esc or n cancels.';
-    this.context?.renderRequest();
   }
 
   async reloadRuntime(): Promise<void> {
@@ -177,14 +156,10 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
 
   async saveForm(): Promise<void> {
     if (!this.context) return;
-    if (!isAffirmative(this.form.confirm)) {
-      this.setStatus('MCP server add/update not confirmed. Type yes on the Confirm field, then press Enter on Save server.', 'warning');
-      this.context.renderRequest();
-      return;
-    }
     this.lastError = null;
     try {
       const server = formToServerConfig(this.form);
+      this.setStatus(`Saving ${server.name} to ${this.form.scope} MCP config and reloading runtime...`);
       // The config writer's own result decides: it throws when the save did not
       // happen, and the form stays open with what was typed so it can be corrected.
       const result = await requireMcpApi(this.context).upsertServerConfig(requireShellPaths(this.context), this.form.scope, server);

@@ -82,15 +82,18 @@ export interface GoogleSetupActionDeps extends JudgmentReadingOptions {
    * Proves the credential by reading mail and calendar with it. Injected so
    * `oauth-verify` can make real calls without this module owning a client.
    */
-  readonly proveConnection?: () => Promise<{
+  readonly proveConnection: () => Promise<{
     readonly ok: boolean;
     readonly detail: string;
     readonly problem?: string;
     readonly fix?: string;
   }>;
-  /** Real IMAP/SMTP connectivity check, so `gmail-verify` proves rather than assumes. */
-  readonly verifyMail?: () => Promise<{ readonly ok: boolean; readonly detail: string }>;
-  /** Real calendar feed read, so `calendar-verify` proves rather than assumes. */
-  readonly verifyCalendar?: () => Promise<{ readonly ok: boolean; readonly detail: string }>;
+  /**
+   * Real IMAP and SMTP sign-in with the stored app password, nothing sent and
+   * nothing read: `gmail-verify` runs it as a step of the setup.
+   */
+  readonly verifyMail: () => Promise<{ readonly ok: boolean; readonly detail: string }>;
+  /** Real read of the stored private calendar feed: `calendar-verify` runs it as a step of the setup. */
+  readonly verifyCalendar: () => Promise<{ readonly ok: boolean; readonly detail: string }>;
   readonly now?: () => number;
 }

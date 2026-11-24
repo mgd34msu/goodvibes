@@ -14,6 +14,9 @@ import { useToast } from '../../lib/toast';
 import type { AskChoice, OpenAsk } from '../../lib/asks';
 import type { ApprovalActions } from './useApprovalActions';
 
+/** The refusal reason that means "choose another model" (platform MODEL_CHOICE_REASON). */
+const CHOOSE_MODEL_REASON = 'choose another model';
+
 export interface ChoiceInput {
   /** Free text: a question's own answer, or the reason for a No. */
   readonly text?: string;
@@ -73,6 +76,14 @@ export function useAskActions(approvals: ApprovalActions) {
           const result = await approvals.deny.mutateAsync({ id: record.id, expectedRevision: revision, ...(input.text?.trim() ? { reason: input.text.trim() } : {}) });
           return result.applied === true;
         }
+        // "Choose another model" refuses with the reason the turn reads as that choice
+        // (the platform's MODEL_CHOICE_REASON, permissions/ask-presentation.ts).
+        if (choice.id === 'choose-model') {
+          const result = await approvals.deny.mutateAsync({ id: record.id, expectedRevision: revision, reason: CHOOSE_MODEL_REASON });
+          return result.applied === true;
+        }
+        // Any other choice this build does not know is never taken as a yes.
+        if (choice.id !== 'once' && choice.id !== 'remember' && choice.id !== 'apply-selected') return false;
         const result = await approvals.approve.mutateAsync({
           id: record.id,
           expectedRevision: revision,

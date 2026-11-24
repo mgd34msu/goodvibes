@@ -18,6 +18,15 @@
   min-height: 0;
 }
 
+/* Copies and restore beside Add memory in the page header. */
+.lib-header__actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .lib-toolbar {
   display: flex;
   flex: none;

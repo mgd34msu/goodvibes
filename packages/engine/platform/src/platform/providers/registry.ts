@@ -1,12 +1,14 @@
 import { providerDisplayLabel } from './provider-labels.js';
 import { DecisionRouterProvider } from './decision-router.js';
-import { installCatalogModelFacts } from './model-catalog-facts.js';
+import { installCatalogModelFacts, modelsNoLongerFree, noLongerFreeNotice } from './model-catalog-facts.js';
+import { ModelPriceChanges } from './model-price-changes.js';
 import { isDeepStrictEqual } from 'node:util';
 import type { LLMProvider, ProviderRuntimeMetadata, ProviderRuntimeMetadataDeps, RegistrableProvider } from './interface.js';
 import { ProviderNotFoundError } from './provider-not-found-error.js';
 import { snapshotRuntimeMetadataDeps } from './runtime-metadata.js';
 import { resolveProviderConfiguredStatus, type ProviderConfiguredStatus } from './configured-status.js';
 import { join } from 'node:path';
+import { resolveSharedDirectory } from '../runtime/surface-root.js';
 import { logger } from '../utils/logger.js';
 import { ProviderCapabilityRegistry, type ProviderCapability, type RequestProfile, type RouteExplanation } from './capabilities.js';
 import { recordProviderAdapterKind } from './adapter-kind.js';
@@ -54,7 +56,7 @@ import { buildModelRegistry, diffCustomModels, findModelDefinition, findModelDef
 import { assertProviderCredentialAuthority } from './credential-authority-contract.js';
 import { resolveModelReference } from './model-id-resolution.js';
 import { ConfiguredModelFollower } from './registry-configured-model.js';
-import { LiveModelListings, type LentModelListings, type LiveModelDiscoveryResult, type LiveModelDiscoverySource } from './live-model-discovery.js';
+import { LiveModelListings, getProviderModelsCachePath, type LentModelListings, type LiveModelDiscoveryResult, type LiveModelDiscoverySource } from './live-model-discovery.js';
 import { TTL_24H_MS } from './json-ttl-cache.js';
 
 /** One provider's model list as it stands (ProviderRegistry.modelListReading). */
@@ -253,6 +255,14 @@ export class ProviderRegistry {
       if (!stop) continue;
       try { options.registerDispose?.(stop); }
       catch (error) { stop(); throw error; }
+    }
+    // A sent message is a moment the catalog is checked when its last check is older than a day, as
+    // opening a model list is: a long session that never opens a picker still learns that a model it
+    // uses stopped being free. No timer; per message it costs one comparison, and one catalog read a day.
+    const stopTurnCheck = this.runtimeBus?.on('TURN_SUBMITTED', () => this.refreshCatalogWhenDue());
+    if (stopTurnCheck) {
+      try { options.registerDispose?.(stopTurnCheck); }
+      catch (error) { stopTurnCheck(); throw error; }
     }
   }
 
@@ -1390,6 +1400,7 @@ export class ProviderRegistry {
       reservedNames,
       ingestContextWindows: this.featureFlags?.isEnabled('local-provider-context-ingestion') ?? false,
       contextIngestion: this.localContextIngestionService,
+      modelsCachePath: (name) => getProviderModelsCachePath(this.getPersistenceRoot(), name),
     });
     const diff = diffCustomModels(this.customModels, result.models, this.getCatalogBuiltins());
     const warnings = [...result.warnings, ...diff.collisionWarnings];
@@ -1650,13 +1661,21 @@ export class ProviderRegistry {
     initProviderCatalog(this._catalogLifecycleCtx(options.contextWindowEnrichment ?? 'background'));
   }
 
-  /** Background, TTL-respecting live model discovery sweep (never blocks/throws); separate from initCatalog() so tests calling that without mocking a provider API aren't surprised by a live network call. Real callers invoke this once at startup too. */
+  /**
+   * Background live model discovery at start (never blocks/throws): every
+   * provider's list is read again from the provider, whatever the age of its
+   * stored list, while the program already works from that stored list; a list
+   * that changed is announced (PROVIDERS_CHANGED) when it arrives, and a
+   * provider that cannot be reached keeps its stored list with the reason on its
+   * row (modelListReading). Separate from initCatalog() so tests calling that
+   * without mocking a provider API aren't surprised by a live network call.
+   */
   initProviderModelDiscovery(): void {
     const host = this.hostModelListings;
     // A borrower waits for the host's own startup sweep, already running, rather than repeating it.
     this.startupDiscovery.start(host
       ? async () => { await host.settled(); return this.refreshLiveModelDiscovery(); }
-      : () => this.refreshLiveModelDiscovery());
+      : () => this.refreshLiveModelDiscovery(undefined, { force: true }));
   }
 
   /** When the startup sweep settled (StartupModelDiscovery); at once when none was started. */
@@ -1680,13 +1699,53 @@ export class ProviderRegistry {
 
   async refreshCatalog(options: ProviderCatalogOptions = {}): Promise<void> {
     const revision = this._modelRegistryRevision;
+    const before = this.catalogModels;
     await refreshProviderCatalog(this._catalogLifecycleCtx(options.contextWindowEnrichment ?? 'background'));
     // Checked now, whether the catalog changed or was found the same.
     this.catalogCheckedAt = Date.now();
     if (this.runtimeBus && this._modelRegistryRevision !== revision) {
       emitProvidersChanged(this.runtimeBus, { sessionId: 'system', traceId: `providers:catalog:${Date.now()}`, source: 'provider-registry' }, { added: [], removed: [], updated: [] });
     }
+    if (this.catalogModels !== before) await this.announceNoLongerFree(before);
   }
+
+  /**
+   * A model the person uses (the current one, a pinned or recent one) that the
+   * catalog listed as free and no longer does is said at once, as a provider
+   * warning every surface shows: charges would otherwise start without a word.
+   */
+  private async announceNoLongerFree(before: readonly CatalogModel[]): Promise<void> {
+    const bus = this.runtimeBus;
+    if (!bus) return;
+    const changed = modelsNoLongerFree(before, this.catalogModels);
+    if (changed.length === 0) return;
+    let current: { provider: string; id: string; registryKey: string } | undefined;
+    try { current = this.getCurrentModel(); } catch { current = undefined; }
+    const favorites = await this.favoritesStore.load().catch(() => ({ pinned: [], history: [] }));
+    const used = new Set([...favorites.pinned, ...favorites.history].map((entry) => entry.registryKey));
+    for (const model of changed) {
+      const matches = (provider: string, id: string): boolean => id === model.modelId
+        && (provider === model.providerId || CATALOG_PROVIDER_NAME_ALIASES[provider] === model.providerId);
+      const inUse = current !== undefined && matches(current.provider, current.id);
+      const keys = [...used].filter((key) => { const [provider, ...rest] = key.split(':'); return matches(provider ?? '', rest.join(':')); });
+      if (inUse) keys.push(current!.registryKey);
+      if (keys.length === 0) continue;
+      // Asked before the first send to it (core/orchestrator.ts confirmPriceChange), once per change.
+      for (const key of new Set(keys)) {
+        this.priceChanges.record(key, { name: model.name, providerId: model.providerId, tier: model.tier, detectedAt: Date.now(),
+          ...(model.pricing ? { pricing: model.pricing } : {}) });
+      }
+      emitProviderWarning(bus, { sessionId: 'system', traceId: `providers:no-longer-free:${Date.now()}`, source: 'provider-registry' },
+        { message: noLongerFreeNotice(model, inUse) });
+    }
+  }
+
+  /** The models whose price moved away from free since they were chosen (model-price-changes.ts). */
+  readonly priceChanges = new ModelPriceChanges(() => {
+    // One record for the machine, in the shared tier; a registry with no home (a test harness) keeps it beside its other state.
+    const home = this.configManager.getHomeDirectory?.();
+    return home ? resolveSharedDirectory(home, 'shared') : this.getPersistenceRoot();
+  });
 
   private _catalogLifecycleCtx(contextWindowEnrichment: 'background' | 'none' = 'background') {
     return {

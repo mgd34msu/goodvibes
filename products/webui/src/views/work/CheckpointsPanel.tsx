@@ -19,7 +19,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Camera, History, RotateCcw } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { WorkspaceCheckpoint } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import {
   CHECKPOINT_NOOP_MESSAGE,
   formatBytes,
@@ -35,6 +35,7 @@ import { useIsPhoneViewport } from '../../hooks/useIsPhoneViewport';
 import { errorCode, formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { CodeFrame, DetailSection, EmptyState, Facts, SkeletonRows } from '../../components/data-view/DataView';
+import { ReadAt } from '../../components/data-view/ReadAt';
 import { Button } from '../../components/ui/Button';
 import { Input } from '../../components/ui/Field';
 import { Row, RowList } from '../../components/ui/Row';
@@ -78,6 +79,7 @@ export function CheckpointsPanel({ sessionId }: CheckpointsPanelProps = {}) {
   const list = useQuery({
     queryKey: [...queryKeys.checkpoints, sessionId ?? 'workspace'],
     queryFn: () => platformClient.operator.checkpoints.list(sessionId ? { sessionId } : undefined),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   const checkpoints = useMemo(() => sortCheckpointsNewestFirst(list.data?.checkpoints ?? []), [list.data]);
   const selected = useMemo(() => checkpoints.find((c) => c.id === selectedId) ?? null, [checkpoints, selectedId]);
@@ -303,6 +305,8 @@ export function CheckpointsPanel({ sessionId }: CheckpointsPanelProps = {}) {
         </Button>
       </form>
 
+      {/* Checkpoints send no live event: say when the list was read. */}
+      {list.isSuccess && <ReadAt at={list.dataUpdatedAt} onRefresh={() => void list.refetch()} refreshing={list.isFetching} />}
       {list.isPending && <SkeletonRows count={3} label="Loading checkpoints" />}
       {list.isError && (
         <p className="dv-notice dv-notice--bad" role="alert">

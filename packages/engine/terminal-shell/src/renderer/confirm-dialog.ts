@@ -27,11 +27,16 @@ export function renderConfirmDialog(dialog: ConfirmView, screenWidth: number, sc
   const cancelLabel = dialog.options.cancelLabel ?? 'Cancel';
   const width = Math.min(CONFIRM_WIDTH, standardModalWidth(screenWidth));
   const lines = body.split('\n').flatMap((para) => (para.trim() === '' ? [''] : wrapLines(para, modalInnerWidth(width))));
-  // Fill rows: padding, title, blank, body, blank, buttons, empty last row.
-  const f = beginModal(screenWidth, screenHeight, { title, width, height: lines.length + 6, center: true });
+  // A field to type in the same ask: a blank, its help line, the value, and what is wrong with it while it is.
+  const field = dialog.options.field;
+  const value = dialog.fieldValue ?? '';
+  const problem = field && value !== '' ? field.check(value) : null;
+  const fieldLines = field ? ['', ...wrapLines(field.help, modalInnerWidth(width)), `${field.label}: ${value}▏`, problem ?? ''] : [];
+  // Fill rows: padding, title, blank, body, [field], blank, buttons, empty last row.
+  const f = beginModal(screenWidth, screenHeight, { title, width, height: lines.length + fieldLines.length + 6, center: true });
   // Body rows run from the top to two rows above the buttons. A body taller than
   // that scrolls, and its last row says how much is still below (or above).
-  const capacity = Math.max(1, f.bottom - 1 - f.top);
+  const capacity = Math.max(1, f.bottom - 1 - f.top - fieldLines.length);
   const overflow = lines.length > capacity;
   const visible = overflow ? Math.max(1, capacity - 1) : lines.length;
   dialog.noteBody?.(lines.length, visible);
@@ -43,9 +48,19 @@ export function renderConfirmDialog(dialog: ConfirmView, screenWidth: number, sc
     f.canvas.put(f.l, y, below > 0
       ? `↓ ${below} more line${below === 1 ? '' : 's'} (down or page down to read them)`
       : `↑ ${start} line${start === 1 ? '' : 's'} above · end shown`, { fg: t.textMuted, bold: below > 0 });
+    y++;
   }
-  // Confirming is possible only once the whole body has been on screen.
-  const ready = dialog.seenToEnd ?? !overflow;
+  if (field) {
+    const helpCount = fieldLines.length - 3;
+    fieldLines.forEach((line, k) => {
+      if (line === '') return;
+      const isValue = k === helpCount + 1;
+      const isProblem = k === helpCount + 2;
+      f.canvas.put(f.l, y + k, line, isValue ? { fg: t.text, bold: true } : isProblem ? { fg: t.warning } : { fg: t.textMuted });
+    });
+  }
+  // Confirming is possible only once the whole body has been on screen, and a field holds a good value.
+  const ready = (dialog.seenToEnd ?? !overflow) && (!field || field.check(value) === null);
   const toneBg = tone === 'danger' ? t.error : tone === 'warning' ? t.warning : t.brand;
   const confirmW = buttonWidth(confirmLabel);
   const cancelW = buttonWidth(cancelLabel);
@@ -55,12 +70,14 @@ export function renderConfirmDialog(dialog: ConfirmView, screenWidth: number, sc
   const cancelX = Math.max(f.l, confirmX - 2 - cancelW);
   f.canvas.put(cancelX, by, ` ${cancelLabel} `, dialog.chosen === 0
     ? { fg: t.selectedListItemText, bg: t.textMuted, bold: true }
-    : { fg: t.textMuted, bg: t.border });
+    : { fg: t.text, bg: t.border });
+  // An unchosen button is text on the border colour (the one pair every theme
+  // keeps at 4.5:1); a button that cannot be pressed yet has no fill.
   f.canvas.put(confirmX, by, ` ${confirmLabel} `, !ready
-    ? { fg: t.textMuted, bg: t.border }
+    ? { fg: t.textMuted }
     : dialog.chosen === 1
       ? { fg: t.selectedListItemText, bg: toneBg, bold: true }
-      : { fg: toneBg, bg: t.border, bold: true });
+      : { fg: t.text, bg: t.border, bold: true });
   f.canvas.hitTargets.push({ id: 'cancel', x: cancelX, y: by, width: cancelW, height: 1, keys: ['n'] });
   if (ready) f.canvas.hitTargets.push({ id: 'confirm', x: confirmX, y: by, width: confirmW, height: 1, keys: ['y'] });
   return finishModal(f);

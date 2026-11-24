@@ -1,11 +1,11 @@
 import { createMcpWorkspaceRenderer } from '@goodvibes/engine/terminal-shell/renderer/mcp-workspace';
 export const { renderMcpWorkspace, renderMcpWorkspacePackageText } = createMcpWorkspaceRenderer({
-  formWriteHelp: 'Workspace writes require explicit confirmation. Type yes on the Confirm field, then save from here.',
+  formWriteHelp: 'Writes a server through the platform MCP config manager, then reloads the live runtime without restarting the Agent.',
   configHelp:
-    'Project/global config locations are shown for review. The workspace dispatches confirmed MCP changes through the shell-owned command router.',
-  removeHelp: 'Press y to remove through the shell-owned command router, n or Esc to cancel.',
-  reloadHelp: 'Press y to reload the MCP runtime from the current config through the shell-owned command router, n or Esc to cancel.',
-  browseEnter: 'view or run',
+    'Project scope writes to this workspace. Global scope writes to your user MCP config. External Claude/Desktop config files are shown but not edited here.',
+  removeHelp: 'Press y to remove, n or Esc to cancel.',
+  reloadHelp: '',
+  browseEnter: 'edit or run',
   freshnessLabel: 'config',
   originLabel: (source) => (source === 'runtime' ? source : source + ' config'),
 });

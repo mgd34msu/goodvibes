@@ -1,8 +1,22 @@
 /**
  * Composer attachment helpers.
  * Handles drag-and-drop and paste-image (clipboard) for the Composer.
- * Pure utilities, no React dependencies.
+ * Pure utilities, no React dependencies; the file limit both the composer and the native request form keep.
  */
+
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '@goodvibes/engine/platform/platform/companion/attachment-limits';
+
+/** The files one message or request may carry: the daemon's own limit. */
+export const MAX_ATTACHED_FILES = MAX_ATTACHMENTS_PER_MESSAGE;
+
+/** Said when more files are added than fit, in the chat composer and the native request form alike. */
+export const TOO_MANY_FILES = `A request takes at most ${MAX_ATTACHMENTS_PER_MESSAGE} files. Remove one to add another.`;
+
+/** The files that still fit beside `held` already attached, and whether any were left out. */
+export function filesThatFit<T>(held: number, added: readonly T[]): { taken: T[]; refused: boolean } {
+  const room = Math.max(0, MAX_ATTACHMENTS_PER_MESSAGE - held);
+  return { taken: added.slice(0, room), refused: added.length > room };
+}
 
 /** Returns true if the drag event carries files. */
 export function dragHasFiles(event: DragEvent): boolean {

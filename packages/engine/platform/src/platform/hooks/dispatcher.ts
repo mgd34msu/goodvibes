@@ -233,6 +233,18 @@ export class HookDispatcher {
     this.loadedHooksCheck = check;
   }
 
+  /** Run before every dispatch: reads the hooks file again first when it changed since it was loaded. */
+  private hooksFileFreshness: (() => Promise<void>) | null = null;
+
+  /**
+   * A check every dispatch awaits first, whether or not hooks from a file are
+   * loaded, so a hooks file edited by hand (or created) since it was loaded is
+   * read again before any hook fires. Null removes it.
+   */
+  setHooksFileFreshnessCheck(check: (() => Promise<void>) | null): void {
+    this.hooksFileFreshness = check;
+  }
+
   /**
    * Receives, after every {@link loadFromFile}, each entry of the file that was
    * not loaded (empty when all were), so the owner is told what was left out.
@@ -431,6 +443,13 @@ export class HookDispatcher {
   }
 
   private async fireInScope(event: HookEvent, owner?: TurnHookOwner, admitHook?: HookWorkAdmission): Promise<HookResult> {
+    if (this.hooksFileFreshness) {
+      try {
+        await this.hooksFileFreshness();
+      } catch (error) {
+        logger.warn('HookDispatcher: the hooks file was not read again after it changed; the hooks loaded before stay', { error: summarizeError(error) });
+      }
+    }
     if (this.holdsFileHooks && this.loadedHooksCheck) {
       try {
         await this.loadedHooksCheck();

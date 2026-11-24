@@ -255,6 +255,27 @@ export {
 } from './connection-owner.js';
 
 export {
+  GoogleConnectionRepair,
+  decideGoogleApiEnable,
+  describeConsentForModel,
+  enableGoogleApis,
+  googleConnectionRepairOf,
+  installGoogleConnectionRepair,
+  type GoogleApiEnableDecider,
+  type GoogleApiEnableDecision,
+  type GoogleApiEnableRequest,
+  type GoogleConnectionRepairDeps,
+  type GoogleConsentReason,
+  type GoogleConsentStart,
+  type GoogleConsentStarted,
+  type GoogleDisabledService,
+  type GoogleRepairNotice,
+  type GoogleRepairOptions,
+  type GoogleRepairOutcome,
+  type GoogleRequestRepair,
+} from './connection-repair.js';
+
+export {
   checkDaemonGoogleAtBoot,
   daemonGoogleConnectionOwner,
   type DaemonGoogleBootCheckDeps,

@@ -36,6 +36,7 @@ import {
 import { revealOrNull, type Secret } from '../security/secret.js';
 import { nodeGoogleFilePort } from '../google/node.js';
 import { daemonGoogleConnectionOwner } from '../google/daemon-connection.js';
+import { googleConnectionRepairOf } from '../google/connection-repair.js';
 
 /** The slice of the daemon runtime this composition needs. Nothing wider. */
 export interface DaemonGmailInboundReaderDeps {
@@ -86,6 +87,11 @@ export function createDaemonGmailInboundReader(
       secretGet: async (key) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
     },
     fetch: fetchPort,
+    // The daemon's repair: a missing or scope-less grant starts the consent from here.
+    repair: googleConnectionRepairOf(deps.secretsManager),
+    wantsGmail: () => {
+      try { return deps.configManager.get('surfaces.email.inbound.source' as never) === 'gmail'; } catch { return false; }
+    },
     // The daemon's one token manager, shared with the calendar verbs and the start-up check.
     connectionOwner: daemonGoogleConnectionOwner({
       configManager: deps.configManager,

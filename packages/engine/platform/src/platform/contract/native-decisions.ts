@@ -12,6 +12,7 @@ import { decideAutonomous, type AutonomousDecision } from '../gate/autonomous-de
 import { autonomousSourceEvidence } from '../permissions/autonomous.js';
 import { snapshotJudgmentInput } from '../gate/judgment-input.js';
 import { assertNativeContractSource, nativeContractSourceForAdmission } from './native-source.js';
+import { bindSourceAttachments } from '../tools/agent/contract-binding.js';
 import { assertDurableCheckpoint, criteriaSetIdForWork } from './durable-admission.js';
 import { isTerminalContractStatus, type Contract, type ContractView, type ContractRouteSelector } from './types.js';
 
@@ -212,7 +213,8 @@ export function nativeContractActionSource(contract: Contract, services: NativeC
     const source = nativeContractSourceForAdmission(contract);
     return issue ? bindNativeCiSourceIssuer(source, issue) : source;
   };
-  return issue ? bindNativeCiSourceIssuer(sourceOf, issue) : sourceOf;
+  // The request's files travel with the getter to every member it is bound to.
+  return bindSourceAttachments(issue ? bindNativeCiSourceIssuer(sourceOf, issue) : sourceOf, contract.nativeSource?.attachments);
 }
 
 /** Decorates the single shared transport; owns no retry loop and cannot turn an outage into a decision. */

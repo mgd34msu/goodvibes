@@ -27,6 +27,15 @@ export interface McpWorkspaceStatePorts<Context, Form extends McpWorkspaceFormBa
     readonly remove: (name: string, scope: 'project' | 'global') => string;
   };
   readonly requestRender: (context: Context) => void;
+  /**
+   * The connected servers as the runtime store holds them (it follows MCP_CONNECTED and
+   * MCP_DISCONNECTED), and its change feed: while the screen is open, a server that connects
+   * or drops updates the rows and the tools with no key.
+   */
+  readonly connections?: ((context: Context) => {
+    readonly connected: () => readonly string[];
+    readonly subscribe: (listener: () => void) => () => void;
+  }) | undefined;
 }
 function isTextField(field: string): field is 'name' | 'command' | 'args' | 'env' | 'allowedPaths' | 'allowedHosts' | 'deniedTools' {
   return (
@@ -94,8 +103,28 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
     this.query = '';
     this.refreshSnapshot();
     void this.refreshTools(this.ports.showToolStatusOnOpen);
+    this.watchConnections(context);
+  }
+  /** Stops following the connected servers; set while the screen is open. */
+  private unwatchConnections: () => void = () => {};
+  private watchConnections(context: Context): void {
+    this.unwatchConnections();
+    const feed = this.ports.connections?.(context);
+    if (!feed) return;
+    let seen = feed.connected().join('\n');
+    this.unwatchConnections = feed.subscribe(() => {
+      if (!this.active || this.context !== context) return;
+      const now = feed.connected().join('\n');
+      if (now === seen) return;
+      seen = now;
+      this.refreshSnapshot();
+      // In form mode the status line belongs to the form; in the browser it says the tool count again.
+      void this.refreshTools(this.mode === 'browse');
+    });
   }
   close(): void {
+    this.unwatchConnections();
+    this.unwatchConnections = () => {};
     this.active = false;
     this.mode = 'browse';
     // A refresh still in flight is retired: it must not publish into a closed
@@ -196,6 +225,10 @@ export abstract class McpWorkspaceState<Context, Form extends McpWorkspaceFormBa
   }
   reopen(): void {
     this.active = true;
+    if (this.context) {
+      this.refreshSnapshot();
+      this.watchConnections(this.context);
+    }
   }
   async refreshTools(updateStatus = true): Promise<void> {
     if (!this.context) return;

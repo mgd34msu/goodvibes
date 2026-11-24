@@ -5,7 +5,7 @@
  * primary action and opens a dialog. Record detail opens in the right-hand pane.
  */
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Search } from 'lucide-react';
+import { ArchiveRestore, Plus, Search } from 'lucide-react';
 import { useEffect, useRef, useState, type SyntheticEvent } from 'react';
 import { DataPage } from '../../components/data-view/DataView';
 import { LIBRARY, resolveTab } from '../../components/shell/nav';
@@ -36,6 +36,8 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
   const [forced, setForced] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [memoryServed, setMemoryServed] = useState(true);
+  // The memory store's copies and restore, opened from the header beside Add memory.
+  const [showCopies, setShowCopies] = useState(false);
   const review = useReviewTally();
 
   useEffect(() => setForced(null), [text]);
@@ -75,13 +77,25 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
         title={LIBRARY.label}
         description={LIBRARY.description}
         action={memoryServed ? (
-          <Button
-            variant="primary"
-            icon={<Plus aria-hidden="true" />}
-            onClick={openAdd}
-          >
-            Add memory
-          </Button>
+          <span className="lib-header__actions">
+            {current === 'memory' && (
+              <Button
+                variant="secondary"
+                icon={<ArchiveRestore aria-hidden="true" />}
+                aria-expanded={showCopies}
+                onClick={() => setShowCopies((open) => !open)}
+              >
+                {showCopies ? 'Hide copies' : 'Copies and restore'}
+              </Button>
+            )}
+            <Button
+              variant="primary"
+              icon={<Plus aria-hidden="true" />}
+              onClick={openAdd}
+            >
+              Add memory
+            </Button>
+          </span>
         ) : undefined}
         filters={(
           <>
@@ -109,7 +123,7 @@ export function LibraryView({ tab, onTabChange }: LibraryViewProps) {
         )}
         className="lib-page"
       >
-        {current === 'memory' && <MemoryView query={query} onAddMemory={openAdd} onServedChange={setMemoryServed} />}
+        {current === 'memory' && <MemoryView query={query} onAddMemory={openAdd} onServedChange={setMemoryServed} showCopies={showCopies} />}
         {current === 'knowledge' && <KnowledgeView query={query} />}
         {current === 'review' && <ReviewTab query={query} />}
       </DataPage>

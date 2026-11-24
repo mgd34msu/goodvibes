@@ -14,8 +14,9 @@
  * With no credential there is nothing to send to `/status`, so one request to
  * the host's public auth route says whether a host is there at all.
  *
- * Cost: one request with a 3 s deadline when the workspace opens (none if a
- * reading for that host is already held), one on Ctrl+R; nothing per repaint.
+ * Cost: one request with a 3 s deadline when the workspace opens, for a host on
+ * this computer or another (none if a reading for that host younger than
+ * `freshMs` is held), one on Ctrl+R; nothing per repaint, nothing on a timer.
  */
 import type { CommandContext } from './command-registry.ts';
 import { readConnectedHostMethod, resolveConnectedHostConnection } from './connected-host-routes.ts';
@@ -63,14 +64,15 @@ export function agentWorkspaceHostSetupReading(baseUrl: string, credentialPath: 
  */
 export function checkAgentWorkspaceHostSetup(
   context: CommandContext,
-  options: { readonly force?: boolean } = {},
+  options: { readonly force?: boolean; readonly freshMs?: number } = {},
 ): Promise<Extract<AgentWorkspaceHostSetupReading, { state: 'checked' }>> {
   const connection = resolveConnectedHostConnection(context);
   const key = readingKey(connection.baseUrl, connection.tokenPath);
   const held = readings.get(key) ?? {};
   readings.set(key, held);
   if (held.pending) return held.pending;
-  if (held.reading && options.force !== true) return Promise.resolve(held.reading);
+  const fresh = held.reading !== undefined && (options.freshMs === undefined || Date.now() - held.reading.checkedAt <= options.freshMs);
+  if (held.reading && fresh && options.force !== true) return Promise.resolve(held.reading);
   const credentialPresent = Boolean(connection.token);
   const pending = (credentialPresent ? probeWithCredential(context, connection.baseUrl) : probeWithoutCredential(connection.baseUrl))
     .then((reading) => {

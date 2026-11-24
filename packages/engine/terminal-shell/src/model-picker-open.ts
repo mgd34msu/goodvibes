@@ -38,6 +38,12 @@ export interface ModelPickerOpenDeps<Info> {
   readonly resolveEmbeddingProviders?: (() => Promise<EmbeddingProviderPickerEntry[]>) | undefined;
   /** Optional live re-check of each provider's served models; resolves true when a list changed. */
   readonly refreshLiveModels?: (() => Promise<boolean>) | undefined;
+  /**
+   * Hear when the providers' model lists change (PROVIDERS_CHANGED, which the
+   * daemon sends after it reads every provider's list on start): an open
+   * picker shows the fresh list when it arrives. Returns the unsubscribe.
+   */
+  readonly onModelsChanged?: ((listener: () => void) => (() => void)) | undefined;
   /** Best-effort prefetches (pinned and recent models); failures stay silent. */
   readonly prefetch?: (() => Promise<void>) | undefined;
   readonly onError: (error: unknown) => void;
@@ -68,6 +74,15 @@ export function openModelPickerNow<Info>(
   const ticket = picker.beginCatalogLoad();
   deps.render();
   const ownsCatalog = () => picker.isCatalogLoadCurrent(ticket);
+  // A list that changes while this picker is open replaces the one shown; the
+  // listener goes at the first change after this picker session has ended.
+  if (deps.onModelsChanged) {
+    const stop = deps.onModelsChanged(() => {
+      if (!ownsCatalog()) { stop(); return; }
+      const fresh = mode === 'providers' ? { providers: deps.listProviders() } : { models: deps.listModels() };
+      if (picker.fillCatalog(ticket, fresh, false)) deps.render();
+    });
+  }
   const prefetch = (deps.prefetch?.() ?? Promise.resolve())
     .catch(() => {})
     .then(() => {

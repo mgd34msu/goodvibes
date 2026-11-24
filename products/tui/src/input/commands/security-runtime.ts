@@ -11,6 +11,7 @@ import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config'
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import {
+  requireMcpRegistry,
   requireReadModels,
   requireSecretsManager,
   requireServiceRegistry,
@@ -102,7 +103,14 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
     policyContext: createPolicyCommandContext,
     sandboxConfig: (ctx) => ({
       get: (key) => ctx.platform.configManager.get(key as Parameters<typeof ctx.platform.configManager.get>[0]),
-      setMcpIsolation: (mode) => ctx.platform.configManager.setDynamic('sandbox.mcpIsolation', mode),
+      setMcpIsolation: (mode) => {
+        // The registry restarts its servers when the setting changes; an unchanged value restarts none.
+        const registry = requireMcpRegistry(ctx);
+        const before = registry.mcpIsolationChange();
+        ctx.platform.configManager.setDynamic('sandbox.mcpIsolation', mode);
+        const after = registry.mcpIsolationChange();
+        return after !== before && after !== null ? after : { mode, restarted: [], afterCall: [] };
+      },
     }),
     sandboxSessions: (ctx) => ctx.workspace.sandboxSessionRegistry ?? undefined,
     resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),

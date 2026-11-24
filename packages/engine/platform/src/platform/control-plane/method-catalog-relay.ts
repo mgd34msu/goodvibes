@@ -61,7 +61,8 @@ const RELAY_CODE_SCHEMA = objectSchema({
 }, ['id', 'name', 'createdAt']);
 
 const RELAY_CODE_LIMIT: ContractErrorCode = { code: 'RELAY_CODE_LIMIT', status: 409, meaning: 'The daemon already holds 64 relay codes, so no new device can pair; revoke the ones no device uses (relay.codes.list, relay.codes.revoke), then pair again.' };
-const RELAY_CODE_NOT_FOUND: ContractErrorCode = { code: 'RELAY_CODE_NOT_FOUND', status: 404, meaning: 'No relay code has that id; list the codes with relay.codes.list and revoke an id it shows.' };
+const RELAY_URL_REQUIRED: ContractErrorCode = { code: 'RELAY_URL_REQUIRED', status: 400, meaning: 'turnOn was sent, but no relay address is set on the daemon and none was given; send the relay\'s wss:// address as url.' };
+const RELAY_CODE_NOT_FOUND: ContractErrorCode ={ code: 'RELAY_CODE_NOT_FOUND', status: 404, meaning: 'No relay code has that id; list the codes with relay.codes.list and revoke an id it shows.' };
 const AUTHORITY_RECORD_UNAVAILABLE: ContractErrorCode = { code: 'AUTHORITY_RECORD_UNAVAILABLE', status: 503, meaning: 'The authority record could not be read, so no relay code was issued and nothing was paired; check the record file, then pair again.' };
 const RELAY_CODE_REVOKE_FAILED: ContractErrorCode = { code: 'RELAY_CODE_REVOKE_FAILED', status: 503, meaning: 'The revocation could not be written to the authority record, so nothing was revoked and the device keeps relay access; try again.' };
 const RELAY_CODE_REVOKE_NOT_SAVED: ContractErrorCode = { code: 'RELAY_CODE_REVOKE_NOT_SAVED', status: 500, meaning: 'The code is revoked and refused, and its connections were closed, but it could not be removed from the relay codes file; revoke the same id again to retry the removal.' };
@@ -80,26 +81,30 @@ export const builtinGatewayRelayMethodDescriptors: readonly GatewayMethodDescrip
     outputSchema: objectSchema({
       status: RELAY_STATUS_SCHEMA,
       configured: { type: 'boolean' },
+      /** The status in plain words with the relay's address, e.g. "The relay at wss://… is not answering yet; GoodVibes keeps trying." */
+      words: STRING_SCHEMA,
+      relayUrl: STRING_SCHEMA,
       rendezvousId: STRING_SCHEMA,
       refusal: RELAY_REFUSAL_SCHEMA,
-    }, ['status', 'configured']),
+    }, ['status', 'configured', 'words']),
   }),
   methodDescriptor({
     id: 'relay.pairing.mint',
     repeat: 'unsafe',
     effects: ['control-plane.administer', 'model.refused'],
     title: 'Mint A Relay Pairing Payload',
-    description: 'Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon\'s static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.',
+    description: 'Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon\'s static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `turnOn: true` is the owner\'s yes to letting devices reach this machine through the relay, asked by the caller first (the ask opens on No): when the relay is off, the daemon sets `relay.enabled` (which also backs the relay-connect capability) and `relay.url` from `url` (the relay\'s wss:// address; needed only when none is set), and the registration starts without a restart. A registration that is on its way (`idle`, `connecting`, `reconnecting`) is waited for in the same call, with no timer, until the host\'s own answer: `registered` mints the pairing, `refused` or `failed` answers with `pairing` null and that status (relay.reachability.get then says why). The wait ends with the caller. While it waits, every status change is announced as LIST_CHANGED with `list: "relay"`, and relay.reachability.get answers `words`, the status in plain words with the relay\'s address (`The relay at <url> is not answering yet; GoodVibes keeps trying.`), for the waiting screen. `words` is on this answer too. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against: the relay is off and `turnOn` was not sent, or the relay refused it. Minting does not create a second identity or a second registration; it describes the one that exists. 400 RELAY_URL_REQUIRED when `turnOn` is sent, no relay address is set and `url` is empty. 409 RELAY_CODE_LIMIT when 64 codes are held.',
     category: 'control-plane',
     transport: ['ws'],
-    inputSchema: objectSchema({ name: STRING_SCHEMA }, []),
+    inputSchema: objectSchema({ name: STRING_SCHEMA, turnOn: { type: 'boolean' }, url: STRING_SCHEMA }, []),
     outputSchema: objectSchema({
       pairing: { anyOf: [RELAY_PAIRING_SCHEMA, { type: 'null' }] },
       status: RELAY_STATUS_SCHEMA,
+      words: STRING_SCHEMA,
       codeId: STRING_SCHEMA,
       codeName: STRING_SCHEMA,
-    }, ['pairing', 'status']),
-    errorCodes: [RELAY_CODE_LIMIT, AUTHORITY_RECORD_UNAVAILABLE],
+    }, ['pairing', 'status', 'words']),
+    errorCodes: [RELAY_CODE_LIMIT, AUTHORITY_RECORD_UNAVAILABLE, RELAY_URL_REQUIRED],
   }),
   methodDescriptor({
     id: 'relay.codes.list',

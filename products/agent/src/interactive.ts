@@ -44,6 +44,8 @@ import { envFlag, logger, summarizeError } from '@goodvibes/engine/platform/plat
 import { emitAgentAwaitingMessage, emitAgentAwaitingTool } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { bootstrapRuntime } from './runtime/bootstrap.ts';
 import { readAgentHostSetting } from './config/host-settings.ts';
+import { createWorkspaceRegistrationLiveChecker } from './config/workspace-registration.ts';
+import { onDaemonAttached } from './runtime/daemon-attach-signal.ts';
 import type { BootstrapContext } from './runtime/bootstrap.ts';
 import { startFirstRenderFollowups, type DaemonRepairPrompt } from './shell/first-render-followups.ts';
 import { deleteRecoveryFile, removeRecoveryPoint } from '@/runtime/index.ts';
@@ -64,10 +66,12 @@ import { createModeWordsSource, getSharedModeFlash } from '@goodvibes/engine/ter
 import { terminalAskFacts, type TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
 import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes/engine/terminal-shell/status-line';
+import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
 import { drawSplashAdditions } from '@goodvibes/engine/terminal-shell/first-run';
 import { GitStatusProvider, type GitHeaderInfo } from '@goodvibes/engine/terminal-shell/git-status';
 import { describeExecutionModeWords } from './permissions/execution-mode.ts';
 import { footerTargetRows } from './renderer/footer-targets.ts';
+import { setStatusWorkspaceKey } from './renderer/status-line.ts';
 import { getSharedNotificationFeed } from './core/notifications-feed.ts';
 import { watchDaemonPowerEvents, type PowerState } from '@goodvibes/engine/platform/platform/power';
 import { buildPersistedSessionContextFromFacts, holdOfferedRecoverySnapshot } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -311,6 +315,11 @@ async function main(prepared: PreparedShellCliRuntime) {
     mainBusy: mainTurnBusy,
     mainModel: () => providerRegistry.getCurrentModel().id,
     promptText: () => input.prompt,
+    sessionKeys: () => ({
+      // An unbound key gives '', and the chips row shows its default key.
+      next: keycapLabel(ctx.services.keybindingsManager.getComboLabel('next-session')) ?? '',
+      previous: keycapLabel(ctx.services.keybindingsManager.getComboLabel('previous-session')) ?? '',
+    }),
     requestRender: () => render(),
   });
   commandContext.openSessionView = (target) => sessionViews.open(target);
@@ -394,6 +403,15 @@ async function main(prepared: PreparedShellCliRuntime) {
   unsubs.push(ownerQuestionCard.start());
   // The status bar's branch: read once, then polled the way the terminal app does (a few file stats
   // every 5 s; git runs only when git's own files moved or the terminal regains focus) and after each turn.
+  // The branch shows only in a folder registered as a project (`goodvibes-agent workspaces register`):
+  // anywhere else a git branch says nothing about the assistant's work. Read at start and after each
+  // turn (one small file read), so registering mid-session shows it from the next turn.
+  const projectRegistration = createWorkspaceRegistrationLiveChecker(ctx.services.shellPaths, ctx.services.workingDirectory);
+  const readOpenedAsProject = (): boolean => {
+    const eligibility = projectRegistration();
+    return eligibility.state === 'readable' && eligibility.resolution.status === 'covered';
+  };
+  let openedAsProject = readOpenedAsProject();
   const gitStatus = new GitStatusProvider(ctx.services.workingDirectory);
   let gitInfo: GitHeaderInfo | undefined;
   const showGit = (info: GitHeaderInfo): void => { gitInfo = info; render(); };
@@ -401,7 +419,10 @@ async function main(prepared: PreparedShellCliRuntime) {
   gitStatus.startPolling(5_000, showGit, () => ctx.services.focusTracker.isFocused());
   unsubs.push(
     () => gitStatus.stopPolling(),
-    uiServices.events.turns.on('TURN_COMPLETED', () => { void gitStatus.refresh().then(showGit, () => undefined); }),
+    uiServices.events.turns.on('TURN_COMPLETED', () => {
+      openedAsProject = readOpenedAsProject();
+      void gitStatus.refresh().then(showGit, () => undefined);
+    }),
   );
   unsubs.push(
     () => powerNote.stop(),
@@ -430,6 +451,12 @@ async function main(prepared: PreparedShellCliRuntime) {
   // A provider reconnect reads as "retrying n/m" in the throbber instead of a generic stall.
   unsubs.push(uiServices.events.turns.on('STREAM_RETRY', (event) => {
     thinkingClock.noteReconnect(event.attempt, event.maxAttempts);
+    render();
+  }));
+  // A provider problem the owner acts on (a model he uses stopped being free, a custom provider file that did not
+  // load): said in the conversation, as the terminal app says it.
+  unsubs.push(uiServices.events.providers.on('PROVIDER_WARNING', (warning) => {
+    systemMessageRouter.high(warning.message);
     render();
   }));
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
@@ -938,12 +965,14 @@ async function main(prepared: PreparedShellCliRuntime) {
   input.surfaceModals.onChange = () => render();
   // A click on a status bar segment opens its view (status-line.ts); the Agent keeps no changes view, so its branch only reads.
   input.onFooterTarget = (target) => {
-    if (target === 'mode') commandContext.openSettingsModal?.('permissions.mode');
+    // The mode opens /permissions: what is in force and why on its first row, the fix and the mode setting below it.
+    if (target === 'mode') void runPickedCommand(commandContext.executeCommand, 'permissions', [], (message) => commandContext.print(message)).finally(() => render());
     else if (target === 'notices') commandContext.openNotifications?.();
     else if (target === 'context') commandContext.openContextInspector?.();
     else if (target === 'model') commandContext.openModelPicker?.();
     else if (target === 'agents') commandContext.openAgents?.();
     else if (target === 'commands') commandContext.openCommandPalette?.();
+    else if (target === 'workspace') commandContext.openWorkspacePicker?.();
     render();
   };
   input.sessionView = sessionViews;
@@ -969,6 +998,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     sessionId: runtime.sessionId,
     unsubs,
     buffer: input,
+    commandContext,
+    subscribeFocusGained: (listener) => ctx.services.focusTracker.onFocusGained(listener),
     submitTurn: submission.submitSpeech,
     notify: (m) => {
       systemMessageRouter.high(m);
@@ -1075,6 +1106,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       hasAttachments: input.getImageAttachments().size > 0,
       turnState: sessionSnapshot.turnState,
     });
+    setStatusWorkspaceKey(keycapLabel(ctx.services.keybindingsManager.getComboLabel('workspace-picker'))); // the status line's `ctrl+g workspace`, as bound
     const footerLines = buildShellFooter({
       width,
       promptText: promptInfo.visibleLines.join('\n'),
@@ -1098,8 +1130,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       model: runtime.model, // prices the cost
       pricing: providerRegistry,
       modelLabel: currentModel.displayName || currentModel.id,
-      // '?' is the git read's "no repository here (or no answer yet)": no branch segment.
-      branch: gitInfo && gitInfo.branch !== '?' ? gitInfo.branch : undefined,
+      // '?' is the git read's "no repository here (or no answer yet)": no branch segment; none outside a registered project.
+      branch: openedAsProject && gitInfo && gitInfo.branch !== '?' ? gitInfo.branch : undefined,
       branchChanged: gitInfo?.dirty === true,
       modeWords: describeExecutionModeWords(configManager, () => modeWords.current()),
       modeKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('cycle-permission-mode')),
@@ -1131,6 +1163,8 @@ async function main(prepared: PreparedShellCliRuntime) {
       composerPendingRisk: composerState.pendingRisk,
       voiceCapture: voiceCaptureStatus(),
       contractQuestionHint: contractQuestions.hint(),
+      // Esc leads back only while what was typed is still in the composer (handler-interactions.ts).
+      workspaceReturnArea: input.prompt.length > 0 ? input.agentWorkspace.typedAwayFromArea : null,
       throbber,
       turnRunning: mainTurnBusy(),
       backToBottom,
@@ -1155,6 +1189,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     // Flush pending renders after updating the width provider and splash posture
     // so the transcript and splash rebuild against the current shell layout.
     workTreeWiring.syncSession(); // a resumed session's folds come back with it
+    conversation.workTree.reduceMotion = configManager.get('display.reduceMotion') === true; // still marks, times still count
     conversation.workTree.tickLive(); // running beads spin and count up
     conversation.getDisplayBlocks();
 
@@ -1276,6 +1311,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     getConfiguredProviderIds: ctx._getConfiguredProviderIds,
     getPinned: ctx._getPinned,
     render,
+    // The daemon reads every provider's list on start and says so: an open picker shows it then.
+    onProvidersChanged: (listener) => uiServices.events.providers?.on('PROVIDERS_CHANGED', listener) ?? (() => {}),
   });
 
   // Crash capture before raw mode and terminal entry, as in the TUI: a throw
@@ -1379,6 +1416,11 @@ async function main(prepared: PreparedShellCliRuntime) {
 
   conversation.rebuildHistory();
   render();
+  // What is waiting (Home and Work & Approvals) is read in the background at every start, after the
+  // first frame, so the workspace opens with it already read; one read per report, nothing on a timer.
+  input.agentWorkspace.readAtStart(commandContext, () => render());
+  // When the connected daemon answers again, what failed because it did not is read again by itself.
+  unsubs.push(onDaemonAttached(() => { input.agentWorkspace.daemonAnswered(); render(); }));
   const followups = startFirstRenderFollowups({
     shellPaths: ctx.services.shellPaths,
     providerRegistry,

@@ -139,7 +139,7 @@ The model name in the status bar does not change when the runtime switches backe
 
 When every backend for a free synthetic model is exhausted and cooldowns are too long to wait out, the system falls back to the next-best free model ranked by benchmark score, notifies inline without blocking the turn, and cascades until it finds a working free model. Free, paid, and subscription tiers never mix. This cascade only happens within the free tier.
 
-> **Cost-accrual caveat:** this system is not perfect, and charges can accrue in ways it cannot always catch. This happens notably when a provider moves a model from free to paid while a session has been running longer than 24 hours without a model refresh, since the system has no way to know the model is now paid. Refreshes happen automatically when a session is started or resumed after the 24-hour catalog TTL expires; for long-running sessions, refresh the model list daily.
+> **Cost-accrual caveat:** charges can still accrue in ways GoodVibes cannot catch at once. The shared model catalog is checked again when its last check is more than 24 hours old: at start, at the next message you send, or when a model list is opened (no timer runs). When a check finds that a model you use (the current one, a pinned or a recent one) moved from free to paid, a provider warning names it, its new price, and `/model` to pick a free one, and before the next message to that model your permission mode decides, as for every decision: YOLO keeps it, Jev decides and Just vibes let the decision model decide (Jev decides asks you, and Just vibes sends nothing, when no decision model works), and Ask me asks `<model> is no longer free: about <price>. Keep using it?` (opening on No; `Yes, keep using it`, `No`, `Choose another model`). A keep is remembered for that change; a warning says what decided. A price change between two checks is seen only at the next check; `/model refresh` checks at once. The model picker shows each model's price tier (free, paid, subscription, or price not known).
 
 ### Paid and subscription exhaustion
 
@@ -219,7 +219,7 @@ The model picker has six targets, each writing its own config keys, so a choice 
 | `decision` | Decision model | `judgment.endpoint` + `judgment.model` + `judgment.keySource` + `judgment.keyName` + `judgment.backend` | The model that decides which actions are safe under Jev decides. Choosing one runs the same steps as the Decision model row in `/settings open` (its address, then where its key comes from); "No decision model" clears it. |
 | `embeddings` | Search index | `provider.embeddingProvider` | Not an LLM route: an embedding provider id only, no model concept, used for memory search and the code index. |
 
-The search index and decision model targets have no catalog model to pick, so each opens its own short list instead of the model list the other four targets share. Those four list only models the model catalog says read and write text (its published type and input and output modalities); a model the catalog does not describe is listed after the described ones, marked `kind unknown`.
+The search index and decision model targets have no catalog model to pick, so each opens its own short list instead of the model list the other four targets share. Those four list only models the model catalog says read and write text (its published type and input and output modalities); a model the catalog does not describe is listed after the described ones, marked `not in the catalog`.
 
 ## Custom providers
 

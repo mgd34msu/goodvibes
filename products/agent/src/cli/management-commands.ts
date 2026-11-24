@@ -13,6 +13,13 @@ import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-
 import { appendTemporalLabel } from './temporal-label.ts';
 import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
 
+/** The ordinary ask of a terminal command, opening on No (`[y/N]`). */
+export async function askYesNoOnTerminal(question: string): Promise<boolean> {
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try { return /^y(es)?$/i.test((await rl.question(`${question} [y/N] `)).trim()); } finally { rl.close(); }
+}
+
 /**
  * `goodvibes-agent pair`: mint a named device token on the connected host and
  * print its `#pair=` link and QR. The Agent's own host credential is never printed.
@@ -22,7 +29,7 @@ export async function renderPairing(runtime: CliCommandRuntime): Promise<{ reado
   const json = runtime.cli.flags.outputFormat === 'json';
   const outcome = await mintAgentDevicePairing(
     createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory, invokeTimeoutMs: 15_000 }),
-    { ...(name === undefined ? {} : { name }), qr: !json },
+    { ...(name === undefined ? {} : { name }), qr: !json, ...(!json && process.stdin.isTTY ? { askToServe: askYesNoOnTerminal } : {}) },
   );
   if (!outcome.ok) {
     return {

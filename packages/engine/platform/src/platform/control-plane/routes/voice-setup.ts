@@ -17,6 +17,7 @@ import { readInvocationParams } from './invocation-params.js';
 import type { VoiceKeySupersede } from '../../voice/provisioning/config-preconfigure.js';
 import type { VoiceRoundTripProof } from '../../voice/provisioning/round-trip-proof.js';
 import { attachHandler } from './attach-handler.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import type { VoiceSetupOutcome, VoiceSetupRequest } from '../../runtime/voice-setup.js';
 import { WAKE_MODEL_COMPONENTS, isWakeModelComponent, type WakeModelComponent } from '../../runtime/wake-setup.js';
 
@@ -108,7 +109,11 @@ export function createWakeStatusHandler(service: VoiceSetupGatewayService): Gate
 }
 
 export function createWakeProvisionHandler(service: VoiceSetupGatewayService): GatewayMethodHandler {
-  return () => service.wakeProvision();
+  return async () => {
+    try { return await service.wakeProvision(); }
+    // Provisioned or not, the wake artifacts' state changed: every voice view reads it again.
+    finally { noteListChanged({ list: 'voice', change: 'changed' }); }
+  };
 }
 
 /**

@@ -12,6 +12,9 @@ import { logger, summarizeError } from '@goodvibes/engine/platform/platform/util
 import { writeFatalLine } from '@goodvibes/engine/platform/platform/daemon';
 import type { GoodVibesCliParseResult } from '@goodvibes/engine/terminal-shell';
 import { openDeepLink, parseDeepLink } from '../input/commands/deep-link.ts';
+import { existsSync, realpathSync } from 'node:fs';
+import { isAbsolute, join, relative, sep } from 'node:path';
+import { getMcpConfigLocations } from '@goodvibes/engine/platform/platform/mcp';
 
 export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[0] & {
   readonly workingDirectory: string;
@@ -39,24 +42,51 @@ export function decodeFirstOpenChoice(id: string | null): FirstOpenTrustLevel | 
  * selfRecordWorkspaceRegistration below) rather than ever asking a question
  * about a registry the user hasn't met yet.
  */
-export function buildFirstOpenItems(): { readonly title: string; readonly items: SelectionItem[] } {
+export function buildFirstOpenItems(folder: FolderTrustFacts): { readonly title: string; readonly items: SelectionItem[] } {
+  const found = folder.found.length > 0
+    ? `This folder has ${folder.found.join(' and ')}.`
+    : 'This folder has no hooks file or tool servers (MCP) of its own.';
+  const undo = 'Change it later with /security trust-folder or /security restrict-folder.';
   return {
-    title: 'New workspace: choose a trust level',
+    title: `Trust ${folder.shownPath}?`,
     items: [
       {
         id: 'trusted',
         label: 'Trust this workspace',
-        detail: 'Trusting this folder lets its own hooks and MCP servers run and lets GoodVibes change files in it. It approves nothing: each action still follows your setting for when GoodVibes asks.',
+        detail: `${found} Trusting it lets them run and lets GoodVibes change files here. It approves nothing: each action still follows your setting for when GoodVibes asks. ${undo}`,
         primaryAction: 'select',
       },
       {
         id: 'restricted',
         label: 'Keep restricted (read-only)',
-        detail: 'GoodVibes can read this folder but cannot change files or run commands in it, and the folder\'s own hooks and MCP servers stay off, until you trust it.',
+        detail: `GoodVibes can read this folder but cannot change files or run commands in it, and the folder's own hooks and MCP servers stay off, until you trust it. ${undo}`,
         primaryAction: 'select',
       },
     ],
   };
+}
+
+/** What the trust prompt names: the folder (home shortened to ~) and the files of its own that trusting would let run. */
+export interface FolderTrustFacts {
+  readonly shownPath: string;
+  /** "a hooks file (hooks.json)", "tool servers (.goodvibes/mcp.json)"; empty when it has none. */
+  readonly found: readonly string[];
+}
+
+/** Read which of the folder's own hooks and MCP files exist (two or three stat calls, once per prompt). */
+export function readFolderTrustFacts(workingDirectory: string, homeDirectory: string, hooksFile: string): FolderTrustFacts {
+  let real = workingDirectory;
+  try { real = realpathSync(workingDirectory); } catch { /* the folder as given */ }
+  const shownPath = homeDirectory && (real === homeDirectory || real.startsWith(`${homeDirectory}${sep}`)) ? `~${real.slice(homeDirectory.length)}` : real;
+  const found: string[] = [];
+  const hooks = isAbsolute(hooksFile) ? hooksFile : join(workingDirectory, hooksFile || 'hooks.json');
+  if (existsSync(hooks)) found.push(`a hooks file (${relative(workingDirectory, hooks) || hooks})`);
+  const mcp = getMcpConfigLocations({ workingDirectory, homeDirectory })
+    .filter((location) => location.kind === 'project-mcp' || location.kind === 'project-goodvibes')
+    .filter((location) => existsSync(location.path))
+    .map((location) => relative(workingDirectory, location.path));
+  if (mcp.length > 0) found.push(`tool servers (MCP: ${mcp.join(', ')})`);
+  return { shownPath, found };
 }
 
 /**

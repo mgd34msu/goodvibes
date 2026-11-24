@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `651`
+- Methods: `655`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -6069,7 +6069,8 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                   "decision",
                   "claim",
                   "queued-action",
-                  "report"
+                  "report",
+                  "model-price"
                 ]
               },
               "mark": {
@@ -6152,6 +6153,9 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                 ],
                 "additionalProperties": false
               },
+              "weakensSafety": {
+                "type": "boolean"
+              },
               "choices": {
                 "type": "array",
                 "items": {
@@ -6173,6 +6177,9 @@ Return pending and historical approval records, newest 50. Pass `approvalId` to 
                       "type": "boolean"
                     },
                     "value": {
+                      "type": "string"
+                    },
+                    "said": {
                       "type": "string"
                     }
                   },
@@ -8259,7 +8266,8 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
                 "decision",
                 "claim",
                 "queued-action",
-                "report"
+                "report",
+                "model-price"
               ]
             },
             "mark": {
@@ -8342,6 +8350,9 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
               ],
               "additionalProperties": false
             },
+            "weakensSafety": {
+              "type": "boolean"
+            },
             "choices": {
               "type": "array",
               "items": {
@@ -8363,6 +8374,9 @@ Answer one open inbox item with one of its `options`, or with `text` when it has
                     "type": "boolean"
                   },
                   "value": {
+                    "type": "string"
+                  },
+                  "said": {
                     "type": "string"
                   }
                 },
@@ -9091,7 +9105,8 @@ The asking session reports what became of the answer to a question it posted: `d
                 "decision",
                 "claim",
                 "queued-action",
-                "report"
+                "report",
+                "model-price"
               ]
             },
             "mark": {
@@ -9174,6 +9189,9 @@ The asking session reports what became of the answer to a question it posted: `d
               ],
               "additionalProperties": false
             },
+            "weakensSafety": {
+              "type": "boolean"
+            },
             "choices": {
               "type": "array",
               "items": {
@@ -9195,6 +9213,9 @@ The asking session reports what became of the answer to a question it posted: `d
                     "type": "boolean"
                   },
                   "value": {
+                    "type": "string"
+                  },
+                  "said": {
                     "type": "string"
                   }
                 },
@@ -9940,7 +9961,8 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
                   "decision",
                   "claim",
                   "queued-action",
-                  "report"
+                  "report",
+                  "model-price"
                 ]
               },
               "mark": {
@@ -10023,6 +10045,9 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
                 ],
                 "additionalProperties": false
               },
+              "weakensSafety": {
+                "type": "boolean"
+              },
               "choices": {
                 "type": "array",
                 "items": {
@@ -10044,6 +10069,9 @@ Everything waiting on the owner in one list, newest first: permission asks (kind
                       "type": "boolean"
                     },
                     "value": {
+                      "type": "string"
+                    },
+                    "said": {
                       "type": "string"
                     }
                   },
@@ -10767,7 +10795,8 @@ Leave the owner a question or a queued action from a process that is not the dae
                 "decision",
                 "claim",
                 "queued-action",
-                "report"
+                "report",
+                "model-price"
               ]
             },
             "mark": {
@@ -10850,6 +10879,9 @@ Leave the owner a question or a queued action from a process that is not the dae
               ],
               "additionalProperties": false
             },
+            "weakensSafety": {
+              "type": "boolean"
+            },
             "choices": {
               "type": "array",
               "items": {
@@ -10871,6 +10903,9 @@ Leave the owner a question or a queued action from a process that is not the dae
                     "type": "boolean"
                   },
                   "value": {
+                    "type": "string"
+                  },
+                  "said": {
                     "type": "string"
                   }
                 },
@@ -11531,7 +11566,8 @@ Take back an open item this caller posted, because the answer is no longer neede
                 "decision",
                 "claim",
                 "queued-action",
-                "report"
+                "report",
+                "model-price"
               ]
             },
             "mark": {
@@ -11614,6 +11650,9 @@ Take back an open item this caller posted, because the answer is no longer neede
               ],
               "additionalProperties": false
             },
+            "weakensSafety": {
+              "type": "boolean"
+            },
             "choices": {
               "type": "array",
               "items": {
@@ -11635,6 +11674,9 @@ Take back an open item this caller posted, because the answer is no longer neede
                     "type": "boolean"
                   },
                   "value": {
+                    "type": "string"
+                  },
+                  "said": {
                     "type": "string"
                   }
                 },
@@ -46721,6 +46763,48 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                 "pattern": "\\S"
               },
               "minItems": 1
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[!-~][ -~]{0,255}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "artifactId",
+                  "mimeType",
+                  "sizeBytes"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 8
             }
           },
           "required": [
@@ -48598,6 +48682,48 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                             "pattern": "\\S"
                           },
                           "minItems": 1
+                        },
+                        "attachments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "pattern": "^[!-~][ -~]{0,255}$"
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "filename": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "mimeType": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "sizeBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "artifactId",
+                              "mimeType",
+                              "sizeBytes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 8
                         }
                       },
                       "required": [
@@ -48888,6 +49014,48 @@ Start a contract for `ask` (the person's words verbatim) in a hosted session cre
                             "pattern": "\\S"
                           },
                           "minItems": 1
+                        },
+                        "attachments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "pattern": "^[!-~][ -~]{0,255}$"
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "filename": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "mimeType": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "sizeBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "artifactId",
+                              "mimeType",
+                              "sizeBytes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 8
                         }
                       },
                       "required": [
@@ -54857,6 +55025,48 @@ One contract with its whole tree, running or ended. The captured input's per-fil
             "pattern": "\\S"
           },
           "minItems": 1
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[!-~][ -~]{0,255}$"
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "filename": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "\\S"
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "artifactId",
+              "mimeType",
+              "sizeBytes"
+            ],
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "maxItems": 8
         }
       },
       "required": [
@@ -56734,6 +56944,48 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                         "pattern": "\\S"
                       },
                       "minItems": 1
+                    },
+                    "attachments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "artifactId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "pattern": "^[!-~][ -~]{0,255}$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "filename": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "mimeType": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "artifactId",
+                          "mimeType",
+                          "sizeBytes"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
                     }
                   },
                   "required": [
@@ -57024,6 +57276,48 @@ One contract with its whole tree, running or ended. The captured input's per-fil
                         "pattern": "\\S"
                       },
                       "minItems": 1
+                    },
+                    "attachments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "artifactId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 256,
+                            "pattern": "^[!-~][ -~]{0,255}$"
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "filename": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "mimeType": {
+                            "type": "string",
+                            "minLength": 1,
+                            "pattern": "\\S"
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "artifactId",
+                          "mimeType",
+                          "sizeBytes"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "minItems": 1,
+                      "maxItems": 8
                     }
                   },
                   "required": [
@@ -62982,6 +63276,48 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                   "pattern": "\\S"
                 },
                 "minItems": 1
+              },
+              "attachments": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "artifactId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256,
+                      "pattern": "^[!-~][ -~]{0,255}$"
+                    },
+                    "label": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    },
+                    "filename": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    },
+                    "mimeType": {
+                      "type": "string",
+                      "minLength": 1,
+                      "pattern": "\\S"
+                    },
+                    "sizeBytes": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "artifactId",
+                    "mimeType",
+                    "sizeBytes"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 1,
+                "maxItems": 8
               }
             },
             "required": [
@@ -64859,6 +65195,48 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                               "pattern": "\\S"
                             },
                             "minItems": 1
+                          },
+                          "attachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "artifactId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "pattern": "^[!-~][ -~]{0,255}$"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "\\S"
+                                },
+                                "filename": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "\\S"
+                                },
+                                "mimeType": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "\\S"
+                                },
+                                "sizeBytes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "artifactId",
+                                "mimeType",
+                                "sizeBytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 8
                           }
                         },
                         "required": [
@@ -65149,6 +65527,48 @@ Every contract this daemon holds, newest first, each with its whole tree: the as
                               "pattern": "\\S"
                             },
                             "minItems": 1
+                          },
+                          "attachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "artifactId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 256,
+                                  "pattern": "^[!-~][ -~]{0,255}$"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "\\S"
+                                },
+                                "filename": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "\\S"
+                                },
+                                "mimeType": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "pattern": "\\S"
+                                },
+                                "sizeBytes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "artifactId",
+                                "mimeType",
+                                "sizeBytes"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "minItems": 1,
+                            "maxItems": 8
                           }
                         },
                         "required": [
@@ -71330,6 +71750,48 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                 "pattern": "\\S"
               },
               "minItems": 1
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[!-~][ -~]{0,255}$"
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1,
+                    "pattern": "\\S"
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "artifactId",
+                  "mimeType",
+                  "sizeBytes"
+                ],
+                "additionalProperties": false
+              },
+              "minItems": 1,
+              "maxItems": 8
             }
           },
           "required": [
@@ -73207,6 +73669,48 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                             "pattern": "\\S"
                           },
                           "minItems": 1
+                        },
+                        "attachments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "pattern": "^[!-~][ -~]{0,255}$"
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "filename": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "mimeType": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "sizeBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "artifactId",
+                              "mimeType",
+                              "sizeBytes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 8
                         }
                       },
                       "required": [
@@ -73497,6 +74001,48 @@ Start a contract for `ask`, the person's words verbatim, which every stated acce
                             "pattern": "\\S"
                           },
                           "minItems": 1
+                        },
+                        "attachments": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 256,
+                                "pattern": "^[!-~][ -~]{0,255}$"
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "filename": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "mimeType": {
+                                "type": "string",
+                                "minLength": 1,
+                                "pattern": "\\S"
+                              },
+                              "sizeBytes": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "artifactId",
+                              "mimeType",
+                              "sizeBytes"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "minItems": 1,
+                          "maxItems": 8
                         }
                       },
                       "required": [
@@ -82545,7 +83091,7 @@ Revoke one device's relay code. Revocation is immediate: every relay connection 
 
 #### `relay.pairing.mint`
 
-Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against, which is the honest answer for a daemon whose relay is off or has not connected yet. Minting does not create a second identity or a second registration; it describes the one that exists. 409 RELAY_CODE_LIMIT when 64 codes are held.
+Return the pairing payload one device scans to reach this daemon through the relay: the relay URL to dial, the rendezvous id the daemon registered under, the daemon's static public key, and a relay code issued for this device alone (returned once; only its hash is kept). Every request the device tunnels through the relay presents that code, and the daemon refuses one whose code it did not issue or has revoked (401 RELAY_CODE_REVOKED), so one phone is cut off with relay.codes.revoke while every other keeps working. `name` labels the code in relay.codes.list (default: "Relay device" and the time). `codeId` and `codeName` name the code minted. `turnOn: true` is the owner's yes to letting devices reach this machine through the relay, asked by the caller first (the ask opens on No): when the relay is off, the daemon sets `relay.enabled` (which also backs the relay-connect capability) and `relay.url` from `url` (the relay's wss:// address; needed only when none is set), and the registration starts without a restart. A registration that is on its way (`idle`, `connecting`, `reconnecting`) is waited for in the same call, with no timer, until the host's own answer: `registered` mints the pairing, `refused` or `failed` answers with `pairing` null and that status (relay.reachability.get then says why). The wait ends with the caller. While it waits, every status change is announced as LIST_CHANGED with `list: "relay"`, and relay.reachability.get answers `words`, the status in plain words with the relay's address (`The relay at <url> is not answering yet; GoodVibes keeps trying.`), for the waiting screen. `words` is on this answer too. `pairing` is null, not an error, and no code is kept, when there is no live registration to mint against: the relay is off and `turnOn` was not sent, or the relay refused it. Minting does not create a second identity or a second registration; it describes the one that exists. 400 RELAY_URL_REQUIRED when `turnOn` is sent, no relay address is set and `url` is empty. 409 RELAY_CODE_LIMIT when 64 codes are held.
 
 - Title: `Mint A Relay Pairing Payload`
 - Source: `builtin`
@@ -82564,6 +83110,12 @@ Return the pairing payload one device scans to reach this daemon through the rel
   "type": "object",
   "properties": {
     "name": {
+      "type": "string"
+    },
+    "turnOn": {
+      "type": "boolean"
+    },
+    "url": {
       "type": "string"
     }
   },
@@ -82628,6 +83180,9 @@ Return the pairing payload one device scans to reach this daemon through the rel
         "stopped"
       ]
     },
+    "words": {
+      "type": "string"
+    },
     "codeId": {
       "type": "string"
     },
@@ -82637,7 +83192,8 @@ Return the pairing payload one device scans to reach this daemon through the rel
   },
   "required": [
     "pairing",
-    "status"
+    "status",
+    "words"
   ],
   "additionalProperties": false
 }
@@ -82689,6 +83245,12 @@ Whether this daemon is registered with the relay, and what state its registratio
     "configured": {
       "type": "boolean"
     },
+    "words": {
+      "type": "string"
+    },
+    "relayUrl": {
+      "type": "string"
+    },
     "rendezvousId": {
       "type": "string"
     },
@@ -82726,7 +83288,8 @@ Whether this daemon is registered with the relay, and what state its registratio
   },
   "required": [
     "status",
-    "configured"
+    "configured",
+    "words"
   ],
   "additionalProperties": false
 }
@@ -135224,7 +135787,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https, available via tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: goodvibes-daemon webui enable --lan --https, or Tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -135255,6 +135818,9 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
       "type": "boolean"
     },
     "forThisMachine": {
+      "type": "boolean"
+    },
+    "serveToNetwork": {
       "type": "boolean"
     }
   },
@@ -135433,7 +135999,7 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
 
 #### `pairing.posture.get`
 
-The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https, available via tailscale" so surfaces render labels instead of dead buttons. Localhost keeps all three. With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done|next|then, text, detail, command). Every pairing surface asks this before minting. The daemon never mints certificates.
+The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https: goodvibes-daemon webui enable --lan --https, or Tailscale" so surfaces render labels instead of dead buttons. Localhost keeps all three. https on a private address that is not a tailnet name is the daemon's own LAN certificate (controlPlane.lanHttps): its capabilities are available and its notice says each phone installs the certificate once from /lan-https on the plain address. With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done|next|then, text, detail, command). Every pairing surface asks this before minting. With controlPlane.lanHttps on, the address a pairing code carries is the LAN https one, issued by the certificate authority the daemon made for this machine's own names and private addresses.
 
 - Title: `Get Origin TLS/Capability Posture`
 - Source: `builtin`
@@ -135455,6 +136021,142 @@ The honest TLS/capability posture of a web origin, pass your surface's current o
       "type": "string"
     }
   },
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "posture": {
+      "type": "object",
+      "properties": {
+        "origin": {
+          "type": "string"
+        },
+        "scheme": {
+          "type": "string"
+        },
+        "privateNetwork": {
+          "type": "boolean"
+        },
+        "secureContext": {
+          "type": "boolean"
+        },
+        "notice": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "capability": {
+                "type": "string"
+              },
+              "available": {
+                "type": "boolean"
+              },
+              "reason": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "capability",
+              "available"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "reach": {
+          "type": "object",
+          "properties": {
+            "otherDevices": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string"
+            },
+            "fix": {
+              "type": "string"
+            },
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "next",
+                      "then"
+                    ]
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "detail": {
+                    "type": "string"
+                  },
+                  "command": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "state",
+                  "text"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "otherDevices"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "origin",
+        "scheme",
+        "privateNetwork",
+        "secureContext",
+        "capabilities"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "posture"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `pairing.serve.network`
+
+What goodvibes-daemon webui enable --lan does, from any surface, after the owner said yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?" (asked opening on No): the daemon writes controlPlane.hostMode and web.hostMode network and controlPlane.enabled true, and answers only once its own listener reports it is bound again (TRANSPORT_CONNECTED; no sleep, no poll). The answer is the pairing posture of the address a code would now carry (`posture`, with `reach`), so the surface can mint at once with pairing.handoff.create. The plain listener stays as it was otherwise; undo with goodvibes-daemon webui enable --loopback. Admin, like config.set.
+
+- Title: `Serve The Web UI To The Network`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
   "additionalProperties": false
 }
 ```
@@ -141123,7 +141825,7 @@ Switch the daemon's current model live, by the registry key `models.list` return
 
 #### `models.list`
 
-Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open: a provider's list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal's does. A connected provider's models may carry `recommended`, why the model is on that provider's short list of at most five, in catalog facts only ("newest claude-sonnet", "largest context: 1M tokens", "lowest price: $0.15 in, $0.60 out per 1M tokens"); a picker shows them after pinned and recent, and a provider the catalog gives no such facts for has none.
+Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal's model picker triggers on open: a provider's list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon's current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. Each model carries `priceTier`, what it costs to use: `free`, `paid` (charged per token), `subscription` (served through a plan the person signed in with) or `unknown`; a picker shows it beside the model, and a model the person uses that the catalog stops listing as free is announced as a PROVIDER_WARNING when the catalog is next checked. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal's does. A connected provider's models may carry `recommended`, why the model is on that provider's short list of at most five, in catalog facts only ("newest claude-sonnet", "largest context: 1M tokens", "lowest price: $0.15 in, $0.60 out per 1M tokens"); a picker shows them after pinned and recent, and a provider the catalog gives no such facts for has none.
 
 - Title: `Model Catalog`
 - Source: `builtin`
@@ -141320,6 +142022,15 @@ Every provider this daemon knows about with the models it offers, whether it is 
                     "unknown"
                   ]
                 },
+                "priceTier": {
+                  "type": "string",
+                  "enum": [
+                    "free",
+                    "paid",
+                    "subscription",
+                    "unknown"
+                  ]
+                },
                 "recommended": {
                   "type": "string"
                 }
@@ -141328,7 +142039,8 @@ Every provider this daemon knows about with the models it offers, whether it is 
                 "id",
                 "registryKey",
                 "provider",
-                "textWork"
+                "textWork",
+                "priceTier"
               ],
               "additionalProperties": false
             }
@@ -141514,6 +142226,70 @@ Read the model lists from the providers now, past each stored list: every provid
   },
   "required": [
     "providers"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `providers.apiKey.set`
+
+Sign an API-key provider in from any client (the web UI's provider row): `key` is stored in the secret store under the provider's own key name (the first of its key names the credential scope registry files, such as OPENAI_API_KEY), at the scope the ownership rules resolve (a key the daemon needs lands in the daemon tier), and the provider's credentials are read again, so its row reads signed in and PROVIDERS_CHANGED is announced. Answers `provider`, `keyName`, `scope` and `signedIn`; the key is never answered or logged. A provider that takes no key (one signed in with providers.subscription.signIn.begin) or whose key name is not filed is refused 400; an unknown provider 404; a goodvibes:// reference instead of a key 400. Admin.
+
+- Title: `Store A Provider API Key`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:providers`, `write:config`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "key": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "key"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "keyName": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "signedIn": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "provider",
+    "keyName",
+    "scope",
+    "signedIn"
   ],
   "additionalProperties": false
 }
@@ -142285,6 +143061,132 @@ Return runtime provider metadata, policy hooks, and priced model summaries.
   },
   "required": [
     "providers"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `providers.subscription.signIn.begin`
+
+Begin signing in to a provider through its own sign-in page, from any client (the web UI's "Sign in again"), on the same code path as the terminal's /provider sign-in. Answers `authorizationUrl` (open it) and `finishes`: `on-its-own` when the provider returns to an address on the daemon's machine and a browser there completes it (the daemon then stores the sign-in and announces it with PROVIDERS_CHANGED), `paste` when the page shows a code or an address to send to providers.subscription.signIn.finish (a browser on another device always finishes this way). A new begin replaces one still waiting. Tokens are kept in the subscription store and never answered or logged. A provider with no subscription sign-in is refused 404; an API-key provider is signed in by storing its key with credentials.set. Admin, like the terminal command.
+
+- Title: `Begin A Subscription Sign-in`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:providers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "authorizationUrl": {
+      "type": "string"
+    },
+    "finishes": {
+      "type": "string",
+      "enum": [
+        "on-its-own",
+        "paste"
+      ]
+    },
+    "listenerNote": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "authorizationUrl",
+    "finishes"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `providers.subscription.signIn.finish`
+
+Finish a sign-in providers.subscription.signIn.begin started, with what the provider's page showed: the code, or the whole address it ended on (its state must match the begin). Stores the sign-in and announces it with PROVIDERS_CHANGED; answers the provider, `signedIn: true`, `tokenType` and `expiresAt`, never a token. A refused code is 400 with the provider's reason. Admin.
+
+- Title: `Finish A Subscription Sign-in`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:providers`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "code": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "provider",
+    "code"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "provider": {
+      "type": "string"
+    },
+    "signedIn": {
+      "type": "boolean"
+    },
+    "tokenType": {
+      "type": "string"
+    },
+    "expiresAt": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "provider",
+    "signedIn",
+    "tokenType"
   ],
   "additionalProperties": false
 }
@@ -148070,7 +148972,7 @@ READ-ONLY detection of a usable tailscale environment: binary present, logged-in
 
 #### `tailscale.serve.run`
 
-The one-action https affordance: run `tailscale serve --bg <port>` so tailscale fronts the web UI at its https MagicDNS URL, the port being the one the web UI is served on: the control-plane port while the daemon serves the bundle (controlPlane.webui.serve), web.port for a web UI it does not serve (web.enabled). With no web UI served it is refused with 409 WEB_UI_NOT_SERVED and nothing runs. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.
+The one-action https affordance: run `tailscale serve --bg <port>` so tailscale fronts the web UI at its https MagicDNS URL, the port being the one the web UI is served on: the control-plane port while the daemon serves the bundle (controlPlane.webui.serve), web.port for a web UI it does not serve (web.enabled). With no web UI served it is refused with 409 WEB_UI_NOT_SERVED and nothing runs. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success the https address is asked once for the daemon's health (`answers`: ok and why), and only when it answers is web.publicBaseUrl updated to it, keeping the value it replaced for the stop. TLS on this route is terminated by tailscale with a certificate the phone already trusts (the other https route is the daemon's own LAN certificate, webui https).
 
 - Title: `Set Up Tailscale Serve For The Daemon`
 - Source: `builtin`
@@ -148146,6 +149048,22 @@ The one-action https affordance: run `tailscale serve --bg <port>` so tailscale 
     },
     "receiptRecorded": {
       "type": "boolean"
+    },
+    "answers": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "detail": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok",
+        "detail"
+      ],
+      "additionalProperties": false
     }
   },
   "required": [
@@ -159271,7 +160189,7 @@ Return a page of retained session messages. Offset counts backward from the newe
 
 #### `sessions.permissionMode.get`
 
-Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, "Jev decides"); when the mode in force differs, `inForce` (what is in force, written to lead after "Permissions: ": "asking you, for now"), `chosenWhen` (the chosen mode and the condition it waits on: "Jev decides once a decision model is set"), `chosenShort` (the choice in a few words, for where `chosenWhen` does not fit: "you chose Jev decides", or "default: Jev decides" while it is only the shipped default), `because` ("no decision model set", "decision model unreachable") and `failure` (true when `because` reports the decision model failing or out of reach, not a choice); a surface shows `inForce · chosenWhen`, then `because` when `failure` is true. Then `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL.
+Return the session execution mode in force (`mode`): ask-me, jev-decides, just-vibes, yolo, or the read-only plan posture, read the way the gate decides calls. `chosenMode` is the mode the session chose, or the saved one; when they differ, `reason` says why (for example jev-decides runs as ask-me while no decision model is set or while the set one is not answering). `words` says the same in plain words for a person: `chosen` (the label of the chosen mode, "Jev decides"); when the mode in force differs, `inForce` (what is in force, written to lead after "Permissions: ": "asking you, for now"), `chosenWhen` (the chosen mode and the condition it waits on: "Jev decides once a decision model is set"), `chosenShort` (the choice and its cause in a few words, for where `chosenWhen` does not fit: "Jev decides: no decision model set"), `because` ("no decision model set", "decision model unreachable") and `failure` (true when `because` reports the decision model failing or out of reach, not a choice); a surface shows `inForce · chosenWhen`, then `because` when `failure` is true. Then `sentence` (what the mode in force does, the explanation behind a mode chip) and `asksBefore` (what GoodVibes asks you before). Answers for the local runtime session (addressable as `runtime`), every session the daemon hosts, a channel session with its own mode, and a web chat (companion-chat), whose turns run under the daemon-wide mode; other session ids answer 404 SESSION_NOT_LOCAL.
 
 - Title: `Get Session Permission Mode`
 - Source: `builtin`
@@ -173890,6 +174808,47 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                 ],
                                 "additionalProperties": false
                               },
+                              "attachments": {
+                                "minItems": 1,
+                                "maxItems": 8,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "artifactId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "filename": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 1000
+                                    },
+                                    "mimeType": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 255
+                                    },
+                                    "sizeBytes": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "artifactId",
+                                    "mimeType",
+                                    "sizeBytes"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
                               "extraction": {
                                 "type": "object",
                                 "properties": {
@@ -174756,6 +175715,47 @@ Read at most 100 events after an exclusive cursor, pinned to a history high-wate
                                   ],
                                   "additionalProperties": false
                                 },
+                                "attachments": {
+                                  "minItems": 1,
+                                  "maxItems": 8,
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "artifactId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "filename": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 1000
+                                      },
+                                      "mimeType": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 255
+                                      },
+                                      "sizeBytes": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 9007199254740991
+                                      }
+                                    },
+                                    "required": [
+                                      "artifactId",
+                                      "mimeType",
+                                      "sizeBytes"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
                                 "extraction": {
                                   "type": "object",
                                   "properties": {
@@ -175450,6 +176450,47 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                         "messages"
                                       ],
                                       "additionalProperties": false
+                                    },
+                                    "attachments": {
+                                      "minItems": 1,
+                                      "maxItems": 8,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "artifactId": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 200
+                                          },
+                                          "label": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 200
+                                          },
+                                          "filename": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 1000
+                                          },
+                                          "mimeType": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 255
+                                          },
+                                          "sizeBytes": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          }
+                                        },
+                                        "required": [
+                                          "artifactId",
+                                          "mimeType",
+                                          "sizeBytes"
+                                        ],
+                                        "additionalProperties": false
+                                      }
                                     },
                                     "extraction": {
                                       "type": "object",
@@ -176309,6 +177350,47 @@ Import one exact versioned legacy manifest only after fresh recorded autonomous 
                                           "messages"
                                         ],
                                         "additionalProperties": false
+                                      },
+                                      "attachments": {
+                                        "minItems": 1,
+                                        "maxItems": 8,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "artifactId": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200
+                                            },
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 200
+                                            },
+                                            "filename": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 1000
+                                            },
+                                            "mimeType": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 255
+                                            },
+                                            "sizeBytes": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            }
+                                          },
+                                          "required": [
+                                            "artifactId",
+                                            "mimeType",
+                                            "sizeBytes"
+                                          ],
+                                          "additionalProperties": false
+                                        }
                                       },
                                       "extraction": {
                                         "type": "object",
@@ -178074,6 +179156,47 @@ Start the single initial semantic admission of captured conversation text. Repla
             "messages"
           ],
           "additionalProperties": false
+        },
+        "attachments": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "filename": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "artifactId",
+              "mimeType",
+              "sizeBytes"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -179243,6 +180366,47 @@ Start the single initial semantic admission of captured conversation text. Repla
                     "messages"
                   ],
                   "additionalProperties": false
+                },
+                "attachments": {
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "mimeType",
+                      "sizeBytes"
+                    ],
+                    "additionalProperties": false
+                  }
                 },
                 "admissionDecisionId": {
                   "type": "string",
@@ -180197,6 +181361,47 @@ Persist a terminal intake cancellation before work admission. If admission alrea
             "messages"
           ],
           "additionalProperties": false
+        },
+        "attachments": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "filename": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "artifactId",
+              "mimeType",
+              "sizeBytes"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -181367,6 +182572,47 @@ Persist a terminal intake cancellation before work admission. If admission alrea
                   ],
                   "additionalProperties": false
                 },
+                "attachments": {
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "mimeType",
+                      "sizeBytes"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
                 "admissionDecisionId": {
                   "type": "string",
                   "minLength": 1,
@@ -181592,6 +182838,29 @@ Persist exact original conversation text and unsupported-source disclosures on t
         "required": [
           "kind",
           "label"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "attachments": {
+      "minItems": 1,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "artifactId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "label": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          }
+        },
+        "required": [
+          "artifactId"
         ],
         "additionalProperties": false
       }
@@ -182445,6 +183714,47 @@ Persist exact original conversation text and unsupported-source disclosures on t
             "messages"
           ],
           "additionalProperties": false
+        },
+        "attachments": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "filename": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "artifactId",
+              "mimeType",
+              "sizeBytes"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -183614,6 +184924,47 @@ Persist exact original conversation text and unsupported-source disclosures on t
                     "messages"
                   ],
                   "additionalProperties": false
+                },
+                "attachments": {
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "mimeType",
+                      "sizeBytes"
+                    ],
+                    "additionalProperties": false
+                  }
                 },
                 "admissionDecisionId": {
                   "type": "string",
@@ -184564,6 +185915,47 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                 "messages"
               ],
               "additionalProperties": false
+            },
+            "attachments": {
+              "minItems": 1,
+              "maxItems": 8,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "artifactId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "label": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 1000
+                  },
+                  "mimeType": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "sizeBytes": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "artifactId",
+                  "mimeType",
+                  "sizeBytes"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
@@ -185734,6 +187126,47 @@ Read the current conversation intake or immutable admitted-work receipt by origi
                       ],
                       "additionalProperties": false
                     },
+                    "attachments": {
+                      "minItems": 1,
+                      "maxItems": 8,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "artifactId": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "label": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "filename": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          },
+                          "mimeType": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255
+                          },
+                          "sizeBytes": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "artifactId",
+                          "mimeType",
+                          "sizeBytes"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
                     "admissionDecisionId": {
                       "type": "string",
                       "minLength": 1,
@@ -186704,6 +188137,47 @@ Explicitly recover captured conversation admission with a fresh semantic operati
             "messages"
           ],
           "additionalProperties": false
+        },
+        "attachments": {
+          "minItems": 1,
+          "maxItems": 8,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "artifactId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "filename": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 1000
+              },
+              "mimeType": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255
+              },
+              "sizeBytes": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "artifactId",
+              "mimeType",
+              "sizeBytes"
+            ],
+            "additionalProperties": false
+          }
         }
       },
       "required": [
@@ -187874,6 +189348,47 @@ Explicitly recover captured conversation admission with a fresh semantic operati
                   ],
                   "additionalProperties": false
                 },
+                "attachments": {
+                  "minItems": 1,
+                  "maxItems": 8,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "filename": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000
+                      },
+                      "mimeType": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255
+                      },
+                      "sizeBytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "mimeType",
+                      "sizeBytes"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
                 "admissionDecisionId": {
                   "type": "string",
                   "minLength": 1,
@@ -188462,6 +189977,47 @@ Read the selected host project ledger, without mutation authority or allowedActi
                               "messages"
                             ],
                             "additionalProperties": false
+                          },
+                          "attachments": {
+                            "minItems": 1,
+                            "maxItems": 8,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "artifactId": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "filename": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 1000
+                                },
+                                "mimeType": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "sizeBytes": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "artifactId",
+                                "mimeType",
+                                "sizeBytes"
+                              ],
+                              "additionalProperties": false
+                            }
                           },
                           "extraction": {
                             "type": "object",
@@ -193190,7 +194746,8 @@ Every approval record transition, pushed the moment the broker records it: an as
             "decision",
             "claim",
             "queued-action",
-            "report"
+            "report",
+            "model-price"
           ]
         },
         "mark": {
@@ -193273,6 +194830,9 @@ Every approval record transition, pushed the moment the broker records it: an as
           ],
           "additionalProperties": false
         },
+        "weakensSafety": {
+          "type": "boolean"
+        },
         "choices": {
           "type": "array",
           "items": {
@@ -193294,6 +194854,9 @@ Every approval record transition, pushed the moment the broker records it: an as
                 "type": "boolean"
               },
               "value": {
+                "type": "string"
+              },
+              "said": {
                 "type": "string"
               }
             },
@@ -194122,7 +195685,8 @@ A question, claim, purchase window or queued action in the owner inbox was poste
                 "decision",
                 "claim",
                 "queued-action",
-                "report"
+                "report",
+                "model-price"
               ]
             },
             "mark": {
@@ -194205,6 +195769,9 @@ A question, claim, purchase window or queued action in the owner inbox was poste
               ],
               "additionalProperties": false
             },
+            "weakensSafety": {
+              "type": "boolean"
+            },
             "choices": {
               "type": "array",
               "items": {
@@ -194226,6 +195793,9 @@ A question, claim, purchase window or queued action in the owner inbox was poste
                     "type": "boolean"
                   },
                   "value": {
+                    "type": "string"
+                  },
+                  "said": {
                     "type": "string"
                   }
                 },

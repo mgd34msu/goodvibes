@@ -17,8 +17,10 @@ const path = (value: string | undefined): string => value === undefined ? 'not r
 export function nativeWorkIntegrationView(state: NativeWorkExecutionState | undefined): NativeWorkIntegrationView {
   const rows: { id: string; label: string; selectable: false }[] = [];
   const snapshot = state?.snapshot;
+  // The status is read by itself when the view opens and on each ledger change; i reads it again.
   if (!snapshot) return { status: state?.busy ? 'Integration unavailable while the native request is pending.'
-    : 'Integration unavailable. Select a Work control row and press i for status.', rows };
+    : state ? `Integration unavailable: ${state.message}`
+      : 'Integration: no work here has a current attempt yet. It shows here by itself once one does.', rows };
   const identity = [snapshot.projectId, snapshot.workId, snapshot.attemptId];
   const add = (scope: readonly unknown[], role: string, label: string, index?: number): void => {
     rows.push({ id: JSON.stringify(['integration', identity, scope, role, index ?? null]), label: safe(label), selectable: false });

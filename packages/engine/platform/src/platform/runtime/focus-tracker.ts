@@ -18,6 +18,7 @@
  */
 export class FocusTracker {
   private focused: boolean | null = null;
+  private readonly gainedListeners = new Set<() => void>();
 
   /** True/false once at least one focus token has arrived; null if none ever has. */
   isFocused(): boolean | null {
@@ -26,7 +27,18 @@ export class FocusTracker {
 
   /** Called from the input pipeline on every focus token. */
   setFocused(value: boolean): void {
+    const regained = value && this.focused !== true;
     this.focused = value;
+    if (!regained) return;
+    for (const listener of [...this.gainedListeners]) {
+      try { listener(); } catch { /* one listener cannot stop the input pipeline or the others */ }
+    }
+  }
+
+  /** Told each time the terminal gains focus (a focus-in after a focus-out, or the first one). Returns the unsubscribe. */
+  onFocusGained(listener: () => void): () => void {
+    this.gainedListeners.add(listener);
+    return () => { this.gainedListeners.delete(listener); };
   }
 
   /**

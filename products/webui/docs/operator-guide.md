@@ -16,15 +16,22 @@ them in order:
   number of items waiting on you.
 - Library, what GoodVibes remembers and knows
 - Personal, your calendar, mail and occasions
-- Recent, your chats, newest first, each with a permanent delete
+- Recent, your chats, newest first. Each row's "…" menu (shown on hover, on
+  the open chat, and always on a touch screen and in the phone drawer) holds
+  Rename, which opens the chat with its title ready to edit, and "Delete
+  chat…", which asks before it deletes for good. Two chats whose titles read
+  alike show when each was last used ("2h ago", "Nov 14") beside the title.
 
 Work, Library and Personal open with a section switch across the top, so every
 section inside them is one click away. Settings, Devices and pairing, People
 and channels, and Check-ins are in the account menu at the foot of the
 sidebar, together with the theme (Light, Dark, Auto and the opt-in GoodVibes
-Neon), the connection to your daemon in plain words with its latency, and Sign
-out. The dot on your avatar is the connection at a glance; when the connection
-drops, a toast and a thin banner say so. Settings also opens with Ctrl comma.
+Neon), the connection to your daemon in plain words with its latency, "N
+waiting for you" while something waits (it opens Work on only those), what is
+running, and Sign out. While a recommended setup step is neither done nor
+skipped, the menu starts with "Finish setting up" and how many are left. The
+dot on your avatar is the connection at a glance; when the connection drops, a
+toast and a thin banner say so. Settings also opens with Ctrl comma.
 
 Links from earlier versions still work. `?view=fleet`, `?view=sessions`,
 `?view=approvals-tasks`, `?view=workstream`, `?view=ci-watches` and
@@ -56,7 +63,7 @@ the top finds a section by name or by the setting inside it.
 
 | Page | Sections | What it covers |
 | --- | --- | --- |
-| General | Display, Network, About, Advanced | Theme (including GoodVibes Neon), density, how devices reach the daemon (Tailscale, relay, listeners), the daemon and connection status, and every remaining daemon setting |
+| General | Display, Network, About, Advanced | What is set up and what is left, theme (including GoodVibes Neon), density, reduce motion, how devices reach the daemon (Tailscale, relay, listeners), the daemon and connection status, and every remaining daemon setting |
 | Account | Sign-in, Devices and pairing, People and channels | How this browser signs in, passkey step-up, owner profile and mail/calendar accounts, paired devices and their tokens, power keep-awake, this browser as a phone node, and the named identities behind each channel |
 | Models and providers | Model, Credentials, Usage | The model new chats use, provider status and sign-in routes, what the credential store holds, and per-provider usage and budgets |
 | Voice | Voice | Dictation, spoken replies and the wake word |
@@ -69,6 +76,30 @@ secrets are masked and write-only, a refusal for lack of admin scope is
 reported as that, and a change that needs a restart is marked as pending. Every
 setting the daemon reports is reachable somewhere in the dialog, so a key this
 build has never heard of lands in Advanced instead of disappearing.
+
+General opens with "Setting up" and how many steps are done ("3 of 5 set up"):
+connect a model provider, choose the model new chats use and decide when
+GoodVibes asks you (each Recommended until done), get notified on this device
+and pair a phone or another browser (Optional). Each step not done says why in
+a sentence and has the button that opens where it is done, and "Skip for now"
+(kept in this browser; "Show again" undoes it). Notifications on a page served
+over plain http read "Not on this page" with the reason.
+
+When the daemon serves a newer web UI than the one open, the page reloads by
+itself as soon as nothing would be lost: no text typed and not sent, no reply
+streaming, nothing open over the page. Until then the header shows a "Reload
+to update" button, and the page reloads at the next moment those are all clear.
+
+The wake word starts listening again by itself after it stopped, when a
+microphone is plugged in or changed or the tab comes back into focus; its
+indicator offers "Listen again" to start it at once.
+
+Reduce motion (Settings, General) holds the page still in this browser even
+when the system does not ask for it: menus, panels and notices appear without
+moving, the "Thinking…" line does not shimmer and nothing scrolls smoothly. A
+system set to reduce motion always does the same. A screen reader hears "GoodVibes
+is replying…" when a reply starts and "GoodVibes replied." when it ends, not the
+reply word by word as it streams; the finished reply is the newest message.
 
 ## Signing in and pairing
 
@@ -86,6 +117,18 @@ validation path as a pasted one, and the one-time secret is stripped from the
 URL immediately so it never lingers in the address bar or history. Everything
 else is under "Other ways to sign in": pasting a sign-in code by hand, the relay
 code, username and password, and where to find a code.
+
+In Settings, Devices and pairing, when a phone could not open a code because
+the daemon serves only its own computer, the page asks "Phones on your network
+cannot reach GoodVibes yet. Serve it to your network?" (No is the default),
+saying that every device on the network can then reach the sign-in page and
+only a device with a code signs in. "Yes, serve it to my network" asks the
+daemon to serve the network and make the phone's code in one step; the code
+(QR and link) shows when the daemon answers. No keeps the link for a browser
+on the daemon's own computer, below. A refused sign-in code
+says what can be wrong (already used, revoked, made for a different daemon, or
+mistyped); a code that could not be checked because the page could not reach
+GoodVibes says a phone must be on the same network or use Tailscale.
 
 A pairing link can also carry a hand-off bundle with up to three offers, so
 one scan can finish the whole device setup. Each offer is independently
@@ -132,7 +175,9 @@ Supported chat behavior:
   Copy and a More menu holding Edit and resend, Resend or Regenerate, Read aloud
   and the reply's code and files, each by name
 - wrap long lines in code blocks with the wrap button on any block; the choice
-  holds for every code block on this device
+  holds for every code block on this device. Until it is made, code wraps on a
+  screen narrower than 640 px and scrolls on a wider one, where a block with
+  more to its right fades at its right edge and keeps a thin scrollbar
 - open every file attached to or made in the chat, newest first, from the Files
   button in the chat header; each one jumps to the message that brought it
 - resend user messages
@@ -154,7 +199,10 @@ that provider's models, then the chosen model's effort (only for a model that
 has effort levels; the one in use is checked). Providers you are connected to
 come first; the others are listed under "Not connected" with the one action
 that connects them ("Connect in Settings", or "Copy /provider sign-in <id>"
-where only the terminal app can sign in). Within a provider: Favorites (pinned
+where only the terminal app can sign in). Each model says what it costs to use
+("free", "paid", "subscription" or "price not known", the daemon's price
+tier); when a model you use stops being free, the daemon's warning shows as a
+notice that stays until you close it. Within a provider: Favorites (pinned
 models), Recent, "Recommended" (at most five, each with why in the catalog's
 own facts: "newest claude-sonnet", "largest context: 1M tokens", "lowest
 price: $0.15 in, $0.60 out per 1M tokens"; none when the catalog has no such
@@ -186,14 +234,25 @@ when that account answers a one-item read (the same reads Settings, Account show
 the account status from); "What's running" and "What do you remember about..."
 always show.
 
-A message whose first word is a slash and a command name (`/word`, alone or with
-words after it) is not sent: the composer says it is not a command here, names
-`/new` and Ctrl K, keeps the text, and offers "Send as a message". A slash that
+Typing `/` lists what the composer can do from the browser, and only that:
+`/new` starts a new chat; `/schedule`, `/mcp`, `/payments` and `/triggers` open
+their screens; every other command with an action the daemon carries out for
+the browser (`/memory`, `/knowledge`, `/devices`, `/calendar` and the rest) opens
+that action's guided sheet, or the command palette narrowed to its actions when
+it has several. Commands whose every action runs only in the terminal app are
+not listed. Arrows move, Tab or Enter on a partly typed name completes it,
+Enter on a whole name runs it, Escape closes the list. A listed command typed
+with words after it is held ("takes nothing after it here"); any other
+`/word` is not sent either: the composer says it is not a command here, points
+at `/` and Ctrl K, keeps the text, and offers "Send as a message". A slash that
 starts a path (`/etc/hosts is broken`, `/var/log/app.log`) is sent as written.
 
 On a phone, when something outside this chat waits for you, a banner at the top
-of the chat names the oldest one and opens it with one tap: its chat, where the
-card is, or its detail in Work.
+of the chat names the most urgent one (a purchase that goes ahead soonest
+first, the order Work uses). With one waiting, "Open its chat" or "Open it"
+opens it (its chat, where the card is, or its detail in Work); with more,
+"Review 6" opens Work on only what waits for you. While a purchase window runs,
+the banner adds "nearest: goes ahead in 8 min".
 
 An approval or question a chat is waiting on appears in that chat, as a card
 below the last message with its choices and the links "Why am I asked?" and
@@ -202,14 +261,17 @@ open it), and the chat header shows a chip ("asking you · 1") that lists them.
 On a phone the header keeps the chat's title and that chip; the "When GoodVibes
 asks" chip steps aside while it shows, and the chip's sheet ends with the mode
 in force and Change. Work lists the same asks. Once one is decided, here or
-anywhere else, the card folds to one dim line saying what was decided.
+anywhere else, the card folds to one dim line saying what was decided ("You
+said yes once", "You said yes and to remember: Any bun command in this
+project", "You said no").
 
 A turn's tool calls read as one collapsed line ("Read 2 files, edited 1 · 4 s")
 that opens to one line per call, worded as the terminal words it; the raw
 result is behind each call's Details. A reply that failed or was refused is a
 row in the conversation: what happened, the cause and what was changed, then
 buttons for the next step (Try again, Use another model, Details, or Choose a
-model or Sign in again for a refusal). The prompt above it stays as typed, and
+model or "How to sign in again" for a refusal, which opens Models and
+providers). The prompt above it stays as typed, and
 the row is the same after a reload.
 
 ## Command palette and guided sheets
@@ -221,9 +283,9 @@ button and the same "what happened" line as the terminal. A schedule or trigger
 described in words is read back by the daemon first, and the sheet shows what
 will be kept before you save it. An action only a terminal can do is listed
 with the reason. The palette also opens four screens built the same way:
-Schedules, MCP servers and tools, Repeat purchases, and Triggers. Typing `/`
-in the chat composer offers only `/new`; other commands are run from the
-palette, and a `/command` sent from the composer is held there with that said.
+Schedules, MCP servers and tools, Repeat purchases, and Triggers. The same
+actions and screens are listed when you type `/` in the chat composer (see
+Chat).
 
 ## Attachments
 
@@ -255,7 +317,13 @@ Spoken replies and microphone dictation are available in Chat:
   batched and concurrency-capped, with quiet retry
 - dictation records in the browser, transcribes over the daemon's
   speech-to-text, and always shows the transcript for review before send,
-  never auto-sending
+  never auto-sending. When the daemon has no speech-to-text provider and the
+  browser has its own speech recognition (over HTTPS), the crossed mic's note
+  offers "Dictate with this browser's speech service", saying that it sends
+  what you say to the browser's maker; the words land in the draft the same way.
+  Agreed once, the choice is remembered in this browser and the mic dictates
+  in one tap; Settings, Voice, "Dictate with this browser's speech service"
+  shows it and turns it off
 - voice configuration (provider, voice, settings) is the shared tier used by
   the terminal and agent. Change it once, it applies everywhere
 - a managed local-voice install is available from the voice settings when the
@@ -296,7 +364,12 @@ else that needs your answer, each in a sentence, with who asked and, when it
 loosens a protection, "this weakens a safety setting"; a purchase window reads
 "Buy a drip irrigation kit from Example Garden Supply for $38.40?" with "From
 "Plan the spring garden beds" · inside your daily budget · goes ahead in 9 min
-unless you say no", naming the chat whose turn began it, or the schedule), Running now (each
+unless you say no", naming the chat whose turn began it, or the schedule; the
+most urgent first: a purchase window by the time it runs out, with a clock pill
+"Goes ahead in 8 min" or "Waits until 14:05", a bar of the time spent and "Stop
+it" on the row for one that goes ahead by itself, then what can't be undone
+("Can't be undone", red edge), then what weakens a safety setting ("Weakens a
+safety setting", amber edge), then the rest, newest first), Running now (each
 agent by what it is doing in words, "Reading 2 files", or its task when nothing
 is known; never a tool's name), Scheduled
 (schedules, triggers and CI watches between runs, with when they run and how the
@@ -309,13 +382,16 @@ attention, with Restart when it can be restarted. Open sessions between turns
 are behind their own line. When the inbox cannot be read, the list keeps the
 asks it last read and says so above them: "Questions and purchase windows could
 not be read: <reason>." with Retry. A search box narrows the rows, and the Show select
-switches between Active (the default) and Archive. Select a row to open its
+switches between Active (the default), Waiting for you (only what waits, also
+`?tab=waiting`) and Archive. Select a row to open its
 detail beside the list (over the page on a phone). An ask opens as its card:
 who asked and when, the question, what it acts on, what it will do, the
 choices, and "Why am I asked?" and "Details" (the tool, its arguments, who
 requested it, the session and the decision trail). "I'll handle this" marks an
-ask as yours when more than one person can answer; "Cancel this request" is
-offered to the person who asked. New offers Ask for work to be done, Run a
+ask as yours when more than one person can answer; "Withdraw this request",
+after the answers on the card, is offered to the person who asked and takes
+the request back (it is not an answer). On a purchase that goes ahead by
+itself, the card says when and why in plain sight while its window runs. New offers Ask for work to be done, Run a
 background task, Start a session in a folder, CI watch and a one-off CI status
 check.
 
@@ -347,11 +423,17 @@ What the list brings together:
 
 ### Native requests and contracts
 
-Choose New, Ask for work to be done, type what you want and press Send. The
+Choose New, Ask for work to be done, type what you want and press Send. Attach
+files the way you do in a chat (Attach files, or drop them on the form), up to
+8; past that the form says so and takes no more. The request's detail lists its
+files. The
 daemon decides whether it becomes work or a reply in a session and carries it
 through; the message box stays open for the next message. Each message you sent
-is a row with one status line that refreshes by itself every few seconds while
-the message is still moving. "Needs you" appears only when the daemon cannot go
+is a row with one status line. While the message is still moving it is read
+again at once whenever the daemon reports a change to it (NATIVE_REQUEST_CHANGED)
+or to its reply's session or its work's contract; nothing is read on a timer.
+The line under it says when it was last read ("Updated 12 s ago") with
+Refresh to read it again now. "Needs you" appears only when the daemon cannot go
 on without you (an interrupted start, a reply that failed without changing
 anything, a result that did not pass its final check), with the one button that
 answers it; Cancel stops a message that is still in progress. Identifiers and
@@ -470,17 +552,23 @@ see the same records). Use it to:
   actually ran, why the semantic index could not be consulted, exclusion
   counts) render verbatim from the daemon. A literal-match fallback says it
   is one
-- filter by the questions the filter row asks: "Applies where?" (scope),
+- filter with the Filters button above the records (it shows how many are in
+  force, "Filters · 2"), which opens the questions: "Applies where?" (scope),
   "What kind?", "Tagged with?", "Match how?" (by meaning, not exact words) and
-  "Show which?" (only what the agent would recall)
+  "Show which?" (only what the agent would recall); each filter in force is a
+  chip beside the button that removes itself, with "Clear all"
 - add records; each scope says where it applies (one conversation's work, this
   project, or how you work across projects) and that every app and device
   signed in to this daemon sees it. Scope does not hide a record or keep it out
   of answers
-- read and set how sure each record is said to be ("Rated 82% sure"): a rating
-  given when it was saved or reviewed, not a measurement. The record says who
-  set it, and a record rated below the recall floor is marked as not brought
-  into answers
+- read and set how sure each record is said to be: each row shows the rating
+  as a small bar and its number ("82%") with "in answers", or "below floor"
+  for a record the recall floor keeps out of answers, and its line says who
+  rated it ("rated by you", "rated as saved"). One sentence above the records
+  says what a rating is: given when it was saved or reviewed, not a
+  measurement, and the floor below which records are not brought into answers
+- see the store's point-in-time copies and restore one with "Copies and
+  restore" beside Add memory
 - delete records: deletion is real and verified (the page proves the record
   is gone rather than just dropping it from the list)
 - read the read-only personas for constraint records
@@ -563,10 +651,22 @@ Credentials and Usage.
 
 Provider status derives from the daemon's own per-route freshness rather than a
 generic status guess. Open a provider for its models and sign-in routes.
-A provider whose subscription sign-in expired (or is about to) says "Sign in
-again in the terminal app: /provider sign-in <provider>" on its row, with a
-"Sign in again" button that copies that command; a subscription sign-in is made
-by a terminal app on the daemon's machine. "Status unavailable" says why and
+Providers are listed in three bands: a sign-in that expired or is about to
+first, then the configured ones, then those not set up. A subscription is
+signed in to from this page, through the daemon: a provider whose
+subscription sign-in expired (or is about to) says "Sign in again to keep
+using the subscription." with a "Sign in again" button; one never signed in
+has "Sign in" on its row and in its own page ("Subscription"). The button asks
+the daemon to start the sign-in and shows "Open <provider>'s sign-in page";
+sign in there. When the provider comes back to the daemon's own computer the
+sign-in finishes by itself; otherwise paste the code, or the whole address the
+page ended on, and press Finish. Either way the row updates by itself when the
+daemon reports the sign-in done. A provider that takes an API key and is not set
+up has "Add API key" on its row, and its own page has an "API key" section: type
+the key and press Save. The daemon keeps it in its secret store and the row
+turns signed in; the key is never shown again, and replacing it is the same
+field. The model menu sends a provider that is not
+connected here ("Sign in in Settings" for a subscription). "Status unavailable" says why and
 what to do: the daemon did not say how the provider signs in (open it, or update
 the daemon), or it reported a state this page does not read (reload the page).
 Model selection is provider-first, so the model list is scoped to the selected
@@ -585,9 +685,9 @@ Settings, Account holds the supporting workflows:
   credential's open connections and event streams at once; a single revoked
   sign-in session's streams end at their next event. Each is told the
   credential was revoked and to sign in or pair again
-- People and channels: principals list every identity with its channel
-  identities, and create, update and delete each go through a confirm sheet
-  (delete is permanent); channel profiles list every surface/channel binding
+- People and channels: "Who is who" lists every person, bot or service with
+  their chat accounts, and adding, changing and removing each go through a
+  confirm sheet (removing is permanent); channel profiles list every surface/channel binding
   and the model, provider and permission defaults a channel's sessions inherit,
   with upsert and confirmed delete
 

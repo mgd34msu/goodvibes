@@ -28,7 +28,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Pencil, RefreshCw, Smartphone, Trash2 } from 'lucide-react';
 import { client as platformClient, getCurrentAuth, setExplicitAuthToken } from '../../lib/goodvibes';
 import type { PublicPairingToken, PublicRelayCode, RemotePairRequest } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { errorCode, formatError } from '../../lib/errors';
 import { useToast } from '../../lib/toast';
 import { Button } from '../ui/Button';
@@ -62,6 +62,7 @@ export function PairingTokensSettings() {
   const tokens = useQuery({
     queryKey: queryKeys.pairingTokens,
     queryFn: () => platformClient.operator.pairing.tokens.list(),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
 
   async function invalidateTokens(): Promise<void> {

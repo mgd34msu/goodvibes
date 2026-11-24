@@ -1,10 +1,11 @@
-import { createContext, isValidElement, memo, ReactNode, useContext, useMemo, useRef, useState } from 'react';
+import { createContext, isValidElement, memo, ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
 import { Check, Copy, TextWrap } from 'lucide-react';
 import { highlightCode, normalizeLanguage } from '../lib/highlight';
-import { useWebUiPreferences, writeWebUiPreference } from '../lib/ui-preferences';
+import { chooseCodeBlockWrap, CODE_WRAP_QUERY, codeBlockWrapFor, useWebUiPreferences } from '../lib/ui-preferences';
+import { useMediaQuery } from './ui/overlay';
 import { useOptionalToast } from '../lib/toast';
 import { copyOutcomeMessage, copyText } from '../lib/copy-text';
 import { IconButton } from './ui/IconButton';
@@ -43,8 +44,29 @@ const LineNumbersContext = createContext(false);
 // untagged block is not run through language detection (every grammar, every token)
 // until the finished reply renders.
 const LiveContext = createContext(false);
-// Whether code blocks wrap long lines: one choice for every block, remembered on this device.
+// Whether code blocks wrap long lines: one choice for every block, remembered on this
+// device once made; until then they wrap on a narrow screen (ui-preferences codeBlockWrapFor).
 const WrapContext = createContext(false);
+
+/**
+ * True while a scrolling block has more to its right: the block then fades at its
+ * right edge, so a cut line reads as cut. Read on scroll and when the block's size
+ * changes; nothing is measured while lines wrap.
+ */
+function useClippedRight(pre: HTMLPreElement | null, wrap: boolean): boolean {
+  const [clipped, setClipped] = useState(false);
+  useEffect(() => {
+    const read = () => setClipped(pre !== null && !wrap && pre.scrollLeft + pre.clientWidth < pre.scrollWidth - 1);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reads the block's layout, which exists only after render
+    read();
+    if (!pre || wrap) return undefined;
+    pre.addEventListener('scroll', read, { passive: true });
+    const observer = typeof ResizeObserver === 'function' ? new ResizeObserver(read) : null;
+    observer?.observe(pre);
+    return () => { pre.removeEventListener('scroll', read); observer?.disconnect(); };
+  }, [pre, wrap]);
+  return clipped;
+}
 
 function CodeBlock({ children }: { children: ReactNode }) {
   const lineNumbers = useContext(LineNumbersContext);
@@ -53,6 +75,8 @@ function CodeBlock({ children }: { children: ReactNode }) {
   const [copied, setCopied] = useState(false);
   const toastCtx = useOptionalToast();
   const blockRef = useRef<HTMLDivElement>(null);
+  const [pre, setPre] = useState<HTMLPreElement | null>(null);
+  const clipped = useClippedRight(pre, wrap);
   const language = languageFromCodeChild(children);
   const code = codeTextFromChildren(children);
   const visibleCode = code.endsWith('\n') ? code.slice(0, -1) : code;
@@ -73,7 +97,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div ref={blockRef}className={['markdown-code-block', lineNumbers ? 'numbered' : '', wrap ? 'wrapped' : ''].filter(Boolean).join(' ')}>
+    <div ref={blockRef} className={['markdown-code-block', lineNumbers ? 'numbered' : '', wrap ? 'wrapped' : '', clipped ? 'clipped' : ''].filter(Boolean).join(' ')}>
       <div className="markdown-code-header">
         <div className="markdown-code-label">{displayLanguage || 'code'}</div>
         <IconButton
@@ -83,7 +107,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
           icon={<TextWrap />}
           aria-pressed={wrap}
           tooltipPlacement="top"
-          onClick={() => writeWebUiPreference('codeBlockWrap', !wrap)}
+          onClick={() => chooseCodeBlockWrap(!wrap)}
         />
         <IconButton
           className="markdown-code-copy"
@@ -95,7 +119,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
         />
       </div>
       {lineNumbers ? (
-        <pre className="markdown-code-pre">
+        <pre ref={setPre} className="markdown-code-pre">
           <code>
             {highlightedLines.map((line, index) => (
               <span className="markdown-code-line" key={`${index}-${line}`}>
@@ -109,7 +133,7 @@ function CodeBlock({ children }: { children: ReactNode }) {
           </code>
         </pre>
       ) : (
-        <pre className="markdown-code-pre">
+        <pre ref={setPre} className="markdown-code-pre">
           <code dangerouslySetInnerHTML={{ __html: highlighted.html }} />
         </pre>
       )}
@@ -172,12 +196,13 @@ interface MarkdownMessageProps {
 export const MarkdownMessage = memo(function MarkdownMessage({ content, lineNumbers, live = false }: MarkdownMessageProps) {
   const [preferences] = useWebUiPreferences();
   const showLineNumbers = lineNumbers ?? preferences.codeBlockLineNumbers;
+  const narrow = useMediaQuery(CODE_WRAP_QUERY);
 
   return (
     <div className="markdown-message">
       <LineNumbersContext.Provider value={showLineNumbers}>
         <LiveContext.Provider value={live}>
-          <WrapContext.Provider value={preferences.codeBlockWrap}>
+          <WrapContext.Provider value={codeBlockWrapFor(preferences, narrow)}>
             <ReactMarkdown remarkPlugins={REMARK_PLUGINS} components={COMPONENTS}>
               {content}
             </ReactMarkdown>

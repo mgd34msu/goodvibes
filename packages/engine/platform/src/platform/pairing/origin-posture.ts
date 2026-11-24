@@ -129,7 +129,15 @@ export const LAN_PLAIN_HTTP_NOTICE =
 export const TAILNET_PLAIN_HTTP_NOTICE =
   'Connection is encrypted by Tailscale. Everything works except browser-gated features, which need https: serve this machine over Tailscale https to get them.';
 
-const NEEDS_HTTPS_REASON = 'needs https, available via tailscale';
+const NEEDS_HTTPS_REASON = 'needs https: goodvibes-daemon webui enable --lan --https, or Tailscale';
+
+/**
+ * The line for https on a private address: the daemon's own LAN certificate
+ * (daemon/lan-https). A phone opens it, and gets the browser-gated features,
+ * only once it trusts that certificate.
+ */
+export const LAN_HTTPS_NOTICE =
+  'This https address uses the certificate GoodVibes made on your computer: on each phone, install it once from the page /lan-https on the computer\'s plain address before opening this one.';
 
 export { isLoopbackHost };
 
@@ -166,12 +174,15 @@ export function describeOriginPosture(origin: string): OriginPosture {
       : { capability, available: false, reason: NEEDS_HTTPS_REASON }
   ));
   const plainHttpLan = scheme === 'http' && privateNetwork && !secureContext;
+  // https on a private address that is not a tailnet name is the daemon's own LAN certificate.
+  const ownCertificate = scheme === 'https' && privateNetwork && !isTailnetHost(parsed.hostname) && !isLoopbackHost(parsed.hostname);
   return {
     origin: parsed.origin,
     scheme,
     privateNetwork,
     secureContext,
-    ...(plainHttpLan ? { notice: isTailnetHost(parsed.hostname) ? TAILNET_PLAIN_HTTP_NOTICE : LAN_PLAIN_HTTP_NOTICE } : {}),
+    ...(plainHttpLan ? { notice: isTailnetHost(parsed.hostname) ? TAILNET_PLAIN_HTTP_NOTICE : LAN_PLAIN_HTTP_NOTICE }
+      : ownCertificate ? { notice: LAN_HTTPS_NOTICE } : {}),
     capabilities,
   };
 }

@@ -94,6 +94,61 @@ export function catalogTextWork(provider: string, modelId: string): CatalogTextW
   return answers.size === 1 ? answers.values().next().value! : 'unknown';
 }
 
+/**
+ * What one model costs to use, as a fact a picker shows beside it: `free`
+ * (the catalog lists it at no charge), `paid` (charged per token),
+ * `subscription` (served through a plan the person signed in with), or
+ * `unknown` (nothing says).
+ */
+export type ModelPriceTier = 'free' | 'paid' | 'subscription' | 'unknown';
+
+/** The price tier in the words a picker shows: "free" | "paid" | "subscription" | "price not known". */
+export const MODEL_PRICE_TIER_WORDS: Readonly<Record<ModelPriceTier, string>> = {
+  free: 'free', paid: 'paid', subscription: 'subscription', unknown: 'price not known',
+};
+
+/**
+ * {@link ModelPriceTier} for one provider's model: a subscription route first
+ * (the registry marks it), then this provider's catalog entries when they agree,
+ * then the registry's own tier (`standard` and `premium` are metered models).
+ * One owner for the fact both pickers show (the terminal's and the web UI's, through models.list).
+ */
+export function modelPriceTier(model: { readonly provider: string; readonly id: string; readonly tier?: string | undefined }): ModelPriceTier {
+  if (model.tier === 'subscription') return 'subscription';
+  const listed = new Set(catalogModelsForReference(model.id, model.provider).map((entry) => entry.tier));
+  if (listed.size === 1) return listed.values().next().value!;
+  if (model.tier === 'free') return 'free';
+  if (model.tier === 'standard' || model.tier === 'premium') return 'paid';
+  return 'unknown';
+}
+
+/** A model the catalog listed as free before a check and no longer does after it. */
+export interface NoLongerFreeModel {
+  readonly providerId: string;
+  readonly modelId: string;
+  readonly name: string;
+  readonly tier: 'paid' | 'subscription';
+  readonly pricing?: { readonly input: number; readonly output: number } | undefined;
+}
+
+/** The models whose catalog tier moved from free to anything else between two readings of the catalog. */
+export function modelsNoLongerFree(before: readonly CatalogModel[], after: readonly CatalogModel[]): NoLongerFreeModel[] {
+  const wasFree = new Set(before.filter((model) => model.tier === 'free').map((model) => `${model.providerId}\u0000${model.id}`));
+  return after
+    .filter((model) => model.tier !== 'free' && wasFree.has(`${model.providerId}\u0000${model.id}`))
+    .map((model) => ({
+      providerId: model.providerId, modelId: model.id, name: model.name || model.id, tier: model.tier as 'paid' | 'subscription',
+      ...(model.pricing ? { pricing: { input: model.pricing.input, output: model.pricing.output } } : {}),
+    }));
+}
+
+/** The notice for a model the person uses that stopped being free: what changed, what it costs now, what to do. */
+export function noLongerFreeNotice(model: NoLongerFreeModel, inUse: boolean): string {
+  const price = model.pricing ? ` at $${model.pricing.input} in and $${model.pricing.output} out per 1M tokens` : '';
+  const charged = model.tier === 'subscription' ? 'now needs a subscription' : `is no longer free: the model catalog now lists it as paid${price}`;
+  return `${model.name} (${model.providerId}) ${charged}. ${inUse ? 'It is the model in use, so the next messages are charged.' : 'It is one of your pinned or recent models.'} Pick a free model with /model if you do not want to pay.`;
+}
+
 /** What the catalog publishes about one provider's model that a recommendation may rest on. */
 export interface CatalogRecommendationFacts {
   readonly family?: string | undefined;

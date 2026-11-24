@@ -384,6 +384,9 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
   // sit under the text instead of beside it.
   const stacked =
     field.type === "object" ||
+    // The decision model's choosers are wide pickers: they sit under their label, not beside it.
+    field.key === "judgment.model" ||
+    field.key === "judgment.backend" ||
     field.key === "daemon.timezone" ||
     field.key === "payments.enabled" ||
     (field.isSecret && field.type === "string" && revealing);

@@ -601,6 +601,8 @@ export function composeInboundMail(
       resolved = null;
       const resolution = await options.gmailReader();
       resolved = resolution;
+      // A consent this resolution opened: when the person approves, the selection is made again at once.
+      if (resolution.kind !== 'ready' && resolution.repairing) void resolution.repairing.then((ok) => { if (ok) supervisor?.recheckNow(); }, () => undefined);
       if (resolution.kind !== 'ready') {
         return {
           googleAdopted: false,

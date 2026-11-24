@@ -16,7 +16,8 @@ interface AgentWorkspaceNavigationHost {
 function enterCategory(host: AgentWorkspaceNavigationHost, previousIndex: number): void {
   if (host.selectedCategoryIndex === previousIndex) return;
   host.lastActionResult = null;
-  host.status = `Agent workspace category: ${host.categories[host.selectedCategoryIndex]?.label ?? 'none'}.`;
+  // The area's name is in the header already: no status line until something happens.
+  host.status = '';
 }
 
 const AGENT_WORKSPACE_CATEGORY_ALIASES = {

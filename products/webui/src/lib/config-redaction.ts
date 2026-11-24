@@ -77,6 +77,8 @@ export const CATEGORY_LABELS: Record<string, string> = {
   display: 'Display',
   ui: 'UI',
   provider: 'Provider',
+  // The decision model's settings (Models and providers, Decision models): named for what they are.
+  judgment: 'Decision model',
   behavior: 'Behavior',
   storage: 'Storage',
   permissions: 'Permissions',

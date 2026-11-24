@@ -94,4 +94,9 @@ export interface ChatViewProps {
   onOpenSettings?: (section: string) => void;
   /** Open an ask from another session in Work (the phone banner's one action), by its Work key. */
   onOpenAsk?: (key: string) => void;
+  /** Open Work on only what waits for you (the phone banner's "Review N" when more than one thing waits). */
+  onReviewAsks?: () => void;
+  /** A chat the sidebar's "Rename" opened: its title opens for editing once it is the chat shown. */
+  renameRequest?: string;
+  onRenameRequestHandled?: () => void;
 }

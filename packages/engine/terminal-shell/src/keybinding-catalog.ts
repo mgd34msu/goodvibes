@@ -15,6 +15,8 @@ export const COMMON_ACTION_DESCRIPTIONS = {
   'redo':                  'Redo last undone edit',
   'paste':                 'Paste from clipboard (image priority)',
   'focus-work-tree':       'Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns)',
+  'next-session':          'Show the next session (agent or process) in the session row above the conversation',
+  'previous-session':      'Show the previous session (agent or process) in the session row above the conversation',
 };
 const COMMON_DEFAULT_KEYBINDINGS = {
   'copy-selection':        [{ key: 'c', ctrl: true, shift: true }],
@@ -31,6 +33,10 @@ const COMMON_DEFAULT_KEYBINDINGS = {
   'redo':                  [{ key: 'z', ctrl: true, shift: true }],
   'paste':                 [{ key: 'v', ctrl: true }],
   'focus-work-tree':       [{ key: 'up', alt: true }, { key: 'up', ctrl: true }],
+  // Session switching has its own chords, so Tab stays completion/fold and
+  // Shift+Tab stays the permission mode in every state.
+  'next-session':          [{ key: 'n', alt: true }],
+  'previous-session':      [{ key: 'p', alt: true }],
 } satisfies Record<string, KeyCombo[]>;
 type CommonKeyAction = keyof typeof COMMON_DEFAULT_KEYBINDINGS;
 function isCommonAction(action: string): action is CommonKeyAction {

@@ -3,7 +3,7 @@
  *
  * Shared "honest inbound attribution" helper. Anywhere the Agent displays who a
  * session or message came from, it should show the RESOLVED principal when the
- * sender's channel identity maps to one, and plainly say "unknown principal"
+ * sender's channel identity maps to one, and plainly say UNKNOWN_SENDER_LABEL
  * when it does not, never a blank field, never a guess.
  *
  * Resolution goes through the connected host's `principals.resolve` operator
@@ -13,7 +13,7 @@
  *
  * Every failure mode (empty channel identity, no connected-host token, a
  * failed/unreachable resolve call, or an explicit `known: false`) collapses to
- * the same human-facing label, `UNKNOWN_PRINCIPAL_LABEL`, so the display never
+ * the same human-facing label, the platform's `UNKNOWN_SENDER_LABEL`, so the display never
  * over-claims certainty about which failure occurred. Callers that want the
  * underlying detail can read the optional `error` field separately.
  */
@@ -21,8 +21,7 @@
 import type { OperatorMethodInput } from '@goodvibes/engine/platform/contracts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
-
-export const UNKNOWN_PRINCIPAL_LABEL = 'unknown principal';
+import { UNKNOWN_SENDER_LABEL } from '@goodvibes/engine/platform/platform/channels';
 
 export interface PrincipalAttributionConnection {
   readonly baseUrl: string;
@@ -48,7 +47,7 @@ type PrincipalsResolveInput = OperatorMethodInput<'principals.resolve'>;
 
 const UNKNOWN_ATTRIBUTION: ResolvedPrincipalAttribution = {
   known: false,
-  label: UNKNOWN_PRINCIPAL_LABEL,
+  label: UNKNOWN_SENDER_LABEL,
   principal: null,
 };
 
@@ -73,7 +72,7 @@ export type ChannelPrincipalAttributionResolver = (channel: string, value: strin
  * The connected-host client: one attempt, no retry, its deadline joined to the
  * caller's signal. A display-only lookup must not stall triage or inbox
  * rendering behind a hung host, so its deadline is short and a miss reads as
- * "unknown principal".
+ * UNKNOWN_SENDER_LABEL.
  */
 function createPrincipalClient(connection: PrincipalAttributionConnection & { readonly token: string }, options: PrincipalAttributionOptions) {
   return createConnectedHost(() => ({ baseUrl: connection.baseUrl, token: connection.token, credential: 'connected-host operator token' }), {
@@ -87,7 +86,7 @@ function createPrincipalClient(connection: PrincipalAttributionConnection & { re
  * Resolve a channel identity ({channel, value}) to its named principal for
  * honest inbound-attribution display.
  *
- * Never fabricates a name. Returns the shared "unknown principal" label
+ * Never fabricates a name. Returns the shared UNKNOWN_SENDER_LABEL
  * (never a blank string) when: the identity is empty, no connected-host
  * operator token is available, or the resolve call fails or returns
  * `known: false`.

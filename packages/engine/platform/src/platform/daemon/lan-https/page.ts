@@ -1,0 +1,69 @@
+/**
+ * page.ts, what the daemon serves a phone so it can trust the LAN https
+ * listener: a plain page at /lan-https that says what installing the
+ * certificate means and how to do it (and undo it) on iPhone and Android, and
+ * the certificate itself at /lan-https/goodvibes-ca.crt. Both are public (the
+ * certificate holds no secret) and served on the plain listener, where a phone
+ * that does not trust the authority yet can open them.
+ */
+import { X509Certificate } from 'node:crypto';
+
+export const LAN_HTTPS_PAGE_PATH = '/lan-https';
+export const LAN_HTTPS_CA_PATH = '/lan-https/goodvibes-ca.crt';
+
+function escape(text: string): string {
+  return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+}
+
+/** The page's words, also what `goodvibes-daemon webui https` prints for each phone. */
+export const LAN_HTTPS_INSTALL_WORDS = {
+  what: 'Installing this certificate lets this phone open GoodVibes over https on your network, which the microphone, push notifications and installing the app need. It was made on your computer and can only vouch for your computer\'s own names and private network addresses: it cannot be used to pose as any website on the internet. Install it only on your own devices.',
+  iphone: [
+    'Open this page in Safari and tap Download the certificate; allow the download.',
+    'Open Settings, General, VPN & Device Management, tap the GoodVibes profile and tap Install.',
+    'Open Settings, General, About, Certificate Trust Settings and switch on full trust for the GoodVibes certificate.',
+    'To remove it later: Settings, General, VPN & Device Management, the GoodVibes profile, Remove Profile.',
+  ],
+  android: [
+    'Tap Download the certificate.',
+    'Open Settings, Security (or Security & privacy), More security settings, Encryption & credentials, Install a certificate, CA certificate, and choose the downloaded goodvibes-ca.crt.',
+    'To remove it later: the same Encryption & credentials screen, Trusted credentials, User, the GoodVibes certificate, Remove.',
+  ],
+} as const;
+
+/** The SHA-256 fingerprint of the authority's certificate, to compare with what the phone shows. */
+export function lanAuthorityFingerprint(certPem: string): string {
+  return new X509Certificate(certPem).fingerprint256;
+}
+
+/**
+ * The page or the certificate for a request to their paths; null for any other
+ * request. `certificate` reads the authority's public certificate (null when
+ * none was made yet); `httpsAddress` is where the phone opens GoodVibes once
+ * it trusts it.
+ */
+export async function lanHttpsPageResponse(req: Request, certificate: () => Promise<string | null>, httpsAddress: () => string | undefined): Promise<Response | null> {
+  if (req.method !== 'GET' && req.method !== 'HEAD') return null;
+  const path = new URL(req.url).pathname;
+  if (path !== LAN_HTTPS_PAGE_PATH && path !== LAN_HTTPS_CA_PATH) return null;
+  const pem = await certificate();
+  if (path === LAN_HTTPS_CA_PATH) {
+    if (!pem) return new Response('No GoodVibes certificate has been made: https on your network is off.', { status: 404, headers: { 'content-type': 'text/plain; charset=utf-8' } });
+    const der = Buffer.from(pem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, ''), 'base64');
+    return new Response(der, { headers: { 'content-type': 'application/x-x509-ca-cert', 'content-disposition': 'attachment; filename="goodvibes-ca.crt"', 'cache-control': 'no-store' } });
+  }
+  const address = httpsAddress();
+  const steps = (items: readonly string[]): string => `<ol>${items.map((item) => `<li>${escape(item)}</li>`).join('')}</ol>`;
+  const body = pem
+    ? `<p>${escape(LAN_HTTPS_INSTALL_WORDS.what)}</p>
+<p><a href="${LAN_HTTPS_CA_PATH}" download>Download the certificate</a></p>
+<p>Fingerprint (SHA-256), to compare with what your phone shows: <code>${escape(lanAuthorityFingerprint(pem))}</code></p>
+<h2>iPhone and iPad</h2>${steps(LAN_HTTPS_INSTALL_WORDS.iphone)}
+<h2>Android</h2>${steps(LAN_HTTPS_INSTALL_WORDS.android)}
+${address ? `<p>Then open <a href="${escape(address)}">${escape(address)}</a>.</p>` : ''}`
+    : '<p>https on your network is off, so there is no certificate to install. On the computer running GoodVibes: <code>goodvibes-daemon webui enable --lan --https</code></p>';
+  const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Trust GoodVibes on this phone</title>
+<style>body{font:16px/1.5 system-ui,sans-serif;max-width:40rem;margin:2rem auto;padding:0 1rem}code{word-break:break-all}a{font-weight:600}</style></head>
+<body><h1>Trust GoodVibes on this phone</h1>${body}</body></html>`;
+  return new Response(req.method === 'HEAD' ? null : html, { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+}

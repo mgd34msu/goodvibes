@@ -137,6 +137,10 @@ export const runtimeConfigDefaults = {
       certFile: '',
       keyFile: '',
     },
+    lanHttps: {
+      enabled: false,
+      port: 3443,
+    },
   },
   httpListener: {
     hostMode: 'local',
@@ -386,6 +390,19 @@ export const runtimePrimaryConfigSettings: ConfigSettingDefinition[] = [
     description: 'Filesystem pathname of the PEM file used for direct control-plane TLS. This setting stores a path, not the private key contents. Empty uses certs/privkey.pem under this surface\'s settings directory (e.g. ~/.goodvibes/tui/certs/privkey.pem for the terminal app and the daemon).',
   },
   {
+    key: 'controlPlane.lanHttps.enabled',
+    label: 'Serve the web UI over https on your network',
+    type: 'boolean',
+    description: 'Off by default. On, the daemon also listens over https on controlPlane.lanHttps.port, beside its plain listener, with a certificate from a certificate authority made on this machine for its own names and private network addresses only (its key is kept in the secret store). A phone that installs that authority once (the page /lan-https on the plain address says how, for iPhone and Android) gets the microphone, push notifications and installing the app, which browsers allow only over https. Needs the web UI served to the network (goodvibes-daemon webui enable --lan --https turns both on). Off again: the https listener stops; the plain listener is unchanged either way.',
+  },
+  {
+    key: 'controlPlane.lanHttps.port',
+    label: 'Port for https on your network',
+    type: 'number',
+    description: 'The port of the https listener controlPlane.lanHttps.enabled turns on (default 3443).',
+    ...port(),
+  },
+  {
     key: 'httpListener.hostMode',
     label: 'Who the webhook receiver listens to',
     type: 'enum',
@@ -529,8 +546,9 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'service.restartOnFailure',
     label: 'Restart the daemon if it stops',
+    appliesWhen: 'restart',
     type: 'boolean',
-    description: 'Restart the service automatically after failure',
+    description: 'Restart the service automatically after failure. Saving it rewrites the service definition (what goodvibes-daemon refresh-service does): the running daemon service does it at once, or at its next start when no daemon ran; it takes effect at the next daemon start, and nothing is restarted.',
   },
   {
     key: 'service.platform',
@@ -548,8 +566,9 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
   {
     key: 'service.logPath',
     label: 'Daemon log file',
+    appliesWhen: 'restart',
     type: 'string',
-    description: 'File path for daemon/service logs (empty = platform default under the configured service directory)',
+    description: 'File path for daemon/service logs (empty = platform default under the configured service directory). Saving it rewrites the service definition, as service.restartOnFailure does; it takes effect at the next daemon start.',
   },
   {
     key: 'network.outboundTls.mode',

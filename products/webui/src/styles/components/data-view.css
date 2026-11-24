@@ -287,8 +287,21 @@
   line-height: var(--leading-meta);
 }
 
-.dv-group__count {
+/* When a list with no live event was last read, and Refresh. */
+.dv-read-at {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 4px;
   color: var(--text-3);
+  font-size: var(--text-meta);
+}
+
+.dv-group__count {
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--surface-2);
+  color: var(--text-2);
   font-variant-numeric: tabular-nums;
 }
 

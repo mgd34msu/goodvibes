@@ -10,13 +10,17 @@ import { drainOwned } from '@goodvibes/judgment/decisions';
  * onStarted() after the server is accepting, onStopping() during an
  * orderly stop, and peekReceipts()/acknowledgeReceipts() for the /status payload.
  */
+import { readFileSync } from 'node:fs';
 import { assertNativeReaderCompatible, parseNativeReaderCapabilities, NativeDataCompatibilityError } from '../runtime/native-reader-compatibility.js';
 import { observeServiceCommand, runServiceCommand, serviceCommandSignal, type ServiceCommandRunner, type ServiceHandoverOutcome } from './service-handover.js';
 import { flushActivityLogSync, logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { ConfigManager } from '../config/manager.js';
 import { DEFAULT_CONFIG } from '../config/schema.js';
-import { detectPlatform, type PlatformServiceManager } from './service-manager.js';
+import { detectPlatform, isProductServiceDefinition, type PlatformServiceManager } from './service-manager.js';
+
+/** The settings the service definition is written from; a save of one rewrites it (watchServiceDefinition). */
+const SERVICE_DEFINITION_SETTINGS = ['service.restartOnFailure', 'service.logPath'] as const;
 import { DaemonAutoUpdater, type AutoUpdateServiceActions } from './auto-updater.js';
 import { prepareHandoverBeforeStop, prepareServiceHandover, ServiceHandoverPreflightError, type PreparedServiceHandover } from './service-handover-preflight.js';
 import { reserveLaunchdHandover } from './launchd-handover.js';
@@ -278,6 +282,8 @@ export class DaemonLifecycleRuntime {
   private promotionAttempted = false;
   /** The service.autostart subscription, while this daemon applies the setting. */
   private autostartWatch: (() => void) | null = null;
+  /** The subscriptions to the settings the service definition is written from. */
+  private definitionWatch: (() => void)[] = [];
   /** The promotion handed over and asked the process to exit; nothing about it is stale. */
   private promotionExited = false;
   private rollbackHandover: Promise<void> | null = null;
@@ -870,7 +876,51 @@ export class DaemonLifecycleRuntime {
     this.startAutoUpdater();
     this.promoteToServiceAtBoot();
     this.watchAutostart();
+    this.watchServiceDefinition();
     return this.promotionHandover;
+  }
+
+  /**
+   * The settings the service definition is written from (`service.restartOnFailure`,
+   * `service.logPath`) are written into it on every save, however it was made
+   * (a settings screen, /settings set, goodvibes-daemon config set through the
+   * config watcher, the API), and once at start for a save made while no
+   * daemon ran: what `goodvibes-daemon refresh-service` does. Only the running
+   * service rewrites its own definition, and only one GoodVibes wrote; it
+   * takes effect at the next daemon start, and nothing is restarted. Cost: one
+   * definition read per save, and one write and one service-manager reload
+   * when it changed.
+   */
+  private watchServiceDefinition(): void {
+    if (this.definitionWatch.length > 0 || this.options.hasOverriddenHome === true) return;
+    // A source/dev run would write its own dev command line into the definition, as boot promotion refuses to.
+    const isCompiled = this.options.isCompiledBinary ?? (() => isCompiledBinaryInvocation(currentProcessSignals()));
+    if (!isCompiled()) return;
+    const config = this.options.configManager;
+    const manager = this.options.platformServiceManager;
+    const rewrite = (when: string): void => {
+      if (this.stopping || this.promotionTask) return;
+      if (config.get('service.enabled') === false) return;
+      void manager.statusAsync().then(async (status) => {
+        // A daemon not running as its service leaves the definition to the service's own process (the same reading as isSupervised).
+        if (!status.installed || !status.running || status.actionError) return;
+        let contents: string;
+        try { contents = readFileSync(status.path, 'utf-8'); } catch { return; }
+        if (!isProductServiceDefinition(contents)) {
+          this.alertOwner(`A service setting was saved (${when}), but ${status.path} is a service definition GoodVibes did not write, so it was not rewritten.`);
+          return;
+        }
+        if (manager.installedDefinitionMatches()) return;
+        const written = await manager.refreshAsync();
+        if (written.actionError) this.alertOwner(`A service setting was saved (${when}), but the service definition was not fully rewritten: ${written.actionError}`);
+        else logger.info(`DaemonServer: the service definition at ${written.path} was rewritten with the saved service settings (${when}); it takes effect at the next daemon start`);
+      }).catch((error: unknown) => {
+        this.alertOwner(`A service setting was saved (${when}), but the service definition was not rewritten: ${summarizeError(error)}`);
+      });
+    };
+    this.definitionWatch = SERVICE_DEFINITION_SETTINGS.map((key) => config.subscribe(key, () => rewrite('changed')));
+    if (this.promotionTimer || this.promotionTask) return;
+    rewrite('at start');
   }
 
   /**
@@ -913,11 +963,31 @@ export class DaemonLifecycleRuntime {
     }).catch((error: unknown) => { unchecked(summarizeError(error)); });
   }
 
+  /**
+   * Restart this daemon through its service manager, the path a self-update's
+   * restart takes (the manager's stop is the ordinary graceful stop, so a reply
+   * already being written is finished). `by-hand` when this daemon was started
+   * by hand (no service runs it), with nothing done; `failed` with the
+   * manager's words when it refused.
+   */
+  async restartThroughService(): Promise<{ readonly outcome: 'restarting' | 'by-hand' | 'failed'; readonly detail?: string | undefined }> {
+    if (this.stopping) return { outcome: 'failed', detail: 'the daemon is already stopping' };
+    const actions = this.buildServiceActions(undefined, this.assertArtifactCurrent);
+    if (!actions.isSupervised()) return { outcome: 'by-hand' };
+    const requested = await actions.restartService();
+    const status = requested === undefined ? 'accepted' : requested.status;
+    return status === 'accepted'
+      ? { outcome: 'restarting' }
+      : { outcome: 'failed', detail: requested?.detail ?? `the service manager answered ${status}` };
+  }
+
   /** Fence handovers before the facade awaits any shutdown hooks. Never self-drains. */
   beginStopping(forHandover = false): void {
     this.stopping = true;
     this.autostartWatch?.();
     this.autostartWatch = null;
+    for (const unsubscribe of this.definitionWatch) unsubscribe();
+    this.definitionWatch = [];
     if (!forHandover) { this.promotionAbort?.abort(); this.rollbackAbort?.abort(); }
     this.autoUpdater?.stop(forHandover);
     this.appliedUpdater?.stop(forHandover);

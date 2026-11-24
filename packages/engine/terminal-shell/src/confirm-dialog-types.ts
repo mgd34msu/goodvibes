@@ -18,6 +18,18 @@ export interface ConfirmOptions {
    * chord that opened it: ctrl+x twice stops an agent). Enter and y still work.
    */
   readonly confirmChord?: { readonly key: string; readonly ctrl?: boolean };
+  /**
+   * One line to type in the same ask (a relay's address): its help line, its
+   * shape checked as it is typed (`check` gives the problem, or null), and the
+   * value handed to `onValue` when the ask is confirmed. While a field is shown,
+   * typed letters go into it, so y and n do not answer: the buttons and Enter do.
+   */
+  readonly field?: {
+    readonly label: string;
+    readonly help: string;
+    readonly check: (value: string) => string | null;
+    readonly onValue: (value: string) => void;
+  } | undefined;
 }
 
 /** What the confirm renderer reads from the dialog. */
@@ -31,4 +43,6 @@ export interface ConfirmView {
   readonly seenToEnd?: boolean;
   /** Told by the renderer how many body lines there are and how many fit, so the dialog can scroll. */
   noteBody?(total: number, visible: number): void;
+  /** What is typed in the field so far (options.field). */
+  readonly fieldValue?: string;
 }

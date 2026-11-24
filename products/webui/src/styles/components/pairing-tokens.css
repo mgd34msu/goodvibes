@@ -37,6 +37,37 @@
   margin-top: var(--space-3);
 }
 
+/* Why a phone cannot open a code: the sentence, the daemon's steps, then the actions, one under another, full width. */
+.pair-new-device__unreachable {
+  flex: 1 1 100%;
+  align-items: flex-start;
+}
+
+/* The sentence, the steps or question, then the actions, one under another beside the banner's mark. */
+.pair-new-device__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.pair-new-device__body p {
+  margin: 0;
+}
+
+.pair-new-device__note {
+  margin: 0;
+  font-size: var(--text-sm);
+  opacity: 0.9;
+}
+
+.pair-new-device__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
 .pair-new-device {
   display: flex;
   flex-direction: column;

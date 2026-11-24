@@ -76,6 +76,7 @@ export type { HostedSessionSpine } from './spine-intake.js';
 import { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLastOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError } from './errors.js';
 export { HostedSessionArgumentError, HostedSessionClientOwnerError, HostedSessionLastOwnerError, HostedSessionLimitError, HostedSessionNotFoundError, HostedSessionNotReadyError, HostedSessionTerminatedError, HostedSessionUnavailableError, HostedSessionUnknownPrincipalError } from './errors.js';
 import type { HostedContractWorkAdapter } from './contract-work-adapter.js';
+import { buildProviderUserContent } from '../companion/companion-chat-attachments.js';
 import { isTerminalContractStatus } from '../contract/types.js';
 import type {
   CreateHostedSessionInput,
@@ -175,6 +176,8 @@ export interface HostedSessionManagerOptions {
   readonly ownerQuestions?: import('./session-runtime.js').HostedSessionRuntimeOptions['ownerQuestions'];
   /** The daemon's trigger supervisor, for each hosted session's `trigger` tool. */
   readonly triggers?: import('./session-runtime.js').HostedSessionRuntimeOptions['triggers'];
+  /** The daemon's artifact store: a native request's attachments are read from it for its turn, as a chat message's are. */
+  readonly artifacts?: Pick<import('../companion/companion-chat-attachments.js').CompanionChatArtifactStore, 'readContent'> | undefined;
   /** The daemon's project work plan, for each hosted session's `work_plan` tool. */
   readonly workPlan?: import('./session-runtime.js').HostedSessionRuntimeOptions['workPlan'];
   /** Whether a workspace root is acceptable. Omitted ⇒ any absolute path. */
@@ -897,7 +900,13 @@ export class HostedSessionManager {
     }
     if (!this.nativeCheckpoints.has(sessionId)) this.checkpointNative(live);
     const before = this.nativeCheckpointWrites.get(sessionId);
-    await live.runtime.submitNative(permit, input.id, input.correlationId);
+    // Files sent with the request reach the model the way a chat message's do:
+    // small text and images inline, anything else named as not read.
+    const content = source.attachments
+      ? await buildProviderUserContent(source.text, source.attachments, this.options.artifacts ?? null)
+      : undefined;
+    await live.runtime.submitNative(permit, input.id, input.correlationId,
+      content === undefined ? undefined : typeof content === 'string' ? [{ type: 'text', text: content }] : content);
     live.record = { ...live.record, messageCount: live.runtime.conversation.getMessageCount(), updatedAt: this.now() };
     // Unlike ordinary best-effort persistence, this failure prevents a completion receipt.
     // A completed turn was already saved durably when it ended; wait for that

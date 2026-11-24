@@ -392,6 +392,7 @@ export { observeImportFile, assertImportFileCurrent } from './prepared-import.js
 export type { ImportFileObservation, PreparedImportTransitionFacts } from './prepared-import.js';
 export * from './subscription-auth.js';
 export * from './subscription-providers.js';
+export * from './subscription-sign-in.js';
 export { resolveToolLLM, ToolLLM, ToolLLMUnavailableError } from './tool-llm.js';
 export type {
   ResolvedToolLLM,

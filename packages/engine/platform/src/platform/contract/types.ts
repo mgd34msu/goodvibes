@@ -1,4 +1,5 @@
 import type { NativeConversationContinuation } from '../workflow/work-ledger/native-continuation-context.js';
+import type { AttachmentFacts } from '../companion/attachment-limits.js';
 import type { ReviewInventory } from './review-inventory.js';
 import type { ReviewedFileReference } from './review-file-observations.js';
 import type { DurableContractAdmission } from './durable-admission.js';
@@ -152,6 +153,8 @@ export type ContractRouteSelector = (request: {
 export interface NativeContractSource {
   /** Host-captured prior conversation evidence, never generated requirements or authority. */
   readonly continuation?: NativeConversationContinuation;
+  /** The files the request was sent with: artifacts by id in the daemon's store, given to whoever does the work. */
+  readonly attachments?: readonly AttachmentFacts[];
   readonly sourceId: string;
   readonly sourceRevision: string;
   readonly inputRevision: string;

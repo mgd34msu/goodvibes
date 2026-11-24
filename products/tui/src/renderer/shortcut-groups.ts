@@ -17,13 +17,16 @@ const HARDCODED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Shift+Enter', 'Insert newline'],
   ['@', 'Open file picker'],
   ['/', 'Slash command mode'],
-  ['Esc', 'Close overlay / clear prompt / leave an agent or process view / interrupt main'],
-  ['Shift+Tab', 'Cycle permission mode; with session chips showing and an empty composer, the previous session'],
+  // One step per press, the first that applies; the status line names what the
+  // next Esc does (`esc clear input`, `esc back`, `esc interrupt`). Each step
+  // also has a key of its own: Alt+U clears the prompt, Ctrl+C interrupts.
+  ['Esc', 'One step back: close the top overlay, else clear the prompt, else leave an agent or process view, else stop the running turn'],
+  ['Shift+Tab', 'Change when GoodVibes asks, for this session (always; never switches sessions)'],
   ['F2', 'Open Agents'],
   ['?  or  /help', 'Help: every command and key'],
   // Precedence: a partial path under the cursor claims Tab for completion,
   // otherwise it collapses or expands the nearest block.
-  ['Tab', 'Path-complete, else collapse/expand block; with session chips showing and an empty composer, the next session'],
+  ['Tab', 'Path-complete, else collapse/expand the nearest block'],
 ];
 
 /** Where the views live now (they open as modals over the conversation). */
@@ -34,6 +37,7 @@ const VIEW_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Esc', 'Close the top modal (one level)'],
   ['Enter on lane', 'Open that agent full screen; typing there steers it'],
   ['Enter on ▶ bead', 'Open that background process\'s live output'],
+  ['Alt+N / Alt+P', 'Next / previous session in the session row (rebindable: next-session, previous-session)'],
   ['ctrl+x in view', 'Stop the agent or process shown (press twice)'],
 ];
 

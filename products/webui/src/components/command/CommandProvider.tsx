@@ -23,7 +23,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import '../../styles/components/command.css';
-import { registerCommand, unregisterCommand, type CommandDef } from '../../lib/commands';
+import { registerCommand, setPaletteOpener, unregisterCommand, type CommandDef } from '../../lib/commands';
 import type { ViewId } from '../../lib/router';
 import { SETTINGS_SECTIONS } from '../settings/dialog/sections';
 import { useHotkeys } from '../../hooks/useHotkeys';
@@ -55,14 +55,20 @@ interface CommandProviderProps {
 
 export default function CommandProvider({ onNavigate, onOpenSettings, children }: CommandProviderProps) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // The search the palette opens on (a slash command with several actions opens it on `/<command>`).
+  const [paletteQuery, setPaletteQuery] = useState('');
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
+  useEffect(() => {
+    setPaletteOpener((query) => { setPaletteQuery(query); setPaletteOpen(true); });
+    return () => setPaletteOpener(null);
+  }, []);
   /** The slash-command action whose sheet is open from the palette. */
   const [sheet, setSheet] = useState<{ readonly command: string; readonly action: string } | null>(null);
   /** The screen drawn from a command's description (schedules, MCP servers ...) open in a panel. */
   const [screen, setScreen] = useState<string | null>(null);
 
-  const openPalette = useCallback(() => setPaletteOpen(true), []);
-  const closePalette = useCallback(() => setPaletteOpen(false), []);
+  const openPalette = useCallback(() => { setPaletteQuery(''); setPaletteOpen(true); }, []);
+  const closePalette = useCallback(() => { setPaletteOpen(false); setPaletteQuery(''); }, []);
   const openCheatsheet = useCallback(() => setCheatsheetOpen(true), []);
   const closeCheatsheet = useCallback(() => setCheatsheetOpen(false), []);
 
@@ -146,7 +152,7 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
         shortcut: 'mod+k',
         run: openPalette,
         // The key toggles; the palette command only opens.
-        hotkey: () => setPaletteOpen((open) => !open),
+        hotkey: () => { setPaletteQuery(''); setPaletteOpen((open) => !open); },
         // Must fire even when the palette's own search input is focused (toggle/close)
         allowInInput: true,
       },
@@ -221,7 +227,7 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
   return (
     <>
       {children}
-      <CommandPalette open={paletteOpen} onClose={closePalette} />
+      <CommandPalette open={paletteOpen} onClose={closePalette} initialQuery={paletteQuery} />
       <ShortcutCheatsheet open={cheatsheetOpen} onClose={closeCheatsheet} />
       <CommandScreenDrawer screen={screen} onClose={() => setScreen(null)} />
       {sheet ? <ActionSheet key={`${sheet.command}.${sheet.action}`} open command={sheet.command} action={sheet.action} onClose={() => setSheet(null)} /> : null}

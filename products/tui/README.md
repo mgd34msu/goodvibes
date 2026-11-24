@@ -34,7 +34,7 @@ The footer keeps an honest running total: fresh input tokens separated from cach
 
 <img src="docs/assets/workspace-trust.png" alt="A modal titled New workspace: choose a trust level, over a dimmed conversation whose turn waits on it. Its sentence reads: Trusting this folder lets its own hooks and MCP servers run and lets GoodVibes change files in it. It approves nothing: each action still follows your setting for when GoodVibes asks. Two options follow, Trust this workspace (selected) and Keep restricted (read-only), with the keys move, choose and details." width="820">
 
-The first time you open a directory, GoodVibes asks how much it is allowed to do there. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. `/security trust-folder` changes it later.
+The first time you open a directory, GoodVibes asks how much it is allowed to do there. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. The question names the folder and the hooks and tool-server files of its own it found; `/security trust-folder` or `/security restrict-folder` changes the answer later.
 
 <img src="docs/assets/permission-prompt.png" alt="An approval card over the dimmed conversation, headed Run this command? with the folder ~/projects/garden-planner on the right. It shows the command $ mkdir -p build, three buttons, Yes, once (selected), Yes, and remember (choose what) and No, and the keys y yes, a remember, n no, d details, or type why not." width="900">
 
@@ -55,7 +55,7 @@ The other modes:
 
 <img src="docs/assets/model-picker.png" alt="The model picker, titled Models, with a tab for each job: Main chat (selected), Side work, Tool work, Spoken replies, Decision model and Search index. Under a search field reading available only · 1 of 2, the model rt-1 from rtfake is listed under not described by the catalog, marked kind unknown. The detail pane names its provider, says kind unknown: the model catalog does not say what it reads and writes, and lists what it serves, its status, sign-in and 200k context. The footer keys read use for Main chat, tab next target, ctrl+f pin and ctrl+r refresh catalog." width="900">
 
-Models come from a live catalog, so the picker lists far more than a hardcoded set, filterable by search, price, capability, and availability. Each tab lists only models the catalog says read and write text, with models it does not describe after them, marked `kind unknown`. Separate jobs route independently: Main chat, Side work (a cheaper model for side jobs), Tool work, Spoken replies, the Decision model and the Search index can each point somewhere different.
+Models come from a live catalog, so the picker lists far more than a hardcoded set, filterable by search, price, capability, and availability. Each tab lists only models the catalog says read and write text, with models it does not describe after them, marked `not in the catalog`; each row shows its price tier (`free`, `paid`, `subscription`) when it is known, and the detail says how long ago the provider's list was read. The picker opens on Main chat, the one choice most people make; the optional jobs sit behind `Other jobs (optional) ▸` (Tab reaches them): Side work (a cheaper model for side jobs), Tool work, Spoken replies, the Decision model and the Search index, each of which can point somewhere different. The filter keys sit under the search field with what each is set to (`ctrl+t price: any`, `ctrl+a all models`, ...).
 
 The `synthetic` provider groups the same model across every backend that serves it into one entry. Pick it and requests route to whichever backend is healthy, failing over on rate limits and transient errors without changing the model you chose, and without ever crossing the free, paid, and subscription boundaries. Any OpenAI-compatible API can be added as a custom provider by dropping a JSON file in `~/.goodvibes/tui/providers/`. It is hot-reloaded. See [docs/providers-and-routing.md](docs/providers-and-routing.md).
 
@@ -78,15 +78,16 @@ Press `?` on an empty prompt, `Ctrl+P` or `/help` for one searchable list of eve
 | `Enter` / `Shift+Enter` | Send the message / insert a newline |
 | `?` | The list of every command and key (on an empty prompt) |
 | `@` | File picker: insert a path into the prompt |
-| `Tab` | Complete a path, or toggle collapse on the nearest block. With the session chips showing and an empty composer, switch to the next session |
+| `Tab` | Complete a path, or toggle collapse on the nearest block |
 | `Ctrl+F` | Search the conversation |
 | `Ctrl+Y` / `Ctrl+S` | Copy / save the nearest block |
 | `Ctrl+P` / `Ctrl+K` | The same list as `?`: search and run any command, view or setting |
 | `F2` / `Ctrl+O` | Open or close Your agents |
 | `Ctrl+N` | Open the notices the status bar counts |
 | `Alt+R` / `Alt+O` / `Alt+I` | On a failed turn: try again, use another model, show the details |
-| `Shift+Tab` | Cycle this session's permission mode (asks before `yolo`; the saved default is unchanged). With the session chips showing and an empty composer, switch to the previous session |
-| `Esc` | Close the top modal (one level), clear the composer, leave an agent or process view (never stops it), or interrupt main's turn |
+| `Shift+Tab` | Cycle this session's permission mode (asks before `yolo`; the saved default is unchanged) |
+| `Alt+N` / `Alt+P` | With the session chips showing: the next / previous agent or process |
+| `Esc` | One step back per press: close the top modal (one level), clear the composer, leave an agent or process view (never stops it), or interrupt main's turn. The status bar names what the next `Esc` does |
 | `Ctrl+X` | Inside an agent or process view: stop it (press twice to confirm) |
 | `Ctrl+C` | Clear input, cancel a running turn. Press twice to quit |
 
@@ -201,29 +202,13 @@ the card field by field, each hidden, and sends it to the selected daemon in one
 cards the daemon holds (label, kind, brand, last four digits, expiry; never the
 number, CVV or name).
 
-### Native work controls (local Jev implementation)
+### Work on the host
 
-`/work open` discovers the authenticated daemon's native project without legacy
-planning lookup; `/work open <daemon-project-id>` selects it explicitly.
-In the Native Work modal, select a work item's control row: `s` starts, `i`
-inspects status, `c` cancels, and `r` explicitly resumes. The row names the
-attempt targeted by status/cancel; execution progress paints without a new key.
-
-Start/resume require an existing active attempt and the daemon's current paired
-operator authority. Execution controls do not create work or edit original criteria. Explicit source
-submission and conversational intake are described below. Opening a view never starts or resumes
-execution. Status/cancel retain the last observed attempt across a handoff within
-that view; older attempts cannot be rediscovered after reopening this surface.
-
-Reported work state, verified evidence, execution progress, admitted/current
-revisions and recovery state remain distinct. A lost response leaves the server
-outcome unknown. Closing or replacing host, token or workspace only aborts local
-requests and discards their results; use Cancel to request host cancellation.
-Pending and refused admissions, and cancellation before admission, have no
-execution receipt or progress. They display requested revisions, separately from
-admitted executions. Refused/interrupted admission recovery requires explicit
-resume; a cancelled intent requires a new native attempt.
-No control asks for owner approval or automatically retries/resumes execution.
+`/work open` opens the work view: each task with where it stands and whether it
+is checked done, and on its key row `s` start, `i` check, `c` stop, `r` resume
+after a stop. `/work new` asks for new work with what done means. Opening the view
+never starts anything. How a request whose answer was lost is recovered, and the
+limits on a request, are in [docs/native-work.md](docs/native-work.md).
 
 ### Conversation input
 
@@ -249,74 +234,10 @@ File/context references and folded paste/image markers remain declared unsupport
 sources; they are not expanded into replacement owner authority. Generic, model
 and nested command invocations cannot submit a new owner request.
 
-Use `/work intake`, `/work intake-retry`, `/work intake-resume` and
-`/work intake-cancel` to inspect or recover the retained native input. Uncertain
-writes retain the original request IDs and source; repeated submission while
-pending cannot replace them. Host/principal changes and late cancelled results
-cannot dispatch stale local turns.
-
-`/workstream list`, `status`, `stop` and `answer` continue to address historical
-legacy contract IDs. They do not inspect or cancel newly admitted native work;
-use `/work` for native execution status and cancellation.
-
-### Explicit native source submission
-
-Both products use the same command contract:
-
-- `/work submit-file <path>` reads a regular UTF-8 JSON file containing exactly
-  `goal` (a string) and `criteria` (an ordered array of strings).
-- `/work submission` looks up the retained request without writing work.
-- `/work submission-retry` first looks up that same request. Only a `not-found`
-  result can lead to replay of the exact retained request.
-- `/work submission-discard` first looks up that same request. When the host
-  has it, its receipt is shown and nothing is dropped; otherwise the retained
-  request is removed and nothing is sent, so a corrected source can be
-  submitted.
-
-Example source file:
-
-```json
-{"goal":"  Deliver the original goal\nwithout rewriting it  ","criteria":["First criterion","Second criterion","First criterion"]}
-```
-
-Decoded goal/criterion strings are preserved verbatim, including whitespace,
-line breaks, order and duplicates. No model generates or changes criteria.
-Blank/whitespace-only values and missing criteria are rejected locally. Each
-string is limited to 20,000 UTF-16 code units; 1–100 criteria are required. Both
-the source file and complete encoded submission must fit 262,144 UTF-8 bytes.
-For paths containing spaces, use a file URL such as
-`file:///tmp/my%20source.json`, which survives both slash-command parsers.
-
-Initial submission generates request/input IDs and captures the live whole-ledger
-revision once. Before sending, the app durably publishes the exact source, IDs and
-revision in its private `native-work-submission.json` journal under its product
-state directory. The journal binds each request to the exact daemon endpoint,
-canonical workspace, project and live server-verified paired principal. It stores
-no bearer token. The journal has no record cap; the file is bounded at 2 MiB. A
-binding is removed once its submission has a validated receipt, or when
-`submission-discard` drops it after the host reported it does not have it; one
-whose outcome is not yet known is never evicted. Corrupt, oversized,
-symlink-backed or unconfirmable state fails closed without a submission.
-
-After a restart, use `submission` or `submission-retry` to recover the
-original request. Both first look it up using that same identity. Retry does not
-reread the source file, generate new IDs or refresh the revision. Only an explicit
-retry after `not-found` can send the identical durably confirmed request. A
-`not-found` lookup is not proof that a lost in-flight request cannot still arrive.
-A persistence failure sends nothing and retains any uncertain journal publication
-for inspection/recovery; it never deletes or silently replaces that identity.
-Changing credentials to another principal cannot replay the old principal's
-journal. Host, token, project and canonical-workspace changes or cleanup discard
-in-flight results; overlapping submission commands remain single-flight.
-
-A definite stale-ledger conflict permits an explicitly new `submit-file` command
-to capture a new identity/revision. An unresolved retained request must be looked
-up before submitting a new source. Submission/replay never starts execution.
-
-Submission requires an existing paired operator with native ledger read/write
-scopes. It never grants scopes, stores credentials or starts execution. The
-receipt identifies the created work/current attempt and preserves the original
-source; inspect `/work` and use its separate explicit Start control.
+`/work intake` and its `intake-retry`, `intake-resume` and `intake-cancel`
+show and recover input waiting for the host to admit it (see
+[docs/native-work.md](docs/native-work.md)). `/workstream list`, `status`, `stop`
+and `answer` address the older workstreams; use `/work` for work on the host.
 
 ### TUI host credentials
 

@@ -38,7 +38,7 @@ import { AlertCircle, Cake, Pencil, Plane, Plus, RefreshCw, Trash2 } from 'lucid
 import { client as platformClient } from '../../lib/goodvibes';
 import type { OperatorMethodInput, OperatorMethodOutput } from '../../lib/goodvibes';
 import { WEBUI_PROFILE_AUTHORITY, WEBUI_PROFILE_SURFACE } from '../../lib/owner-profile';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { formatError, isMethodNotInvokableError, isMethodUnavailableError } from '../../lib/errors';
 import { formatRelative } from '../../lib/object';
 import ErrorBoundary from '../../components/feedback/ErrorBoundary';
@@ -328,10 +328,10 @@ export function DatesView({ tabs }: DatesViewProps = {}) {
   const [interviewDrafts, setInterviewDrafts] = useState<Record<string, Record<string, string>>>({});
   const [landedOnDrafts, setLandedOnDrafts] = useState<Record<string, string>>({});
 
-  const list = useQuery({ queryKey: queryKeys.occasionsList, queryFn: () => platformClient.operator.occasions.list() });
-  const plans = useQuery({ queryKey: queryKeys.occasionsPlansList, queryFn: () => platformClient.operator.occasions.plans.list() });
-  const pending = useQuery({ queryKey: queryKeys.occasionsPending, queryFn: () => platformClient.operator.occasions.pending() });
-  const state = useQuery({ queryKey: queryKeys.occasionsState, queryFn: () => platformClient.operator.occasions.state() });
+  const list = useQuery({ queryKey: queryKeys.occasionsList, queryFn: () => platformClient.operator.occasions.list(), ...NO_EVENT_LIST_FRESHNESS });
+  const plans = useQuery({ queryKey: queryKeys.occasionsPlansList, queryFn: () => platformClient.operator.occasions.plans.list(), ...NO_EVENT_LIST_FRESHNESS });
+  const pending = useQuery({ queryKey: queryKeys.occasionsPending, queryFn: () => platformClient.operator.occasions.pending(), ...NO_EVENT_LIST_FRESHNESS });
+  const state = useQuery({ queryKey: queryKeys.occasionsState, queryFn: () => platformClient.operator.occasions.state(), ...NO_EVENT_LIST_FRESHNESS });
 
   function invalidateAll(): Promise<void> {
     return Promise.all([

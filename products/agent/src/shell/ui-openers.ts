@@ -1,5 +1,6 @@
 import { createModelPickerCommandOpeners } from '@goodvibes/engine/terminal-shell/model-picker-open';
 import { shortcutGroups } from '../renderer/shortcut-groups.ts';
+import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes/engine/terminal-shell/command-palette';
 import type { KeybindingsManager } from '../input/keybindings.ts';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
@@ -55,6 +56,8 @@ type WireShellUiOpenersOptions = {
   getConfiguredProviderIds: () => string[];
   getPinned: () => Promise<string[]>;
   render: () => void;
+  /** Hear PROVIDERS_CHANGED, so an open model picker shows a fresh list when it arrives. */
+  onProvidersChanged?: ((listener: () => void) => () => void) | undefined;
 };
 
 /**
@@ -127,6 +130,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     }),
     picker: input.modelPicker,
     render,
+    ...(options.onProvidersChanged ? { onModelsChanged: options.onProvidersChanged } : {}),
     listModels: pickerModels,
     listProviders: () => [...new Set(providerRegistry.listModels().map((model) => model.provider))],
     currentModelId: () => {
@@ -311,6 +315,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     categories: () => new Map((input.commandRegistry?.getAll() ?? []).flatMap((command) => command.described ? [[command.name, command.described.group] as const] : [])),
     // The keyboard shortcuts, the list's last group, from the live key table.
     shortcuts: () => paletteShortcuts(commandContext.workspace?.keybindingsManager),
+    // Suggested's counts, kept beside input history, and only where history is kept.
+    usageFile: configManager.get('behavior.saveHistory') === false ? undefined : commandContext.workspace?.shellPaths?.resolveUserPath(GOODVIBES_AGENT_SURFACE_ROOT, 'palette-usage.json'),
     run: (name, args) => runPickedCommand(commandContext.executeCommand, name, [...args], (message) => commandContext.print(message)),
     fill: (name) => {
       input.prompt = `/${name} `;

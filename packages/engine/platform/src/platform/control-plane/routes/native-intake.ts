@@ -58,7 +58,8 @@ export function registerNativeConversationIntakeGatewayMethods(catalog: GatewayM
             : ['stale', 'conflict', 'request-conflict', 'recovery-required'].includes(error.code) ? 409 : error.code === 'not-found' ? 404 : 503;
           throw new GatewayVerbError(error.code === 'indeterminate'
             ? 'Native intake outcome is unknown. Look up the original input before choosing recovery.'
-            : `Native conversation intake ${error.code}`, `NATIVE_INTAKE_${error.code.replaceAll('-', '_').toUpperCase()}`, status);
+            // A refused request says why (host-written text: the file limit, an unknown attachment, a malformed request).
+            : error.code === 'invalid' ? error.message : `Native conversation intake ${error.code}`, `NATIVE_INTAKE_${error.code.replaceAll('-', '_').toUpperCase()}`, status);
         }
         if (error instanceof NativeConversationStorageError) {
           // The record on disk, not the request, is what is wrong: a record

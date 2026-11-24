@@ -144,6 +144,7 @@ export function createFeedInputTokens<Context extends FeedPipelineContext>(ports
         commandMode: context.commandMode,
         saveUndoState: context.saveUndoState,
         requestRender: context.requestRender,
+        ...(context.keybindingsManager.lookup ? { lookup: (key: KeyToken) => context.keybindingsManager.lookup?.(key) } : {}),
         ...(expandPastes ? { expandPastes: (text: string) => expandPastes(context, text) } : {}),
       };
       const viewBefore = snapshot(context, PROMPT_KEYS);

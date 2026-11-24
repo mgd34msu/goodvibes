@@ -126,7 +126,9 @@ export function buildThrobberState(deps: ThrobberDeps): ThrobberState | null {
     tokenSpeed: showSpeed ? deps.streamTokenSpeed : undefined,
     now,
   });
-  return activity ? { spinner: deps.orchestrator.getSpinner(), frame: deps.orchestrator.thinkingFrame, activity } : null;
+  // display.reduceMotion: one still mark and no colour sweep; the elapsed time still counts.
+  const still = deps.configManager.get('display.reduceMotion') === true;
+  return activity ? { spinner: still ? '●' : deps.orchestrator.getSpinner(), frame: still ? 0 : deps.orchestrator.thinkingFrame, activity } : null;
 }
 
 /**

@@ -64,7 +64,10 @@ function failureFromThrow(spec: GoogleSetupStepSpec, error: unknown): GoogleStep
     outcome: 'failed',
     detail: `${spec.title} did not complete.`,
     problem: `This step stopped unexpectedly: ${message}`,
-    fix: `Say the word and I will lay out the written steps for "${spec.title}" and pick up where this left off, completed work is detected and skipped.`,
+    // The written steps are laid out here; a re-run picks up where this left off (completed work is detected and skipped).
+    fix: spec.manualSteps.length > 0
+      ? `The steps for "${spec.title}" by hand: ${spec.manualSteps.map((step, index) => `${index + 1}. ${step}`).join(' ')} Running the setup again picks up where this left off.`
+      : `Running the setup again picks up where this left off; completed work is detected and skipped.`,
   };
 }
 

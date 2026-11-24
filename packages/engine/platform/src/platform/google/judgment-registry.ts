@@ -8,3 +8,7 @@ registry.register(googleGrantFailure);
 
 import { verificationArtifact } from './verification-reading.js';
 registry.register(verificationArtifact);
+
+// Enabling a Google API on the person's Cloud project so their request can run (decided in their place under Jev decides and Just vibes).
+import { enableGoogleApis } from './connection-repair.js';
+registry.register(enableGoogleApis);

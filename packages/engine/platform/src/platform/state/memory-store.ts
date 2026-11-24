@@ -11,6 +11,7 @@
 import { captureMemoryOperation, assertMemoryOperationCurrent, awaitMemoryOperation, type MemoryOperationOptions } from './memory-operation.js';
 import { rankReviewQueue, rankSemanticSearch, rerankRetrieved } from './memory-search-ranking.js';
 import { MEMORY_ID_SHAPE, newMemoryId } from './memory-id.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { SQLiteStore } from './sqlite-store.js';
 import {
   SqliteVecMemoryIndex,
@@ -434,6 +435,7 @@ export class MemoryStore {
       throw new Error(`MemoryStore: the memory could not be saved to disk (${summarizeError(cause)}); nothing was stored. Retry once the disk can be written.`, { cause });
     }
     logger.info('MemoryStore: record added', { id, cls: opts.cls });
+    noteListChanged({ list: 'memory', change: 'created', id });
     return insert.id !== undefined ? stored : record;
   }
 
@@ -732,6 +734,7 @@ export class MemoryStore {
     // Published: only a failed save can still fail the import (see add).
     await this.persistNow();
     logger.info('MemoryStore: bundle imported', { importedRecords, skippedRecords, importedLinks });
+    if (importedRecords > 0 || importedLinks > 0) noteListChanged({ list: 'memory', change: 'changed' });
     return { importedRecords, skippedRecords, importedLinks };
   }
 
@@ -800,6 +803,7 @@ export class MemoryStore {
     logger.info('MemoryStore: records restored from a copy', { copy: image.name, recordsBefore: outcome.value.recordsBefore, recordsAfter: outcome.value.recordsAfter });
     // Re-embed what differs and drop what is gone, off the caller's path.
     this.syncVectorIndexInBackground();
+    noteListChanged({ list: 'memory', change: 'changed' });
     return { ...outcome.value, vectorIndex: this.vectorIndex ? 'updating' : 'off' };
   }
 
@@ -839,6 +843,7 @@ export class MemoryStore {
     }
 
     await this.persistNow();
+    noteListChanged({ list: 'memory', change: 'changed', id: fromId });
     return { fromId, toId, relation, createdAt: now };
   }
 
@@ -920,6 +925,7 @@ export class MemoryStore {
     this.indexRow(updated);
     this.persist();
     logger.info('MemoryStore: record updated', { id });
+    noteListChanged({ list: 'memory', change: 'changed', id });
     return updated;
   }
 
@@ -966,6 +972,7 @@ export class MemoryStore {
     this.indexRow(reviewed);
     this.persist();
     logger.info('MemoryStore: record reviewed', { id, reviewState, confidence });
+    noteListChanged({ list: 'memory', change: 'changed', id });
     return reviewed;
   }
 
@@ -985,6 +992,7 @@ export class MemoryStore {
     this.indexCommitted(() => this.vectorIndex?.delete(id));
     this.persist();
     logger.info('MemoryStore: record deleted', { id });
+    noteListChanged({ list: 'memory', change: 'deleted', id });
     return true;
   }
 

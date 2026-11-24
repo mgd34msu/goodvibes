@@ -92,3 +92,26 @@ export function subscribeCommands(listener: Listener): () => void {
     registry.listeners.delete(listener);
   };
 }
+
+/** Run a registered command by id (the composer's slash commands run palette entries). False when none is registered. */
+export function runCommand(id: string): boolean {
+  const command = registry.commands.get(id);
+  if (!command) return false;
+  command.run();
+  return true;
+}
+
+type PaletteOpener = (query: string) => void;
+let paletteOpener: PaletteOpener | null = null;
+
+/** The palette's owner (CommandProvider) says how to open it on a search. */
+export function setPaletteOpener(opener: PaletteOpener | null): void {
+  paletteOpener = opener;
+}
+
+/** Open the palette with its search already typed ("/schedule": that command's actions). False when no palette is mounted. */
+export function openPaletteWith(query: string): boolean {
+  if (!paletteOpener) return false;
+  paletteOpener(query);
+  return true;
+}

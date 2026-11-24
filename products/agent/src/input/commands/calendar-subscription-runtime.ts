@@ -119,7 +119,7 @@ export async function subscribeCalendarFeed(ctx: CommandContext, subscription: C
   return [
     `Subscribed to '${result.name}'.`,
     `  events   ${result.eventCount} loaded`,
-    `  refresh  every ${Math.round(result.refreshIntervalMs / 60_000)} min, /calendar refresh reads it now`,
+    `  refresh  read again whenever your calendar is read and it is more than ${Math.round(result.refreshIntervalMs / 60_000)} min old; /calendar refresh reads it now`,
     ...(subscription.privateNetwork ? ['  Private-network addresses are allowed for this feed.'] : []),
     '  These events are read-only and appear source-labeled in /calendar all and /calendar upcoming.',
   ].join('\n');
@@ -151,7 +151,7 @@ export async function calendarFeeds(ctx: CommandContext, fetcher?: FeedFetcher):
       `    url     ${s.maskedUrl}`,
       `    status  ${formatHealth(s)}`,
       `    events  ${s.eventCount}`,
-      `    refresh every ${Math.round(s.refreshIntervalMs / 60_000)} min${s.allowPrivateHost ? ' (private-network address allowed)' : ''}`,
+      `    refresh when your calendar is read and it is more than ${Math.round(s.refreshIntervalMs / 60_000)} min old${s.allowPrivateHost ? ' (private-network address allowed)' : ''}`,
     ].join('\n')),
   ].join('\n');
 }

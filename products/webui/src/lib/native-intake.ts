@@ -33,6 +33,8 @@ export type NativeIntakeResult = NativeConversationIntakeLookupResult;
 export interface NativeIntakeSource {
   text: string;
   unsupportedSources: NativeConversationIntakeUnsupportedSource[];
+  /** Files already stored with `artifacts.create`, sent by their ids (1 to 8). */
+  attachments?: { artifactId: string; label?: string }[];
 }
 export interface NativeIntakeScope {
   continuationSessionId?: string;
@@ -323,6 +325,7 @@ export async function openNativeIntake(
             inputId: newId(),
             text: original.text,
             unsupportedSources: original.unsupportedSources,
+            ...(original.attachments?.length ? { attachments: original.attachments } : {}),
             ...(original.continuation ? { continuation: original.continuation } : {}),
           }),
           createdAt: Date.now(),

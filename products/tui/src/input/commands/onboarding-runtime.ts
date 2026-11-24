@@ -1,5 +1,6 @@
 import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { setupCommandDescription, type SetupRun, type SetupTopicId } from '@goodvibes/engine/terminal-shell/setup-command';
+import { setupCommandDescription, setupSkipFile, type SetupRun, type SetupTopicId } from '@goodvibes/engine/terminal-shell/setup-command';
+import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { OnboardingWizardTopic } from '../onboarding/onboarding-wizard-types.ts';
 import { openOnboardingWizard } from './runtime-services.ts';
@@ -29,6 +30,9 @@ export const SETUP_COMMAND = defineCommand<CommandContext>(setupCommandDescripti
     ? 'Only the Agent keeps its own settings; the terminal app already uses these.'
     : `This is done in the Agent: run goodvibes-agent and type /setup ${id}.`,
   notes: { 'import-settings': 'Agent only', 'pair': 'Agent only', 'unpair': 'Agent only' },
+  // The checklist: done marks beside each recommended topic, `N of M set up` first, and Skip for now.
+  settings: (ctx) => ctx.platform.configManager,
+  skipped: setupSkipFile<CommandContext>((ctx) => ctx.workspace?.shellPaths?.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'setup-skipped.json')),
 }));
 
 export function registerOnboardingRuntimeCommands(registry: CommandRegistry): void {

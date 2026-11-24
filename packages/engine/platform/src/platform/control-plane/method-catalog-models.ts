@@ -60,8 +60,9 @@ const PROVIDER_MODEL_ENTRY_SCHEMA = objectSchema({
   contextWindow: NUMBER_SCHEMA,
   reasoningOptions: MODEL_REASONING_OPTIONS_SCHEMA,
   textWork: { type: 'string', enum: ['text', 'other', 'unknown'] },
+  priceTier: { type: 'string', enum: ['free', 'paid', 'subscription', 'unknown'] },
   recommended: STRING_SCHEMA,
-}, ['id', 'registryKey', 'provider', 'textWork']);
+}, ['id', 'registryKey', 'provider', 'textWork', 'priceTier']);
 
 /** One way a provider can be authenticated, and whether it currently is. */
 const PROVIDER_AUTH_ROUTE_SCHEMA = objectSchema({
@@ -123,7 +124,7 @@ export const builtinGatewayModelMethodDescriptors: readonly GatewayMethodDescrip
   methodDescriptor({
     id: 'models.list',
     title: 'Model Catalog',
-    description: 'Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal\'s model picker triggers on open: a provider\'s list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon\'s current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal\'s does. A connected provider\'s models may carry `recommended`, why the model is on that provider\'s short list of at most five, in catalog facts only ("newest claude-sonnet", "largest context: 1M tokens", "lowest price: $0.15 in, $0.60 out per 1M tokens"); a picker shows them after pinned and recent, and a provider the catalog gives no such facts for has none.',
+    description: 'Every provider this daemon knows about with the models it offers, whether it is configured, and how it was configured. A GET also triggers the TTL-respecting live-discovery re-check that the terminal\'s model picker triggers on open: a provider\'s list stored more than 24 hours ago is read from the provider again, and the shared model catalog checked when its last check is that old; a list that changes is announced as a providers change, so every client reads it again. Each provider carries `modelList`: where its list came from (`live` from the provider, `cache` its last stored list, `catalog` the shared model catalog), `listedAt` when it was read, and `error` when the last reading from the provider failed. `currentModel` is the daemon\'s current selection, or null when nothing is selected. `secretsResolutionSkipped` is true when secret-backed credentials were not resolved for this read, so a caller can tell "not configured" from "not checked". Each model that reasons carries `reasoningOptions`: the levels it actually offers and which source resolved them; a model with no entry does not reason at all. Each model carries `textWork`, what the model catalog says about holding a conversation: `text`, `other` (an image, speech or embedding model) or `unknown`. Each model carries `priceTier`, what it costs to use: `free`, `paid` (charged per token), `subscription` (served through a plan the person signed in with) or `unknown`; a picker shows it beside the model, and a model the person uses that the catalog stops listing as free is announced as a PROVIDER_WARNING when the catalog is next checked. `pinned` are the registry keys of the models the person pinned and `recent` the ten used most recently, newest first: a picker lists pinned, then recent, then the rest, as the terminal\'s does. A connected provider\'s models may carry `recommended`, why the model is on that provider\'s short list of at most five, in catalog facts only ("newest claude-sonnet", "largest context: 1M tokens", "lowest price: $0.15 in, $0.60 out per 1M tokens"); a picker shows them after pinned and recent, and a provider the catalog gives no such facts for has none.',
     category: 'providers',
     effects: ['providers.read'],
     http: { method: 'GET', path: '/api/models' },
@@ -175,5 +176,56 @@ export const builtinGatewayModelMethodDescriptors: readonly GatewayMethodDescrip
     http: { method: 'POST', path: '/api/models/refresh' },
     inputSchema: objectSchema({ providerId: STRING_SCHEMA }, []),
     outputSchema: objectSchema({ providers: arraySchema(MODEL_LIST_REFRESH_REPORT_SCHEMA) }, ['providers']),
+  }),
+  methodDescriptor({
+    id: 'providers.subscription.signIn.begin',
+    // A repeat starts a new sign-in that replaces the one still waiting; nothing is stored until a finish.
+    repeat: 'safe',
+    title: 'Begin A Subscription Sign-in',
+    description: 'Begin signing in to a provider through its own sign-in page, from any client (the web UI\'s "Sign in again"), on the same code path as the terminal\'s /provider sign-in. Answers `authorizationUrl` (open it) and `finishes`: `on-its-own` when the provider returns to an address on the daemon\'s machine and a browser there completes it (the daemon then stores the sign-in and announces it with PROVIDERS_CHANGED), `paste` when the page shows a code or an address to send to providers.subscription.signIn.finish (a browser on another device always finishes this way). A new begin replaces one still waiting. Tokens are kept in the subscription store and never answered or logged. A provider with no subscription sign-in is refused 404; an API-key provider is signed in by storing its key with credentials.set. Admin, like the terminal command.',
+    category: 'providers',
+    effects: ['providers.administer'],
+    transport: ['ws'],
+    inputSchema: objectSchema({ provider: STRING_SCHEMA }, ['provider']),
+    outputSchema: objectSchema({
+      provider: STRING_SCHEMA,
+      authorizationUrl: STRING_SCHEMA,
+      finishes: { type: 'string', enum: ['on-its-own', 'paste'] },
+      listenerNote: STRING_SCHEMA,
+    }, ['provider', 'authorizationUrl', 'finishes']),
+  }),
+  methodDescriptor({
+    id: 'providers.subscription.signIn.finish',
+    // A code is used once: a repeat with the same code is refused by the provider, after the first stored the sign-in.
+    repeat: 'unsafe',
+    title: 'Finish A Subscription Sign-in',
+    description: 'Finish a sign-in providers.subscription.signIn.begin started, with what the provider\'s page showed: the code, or the whole address it ended on (its state must match the begin). Stores the sign-in and announces it with PROVIDERS_CHANGED; answers the provider, `signedIn: true`, `tokenType` and `expiresAt`, never a token. A refused code is 400 with the provider\'s reason. Admin.',
+    category: 'providers',
+    effects: ['providers.administer'],
+    transport: ['ws'],
+    inputSchema: objectSchema({ provider: STRING_SCHEMA, code: STRING_SCHEMA }, ['provider', 'code']),
+    outputSchema: objectSchema({
+      provider: STRING_SCHEMA,
+      signedIn: BOOLEAN_SCHEMA,
+      tokenType: STRING_SCHEMA,
+      expiresAt: NUMBER_SCHEMA,
+    }, ['provider', 'signedIn', 'tokenType']),
+  }),
+  methodDescriptor({
+    id: 'providers.apiKey.set',
+    // Storing the same key again leaves the same state.
+    repeat: 'safe',
+    title: 'Store A Provider API Key',
+    description: 'Sign an API-key provider in from any client (the web UI\'s provider row): `key` is stored in the secret store under the provider\'s own key name (the first of its key names the credential scope registry files, such as OPENAI_API_KEY), at the scope the ownership rules resolve (a key the daemon needs lands in the daemon tier), and the provider\'s credentials are read again, so its row reads signed in and PROVIDERS_CHANGED is announced. Answers `provider`, `keyName`, `scope` and `signedIn`; the key is never answered or logged. A provider that takes no key (one signed in with providers.subscription.signIn.begin) or whose key name is not filed is refused 400; an unknown provider 404; a goodvibes:// reference instead of a key 400. Admin.',
+    category: 'providers',
+    effects: ['providers.administer', 'secret.write'],
+    transport: ['ws'],
+    inputSchema: objectSchema({ provider: STRING_SCHEMA, key: STRING_SCHEMA }, ['provider', 'key']),
+    outputSchema: objectSchema({
+      provider: STRING_SCHEMA,
+      keyName: STRING_SCHEMA,
+      scope: STRING_SCHEMA,
+      signedIn: BOOLEAN_SCHEMA,
+    }, ['provider', 'keyName', 'scope', 'signedIn']),
   }),
 ];

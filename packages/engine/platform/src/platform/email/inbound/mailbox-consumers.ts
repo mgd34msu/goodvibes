@@ -16,6 +16,7 @@
  */
 
 import { InboundNoticeTransportError } from './intake.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import type { InboundCapabilityVerdict } from './capability-types.js';
 import type {
   InboundMailboxMessage,
@@ -135,6 +136,8 @@ export class MailboxFanOut implements InboundMailSink {
       if (!consumer.settle) continue;
       try { await consumer.settle(); } catch (cause) { fail(0, cause); }
     }
+    // New mail reached the mailbox: a client showing it reads it again.
+    if (messages.slice(0, done).some((message) => !isHistoryOrStandIn(message))) noteListChanged({ list: 'mail', change: 'created' });
     return { done, failed, error };
   }
 }

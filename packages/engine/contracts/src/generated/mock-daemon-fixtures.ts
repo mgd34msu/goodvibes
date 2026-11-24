@@ -1100,6 +1100,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "withPlace": "sample",
               "tone": "plain"
             },
+            "weakensSafety": false,
             "choices": [
               {
                 "id": "sample",
@@ -1107,7 +1108,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "key": "sample",
                 "default": false,
                 "danger": false,
-                "value": "sample"
+                "value": "sample",
+                "said": "sample"
               }
             ],
             "remember": {
@@ -1434,6 +1436,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -1441,7 +1444,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -1609,6 +1613,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -1616,7 +1621,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -1784,6 +1790,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "withPlace": "sample",
               "tone": "plain"
             },
+            "weakensSafety": false,
             "choices": [
               {
                 "id": "sample",
@@ -1791,7 +1798,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "key": "sample",
                 "default": false,
                 "danger": false,
-                "value": "sample"
+                "value": "sample",
+                "said": "sample"
               }
             ],
             "remember": {
@@ -1947,6 +1955,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -1954,7 +1963,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -2106,6 +2116,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -2113,7 +2124,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -8228,6 +8240,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "goal": "sample",
           "criteria": [
             "sample"
+          ],
+          "attachments": [
+            {
+              "artifactId": "sample",
+              "label": "sample",
+              "filename": "sample",
+              "mimeType": "sample",
+              "sizeBytes": 0
+            }
           ]
         },
         "nativeDecisions": {
@@ -8334,6 +8355,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "goal": "sample",
               "criteria": [
                 "sample"
+              ],
+              "attachments": [
+                {
+                  "artifactId": "sample",
+                  "label": "sample",
+                  "filename": "sample",
+                  "mimeType": "sample",
+                  "sizeBytes": 0
+                }
               ]
             },
             "proposedUnits": [
@@ -9458,6 +9488,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "goal": "sample",
         "criteria": [
           "sample"
+        ],
+        "attachments": [
+          {
+            "artifactId": "sample",
+            "label": "sample",
+            "filename": "sample",
+            "mimeType": "sample",
+            "sizeBytes": 0
+          }
         ]
       },
       "nativeDecisions": {
@@ -9564,6 +9603,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "goal": "sample",
             "criteria": [
               "sample"
+            ],
+            "attachments": [
+              {
+                "artifactId": "sample",
+                "label": "sample",
+                "filename": "sample",
+                "mimeType": "sample",
+                "sizeBytes": 0
+              }
             ]
           },
           "proposedUnits": [
@@ -10687,6 +10735,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             "goal": "sample",
             "criteria": [
               "sample"
+            ],
+            "attachments": [
+              {
+                "artifactId": "sample",
+                "label": "sample",
+                "filename": "sample",
+                "mimeType": "sample",
+                "sizeBytes": 0
+              }
             ]
           },
           "nativeDecisions": {
@@ -10793,6 +10850,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "goal": "sample",
                 "criteria": [
                   "sample"
+                ],
+                "attachments": [
+                  {
+                    "artifactId": "sample",
+                    "label": "sample",
+                    "filename": "sample",
+                    "mimeType": "sample",
+                    "sizeBytes": 0
+                  }
                 ]
               },
               "proposedUnits": [
@@ -11949,6 +12015,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "goal": "sample",
           "criteria": [
             "sample"
+          ],
+          "attachments": [
+            {
+              "artifactId": "sample",
+              "label": "sample",
+              "filename": "sample",
+              "mimeType": "sample",
+              "sizeBytes": 0
+            }
           ]
         },
         "nativeDecisions": {
@@ -12055,6 +12130,15 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "goal": "sample",
               "criteria": [
                 "sample"
+              ],
+              "attachments": [
+                {
+                  "artifactId": "sample",
+                  "label": "sample",
+                  "filename": "sample",
+                  "mimeType": "sample",
+                  "sizeBytes": 0
+                }
               ]
             },
             "proposedUnits": [
@@ -13874,6 +13958,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "label": "sample"
       },
       "status": "disabled",
+      "words": "sample",
       "codeId": "sample",
       "codeName": "sample"
     }
@@ -13885,6 +13970,8 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "body": {
       "status": "disabled",
       "configured": false,
+      "words": "sample",
+      "relayUrl": "sample",
       "rendezvousId": "sample",
       "refusal": {
         "code": "sample",
@@ -23657,6 +23744,40 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
+  "pairing.serve.network": {
+    "methodId": "pairing.serve.network",
+    "http": null,
+    "status": 200,
+    "body": {
+      "posture": {
+        "origin": "sample",
+        "scheme": "sample",
+        "privateNetwork": false,
+        "secureContext": false,
+        "notice": "sample",
+        "capabilities": [
+          {
+            "capability": "sample",
+            "available": false,
+            "reason": "sample"
+          }
+        ],
+        "reach": {
+          "otherDevices": false,
+          "reason": "sample",
+          "fix": "sample",
+          "steps": [
+            {
+              "state": "done",
+              "text": "sample",
+              "detail": "sample",
+              "command": false
+            }
+          ]
+        }
+      }
+    }
+  },
   "pairing.tokens.create": {
     "methodId": "pairing.tokens.create",
     "http": null,
@@ -24782,6 +24903,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
                 "effectiveByRequested": {}
               },
               "textWork": "text",
+              "priceTier": "free",
               "recommended": "sample"
             }
           ],
@@ -24831,6 +24953,17 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "notAsked": false
         }
       ]
+    }
+  },
+  "providers.apiKey.set": {
+    "methodId": "providers.apiKey.set",
+    "http": null,
+    "status": 200,
+    "body": {
+      "provider": "sample",
+      "keyName": "sample",
+      "scope": "sample",
+      "signedIn": false
     }
   },
   "providers.get": {
@@ -25057,6 +25190,28 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           ]
         }
       ]
+    }
+  },
+  "providers.subscription.signIn.begin": {
+    "methodId": "providers.subscription.signIn.begin",
+    "http": null,
+    "status": 200,
+    "body": {
+      "provider": "sample",
+      "authorizationUrl": "sample",
+      "finishes": "on-its-own",
+      "listenerNote": "sample"
+    }
+  },
+  "providers.subscription.signIn.finish": {
+    "methodId": "providers.subscription.signIn.finish",
+    "http": null,
+    "status": 200,
+    "body": {
+      "provider": "sample",
+      "signedIn": false,
+      "tokenType": "sample",
+      "expiresAt": 0
     }
   },
   "providers.usage.get": {
@@ -26277,7 +26432,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "detail": "sample"
       },
       "publicBaseUrlUpdated": false,
-      "receiptRecorded": false
+      "receiptRecorded": false,
+      "answers": {
+        "ok": false,
+        "detail": "sample"
+      }
     }
   },
   "tailscale.serve.stop": {

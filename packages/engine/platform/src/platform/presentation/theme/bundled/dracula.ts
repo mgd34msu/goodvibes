@@ -1,9 +1,14 @@
 /**
  * dracula, dark = Dracula, light = Alucard (draculatheme.com/spec).
  *
- * Authored from the official published palette. Values that miss a contrast
- * floor against the panel carry the smallest adjustment that reaches it; each
- * one is noted beside its token with the published value.
+ * Authored from the official published palette. Every colour that carries text
+ * reaches 4.5:1 on each surface it is drawn on (background, panel, element,
+ * menu, selection, diff fills): a published value that does not carries the
+ * smallest lift toward white (dark) or black (light) that does. The three text
+ * levels stay apart: faint at the floor, muted at least 10 CIELAB L* above it,
+ * text at least 10 L* above muted. The dark selection fill is the panel tinted
+ * 16% toward primary (not the element), so faint does not have to climb to
+ * near-white to clear it; the light one is the element tinted the same way.
  * Plain data, no module-scope calls.
  */
 
@@ -12,47 +17,45 @@ import type { ThemeJson } from '../types.js';
 export const DRACULA_THEME: ThemeJson = {
   $schema: 'https://opencode.ai/theme.json',
   theme: {
-    primary: { dark: '#bd93f9', light: '#644ac9' },
-    secondary: { dark: '#ff79c6', light: '#a3144d' },
-    accent: { dark: '#8be9fd', light: '#036a96' },
-    error: { dark: '#ff5555', light: '#cb3a2a' },
-    warning: { dark: '#ffb86c', light: '#a34d14' },
-    success: { dark: '#50fa7b', light: '#14710a' },
-    info: { dark: '#8be9fd', light: '#036a96' },
+    primary: { dark: '#caa8fa', light: '#5e46bd' },
+    secondary: { dark: '#ff94d1', light: '#a3144d' },
+    accent: { dark: '#8be9fd', light: '#036089' },
+    error: { dark: '#ff9b9b', light: '#a63022' },
+    warning: { dark: '#ffb86c', light: '#914512' },
+    success: { dark: '#50fa7b', light: '#136909' },
+    info: { dark: '#8be9fd', light: '#036089' },
     text: { dark: '#f8f8f2', light: '#1f1f1f' },
-    // dark: published #6272a4 is 3.36:1 on the panel; adjusted to reach 4.5:1.
-    // Muted and faint carry key hints, reasons and times: at least 4.5:1 on the
-    // panel and on elements (published dark muted #7b89b3, faint #6272a4 / #a39f8a).
-    textMuted: { dark: '#adb6d0', light: '#6c664b' },
-    textFaint: { dark: '#adb6d0', light: '#6b685b' },
+    textMuted: { dark: '#ccd2e2', light: '#464231' },
+    textFaint: { dark: '#adb6d0', light: '#5d5a4f' },
     selectedListItemText: { dark: '#282a36', light: '#fffbeb' },
     background: { dark: '#282a36', light: '#fffbeb' },
     backgroundPanel: { dark: '#21222c', light: '#fffbeb' },
     backgroundElement: { dark: '#44475a', light: '#ece9df' },
     backgroundMenu: { dark: '#343746', light: '#efeddc' },
+    backgroundSelected: { dark: '#3a344d', light: '#d6d0db' },
     border: { dark: '#44475a', light: '#cfcfde' },
     borderActive: { dark: '#6272a4', light: '#6c664b' },
     borderSubtle: { dark: '#343746', light: '#dedccf' },
-    reasoning: { dark: '#bd93f9', light: '#644ac9' },
+    reasoning: { dark: '#caa8fa', light: '#5e46bd' },
     diffAdded: { dark: '#50fa7b', light: '#14710a' },
-    diffRemoved: { dark: '#ff5555', light: '#cb3a2a' },
+    diffRemoved: { dark: '#ff9b9b', light: '#bb3527' },
     diffContext: 'textMuted',
-    diffHunkHeader: { dark: '#bd93f9', light: '#644ac9' },
-    diffHighlightAdded: { dark: '#69ff94', light: '#198d0c' },
-    diffHighlightRemoved: { dark: '#ff6e6e', light: '#d74c3d' },
+    diffHunkHeader: { dark: '#caa8fa', light: '#644ac9' },
+    diffHighlightAdded: { dark: '#69ff94', light: '#15760a' },
+    diffHighlightRemoved: { dark: '#ff8282', light: '#b23f33' },
     diffAddedBg: { dark: '#315845', light: '#dee8cc' },
     diffRemovedBg: { dark: '#57333d', light: '#f8e0d0' },
     diffContextBg: 'backgroundPanel',
-    diffLineNumber: 'textFaint',
+    diffLineNumber: { dark: '#b0b9d2', light: '#696659' },
     diffAddedLineNumberBg: { dark: '#2b523d', light: '#dee8cc' },
     diffRemovedLineNumberBg: { dark: '#522d35', light: '#f8e0d0' },
     markdownText: 'text',
-    markdownHeading: { dark: '#bd93f9', light: '#644ac9' },
+    markdownHeading: { dark: '#caa8fa', light: '#644ac9' },
     markdownLink: { dark: '#8be9fd', light: '#036a96' },
-    markdownLinkText: { dark: '#ff79c6', light: '#a3144d' },
+    markdownLinkText: { dark: '#ff94d1', light: '#a3144d' },
     markdownCode: { dark: '#50fa7b', light: '#14710a' },
-    markdownBlockQuote: { dark: '#f1fa8c', light: '#846e15' },
-    markdownEmph: { dark: '#f1fa8c', light: '#846e15' },
+    markdownBlockQuote: { dark: '#f1fa8c', light: '#7c6714' },
+    markdownEmph: { dark: '#f1fa8c', light: '#7c6714' },
     markdownStrong: 'text',
     markdownHorizontalRule: { dark: '#6272a4', light: '#6c664b' },
     markdownListItem: { dark: '#8be9fd', light: '#036a96' },
@@ -60,16 +63,16 @@ export const DRACULA_THEME: ThemeJson = {
     markdownImage: 'markdownLink',
     markdownImageText: 'markdownLinkText',
     markdownCodeBlock: 'text',
-    syntaxComment: { dark: '#6272a4', light: '#6c664b' },
-    syntaxKeyword: { dark: '#ff79c6', light: '#a3144d' },
+    syntaxComment: { dark: '#adb6d0', light: '#6c664b' },
+    syntaxKeyword: { dark: '#ff94d1', light: '#a3144d' },
     syntaxFunction: { dark: '#50fa7b', light: '#14710a' },
     syntaxVariable: { dark: '#f8f8f2', light: '#1f1f1f' },
-    syntaxString: { dark: '#f1fa8c', light: '#846e15' },
-    syntaxNumber: { dark: '#bd93f9', light: '#644ac9' },
+    syntaxString: { dark: '#f1fa8c', light: '#7c6714' },
+    syntaxNumber: { dark: '#caa8fa', light: '#644ac9' },
     syntaxType: { dark: '#8be9fd', light: '#036a96' },
-    syntaxOperator: { dark: '#ff79c6', light: '#a3144d' },
+    syntaxOperator: { dark: '#ff94d1', light: '#a3144d' },
     syntaxPunctuation: { dark: '#f8f8f2', light: '#1f1f1f' },
     syntaxProperty: { dark: '#ffb86c', light: '#a34d14' },
-    syntaxBuiltin: { dark: '#bd93f9', light: '#644ac9' },
+    syntaxBuiltin: { dark: '#caa8fa', light: '#644ac9' },
   },
 };

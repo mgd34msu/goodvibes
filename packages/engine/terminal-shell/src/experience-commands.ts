@@ -68,6 +68,7 @@ interface VoiceContext extends CommandActionContext {
   /** Returns whether anything was playing; a port that returns nothing is treated as having stopped playback. */
   readonly stopSpokenOutput?: (() => boolean | void) | undefined;
   readonly submitSpokenInput?: ((prompt: string) => void) | undefined;
+  readonly listenForWakeAgain?: (() => Promise<string>) | undefined;
   readonly renderRequest: () => void;
 }
 
@@ -118,7 +119,7 @@ export function createVoiceExperienceCommand<Context extends VoiceContext>(polic
     firstScreenRows: [
       'review', 'speak', 'stop', 'on', 'off',
       { label: 'The local voice runtime…', actions: ['status', 'setup'] },
-      { label: 'The wake word…', actions: ['wake-status', 'wake-setup'] },
+      { label: 'The wake word…', actions: ['wake-status', 'wake-setup', 'wake-again'] },
       { label: 'Voice settings as a file…', actions: ['export', 'inspect', 'import'] },
     ],
     actions: [
@@ -181,6 +182,16 @@ export function createVoiceExperienceCommand<Context extends VoiceContext>(polic
         })],
         sentence: 'The wake-word models are downloaded and checked, and speech-to-text is installed too when chosen.', example: { stt: 'yes' },
         run: guarded(async (values, ctx) => { await policy.wake(['wake', 'setup', ...(values.stt === 'yes' ? ['yes'] : [])], ctx, policy.paths(ctx)); }),
+      }),
+      doAction<Context>({
+        id: 'wake-again', label: 'Listen for the wake word again', word: 'wake-again', operator: VOICE_LOCAL,
+        sentence: 'Listening for the wake word starts again after it stopped by itself (it also starts again when this terminal regains focus).',
+        async run(_values, ctx) {
+          if (!ctx.listenForWakeAgain) throw commandRefusal('Wake-word detection is not available in this session.', undefined, 'UNAVAILABLE');
+          const said = await ctx.listenForWakeAgain();
+          ctx.renderRequest();
+          return said;
+        },
       }),
       doAction<Context>({
         id: 'export', label: 'Save your voice settings to a file', word: 'export', operator: VOICE_LOCAL,

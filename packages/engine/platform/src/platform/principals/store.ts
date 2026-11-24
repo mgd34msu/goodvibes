@@ -29,7 +29,7 @@ export class PrincipalStore {
     return readDocument(this.path, {
       label: 'principals',
       validate: validateSnapshot,
-      recovery: 'The principal registry starts empty: every channel sender resolves as an unknown principal until principals are created again.',
+      recovery: 'The list of people and devices starts empty: every channel sender is treated as someone unknown until they are added again.',
     })?.principals ?? [];
   }
 

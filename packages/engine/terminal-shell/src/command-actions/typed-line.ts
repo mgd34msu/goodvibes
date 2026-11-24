@@ -160,9 +160,13 @@ export function parseTypedLine<Ctx>(description: CommandDescription<Ctx>, args: 
       if (!input) { problem = `/${description.name} ${action.word} has no option ${flag}.`; return done(); }
       const toggle = switchValue(input);
       if (toggle && equals < 0) { values[input.id] = toggle.on; continue; }
-      const value = equals > 0 ? word.slice(equals + 1) : words[index + 1];
+      let value = equals > 0 ? word.slice(equals + 1) : words[index + 1];
       if (value === undefined) { problem = `${flag} needs a value: ${input.label}.`; return done(); }
       if (equals < 0) index += 1;
+      // A free-text option reads on to the next option (or `--`): `--title Tomato blight notes`.
+      if ('flag' in input.typed && input.typed.untilNextFlag === true) {
+        while (index + 1 < words.length && !words[index + 1]!.startsWith('--')) value = `${value} ${words[++index]!}`;
+      }
       values[input.id] = isRepeating(input) && values[input.id] ? `${values[input.id]}\n${value}` : value;
       continue;
     }
@@ -233,10 +237,16 @@ export function renderTypedLine(description: CommandShape, actionId: string, giv
   const tailValue = tail && isShown(tail, values) ? values[tail.id] : undefined;
   if (tail && tailValue) {
     if (tail.kind === 'list') parts.push('--', ...tailValue.split('\n').map(quoteSlashCommandArg));
-    // Text holding a word that reads as an option (--yes, --to) goes after --, so it is read back as the same text.
-    else parts.push(...(tailValue.split(/\s+/).some((word) => word.startsWith('--')) ? ['--'] : []), tailValue);
+    // Text holding a word that reads as an option (--yes, --to) goes after --, so it is read back as the same
+    // text; so does any text after an option that reads on to the next option.
+    else parts.push(...(tailValue.split(/\s+/).some((word) => word.startsWith('--')) || readsOn(action) ? ['--'] : []), tailValue);
   }
   return parts.join(' ');
+}
+
+/** True when one of the action's options reads every word up to the next option (`untilNextFlag`). */
+function readsOn(action: ActionShape): boolean {
+  return action.inputs.some((input) => 'flag' in input.typed && input.typed.untilNextFlag === true);
 }
 
 /** `block <server> <tool> [--keep]`: the action's typed pattern, read from its inputs. */
@@ -248,16 +258,19 @@ export function linePattern(action: ActionShape): string {
     const name = `<${input.label.toLowerCase()}>`;
     parts.push(input.required === true ? name : `[${name}]`);
   }
+  const tail = action.inputs.find((input) => 'tail' in input.typed);
+  const tailPart = tail
+    ? tail.kind === 'list' ? `[-- <${tail.label.toLowerCase()}>...]` : tail.required === true ? `<${tail.label.toLowerCase()}...>` : `[<${tail.label.toLowerCase()}...>]`
+    : '';
+  // An option that reads on to the next option would take text written after it: the text goes first.
+  const tailFirst = tail !== undefined && tail.kind !== 'list' && readsOn(action);
+  if (tailFirst) parts.push(tailPart);
   for (const input of action.inputs) {
     if (!('flag' in input.typed)) continue;
     const toggle = switchValue(input);
     parts.push(toggle ? `[${input.typed.flag}]` : `[${input.typed.flag} <${input.label.toLowerCase()}>]${isRepeating(input) ? '...' : ''}`);
   }
-  const tail = action.inputs.find((input) => 'tail' in input.typed);
-  if (tail) {
-    const name = `<${tail.label.toLowerCase()}...>`;
-    parts.push(tail.kind === 'list' ? `[-- <${tail.label.toLowerCase()}>...]` : tail.required === true ? name : `[${name}]`);
-  }
+  if (!tailFirst) parts.push(tailPart);
   return parts.filter(Boolean).join(' ');
 }
 

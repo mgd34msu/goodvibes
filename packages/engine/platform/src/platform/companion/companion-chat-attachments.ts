@@ -18,7 +18,9 @@ import type {
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 
-export const MAX_ATTACHMENTS_PER_MESSAGE = 8;
+import { MAX_ATTACHMENTS_PER_MESSAGE, type AttachmentFacts } from './attachment-limits.js';
+
+export { MAX_ATTACHMENTS_PER_MESSAGE, type AttachmentFacts };
 const MAX_INLINE_IMAGE_ATTACHMENT_BYTES = 20 * 1024 * 1024;
 const MAX_INLINE_TEXT_ATTACHMENT_BYTES = 200 * 1024;
 
@@ -81,7 +83,7 @@ export function resolveAttachments(
   });
 }
 
-export function formatAttachmentSummary(attachments: readonly CompanionChatMessageAttachment[]): string {
+export function formatAttachmentSummary(attachments: readonly AttachmentFacts[]): string {
   if (attachments.length === 0) return '';
   const lines = attachments.map((attachment, index) => {
     const name = attachment.label ?? attachment.filename ?? attachment.artifactId;
@@ -94,7 +96,7 @@ export function buildReplayUserContent(message: CompanionChatMessage): string {
   return `${message.content}${formatAttachmentSummary(message.attachments ?? [])}`;
 }
 
-function isInlineTextAttachment(attachment: CompanionChatMessageAttachment): boolean {
+function isInlineTextAttachment(attachment: AttachmentFacts): boolean {
   const lower = attachment.mimeType.toLowerCase();
   return attachment.sizeBytes <= MAX_INLINE_TEXT_ATTACHMENT_BYTES
     && (lower.startsWith('text/')
@@ -104,7 +106,7 @@ function isInlineTextAttachment(attachment: CompanionChatMessageAttachment): boo
       || lower === 'text/csv');
 }
 
-function isInlineImageAttachment(attachment: CompanionChatMessageAttachment): boolean {
+function isInlineImageAttachment(attachment: AttachmentFacts): boolean {
   const lower = attachment.mimeType.toLowerCase();
   return attachment.sizeBytes <= MAX_INLINE_IMAGE_ATTACHMENT_BYTES
     && (lower === 'image/png'
@@ -115,8 +117,8 @@ function isInlineImageAttachment(attachment: CompanionChatMessageAttachment): bo
 
 export async function buildProviderUserContent(
   content: string,
-  attachments: readonly CompanionChatMessageAttachment[],
-  artifactStore: CompanionChatArtifactStore | null,
+  attachments: readonly AttachmentFacts[],
+  artifactStore: Pick<CompanionChatArtifactStore, 'readContent'> | null,
 ): Promise<string | ContentPart[]> {
   if (attachments.length === 0) return content;
   const textSections: string[] = [content.trim() ? content : 'Please review the attached file(s).'];

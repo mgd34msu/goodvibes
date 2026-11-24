@@ -143,13 +143,14 @@ export function createCodeIndexServices(deps: CodeIndexServicesDeps): CodeIndexS
   void codeIndexStore.init().then(() => {
     if (isCodeIndexAutoStartEnabled(deps.configManager)) codeIndexStore.scheduleBuild();
   });
-  const codeIndexReindexScheduler = new CodeIndexReindexScheduler({
+  const codeIndexReindexScheduler: CodeIndexReindexScheduler = new CodeIndexReindexScheduler({
     target: codeIndexStore,
     workingDirectory: deps.getWorkingDirectory ?? deps.workingDirectory,
     // Honor governor backpressure: a paused code-index reindex job stops
     // scheduling new work until the governor resumes it, and the critical
     // memory tier refuses new reindex work outright (mirrors the platform).
-    isEnabled: () => isCodeInjectionSettingEnabled(deps.configManager)
+    // A build asked for this session (`/codebase build`) keeps the index current whatever the setting says.
+    isEnabled: (): boolean => (codeIndexReindexScheduler.keptCurrentThisSession() || isCodeInjectionSettingEnabled(deps.configManager))
       && !(deps.isReindexPaused?.() ?? false)
       && (deps.admitExpensiveWork?.('code-index reindex').allowed ?? true),
     whenResumed: deps.whenReindexResumed,

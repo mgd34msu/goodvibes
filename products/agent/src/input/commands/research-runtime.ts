@@ -9,11 +9,15 @@ import { choiceInput, doAction as doNow, textInput } from '@goodvibes/engine/ter
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 import { given, ownerToolCall, runOwnerToolCall, splitLines, splitWords } from './owner-tool-call.ts';
+import { AgentResearchRunRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
 
 const LOCAL_ONLY = { terminalOnly: 'Research runs from this Agent\'s conversation and is kept in its home.' } as const;
 
+/** A free-text option: its value is every word up to the next option, so it needs no quotes. */
+const words = (flag: `--${string}`) => ({ flag, untilNextFlag: true } as const);
+
 const opt = (id: string, label: string, help: string, flag: `--${string}`, means: string, kind: InputDescription['kind'] = 'text', why = 'your own words'): InputDescription =>
-  textInput({ id, label, help, why, kind, typed: { flag }, optional: { default: '', means } });
+  textInput({ id, label, help, why, kind, typed: words(flag), optional: { default: '', means } });
 
 /** Sends `prompt` to the conversation as the owner's message. */
 function ask(ctx: CommandContext, prompt: string): string {
@@ -23,11 +27,61 @@ function ask(ctx: CommandContext, prompt: string): string {
 }
 
 type ResearchAction = ActionDescription<CommandContext>;
-function keep(tool: string, fields: Pick<ResearchAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example'>, args: (values: Readonly<Record<string, string>>) => Record<string, unknown>): ResearchAction {
+/**
+ * One Agent research tool call as the owner's act. The tool's own answer (ids, model routes, policy)
+ * is for a model; a person reads `said`, one line of what now holds.
+ */
+function keep(
+  tool: string,
+  fields: Pick<ResearchAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example'>,
+  args: (values: Readonly<Record<string, string>>) => Record<string, unknown>,
+  said: (values: Readonly<Record<string, string>>) => string,
+): ResearchAction {
   return {
     done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', operator: LOCAL_ONLY, ownerOnly: ownerToolCall(tool), ...fields,
     async run(values, ctx) {
-      return runOwnerToolCall(ctx, tool, { ...args(values), confirm: true, explicitUserRequest: `${fields.label}: ${values.title ?? values.question ?? ''}` }, fields.label.toLowerCase());
+      await runOwnerToolCall(ctx, tool, { ...args(values), confirm: true, explicitUserRequest: `${fields.label}: ${values.title ?? values.question ?? ''}` }, fields.label.toLowerCase());
+      return said(values);
+    },
+  };
+}
+
+/**
+ * Starting a run is asked for by its name: the kept run is handed to the research runner (the
+ * `research` tool's `runner` action: bounded public web source collection into the run and the
+ * source queue) at once. The runner works on while the answer comes back, and says here when it
+ * has finished or why it stopped.
+ */
+function startRun(kept: ResearchAction): ResearchAction {
+  return {
+    ...kept,
+    touches: 'another-machine',
+    async run(values, ctx) {
+      const since = Date.now();
+      // The tool's own answer (its id, routes and policy) is for a model; a person reads one line.
+      await kept.run(values, ctx);
+      const shellPaths = ctx.workspace?.shellPaths;
+      const run = shellPaths
+        ? AgentResearchRunRegistry.fromShellPaths(shellPaths).list()
+          .find((record) => record.title === values.title && Date.parse(record.createdAt) >= since - 1000)
+        : undefined;
+      if (!run) return `Research run "${values.title ?? ''}" was kept, but it could not be found to start it; start it again from Research with "Start a research run".`;
+      const name = run.title;
+      void runOwnerToolCall(ctx, 'research', { action: 'runner', runId: run.id, explicitUserRequest: `Start a research run: ${name}` }, `run the research for "${name}"`)
+        .then(
+          () => {
+            // Said from the run as it now stands, not the runner's own answer (which names model routes).
+            const after = shellPaths ? AgentResearchRunRegistry.fromShellPaths(shellPaths).get(run.id) : null;
+            const count = after?.sourceIds.length ?? 0;
+            ctx.print(`Research run "${name}" finished: ${count} source${count === 1 ? '' : 's'} collected into your research queue. /agent research shows the run and its sources.`);
+          },
+          (error: unknown) => {
+            const why = (error instanceof Error ? error.message : String(error))
+              .replace(/^Not done:\s*/, '').replace(/^Admitted research runner blocked for [^:]+:\s*/, '');
+            ctx.print(`Research run "${name}" stopped: ${why}`);
+          },
+        );
+      return `Research run "${name}" started. It reports here when it finishes.`;
     },
   };
 }
@@ -73,10 +127,10 @@ export function registerResearchRuntimeCommands(registry: CommandRegistry): void
           ].join('\n'));
         },
       }),
-      keep('agent_research_runs', {
+      startRun(keep('agent_research_runs', {
         id: 'start-run', label: 'Start a research run', word: 'start-run',
         inputs: [
-          textInput({ id: 'title', label: 'Name', help: 'What the run is called', why: 'a name you choose', typed: { flag: '--title' } }),
+          textInput({ id: 'title', label: 'Name', help: 'What the run is called', why: 'a name you choose', typed: words('--title') }),
           textInput({ id: 'question', label: 'Question', help: 'What the run should answer', why: 'your own words', kind: 'long-text', typed: { tail: true } }),
           opt('goal', 'Outcome', 'What you want at the end', '--goal', 'the question answered', 'long-text'),
           opt('plan', 'Plan', 'One research step per line', '--plan', 'none yet', 'long-text'),
@@ -84,17 +138,17 @@ export function registerResearchRuntimeCommands(registry: CommandRegistry): void
           opt('sources', 'Known sources', 'Source ids already in your queue, separated by commas', '--sources', 'none', 'text', 'source ids'),
           opt('note', 'Note', 'Context or a caveat', '--note', 'none', 'long-text'),
         ],
-        sentence: 'A research run "{title}" for the question "{question}" is kept, visible and resumable, until you change it; nothing runs in the background.',
+        sentence: 'A research run "{title}" for the question "{question}" is kept and started: it collects public web sources into your research queue now, and stays visible and resumable until you change it.',
         example: { title: 'E-bike range', question: 'Which e-bikes have the longest range?' },
       }, (values) => {
         const plan = splitLines(values.plan); const next = splitLines(values.next); const sources = splitWords(values.sources);
         return { mode: 'create', title: values.title, question: values.question, ...given(values, 'goal', 'note'), ...(plan.length > 0 ? { plan } : {}), ...(next.length > 0 ? { nextSteps: next } : {}), ...(sources.length > 0 ? { sourceIds: sources } : {}) };
-      }),
+      }, (values) => `Research run "${values.title ?? ''}" kept.`)),
       keep('agent_research_sources', {
         id: 'add-source', label: 'Add a source to the queue', word: 'add-source',
         inputs: [
-          textInput({ id: 'title', label: 'Source', help: 'Its title', why: 'your own words', typed: { flag: '--title' } }),
-          textInput({ id: 'question', label: 'For the question', help: 'The question or topic it supports', why: 'your own words', typed: { flag: '--question' } }),
+          textInput({ id: 'title', label: 'Source', help: 'Its title', why: 'your own words', typed: words('--title') }),
+          textInput({ id: 'question', label: 'For the question', help: 'The question or topic it supports', why: 'your own words', typed: words('--question') }),
           textInput({ id: 'summary', label: 'Summary', help: 'What it says, briefly', why: 'your own words', kind: 'long-text', typed: { tail: true } }),
           opt('url', 'Address', 'Its web address', '--url', 'none', 'text', 'a web address'),
           opt('publisher', 'Publisher', 'Who published it', '--publisher', 'not given'),
@@ -119,13 +173,13 @@ export function registerResearchRuntimeCommands(registry: CommandRegistry): void
           ...given(values, 'url', 'publisher', 'evidence', 'credibility', 'note'), ...(values.published ? { publishedAt: values.published } : {}),
           ...(score === undefined || Number.isNaN(score) ? {} : { score }), tags,
         };
-      }),
+      }, (values) => `Source "${values.title ?? ''}" kept in your research queue for "${values.question ?? ''}". /agent research shows the queue.`),
       keep('agent_research_report', {
         id: 'save-report', label: 'Save a sourced report', word: 'save-report',
         inputs: [
-          textInput({ id: 'title', label: 'Title', help: 'What the report is called', why: 'your own words', typed: { flag: '--title' } }),
-          textInput({ id: 'question', label: 'Question', help: 'The question it answers', why: 'your own words', typed: { flag: '--question' } }),
-          textInput({ id: 'sources', label: 'Sources', help: 'One per line: title | https://address | high/medium/low | note', why: 'your sources', kind: 'long-text', typed: { flag: '--sources' } }),
+          textInput({ id: 'title', label: 'Title', help: 'What the report is called', why: 'your own words', typed: words('--title') }),
+          textInput({ id: 'question', label: 'Question', help: 'The question it answers', why: 'your own words', typed: words('--question') }),
+          textInput({ id: 'sources', label: 'Sources', help: 'One per line: title | https://address | high/medium/low | note', why: 'your sources', kind: 'long-text', typed: words('--sources') }),
           opt('report', 'Report', 'The reviewed report, citing sources as [S1], [S2]', '--report', 'built from the summary and findings', 'long-text'),
           opt('summary', 'Summary', 'A short summary', '--summary', 'none', 'long-text'),
           opt('findings', 'Findings', 'One per line', '--findings', 'none', 'long-text'),
@@ -161,7 +215,7 @@ export function registerResearchRuntimeCommands(registry: CommandRegistry): void
           ...(values.visual !== 'no' ? { visualReport: true } : {}), ...(values.cite === 'yes' ? { requireCitationCoverage: true } : {}),
           tags: values.tags ? splitWords(values.tags) : ['research'],
         };
-      }),
+      }, (values) => `Report "${values.title ?? ''}" saved as an artifact. /artifacts list shows it.`),
     ],
   }));
 }

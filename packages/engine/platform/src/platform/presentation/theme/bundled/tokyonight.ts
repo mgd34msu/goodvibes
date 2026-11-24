@@ -1,9 +1,12 @@
 /**
  * tokyonight, dark = Night, light = Day (github.com/folke/tokyonight.nvim).
  *
- * Authored from the official published palette. Values that miss a contrast
- * floor against the panel carry the smallest adjustment that reaches it; each
- * one is noted beside its token with the published value.
+ * Authored from the official published palette. Every colour that carries text
+ * reaches 4.5:1 on each surface it is drawn on (background, panel, element,
+ * menu, selection, diff fills): a published value that does not carries the
+ * smallest lift toward white (dark) or black (light) that does. The three text
+ * levels stay apart: faint at the floor, muted at least 10 CIELAB L* above it,
+ * text at least 10 L* above muted.
  * Plain data, no module-scope calls.
  */
 
@@ -12,35 +15,32 @@ import type { ThemeJson } from '../types.js';
 export const TOKYONIGHT_THEME: ThemeJson = {
   $schema: 'https://opencode.ai/theme.json',
   theme: {
-    primary: { dark: '#7aa2f7', light: '#2e7de9' },
-    secondary: { dark: '#bb9af7', light: '#9854f1' },
-    accent: { dark: '#ff9e64', light: '#b15c00' },
-    error: { dark: '#f7768e', light: '#f52a65' },
-    warning: { dark: '#e0af68', light: '#8c6c3e' },
-    success: { dark: '#9ece6a', light: '#587539' },
-    info: { dark: '#7dcfff', light: '#007197' },
-    // light: published #3760bf is 4.52:1 on the panel; adjusted to reach 7:1.
-    text: { dark: '#c0caf5', light: '#28458a' },
-    // Muted and faint carry key hints, reasons and times: each is the smallest lift
-    // of the published colour (muted light #6172b0, faint #565f89 / #8990b3) that
-    // reaches 4.5:1 on the panel and on elements.
-    textMuted: { dark: '#a9b1d6', light: '#4c5a8b' },
-    textFaint: { dark: '#8f95b1', light: '#575c72' },
+    primary: { dark: '#8aadf8', light: '#1e5197' },
+    secondary: { dark: '#be9ef7', light: '#6739a4' },
+    accent: { dark: '#ff9e64', light: '#7f4200' },
+    error: { dark: '#f88fa2', light: '#9f1b42' },
+    warning: { dark: '#e0af68', light: '#664f2d' },
+    success: { dark: '#9ece6a', light: '#43592b' },
+    info: { dark: '#7dcfff', light: '#005977' },
+    text: { dark: '#e1e6fa', light: '#152448' },
+    textMuted: { dark: '#c4c9e3', light: '#313a59' },
+    textFaint: { dark: '#a9adc3', light: '#4d5265' },
     selectedListItemText: { dark: '#1a1b26', light: '#e1e2e7' },
     background: { dark: '#1a1b26', light: '#e1e2e7' },
     backgroundPanel: { dark: '#16161e', light: '#e1e2e7' },
     backgroundElement: { dark: '#292e42', light: '#d0d5e3' },
     backgroundMenu: { dark: '#292e42', light: '#d0d5e3' },
+    backgroundSelected: { dark: '#36415f', light: '#b6c7e4' },
     border: { dark: '#3b4261', light: '#a8aecb' },
     borderActive: { dark: '#545c7e', light: '#68709a' },
     borderSubtle: { dark: '#292e42', light: '#c4c8da' },
-    reasoning: { dark: '#bb9af7', light: '#9854f1' },
-    diffAdded: { dark: '#9ece6a', light: '#587539' },
-    diffRemoved: { dark: '#f7768e', light: '#f52a65' },
+    reasoning: { dark: '#be9ef7', light: '#6739a4' },
+    diffAdded: { dark: '#9ece6a', light: '#49612f' },
+    diffRemoved: { dark: '#f7778f', light: '#a91d46' },
     diffContext: 'textMuted',
-    diffHunkHeader: { dark: '#7aa2f7', light: '#2e7de9' },
-    diffHighlightAdded: { dark: '#73daca', light: '#387068' },
-    diffHighlightRemoved: { dark: '#db4b4b', light: '#c64343' },
+    diffHunkHeader: { dark: '#7aa2f7', light: '#225baa' },
+    diffHighlightAdded: { dark: '#73daca', light: '#31635c' },
+    diffHighlightRemoved: { dark: '#e78585', light: '#9c3535' },
     diffAddedBg: { dark: '#374235', light: '#ced3cf' },
     diffRemovedBg: { dark: '#4b2f3d', light: '#e4c8d5' },
     diffContextBg: 'backgroundPanel',
@@ -48,29 +48,29 @@ export const TOKYONIGHT_THEME: ThemeJson = {
     diffAddedLineNumberBg: { dark: '#343e2f', light: '#ced3cf' },
     diffRemovedLineNumberBg: { dark: '#482b37', light: '#e4c8d5' },
     markdownText: 'text',
-    markdownHeading: { dark: '#7aa2f7', light: '#2e7de9' },
-    markdownLink: { dark: '#7aa2f7', light: '#2e7de9' },
-    markdownLinkText: { dark: '#7dcfff', light: '#007197' },
-    markdownCode: { dark: '#9ece6a', light: '#587539' },
-    markdownBlockQuote: { dark: '#a9b1d6', light: '#6172b0' },
-    markdownEmph: { dark: '#e0af68', light: '#8c6c3e' },
+    markdownHeading: { dark: '#7aa2f7', light: '#225baa' },
+    markdownLink: { dark: '#7aa2f7', light: '#225baa' },
+    markdownLinkText: { dark: '#7dcfff', light: '#006385' },
+    markdownCode: { dark: '#9ece6a', light: '#4b6330' },
+    markdownBlockQuote: { dark: '#a9b1d6', light: '#4d5a8b' },
+    markdownEmph: { dark: '#e0af68', light: '#715732' },
     markdownStrong: 'text',
     markdownHorizontalRule: { dark: '#565f89', light: '#8990b3' },
-    markdownListItem: { dark: '#ff9e64', light: '#b15c00' },
-    markdownListEnumeration: { dark: '#ff9e64', light: '#b15c00' },
+    markdownListItem: { dark: '#ff9e64', light: '#8f4b00' },
+    markdownListEnumeration: { dark: '#ff9e64', light: '#8f4b00' },
     markdownImage: 'markdownLink',
     markdownImageText: 'markdownLinkText',
     markdownCodeBlock: 'text',
-    syntaxComment: { dark: '#565f89', light: '#848cb5' },
-    syntaxKeyword: { dark: '#9d7cd8', light: '#7847bd' },
-    syntaxFunction: { dark: '#7aa2f7', light: '#2e7de9' },
-    syntaxVariable: { dark: '#c0caf5', light: '#3760bf' },
-    syntaxString: { dark: '#9ece6a', light: '#587539' },
-    syntaxNumber: { dark: '#ff9e64', light: '#b15c00' },
-    syntaxType: { dark: '#2ac3de', light: '#188092' },
-    syntaxOperator: { dark: '#89ddff', light: '#006a83' },
-    syntaxPunctuation: { dark: '#89ddff', light: '#006a83' },
-    syntaxProperty: { dark: '#73daca', light: '#387068' },
-    syntaxBuiltin: { dark: '#f7768e', light: '#f52a65' },
+    syntaxComment: { dark: '#8f95b1', light: '#565b76' },
+    syntaxKeyword: { dark: '#a688dc', light: '#7243b4' },
+    syntaxFunction: { dark: '#7aa2f7', light: '#225baa' },
+    syntaxVariable: { dark: '#c0caf5', light: '#3358b0' },
+    syntaxString: { dark: '#9ece6a', light: '#4b6330' },
+    syntaxNumber: { dark: '#ff9e64', light: '#8f4b00' },
+    syntaxType: { dark: '#2ac3de', light: '#136573' },
+    syntaxOperator: { dark: '#89ddff', light: '#00657c' },
+    syntaxPunctuation: { dark: '#89ddff', light: '#00657c' },
+    syntaxProperty: { dark: '#73daca', light: '#32655e' },
+    syntaxBuiltin: { dark: '#f7768e', light: '#b01e49' },
   },
 };

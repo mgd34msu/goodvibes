@@ -52,6 +52,9 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - [Windows support](windows.md)
   Running GoodVibes on Windows through WSL2; native Windows binaries are not provided.
 
+- [Screen readers and accessibility](accessibility.md)
+  What works with a screen reader, the plain headless route, and the switches for no colour, answers painted once, ASCII lines and light or dark.
+
 - [Tools and commands](tools-and-commands.md)
   Built-in tool families and a per-tool reference, slash-command families, the full keyboard-binding reference, the agent/archetype and hook systems, MCP and plugin extensibility, and the operator, diagnostics, and workflow surfaces that tie them together.
 

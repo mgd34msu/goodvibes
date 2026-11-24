@@ -44,7 +44,7 @@ export class ModelPickerModal {
     private readonly favoritesStore: Pick<FavoritesStore, 'getRecentModels'>,
     private readonly benchmarkStore: Pick<BenchmarkStore, 'getBenchmarks'>,
     private readonly providerRegistry: Pick<ProviderRegistry, 'getSyntheticModelInfoFromCatalog'> &
-      Partial<Pick<ProviderRegistry, 'getSyntheticCanonicalModels'>>,
+      Partial<Pick<ProviderRegistry, 'getSyntheticCanonicalModels' | 'modelListReading'>>,
     private readonly presentation: ModelPickerPresentation = {
       searchFocusedOnOpen: true,
       resetAvailabilityOnOpen: true,
@@ -522,6 +522,11 @@ export class ModelPickerModal {
   benchmarkScore(model: ModelDefinition): number | null {
     const record = this.benchmarkStore.getBenchmarks(model.id) ?? this.benchmarkStore.getBenchmarks(model.displayName);
     return record ? compositeScore(record.benchmarks) : null;
+  }
+
+  /** How a provider's model list stands now (when it was read, from where), when the registry can say. */
+  listReading(provider: string): ReturnType<ProviderRegistry['modelListReading']> | undefined {
+    return this.providerRegistry.modelListReading?.(provider);
   }
 
   /** Whether a model is pinned (pins may be recorded by id or registry key). */

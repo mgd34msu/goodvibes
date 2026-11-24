@@ -161,9 +161,54 @@ export function paintGutter(line: Line, row: GutterRow, p: GraphPaint, beadStatu
         line[x] = createStyledCell(p.glyphs.role[cell.role], { fg: lane, bg, bold: isMark, chrome: true });
     }
 }
-/** The fill and ┃ of the focused row (and of every row of its opened body's frame). */
-export function applyFocus(line: Line, width: number, glyphs: LaneGlyphs): void {
+/**
+ * The last column of a row's left text (name and argument, single spaces
+ * apart): from the text column to the first gap of two blank cells.
+ */
+function leftTextEnd(line: Line, from: number): number {
+    const blank = (x: number): boolean => (line[x]?.char ?? ' ') === ' ' || line[x]?.char === '';
+    let x = from;
+    while (x + 1 < line.length && !(blank(x) && blank(x + 1))) x++;
+    return x - 1;
+}
+
+/** The hint on the newest turn's last folded row while nothing has focus. */
+export const STEP_HINT = 'alt+↑ step through';
+
+/**
+ * Draw STEP_HINT faint in a row's empty middle: after its name and argument,
+ * three columns before its summary (or its time); the summary and time stay.
+ * Nothing is drawn when the gap is too narrow.
+ */
+export function markStepHint(line: Line, width: number, textX: number): void {
+    const blank = (x: number): boolean => (line[x]?.char ?? ' ') === ' ' || line[x]?.char === '';
+    const leftEnd = leftTextEnd(line, textX);
+    let rightStart = leftEnd + 1;
+    while (rightStart < width && blank(rightStart)) rightStart++;
+    const end = rightStart - 4;
+    const start = end - getDisplayWidth(STEP_HINT) + 1;
+    if (start - 3 <= leftEnd) return;
+    putRight(line, end, STEP_HINT, { fg: activeTokens().textFaint });
+}
+
+/** What the keys do on the focused row, drawn at its right end in place of the summary and time. */
+export const FOCUSED_ROW_KEYS = '⏎ open · y copy · ←→ fold';
+
+/**
+ * The fill and ┃ of the focused row (and of every row of its opened body's
+ * frame). With `keys`, the row says at its right end what its keys do, over
+ * the time (the time is in the row's body when it is opened).
+ */
+export function applyFocus(line: Line, width: number, glyphs: LaneGlyphs, keys?: { readonly text: string; readonly textX: number } | undefined): void {
     const t = activeTokens();
+    if (keys) {
+        const end = timeEnd(width);
+        const start = end - getDisplayWidth(keys.text) + 1;
+        if (start - 2 > leftTextEnd(line, keys.textX)) {
+            for (let x = start - 2; x <= end && x < line.length; x++) line[x] = createStyledCell(' ', {});
+            putRight(line, end, keys.text, { fg: t.textFaint });
+        }
+    }
     for (let x = 1; x <= width - 2 && x < line.length; x++) {
         const cell = line[x]!;
         if (cell.bg === '')

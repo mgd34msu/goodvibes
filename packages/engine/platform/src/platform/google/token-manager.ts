@@ -117,6 +117,16 @@ export class GoogleTokenManager {
       : { ok: false, failure: 'grant-invalid', problem: recorded.problem, fix: recorded.fix };
   }
 
+  /**
+   * Takes the refresh token a fresh consent just stored, so a request that
+   * waited on that consent is sent again with it. The dead-grant verdict, the
+   * cached access token and the scope list belonged to the old grant.
+   */
+  adoptGrant(refreshToken: string): void {
+    this.credentials = { ...this.credentials, refreshToken, accessToken: null, expiresAtMs: null, scopes: [] };
+    this.deadGrant = null;
+  }
+
   /** Scopes the current credential was granted. Safe to display. */
   scopes(): readonly string[] {
     return this.credentials.scopes;
@@ -255,7 +265,8 @@ export async function checkGoogleCredentialsAtBoot(
   if (manager === null) {
     return {
       usable: false,
-      detail: 'Google is not connected. Say the word and I will connect an account.',
+      // A start-up check is not a request: it opens no consent. Connecting starts when something asks for Google.
+      detail: 'Google is not connected.',
       needsReauthorization: false,
       scopes: [],
     };

@@ -29,6 +29,20 @@ export function bindContractActionSource<T extends object>(target: T, sourceOf: 
 export function getContractActionSource(target: object): (() => AutonomousToolSource) | undefined {
   return actionSources.get(target);
 }
+
+/**
+ * The files of the native request a contract works on, kept with its source
+ * getter (which travels with every member it spawns, whichever runner owns
+ * the contract), so each agent that does the work receives them.
+ */
+const sourceAttachments = new WeakMap<object, readonly import('../../companion/attachment-limits.js').AttachmentFacts[]>();
+export function bindSourceAttachments<T extends object>(sourceOf: T, attachments: readonly import('../../companion/attachment-limits.js').AttachmentFacts[] | undefined): T {
+  if (attachments && attachments.length > 0) sourceAttachments.set(sourceOf, attachments);
+  return sourceOf;
+}
+export function getSourceAttachments(sourceOf: object | undefined): readonly import('../../companion/attachment-limits.js').AttachmentFacts[] | undefined {
+  return sourceOf === undefined ? undefined : sourceAttachments.get(sourceOf);
+}
 export function getContractActionPort(target: object): ContractActionPort | undefined { return actionPorts.get(target); }
 
 /** Binds a spawn to a contract unit: the turn loop calls the contract hooks for it. */

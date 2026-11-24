@@ -1321,7 +1321,8 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
             "decision",
             "claim",
             "queued-action",
-            "report"
+            "report",
+            "model-price"
           ]
         },
         "mark": {
@@ -1404,6 +1405,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
           ],
           "additionalProperties": false
         },
+        "weakensSafety": {
+          "type": "boolean"
+        },
         "choices": {
           "type": "array",
           "items": {
@@ -1425,6 +1429,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                 "type": "boolean"
               },
               "value": {
+                "type": "string"
+              },
+              "said": {
                 "type": "string"
               }
             },
@@ -2039,7 +2046,8 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                 "decision",
                 "claim",
                 "queued-action",
-                "report"
+                "report",
+                "model-price"
               ]
             },
             "mark": {
@@ -2122,6 +2130,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
               ],
               "additionalProperties": false
             },
+            "weakensSafety": {
+              "type": "boolean"
+            },
             "choices": {
               "type": "array",
               "items": {
@@ -2143,6 +2154,9 @@ Schema blocks below are emitted directly from the synced contract JSON and may c
                     "type": "boolean"
                   },
                   "value": {
+                    "type": "string"
+                  },
+                  "said": {
                     "type": "string"
                   }
                 },

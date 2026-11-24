@@ -127,7 +127,12 @@ export function CiWatchDetail({ watch, onClose, onOpenSession }: {
     <DetailPane
       title={ciWatchLabel(watch)}
       status={<span className="work-status"><StatusDot tone={overallTone(watch.lastOverall ?? '')} />{watch.lastOverall ?? 'Not checked yet'}</span>}
-      meta={['CI watch', whenLabel(watch.createdAt) ? `created ${whenLabel(watch.createdAt)}` : ''].filter(Boolean).join(' · ')}
+      meta={[
+        'CI watch',
+        whenLabel(watch.createdAt) ? `created ${whenLabel(watch.createdAt)}` : '',
+        // CI watches send no live event: say how old the status shown is; Check now reads it again.
+        whenLabel(watch.updatedAt) ? `status from ${whenLabel(watch.updatedAt)}` : '',
+      ].filter(Boolean).join(' · ')}
       onClose={onClose}
       closeLabel="Close CI watch"
       actions={(

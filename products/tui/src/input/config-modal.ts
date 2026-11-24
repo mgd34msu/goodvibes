@@ -126,8 +126,9 @@ export class ConfigModal {
   private filterQuery = '';
 
   /**
-   * Structure captured at the last interaction boundary (open / key press).
-   * Renders overlay live values onto THIS so rows never reflow mid-interaction.
+   * Structure captured at the last interaction boundary (open / key press) or
+   * the last change of the rows themselves. Renders overlay live values onto
+   * THIS; when the rows change, it is captured again with the selection kept by id.
    */
   private frozenView: ConfigModalView | null = null;
 
@@ -222,9 +223,8 @@ export class ConfigModal {
 
   /**
    * Re-capture the structure from the current live view. Called on every key
-   * press (never during a pure render tick, with one exception: before the
-   * FIRST interaction, getRenderModel syncs so async loads paint), this is
-   * what makes structural changes appear only at an interaction boundary.
+   * press, and by a render when the live rows differ from the captured ones
+   * (before the first interaction it syncs on every render so async loads paint).
    * Selection + active tab are preserved by id and clamped if their target
    * vanished.
    */
@@ -476,9 +476,9 @@ export class ConfigModal {
   }
 
   /**
-   * Compute the render model: frozen structure + live value overlay. Pure,
-   * does NOT sync structure, so calling it repeatedly with only value mutations
-   * yields byte-identical layout (the liveness contract).
+   * Compute the render model: frozen structure + live value overlay. It syncs
+   * structure only when the rows themselves changed, so calling it repeatedly
+   * with only value mutations yields byte-identical layout (the liveness contract).
    *
    * `labelWrapWidth` is the wrap column the kit list uses for row labels
    * (renderConfigModal computes and passes the real one for the current
@@ -504,6 +504,13 @@ export class ConfigModal {
       this.frozenView = this._applyFilter(live);
       this.statusMessage = ''; this.pendingConfirmKey = null; this.scrollOffset = 0;
       this.selectedRowId = '';
+    } else if (this.active && live && this._structureMoved(this._applyFilter(live))) {
+      // The data changed under an engaged cursor: show it now, with no key. Rows are matched
+      // by id, so the selection stays on the same row; a confirm armed on a row that went away
+      // is dropped rather than moved onto another one.
+      const selected = this.selectedRowId;
+      this.syncStructure();
+      if (this.selectedRowId !== selected) this._clearConfirm();
     }
     const frozen = this.frozenView;
     if (!frozen) {
@@ -517,12 +524,9 @@ export class ConfigModal {
 
     const frozenTab = frozen.tabs.find((t) => t.id === this.activeTabId) ?? frozen.tabs[0];
     const liveTab = live?.tabs.find((t) => t.id === this.activeTabId);
-    const deferred = live?.deferredStructureMessage && (frozenTab?.rows.length !== liveTab?.rows.length
-      || frozenTab?.rows.some((row, i) => row.id !== liveTab?.rows[i]?.id))
-      ? live.deferredStructureMessage : undefined;
 
     // Header: all-or-nothing live overlay. Same line count → use live values;
-    // a count change is a structural change, deferred (keep frozen header).
+    // a count change is a structural change, synced above.
     const frozenHeader = frozenTab?.header ?? [];
     const liveHeader = liveTab?.header ?? [];
     const header = liveHeader.length === frozenHeader.length ? liveHeader : frozenHeader;
@@ -562,8 +566,8 @@ export class ConfigModal {
       tabs,
       header,
       rows: windowed,
-      emptyText: frozenRows.length === 0 ? (deferred ?? frozenTab?.emptyText ?? 'Nothing to show.') : undefined,
-      degraded: live?.degraded ?? deferred ?? frozen.degraded,
+      emptyText: frozenRows.length === 0 ? (frozenTab?.emptyText ?? 'Nothing to show.') : undefined,
+      degraded: live?.degraded ?? frozen.degraded,
       status: this.statusMessage || undefined,
       confirmPending: this.pendingConfirmKey !== null,
       hints,
@@ -717,6 +721,18 @@ export class ConfigModal {
       this.pendingConfirmKey = null;
       this.statusMessage = '';
     }
+  }
+
+  /** The live view (filtered as shown) has other tabs, other rows on this tab, or another header height. */
+  private _structureMoved(live: ConfigModalView): boolean {
+    const frozen = this.frozenView;
+    if (!frozen) return true;
+    if (frozen.tabs.length !== live.tabs.length || frozen.tabs.some((tab, i) => tab.id !== live.tabs[i]?.id)) return true;
+    const frozenTab = this._frozenTab();
+    const liveTab = live.tabs.find((t) => t.id === frozenTab?.id);
+    if (!frozenTab || !liveTab) return frozenTab !== liveTab;
+    if ((frozenTab.header?.length ?? 0) !== (liveTab.header?.length ?? 0)) return true;
+    return frozenTab.rows.length !== liveTab.rows.length || frozenTab.rows.some((row, i) => row.id !== liveTab.rows[i]?.id);
   }
 
   private _frozenTab(): ConfigModalTab | undefined {

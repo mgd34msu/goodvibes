@@ -101,10 +101,12 @@ export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, no
 }
 
 /** What an on-demand `update.check` did, so "nothing found" is never read as "nothing ran". */
-export function formatDaemonUpdateCheckLine(check: DaemonUpdateStatusView['check'], offReason: string | undefined, pendingVersion?: string | null): string[] {
+export function formatDaemonUpdateCheckLine(check: DaemonUpdateStatusView['check'], offReason: string | undefined, pendingVersion?: string | null, follows = false): string[] {
   if (check === 'installing') {
     return [`  check:    found ${pendingVersion ?? 'a newer release'}; the daemon is installing it now and will restart into it`,
-      '            run this command again to see how much has downloaded; it stops answering for a short while when it restarts, then shows the new version'];
+      follows
+        ? '            the download is followed here until the daemon has restarted into it'
+        : '            run this command again to see how much has downloaded; it stops answering for a short while when it restarts, then shows the new version'];
   }
   if (check === 'ran') return ['  check:    ran now; the lines above are its result'];
   if (check === 'already-in-flight') return ['  check:    another check was already running, so none was started; the lines above are as of now'];
@@ -118,8 +120,65 @@ export interface DaemonUpdateVerbs {
   invoke<T = unknown>(methodId: string, input?: unknown): Promise<T>;
 }
 
+/**
+ * An interactive terminal follows a release the daemon is installing: the command stays,
+ * prints the download as it grows, and ends when the daemon has restarted into the new
+ * version. A slow download is waited for, never given up on.
+ */
+export interface DaemonUpdateFollow {
+  readonly print: (line: string) => void;
+  /** How long between two asks for progress; the default is two seconds. */
+  readonly everyMs?: number | undefined;
+  readonly wait?: ((ms: number) => Promise<void>) | undefined;
+}
+
+const FOLLOW_EVERY_MS = 2_000;
+
+/** Ask `update.status` again until the daemon runs a version other than `from` (the one it installs, when known). */
+async function followDaemonInstall(verbs: DaemonUpdateVerbs, from: string | null | undefined, first: DaemonUpdateStatusView, follow: DaemonUpdateFollow): Promise<string> {
+  const target = first.installing?.version ?? first.pendingVersion ?? undefined;
+  const failedAtStart = first.failedCheckCount ?? 0;
+  const wait = follow.wait ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
+  let lastBytes = first.installing?.receivedBytes ?? -1;
+  let away = false;
+  for (;;) {
+    await wait(follow.everyMs ?? FOLLOW_EVERY_MS);
+    let now: DaemonUpdateStatusView;
+    try {
+      now = await verbs.invoke<DaemonUpdateStatusView>('update.status', {});
+    } catch {
+      // A daemon restarting into the new release stops answering for a while.
+      if (!away) follow.print(`  restarting: the daemon is not answering while it restarts${target ? ` into ${target}` : ''}`);
+      away = true;
+      continue;
+    }
+    const running = now.currentVersion ?? null;
+    if (running && running !== from && (target === undefined || running === target)) {
+      return ['Daemon updates', `  running:  ${running} (updated from ${from ?? 'the earlier version'})`, ...formatDaemonUpdateStatusLines(now).filter((line) => !line.startsWith('  updates:'))].join('\n');
+    }
+    if (now.installing) {
+      away = false;
+      const bytes = now.installing.receivedBytes ?? 0;
+      if (bytes !== lastBytes) {
+        lastBytes = bytes;
+        follow.print(`  downloading: ${formatBytes(bytes)} received${now.installing.file ? ` (now ${now.installing.file})` : ''}`);
+      }
+      continue;
+    }
+    // The install ended without a new version running: it failed, was rolled back or stopped for recovery.
+    const failed = (now.failedCheckCount ?? 0) > failedAtStart || (target !== undefined && now.rejectedVersion === target) || now.recoveryRequired === true || Boolean(now.transactionRecovery);
+    if (failed || (away && running === from)) {
+      return [
+        'Daemon updates',
+        ...(running ? [`  running:  ${running} (not updated)`] : []),
+        ...formatDaemonUpdateStatusLines(now),
+      ].join('\n');
+    }
+  }
+}
+
 /** `/update daemon [check]`: what the connected daemon says about updating itself, and with `check` one check run now. */
-export async function describeDaemonUpdates(verbs: DaemonUpdateVerbs, check: boolean): Promise<string> {
+export async function describeDaemonUpdates(verbs: DaemonUpdateVerbs, check: boolean, follow?: DaemonUpdateFollow): Promise<string> {
   const reachable = verbs.probe();
   if (!reachable.available) {
     return ['Daemon updates', `  unavailable: ${reachable.reason}`, '  next: connect this app to a daemon, then run /update daemon again'].join('\n');
@@ -127,13 +186,18 @@ export async function describeDaemonUpdates(verbs: DaemonUpdateVerbs, check: boo
   const method = check ? 'update.check' : 'update.status';
   try {
     const status = await verbs.invoke<DaemonUpdateStatusView>(method, {});
-    return [
+    const installing = status.check === 'installing' || Boolean(status.installing);
+    const following = follow !== undefined && installing;
+    const lines = [
       'Daemon updates',
       ...(status.currentVersion ? [`  running:  ${status.currentVersion}`] : []),
       ...formatDaemonUpdateStatusLines(status),
-      ...(check ? formatDaemonUpdateCheckLine(status.check, status.offReason, status.pendingVersion) : []),
-      ...(check ? [] : ['  next: /update daemon --check runs one check now']),
+      ...(check ? formatDaemonUpdateCheckLine(status.check, status.offReason, status.pendingVersion, following) : []),
+      ...(check || installing ? [] : ['  next: /update daemon --check runs one check now']),
     ].join('\n');
+    if (!following) return lines;
+    follow.print(lines);
+    return await followDaemonInstall(verbs, status.currentVersion, status, follow);
   } catch (error) {
     return [
       'Daemon updates',

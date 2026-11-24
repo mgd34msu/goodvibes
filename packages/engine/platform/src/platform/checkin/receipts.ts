@@ -10,6 +10,7 @@
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
 import type { CheckinReceipt } from './types.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 
 const MAX_RECEIPTS = 500;
 
@@ -77,6 +78,7 @@ export class CheckinReceiptStore {
     if (receipts.length > MAX_RECEIPTS) receipts.splice(0, receipts.length - MAX_RECEIPTS);
     const snapshot: CheckinReceiptsSnapshot = { version: 1, receipts: [...receipts] };
     await this.writes.run(() => this.store.persist(snapshot));
+    noteListChanged({ list: 'check-ins', change: 'created' });
     return receipt;
   }
 

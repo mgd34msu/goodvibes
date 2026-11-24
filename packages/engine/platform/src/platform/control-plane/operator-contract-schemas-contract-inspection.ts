@@ -31,6 +31,8 @@ export const CONTRACT_NATIVE_SOURCE_SCHEMA = objectSchema({
   criteriaRevision: REFERENCE,
   goal: NONBLANK_TEXT,
   criteria: { ...arraySchema(NONBLANK_TEXT), minItems: 1 },
+  /** The request's files, by artifact id, given to whoever does the work. */
+  attachments: { ...arraySchema(objectSchema({ artifactId: REFERENCE, label: NONBLANK_TEXT, filename: NONBLANK_TEXT, mimeType: NONBLANK_TEXT, sizeBytes: COUNTER }, ['artifactId', 'mimeType', 'sizeBytes'])), minItems: 1, maxItems: 8 },
 }, ['sourceId', 'sourceRevision', 'inputRevision', 'criteriaId', 'criteriaRevision', 'goal', 'criteria']);
 
 export const CONTRACT_NATIVE_DECISION_RECORD_SCHEMA = objectSchema({

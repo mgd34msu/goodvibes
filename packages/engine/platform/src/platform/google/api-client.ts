@@ -32,6 +32,7 @@
 import { redactSecretsFromMessage } from './oauth-loopback.js';
 import { redactDiagnosticText } from '../utils/redaction.js';
 import type { GoogleTokenManager } from './token-manager.js';
+import type { GoogleDisabledService, GoogleRequestRepair } from './connection-repair.js';
 import {
   collectHistoryDelta,
   type HistoryDeltaDeps,
@@ -87,6 +88,8 @@ export interface GoogleApiFailure {
    * sent). Both carry `status: null`, but they are not a bad request.
    */
   readonly transport?: 'unreachable' | 'token-refresh';
+  /** For `api-disabled`: the service and Cloud project Google's refusal named, when it named them. */
+  readonly disabledService?: GoogleDisabledService | undefined;
 }
 
 export type GoogleApiResult<T> = { readonly ok: true; readonly value: T } | GoogleApiFailure;
@@ -152,6 +155,22 @@ function statedFailureCause(parsed: unknown): GoogleFailureCause | undefined {
     else if (API_DISABLED_REASONS.has(reason)) causes.add('api-disabled');
   }
   return causes.size === 1 ? [...causes][0] : undefined;
+}
+
+/**
+ * The service and consumer project a SERVICE_DISABLED refusal names in its
+ * ErrorInfo metadata (`service`, `consumer: projects/<number>`), when it does.
+ */
+function disabledServiceOf(parsed: unknown): GoogleDisabledService {
+  const error = isRecord(parsed) && isRecord(parsed.error) ? parsed.error : null;
+  for (const detail of error !== null && Array.isArray(error.details) ? error.details : []) {
+    if (!isRecord(detail) || detail['@type'] !== 'type.googleapis.com/google.rpc.ErrorInfo' || !isRecord(detail.metadata)) continue;
+    const service = readString(detail.metadata.service);
+    const consumer = readString(detail.metadata.consumer);
+    const project = consumer.startsWith('projects/') ? consumer.slice('projects/'.length) : '';
+    return { service: /^[a-z0-9.-]+\.googleapis\.com$/.test(service) ? service : null, project: /^[a-z0-9-]+$/.test(project) ? project : null };
+  }
+  return { service: null, project: null };
 }
 
 /** Google's own message from an error body, on one line, with anything credential-shaped masked. */
@@ -504,14 +523,45 @@ export class GoogleApiClient {
     private readonly fetchPort: GoogleApiFetchPort,
     /** Wall clock for the default lower bound of a calendar list. */
     private readonly now: () => number = Date.now,
+    /**
+     * The process's connection repair, read at each refusal: a request refused
+     * for a missing scope, a dead grant or a disabled API is repaired (a fresh
+     * consent, or the API enabled) and sent once more when the repair completes.
+     */
+    private readonly repair: () => GoogleRequestRepair | undefined = () => undefined,
   ) {}
 
   /**
-   * Authorized request. Refreshes once on a 401, a token can expire between
+   * The same client without the repair: for a caller that must not wait on a
+   * person (a start-up path), which hands a refusal to the repair itself
+   * without awaiting it.
+   */
+  withoutRepair(): GoogleApiClient {
+    return new GoogleApiClient(this.tokens, this.fetchPort, this.now);
+  }
+
+  /**
+   * Authorized request. A refusal the repair can act on waits for that repair
+   * (the consent's own completion, or the enable finishing) and is sent once
+   * more; nothing reached Google's side for any of those refusals, so a send
+   * or a write is not repeated.
+   */
+  private async request(url: string, init: RequestInit = {}): Promise<GoogleApiResult<unknown>> {
+    const first = await this.attempt(url, init);
+    if (first.ok || (first.reason !== 'missing-scopes' && first.reason !== 'grant-invalid' && first.reason !== 'api-disabled')) return first;
+    const repair = this.repair();
+    if (repair === undefined) return first;
+    const outcome = await repair.repair(first, this.tokens);
+    if (!outcome.repaired) return { ...first, problem: outcome.problem, fix: outcome.fix };
+    return this.attempt(url, init);
+  }
+
+  /**
+   * One authorized attempt. Refreshes once on a 401, a token can expire between
    * the expiry check and the call landing, and one silent retry is the
    * difference between a working tool and a flaky one.
    */
-  private async request(
+  private async attempt(
     url: string,
     init: RequestInit = {},
     retryOnUnauthorized = true,
@@ -549,7 +599,7 @@ export class GoogleApiClient {
 
     if (response.status === 401 && retryOnUnauthorized) {
       const refreshed = await this.tokens.forceRefresh();
-      if (refreshed.ok) return this.request(url, init, false);
+      if (refreshed.ok) return this.attempt(url, init, false);
       return {
         ok: false,
         status: 401,
@@ -1062,7 +1112,7 @@ export class GoogleApiClient {
  * structured error fields alone. An unrecognised 403 stays `unclassified` and
  * carries Google's own message.
  */
-function describeHttpFailure(status: number, parsed: unknown): Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason'> {
+function describeHttpFailure(status: number, parsed: unknown): Pick<GoogleApiFailure, 'problem' | 'fix' | 'reason' | 'disabledService'> {
   const cause = status === 429 ? 'rate-limited' : status === 403 ? statedFailureCause(parsed) : undefined;
   if (cause === 'rate-limited') return {
     reason: cause,
@@ -1072,13 +1122,17 @@ function describeHttpFailure(status: number, parsed: unknown): Pick<GoogleApiFai
   if (cause === 'missing-scopes') return {
     reason: cause,
     problem: 'Google refused the request because the credential lacks the required OAuth permissions.',
-    fix: 'Say the word and I will re-authorize with every scope this product needs, in one consent.',
+    fix: 'A fresh consent asking for every scope this product needs is what renews it; this program has no consent owner running, so none was started.',
   };
-  if (cause === 'api-disabled') return {
-    reason: cause,
-    problem: 'The required Google API is not enabled for this project.',
-    fix: 'Say the word and I will enable it and retry.',
-  };
+  if (cause === 'api-disabled') {
+    const disabledService = disabledServiceOf(parsed);
+    return {
+      reason: cause,
+      problem: `The ${disabledService.service ?? 'required'} Google API is not enabled for this project.`,
+      fix: 'Enabling it is decided under your mode and run with gcloud; this program has no one to decide it, so nothing was changed.',
+      disabledService,
+    };
+  }
   const stated = statedFailureMessage(parsed);
   return {
     reason: 'unclassified',

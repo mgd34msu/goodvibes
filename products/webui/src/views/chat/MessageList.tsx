@@ -1,4 +1,4 @@
-import { RefObject, useCallback, useSyncExternalStore, type ReactNode } from 'react';
+import { RefObject, useCallback, useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ArrowDown, Square, X } from 'lucide-react';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { Spark } from '../../components/shell/Spark';
@@ -98,6 +98,15 @@ export function MessageList({
   onUseAnotherModel,
 }: MessageListProps) {
   const reducedMotion = useReducedMotion();
+  // What the status region says: "GoodVibes is replying…" while a turn runs, "GoodVibes replied." once it ends.
+  const [replyAnnouncement, setReplyAnnouncement] = useState('');
+  const wasStreaming = useRef(isStreaming);
+  useEffect(() => {
+    if (isStreaming === wasStreaming.current) return;
+    wasStreaming.current = isStreaming;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- follows the turn's own start and end
+    setReplyAnnouncement(isStreaming ? 'GoodVibes is replying…' : 'GoodVibes replied.');
+  }, [isStreaming]);
   // Stop must be reachable for the WHOLE active turn, including the
   // pre-first-token window (model thinking, long tool calls), where there is
   // no liveText yet. Requiring text here used to make a turn unstoppable
@@ -142,8 +151,12 @@ export function MessageList({
               onUseAnotherModel={onUseAnotherModel}
             />
           ))}
+          {/* A screen reader hears that a reply started and that it finished, not every token:
+              a live region over the streaming text would read it out word by word. The finished
+              reply is the newest message above, to read at the reader's own pace. */}
+          <p className="gv-sr-only" role="status">{replyAnnouncement}</p>
           {(hasLiveText || isStreaming) && (
-            <div aria-live="polite" aria-atomic="false">
+            <div>
               <article className="message assistant streaming">
                 <span className="message-mark" aria-hidden="true"><Spark size={18} /></span>
                 <div className="message-body">

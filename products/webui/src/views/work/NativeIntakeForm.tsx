@@ -11,6 +11,10 @@ import {
   type NativeIntakeBrowserRecord,
 } from "../../lib/native-intake-journal";
 import { formatError } from "../../lib/errors";
+import { subscribeEvents } from "../../lib/event-stream";
+import { HOSTED_SESSION_UPDATE_WIRE_EVENT } from "../../lib/hosted-sessions";
+import { SESSION_UPDATE_WIRE_EVENT } from "../../lib/sessions-union";
+import { agoWords } from "@goodvibes/engine/contracts";
 import type { NativeExecutionObservation } from "../../lib/native-execution";
 import type { NativeTurnObservation } from "../../lib/native-turn";
 import { NativeExecutionStatus } from "./NativeExecutionStatus";
@@ -27,6 +31,20 @@ import { useConfirm } from "../../components/ui/ConfirmDialog";
 import { Field, Input, Textarea } from "../../components/ui/Field";
 import { Select } from "../../components/ui/Select";
 import { Facts, DetailSection, Disclosure } from "../../components/data-view/DataView";
+import { client as platformClient } from "../../lib/goodvibes";
+import { randomUuid } from "../../lib/uuid";
+import { formatBytes } from "../../lib/object";
+import { AttachmentChip } from "../chat/Composer";
+import { dragHasFiles, filesFromDrop, filesThatFit, MAX_ATTACHED_FILES, TOO_MANY_FILES } from "../chat/composer-attachments";
+import { fileToBase64, uploadedArtifactId } from "../chat/message-utils";
+
+/** A file chosen for the next request; its artifact id once stored, so a second try never stores it twice. */
+interface ChosenFile {
+  readonly file: File;
+  /** The upload's idempotency key, fixed when the file is chosen. */
+  readonly key: string;
+  readonly artifactId?: string;
+}
 
 /** One message box: each message sent continues into work or a reply in its session. */
 interface NativeIntakeFormProps {
@@ -39,8 +57,13 @@ interface NativeIntakeFormProps {
   /** Text typed before the form was ready, carried into the message box. */
   initialText?: string;
 }
-/** How often a request the host is still moving is read again. */
-const NATIVE_STATUS_REFRESH_MS = 5_000;
+/** A runtime frame's event type: on the frame itself, or on its `payload`. */
+function frameType(frame: unknown): string | undefined {
+  const outer = (frame ?? {}) as { type?: unknown; payload?: unknown };
+  if (typeof outer.type === "string") return outer.type;
+  const inner = (outer.payload ?? {}) as { type?: unknown };
+  return typeof inner.type === "string" ? inner.type : undefined;
+}
 const MAX_TEXT = 20_000;
 
 /** An error whose message already says what happened and what to do. */
@@ -79,6 +102,22 @@ function ScopedNativeIntakeForm({
 }: NativeIntakeFormProps) {
   const [text, setText] = useState(initialText ?? "");
   const [sources, setSources] = useState<NativeConversationIntakeUnsupportedSource[]>([]);
+  const [files, setFiles] = useState<ChosenFile[]>([]);
+  const [filesNote, setFilesNote] = useState<string>();
+  const [dragOver, setDragOver] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+  /** Adds files up to the limit; past it, the rest are refused in plain words. */
+  const addFiles = (added: readonly File[]) => {
+    if (added.length === 0) return;
+    const { taken, refused } = filesThatFit(files.length, added);
+    setFilesNote(refused ? TOO_MANY_FILES : undefined);
+    setFiles((current) => [...current, ...taken.map((file) => ({ file, key: `native-upload.${randomUuid()}` }))]);
+    setSendError(undefined);
+  };
+  const removeFile = (index: number) => {
+    setFiles((current) => current.filter((_, i) => i !== index));
+    setFilesNote(undefined);
+  };
   const [records, setRecords] = useState<NativeIntakeBrowserRecord[]>([]);
   const [lines, setLines] = useState<Record<string, string>>({});
   const [selected, setSelected] = useState<NativeIntakeBrowserRecord>();
@@ -87,6 +126,8 @@ function ScopedNativeIntakeForm({
   const [turnError, setTurnError] = useState<string>();
   const [busy, setBusy] = useState<string>("Connecting");
   const [refreshing, setRefreshing] = useState(false);
+  // When the selected message's status was last read, for "Updated 12 s ago · Refresh".
+  const [readAt, setReadAt] = useState<number>();
   const [error, setError] = useState<string>();
   const [sendError, setSendError] = useState<string>();
   const [execution, setExecution] = useState<NativeExecutionObservation>();
@@ -259,6 +300,7 @@ function ScopedNativeIntakeForm({
       }
     } finally {
       if (current()) {
+        if (mode === "read") setReadAt(Date.now());
         busyRef.current = false;
         reading.current = false;
         cancelling.current = false;
@@ -394,9 +436,32 @@ function ScopedNativeIntakeForm({
   const submit = (event: SyntheticEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (closed || invalid || cancelling.current) return;
-    const source = { text, unsupportedSources: sources };
+    const chosen = files;
     setSendError(undefined);
     void run("Sending", async (connected, signal, current) => {
+      // Files are stored first, the way a chat message's are (artifacts.create, one key per
+      // file, so a second try stores none twice); the request carries their ids.
+      let attachments: { artifactId: string; label: string }[];
+      try {
+        attachments = await Promise.all(chosen.map(async (entry) => {
+          if (entry.artifactId) return { artifactId: entry.artifactId, label: entry.file.name };
+          const uploaded = await platformClient.artifacts.create({
+            filename: entry.file.name,
+            mimeType: entry.file.type || "application/octet-stream",
+            dataBase64: await fileToBase64(entry.file),
+            metadata: { surface: "webui" },
+          }, entry.key, signal);
+          const artifactId = uploadedArtifactId(uploaded);
+          if (!artifactId) throw new Error(`Storing ${entry.file.name} did not return an artifact id.`);
+          if (current()) setFiles((items) => items.map((item) => item.key === entry.key ? { ...item, artifactId } : item));
+          return { artifactId, label: entry.file.name };
+        }));
+      } catch (cause) {
+        if (current()) setSendError(`Not sent: a file could not be stored (${formatError(cause)}). Your text and files are still here.`);
+        return;
+      }
+      if (!current()) return;
+      const source = { text, unsupportedSources: sources, ...(attachments.length ? { attachments } : {}) };
       let original: NativeIntakeBrowserRecord | undefined;
       const saved = (record: NativeIntakeBrowserRecord) => {
         original = record;
@@ -406,6 +471,8 @@ function ScopedNativeIntakeForm({
         setRecords((items) => [...items, record]);
         setText("");
         setSources([]);
+        setFiles([]);
+        setFilesNote(undefined);
       };
       let found: NativeIntakeResult;
       try {
@@ -504,18 +571,39 @@ function ScopedNativeIntakeForm({
   const settled = requestIsSettled(result, turn, execution);
   const idle = !busy && !refreshing;
 
-  // The status keeps itself current: while the host is still moving the selected
-  // message, it is read again every few seconds (one read in flight at a time).
+  // The status follows the daemon's events: NATIVE_REQUEST_CHANGED (the `workspace`
+  // frame) after every committed write to a native request (capture, host decision,
+  // admission, cancellation, settlement), and the reply's session and the work's
+  // contract on the `session` and `contracts` frames. Each one while the message
+  // moves reads it again at once (one read in flight; a frame during a read asks for
+  // one more after it); a stream that comes back reads it once, since frames may
+  // have been missed. Nothing is read on a timer.
+  const eventRead = useRef(false);
   useEffect(() => {
-    if (!moving || !idle || !selected) return;
+    if (!moving || !selected) return undefined;
     const record = selected;
-    const timer = setTimeout(() => {
-      if (!busyRef.current) inspect(record);
-    }, NATIVE_STATUS_REFRESH_MS);
-    return () => clearTimeout(timer);
-    // `inspect` is recreated each render; the timer re-arms after every answer.
+    const read = () => {
+      if (busyRef.current) { eventRead.current = true; return; }
+      inspect(record);
+    };
+    return subscribeEvents({
+      domains: ["workspace", "session", "contracts"],
+      events: ["workspace", "session", "contracts", SESSION_UPDATE_WIRE_EVENT, HOSTED_SESSION_UPDATE_WIRE_EVENT],
+      onEvent: (name, payload) => {
+        if (name === "workspace" && frameType(payload) !== "NATIVE_REQUEST_CHANGED") return;
+        read();
+      },
+      onReady: (resumed) => { if (resumed) read(); },
+    });
+    // `inspect` is recreated each render; the subscription follows the selected message.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moving, idle, selected, result, turn, execution]);
+  }, [moving, selected]);
+  useEffect(() => {
+    if (!idle || !eventRead.current || !selected) return;
+    eventRead.current = false;
+    inspect(selected);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [idle, selected]);
 
   // Carry the message on by itself: each step the host leaves for its client
   // (finish intake, start the work or reply, check a finished result) runs once.
@@ -658,7 +746,25 @@ function ScopedNativeIntakeForm({
       )}
       {closed && <p role="status">This session is closed. Reopen it to send another message.</p>}
       {ready && !closed && (
-        <form className="work-form" onSubmit={submit}>
+        <form
+          className={dragOver ? "work-form native-intake__form native-intake__form--drop" : "work-form native-intake__form"}
+          onSubmit={submit}
+          onDragOver={(event) => {
+            if (!dragHasFiles(event.nativeEvent)) return;
+            event.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragOver(false);
+          }}
+          onDrop={(event) => {
+            const dropped = filesFromDrop(event.nativeEvent);
+            if (!dropped.length) return;
+            event.preventDefault();
+            setDragOver(false);
+            addFiles(dropped);
+          }}
+        >
           <Field
             label={selectedDiff ? "Comment" : "Message"}
             help="Sent exactly as written, up to 20,000 characters."
@@ -678,7 +784,25 @@ function ScopedNativeIntakeForm({
               The message is longer than 20,000 characters. Nothing will be cut or sent.
             </p>
           )}
+          {files.length > 0 && (
+            <div className="composer-attachments native-intake__files" aria-label="Files to send">
+              {files.map((entry, index) => (
+                <AttachmentChip key={entry.key} file={entry.file} index={index} onRemove={removeFile} />
+              ))}
+            </div>
+          )}
+          {filesNote && <p role="alert">{filesNote}</p>}
           {sendError && <p role="alert">{sendError}</p>}
+          <input
+            ref={fileInput}
+            type="file"
+            hidden
+            multiple
+            onChange={(event) => {
+              addFiles(Array.from(event.target.files ?? []));
+              event.target.value = "";
+            }}
+          />
           {sources.map((source, index) => (
             <div className="work-form__pair" key={index}>
               <Field label={`Missing item ${index + 1}`}>
@@ -724,6 +848,14 @@ function ScopedNativeIntakeForm({
             </div>
           ))}
           <div className="work-form__actions">
+            <Button
+              type="button"
+              disabled={files.length >= MAX_ATTACHED_FILES}
+              title={files.length >= MAX_ATTACHED_FILES ? TOO_MANY_FILES : `Attach up to ${MAX_ATTACHED_FILES} files, or drop them here`}
+              onClick={() => fileInput.current?.click()}
+            >
+              Attach files
+            </Button>
             <Button
               type="button"
               disabled={sources.length >= 100}
@@ -802,6 +934,22 @@ function ScopedNativeIntakeForm({
         <section className="native-intake__request" aria-label="Selected message">
           {/* The row above shows the first 80 characters; the whole text only when it was cut. */}
           {selected.command.text.length > 80 && <pre className="native-intake__source">{selected.command.text}</pre>}
+          {(selected.command.attachments?.length ?? 0) > 0 && (
+            <DetailSection title={selected.command.attachments?.length === 1 ? "1 file" : `${selected.command.attachments?.length ?? 0} files`}>
+              <ul className="native-intake__sent-files">
+                {(selected.command.attachments ?? []).map((attachment) => {
+                  // The daemon's facts about the file once it answered with them; else the name it was sent with.
+                  const facts = result?.kind === "turn" ? result.attachments?.find((entry) => entry.artifactId === attachment.artifactId) : undefined;
+                  return (
+                    <li key={attachment.artifactId}>
+                      {facts?.filename ?? attachment.label ?? attachment.artifactId}
+                      {facts ? <span className="dv-muted"> · {facts.mimeType} · {formatBytes(facts.sizeBytes)}</span> : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </DetailSection>
+          )}
           {selected.command.unsupportedSources.length > 0 && (
             <ul>
               {selected.command.unsupportedSources.map((source, index) => (
@@ -812,6 +960,13 @@ function ScopedNativeIntakeForm({
             </ul>
           )}
           <p role="status">{requestStatusLine(result, turn, execution)}</p>
+          {moving && readAt !== undefined && (
+            <p className="dv-muted native-intake__read">
+              Updated {agoWords(readAt, Date.now())}
+              {" · "}
+              <Button size="sm" variant="ghost" disabled={!idle} onClick={() => inspect(selected)}>Refresh</Button>
+            </p>
+          )}
           {turnSnapshot?.state === "completed" && turnSnapshot.sessionId && (
             <NativeReply sessionId={turnSnapshot.sessionId} turnKey={turnSnapshot.correlationId ?? turnSnapshot.inputId} />
           )}
@@ -877,7 +1032,7 @@ function ScopedNativeIntakeForm({
                   ? [{ label: "Source revision", value: result.sourceRef.sourceRevision }]
                   : []),
                 ...(result?.kind === "work"
-                  ? [{ label: "Admission decision", value: result.receipt.source.admissionDecisionId }]
+                  ? [{ label: "Acceptance decision", value: result.receipt.source.admissionDecisionId }]
                   : []),
               ]}
             />

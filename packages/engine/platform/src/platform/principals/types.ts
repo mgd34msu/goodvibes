@@ -49,6 +49,12 @@ export interface PrincipalRecord {
 export const UNKNOWN_PRINCIPAL_ID = 'principal:unknown';
 
 /**
+ * What every surface calls a sender no one has named: who is asking, as a
+ * person says it. The one source for the words; never "unknown principal".
+ */
+export const UNKNOWN_SENDER_LABEL = 'someone you have not added yet';
+
+/**
  * The honest fallback for an unmapped sender: a principal record that names
  * itself "unknown" and carries the exact identity that failed to resolve, so a
  * caller sees WHAT was unmapped rather than a fabricated actor. `createdAt` /
@@ -57,7 +63,7 @@ export const UNKNOWN_PRINCIPAL_ID = 'principal:unknown';
 export function unknownPrincipal(identity?: PrincipalIdentity): PrincipalRecord {
   return {
     id: UNKNOWN_PRINCIPAL_ID,
-    name: 'unknown',
+    name: UNKNOWN_SENDER_LABEL,
     kind: 'user',
     identities: identity ? [identity] : [],
     createdAt: 0,

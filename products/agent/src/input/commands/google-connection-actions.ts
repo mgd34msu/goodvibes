@@ -43,6 +43,7 @@ import {
   describeGoogleConnectionProof,
   describeGoogleSetupState,
   detectGoogleSetupState,
+  googleConnectionRepairOf,
   planGoogleConnection,
   proveGoogleConnection,
   registerGoogleClientFromIntake,
@@ -67,6 +68,9 @@ import {
   nodeGoogleFilePort,
   startLoopbackListener,
 } from '@goodvibes/engine/platform/platform/google/node';
+import { EmailService, describeSenderClaimNeutrally } from '@goodvibes/engine/platform/platform/email';
+import { nodeEmailTransport } from '@goodvibes/engine/platform/platform/email/node';
+import { mailboxServiceDeps } from './email-settings.ts';
 import {
   agentBrowserProfileRoot,
   agentBrowserScreenshotRoot,
@@ -195,7 +199,61 @@ export function googleActionDeps(ctx: CommandContext, intake?: GoogleClientIntak
     // connector takes it as a port and the concrete listener is named here.
     loopback: startLoopbackListener,
     homeDirectory,
+    verifyMail: verifyMailFor(ctx),
+    verifyCalendar: verifyCalendarFor(ctx),
+    // Every route proves the credential as a step of setup; connect and reauthorize name the signed-in account.
+    proveConnection: proveConnectionFor(ctx, null),
     ...(intake === undefined ? {} : { clientIntake: intake }),
+  };
+}
+
+/**
+ * The `gmail-verify` step: signs in over IMAP and SMTP with the settings and
+ * app password setup just stored (the mail service's own connection test).
+ * Nothing is read from the mailbox and nothing is sent.
+ */
+function verifyMailFor(ctx: CommandContext): GoogleSetupActionDeps['verifyMail'] {
+  return async () => {
+    const config = googleConfigPort(ctx);
+    const service = new EmailService(mailboxServiceDeps({
+      getConfig: (key: string) => config.get(key),
+      secretsManager: requireSecretsManager(ctx),
+      transport: nodeEmailTransport,
+      describeSenderClaim: describeSenderClaimNeutrally,
+    }));
+    const result = await service.testConnection();
+    const account = config.get(GOOGLE_CONFIG_KEYS.emailUsername);
+    const who = typeof account === 'string' && account.trim().length > 0 ? ` as ${account.trim()}` : '';
+    if (result.ok) {
+      return {
+        ok: true,
+        detail: result.smtp === 'verified'
+          ? `Signed in to Gmail${who} over IMAP and SMTP; nothing was read or sent.`
+          : `Signed in to Gmail${who} over IMAP; no SMTP host is set, so sending was not checked.`,
+      };
+    }
+    const stage = result.stage === 'smtp' ? 'SMTP' : result.stage === 'imap' ? 'IMAP' : 'The mail settings';
+    return { ok: false, detail: `${stage}: ${result.error ?? 'no reason was given'}` };
+  };
+}
+
+/**
+ * The `calendar-verify` step: fetches the stored private calendar address once
+ * through the feed reader's own checks (https, public host, size cap) and
+ * counts the events in it. Nothing is saved by the read.
+ */
+function verifyCalendarFor(ctx: CommandContext): GoogleSetupActionDeps['verifyCalendar'] {
+  return async () => {
+    const url = await googleSecretPort(ctx).get(GOOGLE_SECRET_KEYS.calendarIcsUrl);
+    if (url === null || url.trim().length === 0) {
+      return { ok: false, detail: 'No private calendar address is stored.' };
+    }
+    const registry = subscriptionRegistryForWrite(ctx);
+    if (registry === null) return { ok: false, detail: 'The secret store is not available, so the calendar address cannot be read.' };
+    const read = await registry.validate(url, GOOGLE_CALENDAR_SUBSCRIPTION_NAME);
+    if (!read.ok) return { ok: false, detail: read.detail };
+    const name = read.calendarName === undefined ? 'the calendar feed' : `the calendar "${read.calendarName}"`;
+    return { ok: true, detail: `Read ${name}: ${read.eventCount} event${read.eventCount === 1 ? '' : 's'}.` };
   };
 }
 
@@ -221,6 +279,8 @@ async function openConnection(ctx: CommandContext, signedInAccount: string | nul
     fetch: { fetch: (url: string, init: RequestInit) => fetch(url, init) },
     onCredentialChange: (listener: () => void) => subscribeGoogleCredentialChanges({
       config: ctx.platform.configManager, secrets: secretsManager }, listener),
+    // This process's repair (runtime/google-repair.ts): a refused read starts the consent and is sent again after it.
+    repair: () => googleConnectionRepairOf(secretsManager)?.requestRepair,
   }));
   return await owner.connection({ sources, signedInAccount });
 }
@@ -324,9 +384,21 @@ export async function adoptGoogleCredentials(
   }
 
   if (!outcome.adopted) {
+    // Nothing to take up: the connection starts from here, and the consent link is shown at once.
+    const repair = googleConnectionRepairOf(requireSecretsManager(ctx));
+    const stored = await googleSecretPort(ctx).get(GOOGLE_SECRET_KEYS.oauthRefreshToken);
+    // Already connected through the credential store: nothing to start.
+    if (stored !== null && stored.trim().length > 0) return { adopted: false, text: outcome.detail };
+    const start = repair === undefined ? null : await repair.startConsent('not-connected');
+    if (start?.started === true) {
+      return {
+        adopted: false,
+        text: [outcome.detail, `${start.joined ? 'A consent is already open' : 'Connecting a Google account has started'}: approve this link in your browser (it asks for mail and calendar together): ${start.consentUrl}`].join('\n'),
+      };
+    }
     return {
       adopted: false,
-      text: [outcome.detail, `Connect an account instead with: ${hints.setup}`].join('\n'),
+      text: [outcome.detail, start === null ? `Connect an account instead with: ${hints.setup}` : `${start.problem} ${start.fix}`].join('\n'),
     };
   }
 

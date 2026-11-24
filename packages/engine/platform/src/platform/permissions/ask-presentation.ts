@@ -17,7 +17,7 @@ import { toolActivityFallback, toolCallActivity } from '@goodvibes/engine/contra
 import { toolActivityOf, toolDescriptionOf } from '../tools/registry.js';
 import { extractHostname } from '../tools/fetch/trust-tiers.js';
 import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
-import { ownerOnlyReason } from '../gate/classify.js';
+import { changesMcpTrust, ownerOnlyReason, type OwnerOnlyKind } from '../gate/classify.js';
 import { archetypeDisplayName } from '../agents/archetypes.js';
 import type { OwnerItem } from '../control-plane/owner-inbox.js';
 import type { PermissionPromptRequest } from './prompt.js';
@@ -26,16 +26,32 @@ import { buildPermissionApprovalBrief } from './briefs/build.js';
 import { execRunPlace, permissionSubject } from './subject.js';
 import { composeConsequence, folderName, readingAnswer, undoFactOf, commandEffect, type SandboxFact } from './ask-consequence.js';
 import { modeInForceLine, type ModeInForceWords } from './decision-model-readiness.js';
+import { HELD_OWNER_ONLY_METADATA } from './held-for-owner.js';
 import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, PURCHASE_STANDING_METADATA } from '../payments/payment-ports.js';
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
 
 export type AskKind =
   | 'run-command' | 'answer-command-prompt' | 'change-files' | 'fetch' | 'start-agent' | 'hand-off-work'
-  | 'change-setting' | 'mcp-tool' | 'other-tool' | 'purchase' | 'send-message' | 'question' | 'decision' | 'claim' | 'queued-action' | 'report';
+  | 'change-setting' | 'mcp-tool' | 'other-tool' | 'purchase' | 'send-message' | 'question' | 'decision' | 'claim' | 'queued-action' | 'report'
+  /** A model whose price moved away from free since it was chosen, asked before the first send to it. */
+  | 'model-price';
+
+/** The `mode` of the `model` ask PermissionManager.askModelPriceChange raises. */
+export const MODEL_PRICE_CHANGE_MODE = 'price-change';
+
+/**
+ * The refusal reason a surface sends for "Choose another model" (choice id
+ * `choose-model`): the turn is not sent and the person picks another model.
+ */
+export const MODEL_CHOICE_REASON = 'choose another model';
+
+const MODEL_PRICE_CONSEQUENCE_TEXT = 'Each message to it is charged from now on. A yes is asked once for this change; No sends nothing.';
+const MODEL_PRICE_CONSEQUENCE = { text: MODEL_PRICE_CONSEQUENCE_TEXT, withPlace: MODEL_PRICE_CONSEQUENCE_TEXT, tone: 'plain' as const };
 
 export interface AskChoice {
-  readonly id: 'once' | 'remember' | 'no' | 'apply-selected' | `option:${number}` | 'own-words' | 'object' | 'acknowledge';
+  /** `choose-model`: refuse, and choose another model (a surface sends MODEL_CHOICE_REASON as the reason). */
+  readonly id: 'once' | 'remember' | 'no' | 'apply-selected' | `option:${number}` | 'own-words' | 'object' | 'acknowledge' | 'choose-model';
   /** "Yes, once" | "Yes, and remember (choose what)" | "No" | "Hello" | "Something else…" */
   readonly label: string;
   /** The terminal key: 'y' | 'a' | 'n' | '1'..'8'. */
@@ -45,6 +61,12 @@ export interface AskChoice {
   readonly danger?: true | undefined;
   /** For an `option:<n>` choice: the option's own value, as the inbox answers it. */
   readonly value?: string | undefined;
+  /**
+   * The one line an answered ask folds to, for a yes that is not remembered:
+   * "You said yes once", or what a lasting change keeps doing ("You switched it
+   * off; it stays off until you turn it back on").
+   */
+  readonly said?: string | undefined;
 }
 
 export interface RememberTierView {
@@ -68,6 +90,8 @@ export interface AskPresentation {
   readonly body?: string | undefined;
   /** `text` for the terminal; `withPlace` with the folder folded in, for the web UI ("Runs your tests in garden-planner. Changes no files outside it."). */
   readonly consequence?: { readonly text: string; readonly withPlace: string; readonly tone: 'plain' | 'cannot-undo' } | undefined;
+  /** The ask changes a setting so that it protects less (lists put it before ordinary asks). */
+  readonly weakensSafety?: true | undefined;
   readonly choices: readonly AskChoice[];
   readonly remember:
     | { readonly offered: true; readonly tiers: readonly RememberTierView[] }
@@ -325,6 +349,7 @@ export function askKindOf(request: Pick<PermissionPromptRequest, 'tool' | 'args'
   if (tool === 'agent' && (mode === 'spawn' || mode === 'batch-spawn')) return 'start-agent';
   if (tool === 'delegate' || (tool === 'agent' && mode === 'message')) return 'hand-off-work';
   if (tool === 'goodvibes_settings') return 'change-setting';
+  if (tool === 'model' && mode === MODEL_PRICE_CHANGE_MODE) return 'model-price';
   // Money and sends are read from what the gate holds them for, whatever the tool is called.
   if (request.ownerOnly === 'spend-over-limit' || request.ownerOnly === 'payment-step') return 'purchase';
   if (request.ownerOnly === 'new-recipient' || request.ownerOnly === 'untrusted-derived-send') return 'send-message';
@@ -365,16 +390,111 @@ function rememberOf(request: PermissionPromptRequest, cannotUndo: boolean): AskP
  */
 const REMEMBER_CHOICE_LABEL = 'Yes, and remember (choose what)';
 
-/** Owner-only asks whose effect cannot be taken back: the choices open on No (money spent, a message sent as the owner). */
-const OPENS_ON_NO: ReadonlySet<string> = new Set(['unrecoverable-delete', 'irreversible-operator', 'spend-over-limit', 'payment-step', 'new-recipient', 'untrusted-derived-send']);
+/** The yes for a call that acts once and keeps nothing in force afterwards; a standing change says what it does instead (lastingYesOf). */
+export const ONCE_LABEL = 'Yes, once';
 
-function approvalChoices(kind: AskKind, remember: AskPresentation['remember'], cannotUndo: boolean, tool: string, opensOnNo = cannotUndo): AskChoice[] {
-  if (kind === 'answer-command-prompt') {
-    return [{ id: 'once', label: 'Send the answer', key: 'y', default: true }, { id: 'no', label: 'No', key: 'n' }];
+/**
+ * The owner-only kinds whose ask opens on No in every program (the terminal
+ * card, the web card, the inbox card, a held call): a yes that cannot be taken
+ * back (a delete nothing restores, an irreversible operator act, money spent, a
+ * payment step, a message sent as the owner) or one that weakens a protection
+ * (a loosened security, judgment or payment setting; access granted to a
+ * person, device, tool server or hook). The one list: every surface reads the
+ * choice marked `default`, built from it.
+ */
+const OPENS_ON_NO: ReadonlySet<OwnerOnlyKind> = new Set<OwnerOnlyKind>([
+  'unrecoverable-delete', 'irreversible-operator', 'spend-over-limit', 'payment-step', 'new-recipient', 'untrusted-derived-send',
+  'loosen-security', 'grant-access',
+]);
+
+/** Whether an ask held for the owner for this owner-only kind opens on No. */
+export function ownerOnlyOpensOnNo(ownerOnly: string | undefined): boolean {
+  return ownerOnly !== undefined && OPENS_ON_NO.has(ownerOnly as OwnerOnlyKind);
+}
+
+/**
+ * A yes whose effect lasts after this one call: the button says what it does,
+ * the card says how long it stays, and the folded line says what was done.
+ */
+interface LastingYes {
+  readonly label: string;
+  readonly lasting: string;
+  readonly said: string;
+}
+
+/** A setting value as on or off, when it is one. */
+function settingOnOff(value: unknown): 'on' | 'off' | undefined {
+  return value === true || value === 'on' || value === 'true' ? 'on' : value === false || value === 'off' || value === 'false' ? 'off' : undefined;
+}
+
+/**
+ * What a yes keeps doing, for the calls whose effect is a standing change: a
+ * setting (every goodvibes_settings write is saved to the settings file,
+ * tools/goodvibes-runtime/config-routing.ts applyRoutedConfigWrite), a tool
+ * server's trust, a hook, an automation, a loosened protection put to the owner,
+ * a contract's requirement. Undefined for a call that acts once.
+ */
+function lastingYesOf(kind: AskKind, request: PermissionPromptRequest): LastingYes | undefined {
+  const args = request.args;
+  if (kind === 'change-setting') {
+    const saved = request.tool === 'goodvibes_settings';
+    const sentence = (rest: string): string => (saved ? `Saved to your settings: ${rest}` : capitalize(rest));
+    if (args['mode'] === 'reset') {
+      return { label: 'Yes, reset it to its default', lasting: sentence('it keeps its default until you change it.'), said: 'You reset it to its default' };
+    }
+    switch (settingOnOff(args['value'])) {
+      case 'off': return { label: 'Yes, switch it off until I turn it back on', lasting: sentence('it stays off until you turn it back on.'), said: 'You switched it off; it stays off until you turn it back on' };
+      case 'on': return { label: 'Yes, switch it on until I turn it off', lasting: sentence('it stays on until you turn it off.'), said: 'You switched it on; it stays on until you turn it off' };
+      default: return { label: 'Yes, change it until I change it back', lasting: sentence('it keeps the new value until you change it.'), said: 'You changed it; it keeps the new value until you change it' };
+    }
   }
+  if (changesMcpTrust(request.tool, args)) {
+    const what = args['mode'] === 'set-role' ? 'its role' : args['mode'] === 'approve-quarantine' ? 'it back to work' : 'its trust';
+    return args['mode'] === 'approve-quarantine'
+      ? { label: 'Yes, let it work again', lasting: 'It stays allowed until it is held again.', said: 'You let it work again; it stays allowed until it is held again' }
+      : { label: `Yes, change ${what} until I change it back`, lasting: 'It stays this way until you change it back.', said: `You changed ${what}; it stays this way until you change it back` };
+  }
+  if (request.tool === 'state' && args['mode'] === 'hooks') {
+    switch (args['hookAction']) {
+      case 'add': return { label: 'Yes, add the hook until I remove it', lasting: 'The hook runs on every event it matches until you remove it.', said: 'You added the hook; it runs until you remove it' };
+      case 'enable': return { label: 'Yes, turn the hook on until I turn it off', lasting: 'The hook runs on every event it matches until you turn it off.', said: 'You turned the hook on; it runs until you turn it off' };
+      case 'disable': return { label: 'Yes, turn the hook off until I turn it back on', lasting: 'The hook stays off until you turn it back on.', said: 'You turned the hook off; it stays off until you turn it back on' };
+      default: return { label: 'Yes, remove the hook', lasting: 'The hook is removed; adding it again asks again.', said: 'You removed the hook' };
+    }
+  }
+  if (request.tool === 'workflow') {
+    const action = args['mode'] === 'hook-actions' ? args['hookAction'] : args['mode'] === 'schedule' ? args['scheduleAction'] : undefined;
+    if (action === 'add' || action === 'enable') {
+      return { label: 'Yes, keep it running until I remove it', lasting: 'It runs each time it is due until you remove it or GoodVibes closes.', said: 'You said yes; it runs until you remove it or GoodVibes closes' };
+    }
+  }
+  if (request.ownerOnly === 'loosen-security') {
+    return { label: 'Yes, make this change until I change it back', lasting: 'It stays in force until you change it back.', said: 'You made the change; it stays in force until you change it back' };
+  }
+  if (request.ownerOnly === 'change-contract') {
+    return { label: 'Yes, change what it requires', lasting: 'The contract keeps the new requirement until it is changed again.', said: 'You changed what the contract requires' };
+  }
+  return undefined;
+}
+
+function approvalChoices(kind: AskKind, remember: AskPresentation['remember'], cannotUndo: boolean, tool: string, opensOnNo: boolean, lasting: LastingYes | undefined): AskChoice[] {
+  if (kind === 'answer-command-prompt') {
+    return [{ id: 'once', label: 'Send the answer', key: 'y', default: true, said: 'You sent the answer' }, { id: 'no', label: 'No', key: 'n' }];
+  }
+  if (kind === 'model-price') {
+    // Money is spent on a yes: it opens on No, as a purchase outside the limits does.
+    return [
+      { id: 'once', label: 'Yes, keep using it', key: 'y', said: 'You kept using it at its new price' },
+      { id: 'no', label: 'No', key: 'n', default: true },
+      { id: 'choose-model', label: 'Choose another model', key: 'm' },
+    ];
+  }
+  const opens =cannotUndo ? { danger: true as const } : opensOnNo ? {} : { default: true as const };
   const yes: AskChoice = kind === 'change-files' && tool === 'edit'
-    ? { id: 'apply-selected', label: 'Apply selected', key: 'y', ...(cannotUndo ? { danger: true as const } : opensOnNo ? {} : { default: true as const }) }
-    : { id: 'once', label: 'Yes, once', key: 'y', ...(cannotUndo ? { danger: true as const } : opensOnNo ? {} : { default: true as const }) };
+    ? { id: 'apply-selected', label: 'Apply selected', key: 'y', ...opens }
+    : lasting
+      ? { id: 'once', label: lasting.label, key: 'y', ...opens, said: lasting.said }
+      : { id: 'once', label: ONCE_LABEL, key: 'y', ...opens, said: 'You said yes once' };
   return [
     yes,
     ...(remember.offered ? [{ id: 'remember' as const, label: REMEMBER_CHOICE_LABEL, key: 'a' }] : []),
@@ -422,11 +542,17 @@ function questionOf(kind: AskKind, request: PermissionPromptRequest, facts: Pick
       // The setting by the name the settings list shows it under, quoted: the names are phrases ("Run commands in a sandbox").
       const name = `"${label}"`;
       const value = args['value'];
-      const onOff = value === true || value === 'on' || value === 'true' ? 'on' : value === false || value === 'off' || value === 'false' ? 'off' : undefined;
+      const onOff = settingOnOff(value);
       const question = args['mode'] === 'reset' ? `Reset ${name} to its default?`
         : onOff !== undefined ? `Turn ${onOff} ${name}?`
           : `Change ${name} to ${typeof value === 'string' || typeof value === 'number' ? clipLine(String(value), 40) : clipLine(String(JSON.stringify(value) ?? ''), 40)}?`;
       return { question, title: question };
+    }
+    case 'model-price': {
+      const model = textArg(args, 'model') ?? 'This model';
+      const price = textArg(args, 'price');
+      const question = `${model} is no longer free${price ? `: about ${price}` : ''}. Keep using it?`;
+      return { question, title: `${model} is no longer free. Keep using it?` };
     }
     case 'purchase': {
       const item = textArg(args, 'item', 'product', 'title', 'description');
@@ -542,6 +668,11 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
   const hosts = kind === 'fetch'
     ? [...new Set(subjectValues.flatMap((url) => extractHostname(url) ?? []))].concat(request.attribution?.kind === 'fetch-localhost' ? [request.attribution.host] : [])
     : undefined;
+  // The gate's own fact (it holds the call because it loosens a protection) needs no decision model; the reading's answer is the other way to know.
+  const weakensSetting = kind === 'change-setting' && (request.ownerOnly === 'loosen-security' || readingAnswer(reading, 'weakensSecurity') === 'yes');
+  const lasting = lastingYesOf(kind, request);
+  // What weakens a protection or cannot be undone opens on No, wherever it is shown.
+  const opensOnNo = cannotUndo || weakensSetting || ownerOnlyOpensOnNo(request.ownerOnly);
   const consequence = composeConsequence({
     toolName: request.tool, args: request.args, reading, undo,
     ...(directory !== undefined ? { workingDirectory: directory } : {}),
@@ -549,10 +680,10 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
     ...(kind === 'run-command' && facts.sandbox ? { sandbox: facts.sandbox } : {}),
     ...(facts.checkpointCovers ? { checkpointCovers: facts.checkpointCovers } : {}),
     ...(hosts && hosts.length > 0 ? { hosts: [...new Set(hosts)] } : {}),
-    // The gate's own fact (it holds the call because it loosens a protection) needs no decision model; the reading's answer is the other way to know.
-    weakensSetting: kind === 'change-setting' && (request.ownerOnly === 'loosen-security' || readingAnswer(reading, 'weakensSecurity') === 'yes'),
+    weakensSetting,
+    ...(lasting ? { lasting: lasting.lasting } : {}),
   });
-  const remember = rememberOf(request, cannotUndo);
+  const remember: AskPresentation['remember'] = kind === 'model-price' ? { offered: false, why: 'asked once for this price change' } : rememberOf(request, cannotUndo);
   const by = whoAsked(request);
   const origin = originOf(by, facts);
 
@@ -586,12 +717,13 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
     kind,
     mark: cannotUndo ? 'cannot-undo' : 'ask',
     question,
-    ...(place ? { place } : {}),
-    ...(subjectOf(kind, request, subjectValues) ? { subject: subjectOf(kind, request, subjectValues)! } : {}),
-    ...(consequence ? { consequence } : {}),
-    choices: approvalChoices(kind, remember, cannotUndo, request.tool, cannotUndo || (request.ownerOnly !== undefined && OPENS_ON_NO.has(request.ownerOnly))),
+    ...(place && kind !== 'model-price' ? { place } : {}),
+    ...(kind !== 'model-price' && subjectOf(kind, request, subjectValues) ? { subject: subjectOf(kind, request, subjectValues)! } : {}),
+    ...(kind === 'model-price' ? { consequence: MODEL_PRICE_CONSEQUENCE } : consequence ? { consequence } : {}),
+    ...(weakensSetting ? { weakensSafety: true as const } : {}),
+    choices: approvalChoices(kind, remember, cannotUndo, request.tool, opensOnNo, lasting),
     remember,
-    typeToRefuse: kind !== 'answer-command-prompt',
+    typeToRefuse: kind !== 'answer-command-prompt' && kind !== 'model-price',
     ...(origin ? { origin } : {}),
     why,
     details,
@@ -656,7 +788,7 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
           id: `option:${index}`, label: DECISION_LABELS[option] ?? capitalize(option), key: String(index + 1), value: option, ...(index === 0 ? { default: true as const } : {}),
         })),
         remember: noRemember, typeToRefuse: false,
-        why: 'Jev decided this in your place; you can keep it, undo it, or set a standing rule for calls like it.',
+        why: 'Jev, the decision model, decided this in your place; you can keep it, undo it, or set a standing rule for calls like it.',
         details: [{ label: 'Decided', value: item.title }, { label: 'Detail', value: item.detail }],
         title: question,
       };
@@ -674,11 +806,16 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
       };
     case 'queued-action': {
       const summary = firstLine(item.detail);
+      // A call held for the owner-only kind it is (held-for-owner.ts posts it) opens on No like the ask it stands for.
+      const opensOnNo = ownerOnlyOpensOnNo(metadataText(item, HELD_OWNER_ONLY_METADATA));
       return {
         ...base, kind: 'queued-action', mark: 'ask', question: 'Let this held action run?',
         ...(summary ? { subject: { kind: 'text' as const, lines: [summary] } } : {}),
         consequence: { text: 'It runs when the work carries on.', withPlace: 'It runs when the work carries on.', tone: 'plain' },
-        choices: [{ id: 'once', label: 'Yes, let it run', key: 'y', default: true, value: 'approve' }, { id: 'no', label: 'No', key: 'n', value: 'dismiss' }],
+        choices: [
+          { id: 'once', label: 'Yes, let it run', key: 'y', value: 'approve', said: 'You let it run', ...(opensOnNo ? {} : { default: true as const }) },
+          { id: 'no', label: 'No', key: 'n', value: 'dismiss', ...(opensOnNo ? { default: true as const } : {}) },
+        ],
         remember: noRemember, typeToRefuse: false,
         why: 'Just vibes held this for you instead of interrupting the work.',
         details: [{ label: 'Detail', value: item.detail }],
@@ -697,7 +834,11 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
       // A veto window opens only for a purchase inside the budget (payments/merchant-recourse.ts windowForPurchase:
       // anything above it gets an approval window), so a veto window is inside it by construction.
       const withinBudget = purchase?.withinBudget ?? (windowKind === 'veto' ? true : undefined);
-      const budget = withinBudget === true ? 'Inside your daily budget.' : withinBudget === false ? 'Over your daily budget.' : undefined;
+      const budget = [
+        withinBudget === true ? 'Inside your daily budget.' : withinBudget === false ? 'Over your daily budget.' : undefined,
+        // The recorded ruling on a stop notice that cannot be delivered (payments/windows.ts), said on the card itself while the window runs.
+        windowKind === 'veto' ? 'It goes ahead when the time runs out, even if this notice never reached you.' : undefined,
+      ].filter((part): part is string => part !== undefined).join(' ') || undefined;
       // The window's deadline as the host posted it; the item's own expiry is a minute later.
       const postedDeadline = item.metadata?.[PURCHASE_DEADLINE_METADATA];
       const deadline = purchase?.deadlineMs ?? (typeof postedDeadline === 'number' ? postedDeadline : item.expiresAt);
@@ -740,7 +881,7 @@ export function presentInboxAsk(item: OwnerItem, facts: AskFacts, request?: Perm
     default:
       return {
         ...base, kind: 'other-tool', mark: 'ask', question: item.title, body: firstLine(item.detail),
-        choices: [{ id: 'once', label: 'Yes, once', key: 'y', default: true }, { id: 'no', label: 'No', key: 'n' }],
+        choices: [{ id: 'once', label: ONCE_LABEL, key: 'y', default: true, said: 'You said yes once' }, { id: 'no', label: 'No', key: 'n' }],
         remember: noRemember, typeToRefuse: true,
         details: [{ label: 'Detail', value: item.detail }],
         title: item.title,

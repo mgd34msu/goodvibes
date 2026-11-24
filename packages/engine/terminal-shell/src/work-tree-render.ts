@@ -21,7 +21,7 @@ import { stringToLine } from './renderer/string-to-line.js';
 import { activeTokens } from './renderer/theme.js';
 import { laneGlyphs, type TreeGlyphSetName } from './renderer/lane-graph-glyphs.js';
 import { layoutLaneGraph, SPINE, type GutterRow, type LaneEvent } from './renderer/lane-graph-layout.js';
-import { applyFocus, laneColor, paintBeadRow, paintBody, paintFoldedRow, paintGutter, paintHeadRow, paintMergeRow, paintSpawnRow, shiftUnderGutter, textColumn, type GraphPaint, } from './renderer/lane-graph-paint.js';
+import { applyFocus, FOCUSED_ROW_KEYS, markStepHint, laneColor, paintBeadRow, paintBody, paintFoldedRow, paintGutter, paintHeadRow, paintMergeRow, paintSpawnRow, shiftUnderGutter, textColumn, type GraphPaint, } from './renderer/lane-graph-paint.js';
 import { semanticSummaryFor } from './semantic-diff-memo.js';
 import type { BlockMeta } from './work-tree-types.js';
 import { beadKeyOf, beadMoreKeyOf, type BeadModel, type LaneModel, type TurnModel, type TurnRow } from './work-tree-model.js';
@@ -30,6 +30,8 @@ export interface TurnRenderOptions {
     readonly glyphSet: TreeGlyphSetName;
     /** Focused row id, when the keyboard is in the work tree. */
     readonly focusId: string | null;
+    /** This is the newest turn: its last folded row shows `alt+↑ step through` while nothing has focus. */
+    readonly stepHint?: boolean | undefined;
     readonly lineNumberMode: 'all' | 'code' | 'off';
     readonly collapseThreshold: number;
     /** Code blocks longer than the threshold start collapsed: their default is written here. */
@@ -190,10 +192,11 @@ export function renderTurn(model: TurnModel, options: TurnRenderOptions, present
         if (index !== undefined && index >= 0 && !messageLines.has(index))
             messageLines.set(index, line);
     };
+    let lastFolded: { line: Line; textX: number } | undefined;
     const focusIf = (line: Line, id: string): void => {
         focusIds.add(id);
         if (options.focusId === id)
-            applyFocus(line, options.width, glyphs);
+            applyFocus(line, options.width, glyphs, { text: FOCUSED_ROW_KEYS, textX: textColumn(p) });
     };
     const resultMembers: Array<{
         index: number;
@@ -304,6 +307,7 @@ export function renderTurn(model: TurnModel, options: TurnRenderOptions, present
                     answers: bead.answers,
                 }, p);
                 focusIf(line, bead.id);
+                if (bead.body !== null && !bead.open) lastFolded = { line, textX: textColumn(p) };
                 lines.push(line);
                 let capped = false;
                 if (bead.open && bead.body) {
@@ -359,6 +363,9 @@ export function renderTurn(model: TurnModel, options: TurnRenderOptions, present
             spacer(cont);
     });
     blocks.forEach((b, k) => { b.blockIndex = k; });
+    // The newest turn's last folded row, while nothing has focus, says how to step through the rows.
+    if (options.stepHint === true && options.focusId === null && lastFolded)
+        markStepHint(lastFolded.line, options.width, lastFolded.textX);
     return {
         lines,
         trailingSeparator: rows.at(-1)?.kind === 'answer' || rows.at(-1)?.kind === 'prose',
@@ -396,7 +403,7 @@ export function renderSingleBead(bead: BeadModel, options: TurnRenderOptions): T
         }, p)];
     const focusIds = new Set([bead.id]);
     if (options.focusId === bead.id)
-        applyFocus(lines[0]!, options.width, glyphs);
+        applyFocus(lines[0]!, options.width, glyphs, { text: FOCUSED_ROW_KEYS, textX: textColumn(p) });
     let capped = false;
     if (bead.open && bead.body) {
         const drawn = paintBody(bead.body, p, { expanded: bead.expanded, semantic: bead.body.kind === 'diff' ? semanticSummaryFor(bead.body.diff, bead.body.path) : undefined });

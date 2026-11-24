@@ -69,6 +69,8 @@ export function createLazyMcpRegistry(
   roots: McpConfigRoots,
 ): LazyMcpStart {
   const connecting = new Map<string, Promise<void>>();
+  // A change kept in a server's config before any server started writes to this workspace and starts them.
+  registry.setWorkspaceRoots(roots);
 
   /** Connect only the addressed server; a name that is not configured is left for the call to report. */
   const ensureServer = async (serverName: string): Promise<void> => {

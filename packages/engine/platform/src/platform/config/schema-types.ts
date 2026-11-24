@@ -80,6 +80,7 @@ export interface GoodVibesConfig {
     showReasoningSummary: boolean; // default: false
     showTokenSpeed: boolean;    // default: false
     showToolPreview: boolean;   // default: false
+    reduceMotion: boolean;      // default: false
   };
   provider: {
     decisionRouter?: DecisionRouterSettings;

@@ -258,7 +258,9 @@
   padding-right: 34px;
 }
 
-.shell-recent__delete {
+/* A chat's "…" menu (Rename, Delete chat…): shown on hover, focus and the open
+   chat on desktop, always on touch and in the phone drawer. */
+.shell-recent__more {
   position: absolute;
   top: 2px;
   right: 2px;
@@ -266,10 +268,21 @@
   transition: opacity var(--motion-fast) ease-out;
 }
 
-.shell-recent__row:hover .shell-recent__delete,
-.shell-recent__row:focus-within .shell-recent__delete,
-.shell-recent__row[data-active] .shell-recent__delete {
+.shell-recent__row:hover .shell-recent__more,
+.shell-recent__row:focus-within .shell-recent__more,
+.shell-recent__row[data-active] .shell-recent__more,
+.shell-recent__more[aria-expanded='true'] {
   opacity: 1;
+}
+
+/* When the chat was last used, beside a title another recent chat shares. */
+.shell-recent__age {
+  flex: none;
+  margin-left: auto;
+  padding-left: 6px;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  font-variant-numeric: tabular-nums;
 }
 
 /* Foot: the account button (44 tall) */
@@ -607,7 +620,7 @@
   height: 44px;
 }
 
-.shell-drawer .shell-recent__delete {
+.shell-drawer .shell-recent__more {
   top: 0;
   opacity: 1;
 }
@@ -617,7 +630,7 @@
 }
 
 @media (pointer: coarse) {
-  .shell-recent__delete {
+  .shell-recent__more {
     opacity: 1;
   }
 
@@ -657,7 +670,7 @@
   .shell-sidebar,
   .shell-nav-item,
   .shell-account,
-  .shell-recent__delete {
+  .shell-recent__more {
     transition: none;
   }
 }

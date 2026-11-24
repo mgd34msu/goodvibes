@@ -8,7 +8,10 @@
  * closed instead of parking a bubble over the composer for conditions that never clear:
  *   - plain-HTTP LAN (insecure context) -> "open over HTTPS to dictate" pointer.
  *   - browser can't capture audio        -> honest unsupported note.
- *   - no STT provider configured         -> bring-your-own-key refusal.
+ *   - no STT provider configured         -> bring-your-own-key refusal, and, where the
+ *     browser has its own speech recognition, the choice to dictate with it (which sends
+ *     the audio to the browser's maker, and says so before the first word). Agreed once,
+ *     the mic dictates with it in one tap; Settings, Voice shows and reverses the choice.
  *   - permission blocked                 -> "allow it and try again".
  */
 import { useState } from 'react';
@@ -16,6 +19,8 @@ import { Loader, Mic, MicOff, Square } from 'lucide-react';
 import { useVoiceInput } from '../../lib/voice/useVoice';
 import { STT_UNAVAILABLE_MESSAGE } from '../../lib/voice/voice-config';
 import { capabilityReason, useOriginPosture } from '../../hooks/useOriginPosture';
+import { browserSpeechAvailable, dictateWithBrowser, type BrowserDictation } from '../../lib/voice/browser-speech';
+import { useWebUiPreferences } from '../../lib/ui-preferences';
 
 interface MicButtonProps {
   /** Receives the transcript. The composer fills its draft with it, never auto-sends. */
@@ -41,6 +46,26 @@ export function MicButton({ onTranscript, disabled }: MicButtonProps) {
   // the composer for the whole session; the crossed mic toggles it instead.
   const [reasonOpen, setReasonOpen] = useState(false);
   const toggleReason = () => setReasonOpen((open) => !open);
+  // With no speech-to-text provider on the daemon, the browser's own speech service is offered
+  // beside the reason, as a choice that says where the audio goes (lib/voice/browser-speech.ts).
+  const [browserListening, setBrowserListening] = useState<BrowserDictation | null>(null);
+  const [browserFailure, setBrowserFailure] = useState<string>();
+  const offerBrowser = support === 'ok' && !availability.sttAvailable && browserSpeechAvailable();
+  // Whether the person agreed to it before (remembered in this browser; Settings, Voice turns it off).
+  const [preferences, setPreference] = useWebUiPreferences();
+  const agreeAndListen = () => {
+    setPreference('browserDictation', true);
+    listenWithBrowser();
+  };
+  const listenWithBrowser = () => {
+    setReasonOpen(false);
+    setBrowserFailure(undefined);
+    const dictation = dictateWithBrowser(onTranscript, (failure) => {
+      setBrowserListening(null);
+      if (failure) { setBrowserFailure(failure); setReasonOpen(true); }
+    });
+    setBrowserListening(dictation ?? null);
+  };
 
   // Resolve a single (icon, label, note, onClick, disabled) tuple for the current state.
   let icon = <Mic size={16} aria-hidden />;
@@ -63,10 +88,21 @@ export function MicButton({ onTranscript, disabled }: MicButtonProps) {
     label = 'Dictation unavailable: not supported in this browser';
     note = 'This browser cannot capture the microphone.';
     onClick = toggleReason;
+  } else if (!availability.sttAvailable && browserListening !== null) {
+    icon = <Square size={16} aria-hidden />;
+    label = 'Stop listening';
+    note = 'Listening through this browser\'s speech service: tap to stop.';
+    transient = true;
+    onClick = () => browserListening.stop();
+    recording = true;
+  } else if (!availability.sttAvailable && offerBrowser && preferences.browserDictation && !browserFailure) {
+    // Agreed once: the mic dictates with the browser's speech service in one tap.
+    label = 'Dictate a message (this browser\'s speech service)';
+    onClick = listenWithBrowser;
   } else if (!availability.sttAvailable) {
     icon = <MicOff size={16} aria-hidden />;
     label = 'Dictation unavailable: no speech-to-text provider';
-    note = STT_UNAVAILABLE_MESSAGE;
+    note = browserFailure ?? STT_UNAVAILABLE_MESSAGE;
     onClick = toggleReason;
   } else if (phase === 'recording') {
     icon = <Square size={16} aria-hidden />;
@@ -104,6 +140,15 @@ export function MicButton({ onTranscript, disabled }: MicButtonProps) {
       {noteVisible && (
         <span className="voice-mic-note" role="status" aria-live="polite">
           {note}
+          {offerBrowser && browserListening === null && (
+            <>
+              {' '}
+              <button type="button" className="voice-mic-note__action" onClick={agreeAndListen}>
+                Dictate with this browser&apos;s speech service
+              </button>
+              It sends what you say to the browser&apos;s maker to be written out.
+            </>
+          )}
         </span>
       )}
       <button

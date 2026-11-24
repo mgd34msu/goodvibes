@@ -60,7 +60,7 @@ export const builtinGatewayTailscaleMethodDescriptors: readonly GatewayMethodDes
     repeat: 'safe',
     effects: ['control-plane.administer', 'model.refused'],
     title: 'Set Up Tailscale Serve For The Daemon',
-    description: 'The one-action https affordance: run `tailscale serve --bg <port>` so tailscale fronts the web UI at its https MagicDNS URL, the port being the one the web UI is served on: the control-plane port while the daemon serves the bundle (controlPlane.webui.serve), web.port for a web UI it does not serve (web.enabled). With no web UI served it is refused with 409 WEB_UI_NOT_SERVED and nothing runs. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success web.publicBaseUrl is updated to the https URL from the same resolution and the value it replaced is kept for the stop. The daemon never mints certificates, TLS is terminated by tailscale.',
+    description: 'The one-action https affordance: run `tailscale serve --bg <port>` so tailscale fronts the web UI at its https MagicDNS URL, the port being the one the web UI is served on: the control-plane port while the daemon serves the bundle (controlPlane.webui.serve), web.port for a web UI it does not serve (web.enabled). With no web UI served it is refused with 409 WEB_UI_NOT_SERVED and nothing runs. Run only from this explicit user-initiated verb. The serve persists in tailscaled, also after the daemon stops or restarts, until tailscale.serve.stop runs. The attempt is recorded with an honest receipt either way (when tailscale prints a link to turn Serve on for the tailnet, the receipt carries it as enableUrl); on success the https address is asked once for the daemon\'s health (`answers`: ok and why), and only when it answers is web.publicBaseUrl updated to it, keeping the value it replaced for the stop. TLS on this route is terminated by tailscale with a certificate the phone already trusts (the other https route is the daemon\'s own LAN certificate, webui https).',
     category: 'remote-access',
     // Runs a host command and rewrites web.publicBaseUrl, which changes every
     // pairing and link URL the daemon emits: admin, like config.set. The empty
@@ -71,6 +71,7 @@ export const builtinGatewayTailscaleMethodDescriptors: readonly GatewayMethodDes
       receipt: TAILSCALE_SERVE_RECEIPT_SCHEMA,
       publicBaseUrlUpdated: BOOLEAN_SCHEMA,
       receiptRecorded: BOOLEAN_SCHEMA,
+      answers: objectSchema({ ok: BOOLEAN_SCHEMA, detail: STRING_SCHEMA }, ['ok', 'detail']),
     }, ['receipt', 'publicBaseUrlUpdated', 'receiptRecorded']),
     errorCodes: [WEB_UI_NOT_SERVED],
   }),

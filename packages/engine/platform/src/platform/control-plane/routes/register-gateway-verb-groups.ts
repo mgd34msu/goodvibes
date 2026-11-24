@@ -20,6 +20,7 @@ import { registerFleetCheckpointsSearchGatewayMethods, type FleetCheckpointsSear
 import { registerPushGatewayMethods } from './push.js';
 import { registerPairingGatewayMethods, type PairingGatewayService } from './pairing.js';
 import { registerPairingHandoffGatewayMethods } from './pairing-handoff.js';
+import { registerProviderSignInGatewayMethods, type ProviderSignInDeps } from './provider-sign-in.js';
 import { pairingReachFromSettings } from '../../pairing/web-origin.js';
 import { registerTailscaleGatewayMethods } from './tailscale.js';
 import { registerAcpGatewayMethods } from './acp.js';
@@ -205,6 +206,10 @@ export interface GatewayVerbGroupDeps extends FleetCheckpointsSearchGatewayDeps,
   readonly relayAvailable?: (() => boolean) | undefined;
   /** The configured web-app origin the pairing QR points at ⇒ hand-off returns a full deep link. */
   readonly pairingWebOrigin?: (() => string | undefined) | undefined;
+  /** Serves the web UI to the network and resolves once the listener is bound again (pairing.handoff.create `serveToNetwork`). */
+  readonly pairingServeToNetwork?: (() => Promise<void>) | undefined;
+  /** The daemon's subscription store and services, for providers.subscription.signIn.* (config/subscription-sign-in.ts). */
+  readonly providerSignIn?: ProviderSignInDeps | undefined;
   /** Injectable tailscale command runner (tests); absent ⇒ the real spawnSync runner. */
   readonly tailscaleRunner?: TailscaleCommandRunner | undefined;
   /**
@@ -702,10 +707,13 @@ export function registerGatewayVerbGroups(catalog: GatewayMethodCatalog, deps: G
       ...(deps.stepUpService ? { stepUp: deps.stepUpService } : {}),
       relayAvailable: deps.relayAvailable ?? ((): boolean => false),
       ...(deps.pairingWebOrigin ? { webOrigin: deps.pairingWebOrigin } : {}),
+      ...(deps.pairingServeToNetwork ? { serveToNetwork: deps.pairingServeToNetwork } : {}),
       // The daemon's own settings decide whether a phone can open the code (the one decision every pairing surface uses).
       reach: (origin) => pairingReachFromSettings(deps.configManager, origin),
     });
   }
+  // A subscription sign-in started from any client, on the terminal's own code path.
+  if (deps.providerSignIn) registerProviderSignInGatewayMethods(catalog, deps.providerSignIn);
   // Hosted third-party coding agents (ACP): read-only discovery + the one-act
   // spawn. Registered only when the composition root threads the host service.
   if (deps.acpHost) {

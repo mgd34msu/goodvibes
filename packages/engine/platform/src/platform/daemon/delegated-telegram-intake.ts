@@ -18,6 +18,7 @@ import { StoreWriteQueue } from '../state/store-write-queue.js';
 import { defineLifecycle } from '../utils/lifecycle-machine.js';
 import { logger } from '../utils/logger.js';
 import { summarizeError } from '../utils/native-error-summary.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 // Isolate the provider reader from the long-lived coordinator closure context.
 const sourceReader = (read: () => string) => () => ({ text: read(), unsupportedSources: [] });
 const routeKey = (chatId: string, threadId?: string) => JSON.stringify([chatId, threadId ?? null]);
@@ -249,6 +250,8 @@ export class DelegatedTelegramIntake implements DelegatedTelegramAdapter {
     void entry.result.then(result => {
       if (result.outcome === 'awaiting-owner') { entry.until = result.sourceExpiresAt; entry.requestId = result.ref.requestId; }
       else if (this.ingresses.get(key) === entry) this.ingresses.delete(key);
+      // A message put to the owner for review, or held waiting for the chat to be confirmed: the intake views read it again.
+      noteListChanged({ list: 'telegram-intake', change: 'created' });
     }, () => { if (this.ingresses.get(key) === entry) this.ingresses.delete(key); });
     return entry.result;
   }

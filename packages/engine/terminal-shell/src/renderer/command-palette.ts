@@ -36,7 +36,7 @@ function rowsFor(palette: PaletteView): KitRow[] {
   const rows: KitRow[] = [];
   const searching = palette.query.trim().length > 0;
   for (const section of palette.sections()) {
-    if (!searching || section.group === 'Keyboard shortcuts') rows.push({ header: section.group });
+    if (!searching || section.group === 'Keyboard shortcuts') rows.push({ header: section.title ?? section.group });
     for (const entry of section.entries) {
       const live = entry.kind === 'command' ? palette.describe(entry.id) : undefined;
       rows.push({
@@ -90,7 +90,7 @@ export function renderCommandPalette(palette: PaletteView, screenWidth: number, 
     title: 'Commands',
     hints: selected?.kind === 'shortcut'
       ? [['↑↓', 'move']]
-      : [['↑↓', 'move'], ['⏎', 'run'], ['tab', 'fill composer']],
+      : [['↑↓', 'move'], ['⏎', 'run'], ['tab', 'fill composer'], ...(palette.query.trim() ? [] : [['ctrl+]', 'next group'] as [string, string]])],
   });
   // Every count here is of listed rows (commands and keys), the same rows the "more" count below counts.
   const total = palette.entries.length;

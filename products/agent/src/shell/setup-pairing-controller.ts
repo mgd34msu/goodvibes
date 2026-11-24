@@ -24,14 +24,14 @@ export class SetupPairingController extends TerminalHostPairingController<Pairin
             status: 'paired-unverified',
             host,
             message:
-              'Pairing credential stored for this host. Verification was interrupted; rerun setup status. No second credential will be created.',
+              'This Agent kept its new key for this host, but checking it was interrupted. Run /setup status to check it; pairing again is not needed and would not make a second key.',
           }),
         unknownRecovery: (host) =>
           formatSetupPairing({
             status: 'unknown',
             host,
             message:
-              'The reply to a pairing request was lost. Run /setup pair to repeat the same request: the host answers it with the credential it made, never a second one. Or run /setup pair --apply to forget the attempt and pair from scratch.',
+              'The host\'s answer to the pairing request was lost. Run /setup pair to repeat the same request: the host answers it with the key it made, never a second one; if that cannot be done, /setup pair offers to forget the attempt and pair from scratch.',
           }),
       },
       ui,

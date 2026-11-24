@@ -165,6 +165,14 @@
   overflow-x: auto;
   background: transparent;
   border: 0;
+  /* A thin bar stays drawn where the system hides overlay scrollbars, so a cut line reads as scrollable. */
+  scrollbar-width: thin;
+}
+
+/* More code to the right: the block fades at its right edge until scrolled to the end. */
+.markdown-code-block.clipped .markdown-code-pre {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 32px), transparent);
 }
 
 .markdown-code-block code {

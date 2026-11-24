@@ -8,9 +8,10 @@
  * Everything the old pane showed as primary text (the arguments as JSON, who
  * requested it, the category, the session, the model judgment, the decision
  * trail) is inside Details. Claim is "I'll handle this", offered only when the
- * reading allows it and more than one person can answer; withdraw is "Cancel
- * this request", offered only to the person who asked (the reading's
- * `requester.mine` and allowed actions). Every action names the revision of
+ * reading allows it and more than one person can answer; withdraw is "Withdraw
+ * this request", beside the answers on the card, offered only to the person
+ * who asked (the reading's `requester.mine` and allowed actions); it takes the
+ * request back and is not an answer. Every action names the revision of
  * the record shown here (useApprovalActions).
  */
 import { useQuery } from '@tanstack/react-query';
@@ -81,24 +82,17 @@ export function ApprovalDetail({ ask, approvalActions, askActions, now, onClose 
     extraDetails.push({ label: 'Request', value: ask.item.id });
   }
 
-  const footer = record && (mayClaim && severalAnswerers || mayCancel) ? (
-    <>
-      {mayClaim && severalAnswerers && (
-        <span className="work-claim">
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => approvalActions.claim.mutate({ id: record.id, expectedRevision: record.revision })}>
-            I&apos;ll handle this
-          </Button>
-          <span className="work-claim__why">Marks it as yours so others see someone is on it.</span>
-        </span>
-      )}
-      <span className="work-footer__spacer" />
-      {mayCancel && (
-        <Button size="sm" variant="ghost" disabled={busy} onClick={() => approvalActions.cancel.mutate({ id: record.id, expectedRevision: record.revision })}>
-          Cancel this request
-        </Button>
-      )}
-    </>
+  const footer = record && mayClaim && severalAnswerers ? (
+    <span className="work-claim">
+      <Button size="sm" variant="ghost" disabled={busy} onClick={() => approvalActions.claim.mutate({ id: record.id, expectedRevision: record.revision })}>
+        I&apos;ll handle this
+      </Button>
+      <span className="work-claim__why">Marks it as yours so others see someone is on it.</span>
+    </span>
   ) : undefined;
+  const withdraw = record && mayCancel
+    ? { busy, run: () => approvalActions.cancel.mutate({ id: record.id, expectedRevision: record.revision }) }
+    : undefined;
 
   return (
     <DetailPane
@@ -119,6 +113,7 @@ export function ApprovalDetail({ ask, approvalActions, askActions, now, onClose 
         variant="detail"
         lead={lead ? <p className="ask-card__lead">{lead}</p> : undefined}
         extraDetails={extraDetails}
+        withdraw={withdraw}
       />
     </DetailPane>
   );

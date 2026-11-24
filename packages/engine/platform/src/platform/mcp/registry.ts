@@ -25,8 +25,10 @@ import { currentExternalOperationSource } from '../permissions/external-operatio
  * Tool namespace: mcp:<server-name>:<tool-name>
  */
 import { logger } from '../utils/logger.js';
+import { fileChangeStamp } from '../utils/file-change-stamp.js';
 import {
   MCP_DEFAULT_TRUST_MODE,
+  getMcpConfigLocations,
   loadMcpEffectiveConfig,
   removeMcpServerConfig,
   setMcpServerToolRule,
@@ -60,7 +62,7 @@ import type { RepositoryFileGate } from '../runtime/workspace-trust.js';
 import type { HookEvent } from '../hooks/types.js';
 import { McpPermissionManager } from '../runtime/mcp/permissions.js';
 import { McpSchemaFreshnessTracker } from '../runtime/mcp/schema-freshness.js';
-import { McpLifecycleManager } from '../runtime/mcp/manager.js';
+import { MCP_CREDENTIALS_REFUSED, McpLifecycleManager } from '../runtime/mcp/manager.js';
 import { McpHttpAuthError } from './http-connection.js';
 import type { McpDecisionRecord, McpReconnectStatus, McpServerRole, McpToolPermission, McpToolRuleRecord, McpTrustMode, QuarantineReason, SchemaFreshness } from '../runtime/mcp/types.js';
 import type { McpEvent } from '../../events/mcp.js';
@@ -85,6 +87,11 @@ import {
 import { sandboxCommandWrapper } from '../runtime/sandbox/backend.js';
 import { summarizeError } from '../utils/error-display.js';
 
+/** Every MCP config file's change stamp, in one string: what tells a hand edit since the last read. */
+function mcpConfigStamp(roots: McpConfigRoots): string {
+  return getMcpConfigLocations(roots).map((location) => `${location.path}=${fileChangeStamp(location.path)}`).join('\n');
+}
+
 function compactEnv(env: NodeJS.ProcessEnv | Record<string, string>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
@@ -105,6 +112,15 @@ export interface McpReloadServerResult {
   readonly connected: boolean;
   /** Why a configured server is not connected; absent when it is connected or was removed. */
   readonly error?: string;
+}
+
+/** What a change to `sandbox.mcpIsolation` did to the running stdio servers. */
+export interface McpIsolationChange {
+  readonly mode: 'contained' | 'disabled';
+  /** Restarted now under the new isolation. */
+  readonly restarted: readonly string[];
+  /** In the middle of a call: restarted as soon as that call ends. */
+  readonly afterCall: readonly string[];
 }
 
 export interface McpReloadResult {
@@ -298,8 +314,71 @@ export class McpRegistry {
   }
 
   setSandboxRuntime(configManager: ConfigManager, sessions: SandboxSessionRegistry): void {
+    this.#unsubscribeIsolation?.();
     this.sandboxConfigManager = configManager;
     this.sandboxSessions = sessions;
+    // A change to sandbox.mcpIsolation restarts the running stdio servers under it.
+    this.#unsubscribeIsolation = configManager.subscribe('sandbox.mcpIsolation', () => { this.#applyMcpIsolation(); });
+  }
+
+  #unsubscribeIsolation: (() => void) | undefined;
+  /** Whether each stdio client was started inside the sandbox boundary. */
+  readonly #startedIsolated = new WeakMap<McpClient, boolean>();
+  /** Tool calls in progress, by server, so an isolation restart waits for the call to end. */
+  readonly #callsInFlight = new Map<string, number>();
+  /** Servers to restart under the current isolation as soon as their calls in progress end. */
+  readonly #restartAfterCall = new Set<string>();
+  #isolationChange: McpIsolationChange | null = null;
+  /** Servers that were not started because this host could not give them the boundary `contained` asks for. */
+  readonly #failedForIsolation = new Set<string>();
+  /** Counts disconnectAll calls, so an isolation restart in flight starts nothing after a shutdown. */
+  #shutdowns = 0;
+
+  /** What the last change to sandbox.mcpIsolation did to the running servers; null before any change. */
+  mcpIsolationChange(): McpIsolationChange | null {
+    return this.#isolationChange;
+  }
+
+  /**
+   * Restart every running stdio server started under the other isolation: at
+   * once when it has no call in progress, else as soon as its calls end.
+   */
+  #applyMcpIsolation(): void {
+    const configManager = this.sandboxConfigManager;
+    if (!configManager) return;
+    const contained = getSandboxConfigSnapshot(configManager).mcpIsolation !== 'disabled';
+    const restarted: string[] = [];
+    const afterCall: string[] = [];
+    for (const [name, config] of this.serverConfigs) {
+      if (!config.command) continue;
+      const client = this.clients.get(name);
+      const starting = this.pendingConnections.has(name);
+      // A server that could not start inside the boundary is started once the change lets it.
+      const failedForIsolation = !client && !starting && !contained && this.#failedForIsolation.has(name);
+      if (!starting && !failedForIsolation && (!client || this.#startedIsolated.get(client) === contained)) continue;
+      if (!starting && (this.#callsInFlight.get(name) ?? 0) > 0) {
+        this.#restartAfterCall.add(name);
+        afterCall.push(name);
+        continue;
+      }
+      this.#restartAfterCall.delete(name);
+      restarted.push(name);
+      this.#restartUnderIsolation(name);
+    }
+    this.#isolationChange = Object.freeze({ mode: contained ? 'contained' : 'disabled', restarted, afterCall });
+  }
+
+  /** Stop one server and start it again from its configuration, so it runs under the isolation in force now. */
+  #restartUnderIsolation(name: string): void {
+    const config = this.serverConfigs.get(name);
+    if (!config) return;
+    // A shutdown (disconnectAll) that lands meanwhile wins: nothing is started after it.
+    const shutdowns = this.#shutdowns;
+    void this.disconnectServer(name, 'sandbox-isolation-changed')
+      .then(() => (this.serverConfigs.get(name) === config && this.#shutdowns === shutdowns ? this._connectServer(config) : undefined))
+      .catch((error: unknown) => {
+        logger.warn('McpRegistry: a server was not restarted under the new sandbox isolation', { server: name, error: summarizeError(error) });
+      });
   }
 
   /**
@@ -358,9 +437,42 @@ export class McpRegistry {
     return () => { unsubscribe(); if (this.repositoryGate === gate) this.repositoryGate = null; };
   }
 
+  /** The MCP config files' modification times and sizes when they were last read; null before any read. */
+  #configStamp: string | null = null;
+  #configRereading: Promise<unknown> | null = null;
+
+  /**
+   * Before an MCP call: when an MCP config file was edited (by hand) since it
+   * was last read, read the configuration again first, so a changed entry is
+   * reconnected and a removed one dropped (the same reload `/mcp reload` runs;
+   * unchanged servers are left alone). One stat per config file; no watcher.
+   */
+  async #rereadConfigIfChanged(): Promise<void> {
+    const roots = this.startedRoots;
+    if (roots === null || this.#configStamp === null || mcpConfigStamp(roots) === this.#configStamp) return;
+    this.#configRereading ??= this.reload(roots).catch((error: unknown) => {
+      logger.warn('McpRegistry: an MCP config file changed, but it could not be read again', { error: summarizeError(error) });
+    }).finally(() => { this.#configRereading = null; });
+    await this.#configRereading;
+  }
+
+  /** The workspace the servers start from on first use, for a product that starts none at launch. */
+  #workspaceRoots: McpConfigRoots | null = null;
+
+  /**
+   * Name the workspace the servers start from, without starting any: a change
+   * kept in a server's MCP config before anything started them (a trust mode,
+   * a per-tool rule) writes there and starts them on that first use.
+   */
+  setWorkspaceRoots(roots: McpConfigRoots): void {
+    this.#workspaceRoots = roots;
+  }
+
   /** The configuration the start paths read: the files, with a project file the owner has not trusted held back. */
   private async startableConfig(roots: McpConfigRoots): Promise<McpEffectiveConfig> {
     this.startedRoots = roots;
+    // Stamped before the read, so an edit that lands during it is read at the next call.
+    this.#configStamp = mcpConfigStamp(roots);
     const gate = this.repositoryGate;
     if (gate === null) return loadMcpEffectiveConfig(roots);
     await gate.load();
@@ -653,6 +765,8 @@ export class McpRegistry {
    */
   async callTool(qualifiedName: string, args: Record<string, unknown>, options?: McpToolCallOptions): Promise<unknown> {
     const source = currentExternalOperationSource();
+    // An MCP config file edited by hand is read again before the call.
+    await this.#rereadConfigIfChanged();
     args = snapshotJudgmentInput(args, qualifiedName) as Record<string, unknown>;
     const parsed = this._parseQualifiedName(qualifiedName);
     if (!parsed) {
@@ -701,6 +815,7 @@ export class McpRegistry {
     const unsubscribe = host?.config.onDidInvalidate(() => configLife.abort(new Error(`MCP call '${qualifiedName}': the configuration changed during the call, so nothing more was sent. Call the tool again.`)));
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     let callSettled = false;
+    this.#callsInFlight.set(serverName, (this.#callsInFlight.get(serverName) ?? 0) + 1);
     try {
       assertCurrent();
       if (host && !operation) throw new Error(`MCP call '${qualifiedName}' has unresolved permission: original operation source is unavailable`);
@@ -861,6 +976,13 @@ export class McpRegistry {
       // Ends anything still holding this call's signal, such as a question left unanswered.
       unsent.abort(new Error(`MCP call '${qualifiedName}' has ended.`));
       admission?.close(); unsubscribe?.(); configLife.abort();
+      const left = (this.#callsInFlight.get(serverName) ?? 1) - 1;
+      if (left > 0) this.#callsInFlight.set(serverName, left);
+      else {
+        this.#callsInFlight.delete(serverName);
+        // A server that was mid-call when sandbox.mcpIsolation changed restarts now that its calls have ended.
+        if (this.#restartAfterCall.delete(serverName)) this.#restartUnderIsolation(serverName);
+      }
     }
   }
 
@@ -872,6 +994,8 @@ export class McpRegistry {
    * its own expiry. A single reconnect or reload never waits on them.
    */
   async disconnectAll(): Promise<void> {
+    this.#shutdowns++;
+    this.#restartAfterCall.clear();
     // A server waiting for a reconnect has no client or pending connect to stop; its timer is ended here.
     this.#lifecycle.stopAll('the MCP servers were disconnected');
     const names = new Set([...this.clients.keys(), ...this.pendingConnections.keys()]);
@@ -913,6 +1037,7 @@ export class McpRegistry {
     this.freshness.removeServer(name);
     this.connectFailures.delete(name);
     this.policyLifetimes.delete(name);
+    this.#failedForIsolation.delete(name);
   }
 
   private async disconnectClient(serverName: string, client: McpClient, reason: string): Promise<void> {
@@ -1029,7 +1154,7 @@ export class McpRegistry {
     } else if (phase === 'restart-wait' || phase === 'starting' || phase === 'negotiating') {
       next = 'it is being restarted; retry in a few seconds';
     } else if (this.#lifecycle.getState(name) === 'auth_required') {
-      next = 'the server refused its credentials, so it is not retried; set its credentials (the auth header or token in its mcp.json entry, or the secret it names), then run /mcp reload to reconnect it';
+      next = MCP_CREDENTIALS_REFUSED;
     } else {
       next = `${reconnect?.stoppedReason ? `${reconnect.stoppedReason}; ` : ''}fix the server or its entry in mcp.json, then run /mcp reload (or reload the MCP configuration) to reconnect it`;
     }
@@ -1201,8 +1326,8 @@ export class McpRegistry {
     rule: McpToolRule,
     workspace?: McpConfigRoots,
   ): Promise<{ readonly scope: McpConfigScope; readonly path: string; readonly changed: boolean; readonly reload: McpReloadResult }> {
-    const roots = workspace ?? this.startedRoots;
-    if (!roots) throw new Error(`The MCP servers were not started from a workspace yet, so no rule for ${serverName} tool '${toolName}' was kept. Run /mcp reload, then try again.`);
+    const roots = workspace ?? this.startedRoots ?? this.#workspaceRoots;
+    if (!roots) throw new Error(`This program names no workspace for its MCP servers, so no rule for ${serverName} tool '${toolName}' was kept.`);
     const entry = loadMcpEffectiveConfig(roots).servers.find((candidate) => candidate.server.name === serverName);
     if (!entry) {
       throw new Error(`No MCP server named '${serverName}' is configured, so no rule for its tool '${toolName}' was kept. `
@@ -1236,8 +1361,8 @@ export class McpRegistry {
     workspace?: McpConfigRoots,
   ): Promise<{ readonly scope: McpConfigScope; readonly path: string; readonly changed: boolean; readonly reload: McpReloadResult }> {
     const what = 'trustMode' in policy ? 'trust mode' : 'role';
-    const roots = workspace ?? this.startedRoots;
-    if (!roots) throw new Error(`The MCP servers were not started from a workspace yet, so the ${what} of ${serverName} was not kept. Run /mcp reload, then try again.`);
+    const roots = workspace ?? this.startedRoots ?? this.#workspaceRoots;
+    if (!roots) throw new Error(`This program names no workspace for its MCP servers, so the ${what} of ${serverName} was not kept.`);
     const entry = loadMcpEffectiveConfig(roots).servers.find((candidate) => candidate.server.name === serverName);
     if (!entry) {
       throw new Error(`No MCP server named '${serverName}' is configured, so its ${what} was not kept. `
@@ -1430,6 +1555,7 @@ export class McpRegistry {
       catch (error) {
         // A server that asked for a boundary this host cannot give is not started; say so where its status is read.
         if (this.serverConfigs.get(name) === serverConfig) {
+          this.#failedForIsolation.add(name);
           this.freshness.markFailed(name, summarizeError(error));
           this.connectFailures.set(name, summarizeError(error));
           if (stillWanted()) this.#lifecycle.failed(name, summarizeError(error));
@@ -1496,6 +1622,8 @@ export class McpRegistry {
       // before it: that read listed the servers connected then, and the client
       // it would replace is checked by identity there.
       this.clients.set(name, client);
+      if (serverConfig.command) this.#startedIsolated.set(client, processSpec?.sandboxSessionId !== undefined);
+      this.#failedForIsolation.delete(name);
       this.connectFailures.delete(name);
       established = true;
       releaseConfiguration(); releaseConfiguration = () => {};
@@ -1551,6 +1679,8 @@ export class McpRegistry {
         if (this.sandboxSessionByServer.get(name) === sandboxSessionId) this.sandboxSessionByServer.delete(name);
       }
       if (this.serverConfigs.get(name) === serverConfig) {
+        // A start inside the boundary that failed is one the next isolation change starts again.
+        if (isolated) this.#failedForIsolation.add(name);
         this.freshness.markFailed(name, summarizeError(err));
         this.connectFailures.set(name, summarizeError(err));
         if (stillWanted()) {

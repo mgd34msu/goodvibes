@@ -15,8 +15,11 @@ import App from './App';
 import { registerServiceWorker } from './lib/pwa/register-sw';
 import { pairingHandoffToken } from './hooks/usePairingHandoff';
 import { primeAuthToken } from './lib/goodvibes';
+import { applyMotionPreference } from './lib/ui-preferences';
 
 export async function mountApp(root: HTMLElement): Promise<void> {
+  // Settings > General > Reduce motion, on the page root before anything draws.
+  applyMotionPreference();
   // A pairing link's token is applied before the first query runs, so no request goes out unauthorized.
   const pairingToken = pairingHandoffToken();
   if (pairingToken !== null) {

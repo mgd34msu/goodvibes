@@ -162,6 +162,7 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
   { key: 'GOODVIBES_CLOUDFLARE_WORKER_TOKEN', match: 'exact', scope: 'daemon-needed', why: 'Issued by the daemon for clients; the daemon is the authority that mints and checks it.' },
   { key: 'GOODVIBES_CLOUDFLARE_ACCESS_SERVICE_TOKEN', match: 'exact', scope: 'daemon-needed', why: 'The daemon presents it to Cloudflare Access on its own behalf.' },
   { key: 'relay.identity', match: 'exact', scope: 'daemon-needed', why: 'The relay identity IS the daemon\'s identity. Written with no scope, it defaulted to the project tier, so one machine grew a different identity per directory the daemon happened to start in.' },
+  { key: 'controlPlane.lanHttps.authority', match: 'exact', scope: 'daemon-needed', why: 'The daemon signs its LAN https listener\'s certificate with this authority\'s key at each start and bind; every phone that installed the authority trusts that one key, so a second one in another tier would make those phones refuse the listener.' },
   { key: 'push.vapid.keypair', match: 'exact', scope: 'daemon-needed', why: 'The daemon signs web-push notifications with it, and every subscription already registered is bound to that one public key, a second keypair in another tier silently invalidates them all.' },
 
   // ── Calendar ─────────────────────────────────────────────────────────────
@@ -221,6 +222,7 @@ export const CREDENTIAL_SCOPE_DECLARATIONS: readonly CredentialScopeDeclaration[
 
   // ── Cluster ──────────────────────────────────────────────────────────────
   { key: daemonSecretKeyFor('cluster.groupMaterial'), match: 'exact', scope: 'daemon-needed', why: 'Daemons authenticate to each other with it; it is meaningless to a client.' },
+  { key: daemonSecretKeyFor('cluster.pendingAction'), match: 'exact', scope: 'daemon-needed', why: 'A group action the owner asked for while sharing was off (a join with its join key, a removal, a key rotation, a rename, a shared-setting decision) that finishes after the daemon restarts: read and cleared by the daemon at its next start.' },
 
   // ── Genuinely surface-local ──────────────────────────────────────────────
   // The whole list. Each is state only the process that created it can use,

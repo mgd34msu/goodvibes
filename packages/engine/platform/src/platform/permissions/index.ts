@@ -11,7 +11,7 @@ export * from './user-rule-store.js';
 export * from './subject.js';
 export * from './briefs/build.js';
 export * from './briefs/types.js';
-export { approvalQuestion, askKindOf, compactAskPresentation, presentApprovalAsk, presentInboxAsk } from './ask-presentation.js';
+export { approvalQuestion, askKindOf, compactAskPresentation, MODEL_CHOICE_REASON, MODEL_PRICE_CHANGE_MODE, ONCE_LABEL, ownerOnlyOpensOnNo, presentApprovalAsk, presentInboxAsk } from './ask-presentation.js';
 export type { AskChoice, AskFacts, AskKind, AskPresentation, PurchaseAskFacts, RememberTierView } from './ask-presentation.js';
 export { codeUndoFact, commandEffect, composeConsequence, FAMILY_SENTENCES, readingAnswer, undoFactOf } from './ask-consequence.js';
 export type { CommandEffect, Consequence, ConsequenceInput, ReadingAnswer, SandboxFact, UndoFact } from './ask-consequence.js';

@@ -14,7 +14,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { FleetAttemptGroup } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { formatError, isMethodUnavailableError } from '../../lib/errors';
 import { sortApprovalsNewestFirst } from '../../lib/approvals';
 import { hostedSessionsFromListResult, sortHostedSessionsNewestFirst } from '../../lib/hosted-sessions';
@@ -116,6 +116,7 @@ export function useWorkData({ contractScope, subscriptionActive, archived, inclu
     refetchInterval: pollInterval,
     queryFn: () => platformClient.operator.ci.watches.list(),
     retry: false,
+    ...NO_EVENT_LIST_FRESHNESS,
   });
 
   const contractRecords = useMemo(() => archived || contracts.isError ? [] : contracts.data?.contracts ?? [], [archived, contracts.isError, contracts.data]);

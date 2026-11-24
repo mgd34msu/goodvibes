@@ -65,6 +65,7 @@ for it to read when it starts.
 | `display.themeMode` | `auto` | Light/dark appearance: `auto` probes the terminal background once at startup, `dark`/`light` force a fixed appearance. A change applies at once however it is made (settings screen, `/settings set`, a settings-sync pull); `auto` applies at once when the terminal reported its background, else at the next launch. Independent of `display.theme` |
 | `display.showThinking` | `false` | Show model thinking traces |
 | `display.showTokenSpeed` | `false` | Show tokens/sec in status bar |
+| `display.reduceMotion` | `false` | Reduce motion: the working spinner is one still mark with no colour sweep, and running rows in the conversation stop spinning (their times still count). Answers still appear as they are written; turn `display.stream` off to have each one appear whole |
 | `provider.model` | `openrouter:openrouter/free` | Active model ID, provider-qualified as `<provider>:<model>` |
 | `provider.reasoningEffort` | `medium` | Reasoning depth for supported models |
 | `provider.systemPromptFile` | `` | Path to a custom system prompt file |

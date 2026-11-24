@@ -1,28 +1,38 @@
 import {
+  drawModelWorkspaceDetail,
+  modelWorkspaceFilterRow,
   modelWorkspaceKey as modelKey,
+  modelWorkspaceListAge,
+  modelWorkspaceTabs,
+  modelWorkspaceTargetLine,
   modelWorkspaceTargetSummary,
   modelWorkspaceProviderRows,
-  modelWorkspaceSignIn,
+  modelWorkspaceTier,
+  MODEL_WORKSPACE_UNKNOWN_KIND,
 } from '@goodvibes/engine/terminal-shell/model-workspace-facts';
 import { modelPickerTargetLabel } from '@goodvibes/engine/terminal-shell/model-picker-targets';
+import { truncateDisplay } from '@goodvibes/engine/platform/platform/utils';
 /**
- * The provider/model picker, drawn with the modal surface kit.
+ * The provider/model picker, drawn with the modal surface kit. The tabs, the
+ * filter row and the selected model's detail are the terminal app's
+ * (terminal-shell model-workspace-facts.ts), so both programs show one picker.
  *
  *   ✦ Models › Main chat › Model list                             esc
- *     Main chat   Side work   Tool work   Spoken replies   Decision model   (target tabs)
+ *     Main chat   Other jobs (optional) ▸
  *
  *   ▏Search models                                        12 of 240
+ *   ctrl+t price: any   ctrl+k needs: nothing   ctrl+a every model   …
  *
  *   ✦ anthropic                         element panel
- *     Claude Sonnet   200k · paid         Target: Main chat (enabled)
- *     ...                                 Selected: ...
+ *     Claude Sonnet   200k · paid         Claude Sonnet
+ *     ...                                 Provider  anthropic …
  *
- *   ↑↓ move   ⏎ select   tab target   ctrl+t price   ctrl+k caps ...
+ *   ↑↓ move   ⏎ select   tab next job   ctrl+f pin   ctrl+r refresh catalog
  *
- * The model targets are tabs across the top (tab / ←→ switch), the search
- * row is always live, the list groups models under ✦ headers, and the
- * element panel beside it explains the target and the selected row in full.
- * Effort and context-cap steps are sub-levels (Esc goes back one).
+ * Tab / ←→ move through the targets, the search row is always live, the list
+ * groups models under ✦ headers. Effort and context-cap steps are sub-levels
+ * (Esc goes back one). The search index is not a target here: it is set in
+ * /settings, and the Other jobs line says so.
  */
 
 import type { ModelDefinition } from '@goodvibes/engine/platform/platform/providers';
@@ -38,7 +48,7 @@ import {
   REPRESENTATIVE_7B_PARAMS,
 } from '../core/hardware-profile.ts';
 import { activeTokens } from './theme.ts';
-import { beginModal, finishModal, scrollCountText, searchRow, type KitHint, type SurfaceLayer } from './surface-kit.ts';
+import { beginModal, finishModal, scrollCountText, searchRow, wrapLines, type KitHint, type SurfaceLayer } from './surface-kit.ts';
 import { drawList, type KitRow } from './surface-kit-list.ts';
 import { panel, panelLines, type PanelLine } from './surface-kit-parts.ts';
 import { drawTabRows, splitPanes, drawTextBlock } from './surface-kit-extra.ts';
@@ -50,7 +60,6 @@ import { drawTabRows, splitPanes, drawTextBlock } from './surface-kit-extra.ts';
 export const MODEL_PICKER_CHROME_LINES = 7;
 
 const MODEL_WORKSPACE_TITLE = 'Models';
-const MODEL_WORKSPACE_TARGETS_TITLE = 'Targets';
 const MODEL_WORKSPACE_MODE_LABELS = {
   provider: 'Provider list',
   model: 'Model list',
@@ -59,17 +68,8 @@ const MODEL_WORKSPACE_MODE_LABELS = {
   choice: 'Choose one',
 } as const;
 const MODEL_WORKSPACE_CHOICE_NEXT = 'Enter asks for its address and where its key comes from, then saves it.';
-const MODEL_WORKSPACE_TABLE_HEADERS = {
-  provider: 'Provider                         Configuration       Catalog',
-  effort: 'Reasoning effort                 Meaning',
-  contextCap: 'Context cap input',
-  modelKey: 'Model key',
-  displayName: 'Display name',
-  providerColumn: 'Provider',
-  context: 'Context',
-  tier: 'Tier',
-  caps: 'Caps',
-} as const;
+/** Where the search index is chosen, since the Agent's picker has no tab for it. */
+const SEARCH_INDEX_WHERE = 'The search index (how memories are searched) is chosen in /settings open provider.embeddingProvider.';
 const MODEL_WORKSPACE_REASONING_EFFORT_DETAIL =
   'Reasoning effort applies to the main chat model. Select the default effort for this model.';
 const MODEL_WORKSPACE_CONTEXT_CAP_DETAIL = 'Context cap overrides the detected local-model context window for this selection.';
@@ -97,75 +97,10 @@ function formatContext(value: number | undefined): string {
 
 const targetSummary = (info: ModelPickerTargetInfo): string => modelWorkspaceTargetSummary(info, true);
 
-function selectedModel(picker: ModelPickerModal): ModelDefinition | null {
-  if (picker.mode !== 'model') return null;
-  return picker.getSelected();
-}
-
 const targetLabelFor = modelPickerTargetLabel;
-
-/** Said on a model the catalog does not describe, in its row and its detail. */
-const UNKNOWN_KIND_NOTE = 'kind unknown';
 
 function providerSelectionDetail(targetLabel: string): string {
   return `Provider selection: choose a provider, then choose a model for ${targetLabel}.`;
-}
-
-function modelSelectionDetail(targetLabel: string): string {
-  return `Model selection: choose the model to store for ${targetLabel}. Use filters to narrow large catalogs.`;
-}
-
-function modelWorkspaceFilterText(query: string, price: string, capability: string, group: string, availableOnly: string): string {
-  return `Search: ${query} | Price: ${price} | Capability: ${capability} | Group: ${group} | Available only: ${availableOnly}`;
-}
-
-export function renderModelWorkspacePackageText(): string {
-  return [
-    MODEL_WORKSPACE_TITLE.trim(),
-    MODEL_WORKSPACE_TARGETS_TITLE,
-    MODEL_WORKSPACE_MODE_LABELS.provider,
-    MODEL_WORKSPACE_MODE_LABELS.model,
-    MODEL_WORKSPACE_MODE_LABELS.effort,
-    MODEL_WORKSPACE_MODE_LABELS.contextCap,
-    MODEL_WORKSPACE_MODE_LABELS.choice,
-    MODEL_WORKSPACE_CHOICE_NEXT,
-    'Target: <target> (<state>)',
-    'Current: <route>',
-    providerSelectionDetail('<target>'),
-    'Selected provider: <provider>',
-    modelSelectionDetail('<target>'),
-    'Selected: <model> | <display> | context <context> | <capabilities>',
-    MODEL_WORKSPACE_REASONING_EFFORT_DETAIL,
-    MODEL_WORKSPACE_CONTEXT_CAP_DETAIL,
-    modelWorkspaceFilterText('<query>', '<price>', '<capability>', '<group>', '<available-only>'),
-    MODEL_WORKSPACE_TABLE_HEADERS.provider,
-    MODEL_WORKSPACE_TABLE_HEADERS.effort,
-    MODEL_WORKSPACE_TABLE_HEADERS.contextCap,
-    MODEL_WORKSPACE_TABLE_HEADERS.modelKey,
-    MODEL_WORKSPACE_TABLE_HEADERS.displayName,
-    MODEL_WORKSPACE_TABLE_HEADERS.providerColumn,
-    MODEL_WORKSPACE_TABLE_HEADERS.context,
-    MODEL_WORKSPACE_TABLE_HEADERS.tier,
-    MODEL_WORKSPACE_TABLE_HEADERS.caps,
-    'Model: <model>',
-    'Detected context: <context>',
-    'Override: <cap>',
-    MODEL_WORKSPACE_CONTEXT_CAP_INPUT_HELP,
-    MODEL_WORKSPACE_LOCAL_ONLY_HEADER,
-    MODEL_WORKSPACE_LOCAL_ONLY_SIGN_IN,
-    'Search models',
-    'Search providers',
-    '<n> of <total>',
-    'No models match the search.',
-    'No providers match the search.',
-    'loading catalog…',
-    ...hintsFor('model').map(([, action]) => action),
-    ...hintsFor('provider').map(([, action]) => action),
-    ...hintsFor('effort').map(([, action]) => action),
-    ...hintsFor('contextCap').map(([, action]) => action),
-    ...hintsFor('choice').map(([, action]) => action),
-    UNKNOWN_KIND_NOTE,
-  ].join('\n');
 }
 
 /**
@@ -207,87 +142,63 @@ function modelHardwareFitLine(model: ModelDefinition): string {
   return label ? `Hardware: ${label}` : '';
 }
 
-/** The explanation lines for the element panel (wrapped by panelLines). */
+/** The explanation lines for the element panel outside the model list (wrapped by panelLines). */
 function detailLines(picker: ModelPickerModal): string[] {
   const target = picker.getSelectedTargetInfo();
   const targetLabel = target?.label ?? targetLabelFor(picker.target);
-  const targetState = target ? (target.enabled ? 'enabled' : 'disabled') : 'active';
-  const selected = selectedModel(picker);
   const lines: string[] = [];
-
-  // Local-only header: shown when the list contains only synthetic fit recommendations.
-  // Never show when any real provider is configured.
-  if (isLocalOnlyList(picker)) {
-    lines.push(MODEL_WORKSPACE_LOCAL_ONLY_HEADER);
-    lines.push(MODEL_WORKSPACE_LOCAL_ONLY_SIGN_IN);
-  }
-
-  lines.push(`Target: ${targetLabel} (${targetState})`);
-  if (target) lines.push(`Current: ${targetSummary(target)}`);
+  lines.push(`${targetLabel}${target && !target.enabled ? ' (off)' : ''}`);
+  if (target) lines.push(`Now: ${targetSummary(target)}`);
   if (picker.mode === 'provider') {
     const provider = picker.getFilteredProviders()[picker.selectedIndex] ?? '';
     lines.push(providerSelectionDetail(targetLabel));
-    if (provider) lines.push(`Selected provider: ${provider}`);
+    if (provider) lines.push(`Provider: ${provider}`);
     const unreachable = provider ? picker.unreachableProviders.get(provider) : undefined;
     if (unreachable !== undefined) lines.push(`Health: unreachable: ${unreachable}`);
-  } else if (picker.mode === 'model') {
-    lines.push(modelSelectionDetail(targetLabel));
-    if (selected) {
-      const caps = selected.capabilities ?? {};
-      const capText =
-        [caps.reasoning ? 'reasoning' : '', caps.multimodal ? 'vision' : '', caps.toolCalling ? 'tools' : ''].filter(Boolean).join(', ') ||
-        'standard';
-      // Suppress the key:id line for synthetic local recommendations, they have
-      // no real registry key and displaying the synthetic id would confuse users.
-      if (isProviderSignInRow(selected)) {
-        lines.push('Sign in to a provider to connect a cloud or local model.');
-        if (selected.description) lines.push(selected.description);
-      } else if (!isLocalFitRecommendation(selected)) {
-        lines.push(
-          `Selected: ${modelKey(selected)} | ${selected.displayName} | context ${formatContext(selected.contextWindow)} | ${capText}`,
-        );
-      } else {
-        lines.push(`Selected: ${selected.displayName}`);
-        // Show the fit hint from the description (e.g. "not yet installed (fits in GPU memory)")
-        if (selected.description) lines.push(selected.description);
-      }
-      if (picker.textWork(selected) === 'unknown') lines.push(`Kind: ${UNKNOWN_KIND_NOTE}, the model catalog does not say what it reads and writes`);
-      const fitLine = modelHardwareFitLine(selected);
-      if (fitLine) lines.push(fitLine);
-      const signIn = picker.configuredProviders.has(selected.provider) ? modelWorkspaceSignIn(picker.configuredViaMap.get(selected.provider)) : undefined;
-      if (signIn) lines.push(`Sign-in: ${signIn}`);
-      const unreachable = picker.unreachableProviders.get(selected.provider);
-      if (unreachable !== undefined) lines.push(`Health: ${selected.provider} is unreachable: ${unreachable}`);
-    }
   } else if (picker.mode === 'effort') {
     lines.push(MODEL_WORKSPACE_REASONING_EFFORT_DETAIL);
   } else if (picker.mode === 'choice') {
     if (target?.description) lines.push(target.description);
     const choice = picker.getSelectedChoice();
-    if (choice) lines.push(`Selected: ${choice.label}${choice.detail ? ` | ${choice.detail}` : ''}`);
+    if (choice) lines.push(choice.detail ? `${choice.label}: ${choice.detail}` : choice.label);
     if (choice && choice.id !== '__none__') lines.push(MODEL_WORKSPACE_CHOICE_NEXT);
-    return lines;
   } else {
     lines.push(MODEL_WORKSPACE_CONTEXT_CAP_DETAIL);
   }
-  const filterText = modelWorkspaceFilterText(
-    picker.query || '(none)',
-    picker.categoryFilter,
-    picker.capabilityFilter,
-    picker.groupBy,
-    picker.availableOnly ? 'yes' : 'no',
-  );
-  lines.push(filterText);
   return lines;
 }
 
+/** The model list's panel: the shared detail, with the Agent's local-only lead and hardware fit. */
+function drawModelPanel(f: Parameters<typeof drawModelWorkspaceDetail>[0], picker: ModelPickerModal, p: Parameters<typeof drawModelWorkspaceDetail>[2]): void {
+  const t = activeTokens();
+  const selected = picker.getSelected();
+  const lead = isLocalOnlyList(picker) ? [{ text: MODEL_WORKSPACE_LOCAL_ONLY_HEADER, fg: t.text }, { text: MODEL_WORKSPACE_LOCAL_ONLY_SIGN_IN, fg: t.textMuted }] : [];
+  if (selected && (isProviderSignInRow(selected) || isLocalFitRecommendation(selected))) {
+    // A placeholder row is not a catalog model: say what it does, nothing more.
+    const lines = isProviderSignInRow(selected) ? ['Sign in to a provider to connect a cloud or local model.'] : [selected.displayName];
+    if (selected.description) lines.push(selected.description);
+    const shown: PanelLine[] = [
+      ...lead.map((line) => ({ text: line.text, style: { fg: line.fg } })),
+      ...lines.map((text, k) => ({ text, style: { fg: k === 0 ? t.text : t.textMuted, bold: k === 0 } })),
+    ];
+    panelLines(f.canvas, p, p.l, p.top, shown);
+    return;
+  }
+  const fit = selected ? modelHardwareFitLine(selected) : '';
+  drawModelWorkspaceDetail(f, picker, p, {
+    lead,
+    extra: fit ? [{ text: fit, fg: t.info }] : [],
+    listAge: selected ? modelWorkspaceListAge(picker.listReading(selected.provider), Date.now()) : undefined,
+  });
+}
+
 /** Keycap hints for a picker step. */
-function hintsFor(mode: ModelPickerModal['mode']): KitHint[] {
+function hintsFor(mode: ModelPickerModal['mode'], localSelected = false): KitHint[] {
   if (mode === 'choice')
     return [
       ['↑↓', 'move'],
       ['⏎', 'select'],
-      ['tab', 'target'],
+      ['tab', 'next job'],
     ];
   if (mode === 'effort')
     return [
@@ -303,20 +214,16 @@ function hintsFor(mode: ModelPickerModal['mode']): KitHint[] {
     return [
       ['↑↓', 'move'],
       ['⏎', 'show models'],
-      ['tab', 'target'],
+      ['tab', 'next job'],
     ];
+  // The filter keys are under the search field, each with what it is set to.
   return [
     ['↑↓', 'move'],
     ['⏎', 'select'],
-    ['tab', 'target'],
+    ['tab', 'next job'],
     ['ctrl+f', 'pin'],
     ['ctrl+r', 'refresh catalog'],
-    ['ctrl+t', 'price'],
-    ['ctrl+k', 'caps'],
-    ['ctrl+a', 'available'],
-    ['ctrl+b', 'benchmark'],
-    ['ctrl+g', 'group'],
-    ['space', 'context cap (local)'],
+    ...(localSelected ? [['space', 'context cap'] as KitHint] : []),
   ];
 }
 
@@ -339,16 +246,17 @@ function modelRows(picker: ModelPickerModal): KitRow[] {
       lastGroup = group;
     }
     const synthetic = isProviderSignInRow(model) || isLocalFitRecommendation(model);
-    // A tier the catalog has not published (the catalog not loaded yet, say) is not shown: it is not known to be paid.
-    const right = synthetic ? undefined : [formatContext(model.contextWindow), model.tier].filter((part): part is string => Boolean(part)).join(' · ');
-    const kind = picker.textWork(model) === 'unknown' ? UNKNOWN_KIND_NOTE : '';
+    // A tier nothing states (the catalog not loaded yet, say) is not shown: it is not known to be paid.
+    const tier = synthetic ? '' : modelWorkspaceTier(model);
+    const right = synthetic ? undefined : [formatContext(model.contextWindow), tier].filter((part): part is string => Boolean(part)).join(' · ');
+    const kind = picker.textWork(model) === 'unknown' ? MODEL_WORKSPACE_UNKNOWN_KIND : '';
     // On the recommended short list: why, in place of the capability words.
     const why = picker.recommendedWhy(model);
     rows.push({
       label: model.displayName,
       desc: synthetic ? undefined : [modelKey(model), why ?? capabilityText(model), kind].filter(Boolean).join(' · '),
       right,
-      rightFg: model.tier === 'free' ? t.success : undefined,
+      rightFg: tier === 'free' ? t.success : undefined,
       mark: picker.pinnedIds.has(model.id) ? '★' : undefined,
       markFg: t.warning,
       selected: index === picker.selectedIndex,
@@ -387,17 +295,23 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   const t = activeTokens();
   const target = picker.getSelectedTargetInfo();
   const targetLabel = target?.label ?? targetLabelFor(picker.target);
+  const selectedForHints = picker.mode === 'model' ? picker.getSelected() : null;
   const f = beginModal(screenWidth, screenHeight, {
     title: MODEL_WORKSPACE_TITLE,
     crumbs: [targetLabel, MODEL_WORKSPACE_MODE_LABELS[picker.mode]],
-    hints: hintsFor(picker.mode),
+    hints: hintsFor(picker.mode, selectedForHints ? picker.isLocalModel(selectedForHints) : false),
   });
 
   let top = f.top;
-  // Target tabs: the active target carries the gradient.
+  // Target tabs: Main chat, and the optional jobs behind one tab until one of them is chosen (shared with the terminal app).
   if (picker.targetInfos.length > 0) {
-    const labels = picker.targetInfos.map((info) => `${info.label}${info.enabled ? '' : ' (off)'}`);
-    top += drawTabRows(f.canvas, f.l, top, labels, picker.targetIndex, f.r) + 1;
+    const shown = modelWorkspaceTabs(picker);
+    top += drawTabRows(f.canvas, f.l, top, shown.labels, shown.active, f.r);
+    const about = modelWorkspaceTargetLine(target);
+    if (about) {
+      for (const line of [...wrapLines(about, f.r - f.l + 1).slice(0, 2), SEARCH_INDEX_WHERE]) f.canvas.put(f.l, top++, truncateDisplay(line, f.r - f.l + 1), { fg: t.textMuted });
+    }
+    top += 1;
   }
 
   const searchable = picker.mode === 'model' || picker.mode === 'provider';
@@ -405,18 +319,26 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
     // Out of the models this target can use: an image, video or speech model is not counted.
     const total = picker.mode === 'model' ? picker.models.filter((model) => picker.textWork(model) !== 'other').length : picker.providers.length;
     const shown = picker.mode === 'model' ? picker.getFilteredModels().length : picker.getFilteredProviders().length;
-    const count = picker.query.length > 0 || shown !== total ? `${shown} of ${total}` : `${total} ${picker.mode === 'model' ? 'models' : 'providers'}`;
+    const counted = picker.query.length > 0 || shown !== total ? `${shown} of ${total}` : `${total} ${picker.mode === 'model' ? 'models' : 'providers'}`;
+    const count = picker.mode === 'model' && picker.availableOnly ? `only models you can use · ${counted}` : counted;
     searchRow(f, top, picker.query, picker.mode === 'model' ? 'Search models' : 'Search providers', count);
     top += 2;
+    if (picker.mode === 'model') {
+      // Each filter key with what it is set to; two rows when one does not hold them.
+      const rows = wrapLines(modelWorkspaceFilterRow(picker), f.r - f.l + 1).slice(0, 2);
+      rows.forEach((text, k) => f.canvas.put(f.l, top - 1 + k, text, { fg: t.textFaint }));
+      top += rows.length;
+    }
   }
 
   const split = splitPanes(f.l, f.r, top, f.bottom, 0.5);
   const p = panel(f.canvas, split.panelX, split.panelY, split.panelW, split.panelH);
-  const details: PanelLine[] = detailLines(picker).map((text, k) => ({
-    text,
-    style: { fg: k === 0 ? t.text : text.startsWith('Hardware:') ? t.info : t.textMuted, bold: k === 0 },
-  }));
-  panelLines(f.canvas, p, p.l, p.top, details);
+  if (picker.mode === 'model') {
+    drawModelPanel(f, picker, p);
+  } else {
+    const details: PanelLine[] = detailLines(picker).map((text, k) => ({ text, style: { fg: k === 0 ? t.text : t.textMuted, bold: k === 0 } }));
+    panelLines(f.canvas, p, p.l, p.top, details);
+  }
 
   if (picker.mode === 'contextCap') {
     const model = picker.contextCapPendingModel;

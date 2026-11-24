@@ -12,7 +12,7 @@ import {
   type MemoryUpdateInput,
   type MemoryUpdateReviewInput,
 } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { firstArray, firstString } from '../../lib/object';
 
 /** A value that follows `value` after it has been stable for `delayMs`. */
@@ -32,6 +32,7 @@ export function useReviewQueue() {
   return useQuery({
     queryKey: queryKeys.memoryReviewQueue,
     queryFn: () => platformClient.operator.memory.reviewQueue({ limit: REVIEW_PAGE_LIMIT }),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
 }
 
@@ -39,6 +40,7 @@ export function useConsolidationReceipts() {
   return useQuery({
     queryKey: queryKeys.memoryConsolidationReceipts,
     queryFn: () => platformClient.operator.memory.consolidation.receipts(),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
 }
 

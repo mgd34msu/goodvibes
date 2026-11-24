@@ -28,7 +28,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, RefreshCw } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { WorkspaceCheckpoint, CheckpointsRevertHunkPreviewResult } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { formatError, isConflictError, isMethodUnavailableError, isSessionClosedError } from '../../lib/errors';
 import { formatRelative } from '../../lib/object';
 import { sortCheckpointsNewestFirst, kindLabel } from '../../lib/checkpoints';
@@ -98,6 +98,7 @@ export function SessionChanges({ sessionId, canSteer, closed, streamPaused = fal
     queryKey: queryKeys.sessionChanges(sessionId),
     queryFn: () => platformClient.operator.sessions.changes.get(sessionId),
     enabled: mode === 'session',
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   const sessionChangesUnavailable = sessionChanges.isError && isMethodUnavailableError(sessionChanges.error);
   const sessionChangesFailed = sessionChanges.isError && !sessionChangesUnavailable;

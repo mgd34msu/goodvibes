@@ -4,7 +4,7 @@
  * register this one description, so their guided path, typed line, help,
  * completion, confirmation and the model's catalogue entry are the same.
  */
-import type { McpApi, McpConfigScope, McpServerConfig, McpStoredToolRuleResult, McpToolRule } from '@goodvibes/engine/platform/platform/mcp';
+import { MCP_CREDENTIALS_REFUSED, type McpApi, type McpConfigScope, type McpServerConfig, type McpStoredToolRuleResult, type McpToolRule } from '@goodvibes/engine/platform/platform/mcp';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { commandRefusal } from './command-confirmation.js';
@@ -324,7 +324,11 @@ function serverList(servers: readonly McpSecurityServer[]): string {
       : '';
     lines.push(`  ${server.name}: ${serverState(server)}; trust: ${formatTrust(server.trustMode)}${session}; role: ${formatRole(server.role)}${server.sessionRole !== undefined ? ' (this session)' : ''}${server.allowedPaths.length ? `; ${server.allowedPaths.length} folder(s)` : ''}${server.allowedHosts.length ? `; ${server.allowedHosts.length} site(s)` : ''}${rules}`);
     if (!server.connected && server.lastError) lines.push(`      last error: ${server.lastError}`);
-    if (!server.connected && server.reconnect?.stoppedReason) lines.push(`      ${server.reconnect.stoppedReason}; fix the server or its entry, then /mcp reload`);
+    if (!server.connected && server.reconnect?.stoppedReason) {
+      lines.push(server.reconnect.stoppedReason === MCP_CREDENTIALS_REFUSED
+        ? `      ${server.reconnect.stoppedReason}`
+        : `      ${server.reconnect.stoppedReason}; fix the server or its entry, then /mcp reload`);
+    }
   }
   return lines.join('\n');
 }
@@ -649,8 +653,14 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
         const server = knownServer(api, values.server!, 'held-back tools');
         if (server.schemaFreshness !== 'quarantined') refuse(`${server.name}'s tools are not held back (${formatFreshness(server.schemaFreshness)}); nothing changed.`);
         api.approveSchemaQuarantine(server.name, 'owner');
+        // Its tools are read again as part of accepting them.
+        const tools = (await api.listAllTools()).filter((tool) => tool.serverName === server.name);
         ctx.renderRequest();
-        return 'Run /mcp reload to read its tools again.';
+        const after = api.listServerSecurity().find((entry) => entry.name === server.name);
+        if (!after?.connected) return `${server.name}'s tools are accepted; it is not connected now, so they are read when it connects (/mcp servers shows why).`;
+        return tools.length > 0
+          ? `Read ${server.name}'s tools again: ${tools.length} offered (${tools.slice(0, 8).map((tool) => tool.toolName).join(', ')}${tools.length > 8 ? ', ...' : ''}).`
+          : `Read ${server.name}'s tools again: it offers none${after.lastError ? ` (${after.lastError})` : ''}.`;
       },
     },
     {

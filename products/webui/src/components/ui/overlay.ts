@@ -434,7 +434,6 @@ export function useMediaQuery(query: string): boolean {
 
 /** The phone breakpoint from the design doc: under 900 the shell is a drawer layout. */
 export const PHONE_QUERY = '(max-width: 899px)';
-export const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 
 let idCounter = 0;
 /** Stable DOM id for aria wiring when React's useId is not wanted in a string template. */

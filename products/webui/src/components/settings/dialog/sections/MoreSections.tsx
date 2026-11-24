@@ -12,6 +12,7 @@ import { queryKeys } from '../../../../lib/queries';
 import { bestTitle } from '../../../../lib/object';
 import { providerOptionsFromResponse, sortProvidersConfiguredFirst } from '../../../../lib/provider-models';
 import { useWebUiPreferences } from '../../../../lib/ui-preferences';
+import { modeInForceLine, useDaemonModeInForce } from '../../../../lib/mode-in-force';
 import type { ViewId } from '../../../../lib/router';
 import { AccountsPanel } from '../../../AccountsPanel';
 import { CredentialStatusPanel } from '../../../CredentialStatusPanel';
@@ -67,6 +68,42 @@ export function DevicesSection({ onOpenView }: { onOpenView: (view: ViewId) => v
 
 export function PeopleSection() {
   return <PrincipalsView />;
+}
+
+/**
+ * The decision model behind "Jev decides" (the judgment.* settings), on its own
+ * as an advanced section: who answers is set once, in Permissions.
+ */
+/**
+ * Decision models (advanced): first what is in force now, in the daemon's own
+ * words (the same reading the header chip shows), then the decision model's
+ * settings with the choice of model first and the call-volume alerts last.
+ */
+export function DecisionModelsSection() {
+  const { groups } = useConfigSettings();
+  const words = useDaemonModeInForce().data?.words;
+  const ordered = useMemo(() => groupsForSection('decision-models', groups).map((group) => ({
+    ...group,
+    plainRows: [...group.plainRows].sort((a, b) => decisionRowRank(a.key) - decisionRowRank(b.key)),
+  })), [groups]);
+  return (
+    <>
+      {words && (
+        <SettingsBlock title="In force now" description={`Permissions: ${modeInForceLine(words)}`}>
+          <p className="settings-empty">{words.sentence}</p>
+        </SettingsBlock>
+      )}
+      <ConfigGroupList groups={ordered} emptyText="No decision model settings reported." />
+    </>
+  );
+}
+
+/** The order a person meets the decision model's settings in: which model, then how it is reached, then its rules, then the alerts. */
+function decisionRowRank(key: string): number {
+  const order = ['judgment.model', 'judgment.backend', 'judgment.endpoint', 'judgment.policy', 'judgment.fallbacks', 'judgment.decisionDeadlineMs'];
+  const at = order.findIndex((prefix) => key === prefix || key.startsWith(`${prefix}.`));
+  if (key.startsWith('judgment.volumeMonitor')) return 1000;
+  return at === -1 ? 500 : at;
 }
 
 export function CredentialsSection() {
@@ -132,9 +169,25 @@ export function UsageSection() {
 }
 
 export function VoiceSection() {
+  const [preferences, setPreference] = useWebUiPreferences();
   return (
     <>
       <div className="settings-embed settings-embed--voice"><VoiceSettings /></div>
+      <SettingsBlock title="This browser" description="Applies to this browser only.">
+        <div className="settings-rows">
+          <SettingRow
+            label="Dictate with this browser's speech service"
+            description="Used only while the daemon has no speech-to-text provider. It sends what you say to the browser's maker to be written out. On: the mic dictates in one tap; off: the mic asks first."
+            control={(
+              <Toggle
+                checked={preferences.browserDictation}
+                aria-label="Dictate with this browser's speech service"
+                onChange={(on) => setPreference('browserDictation', on)}
+              />
+            )}
+          />
+        </div>
+      </SettingsBlock>
       <SectionConfig id="voice" />
     </>
   );

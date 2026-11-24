@@ -116,6 +116,16 @@ export function getProviderModelsCachePath(persistenceRoot: string, providerId: 
   return join(persistenceRoot, 'provider-models', `${providerId}.json`);
 }
 
+/**
+ * The model list a provider stored at its last read (not tied to a sign-in),
+ * so a provider starts from what it read last while the fresh read runs.
+ */
+export function storedProviderModelIds(cachePath: string | undefined): string[] | undefined {
+  if (!cachePath) return undefined;
+  const stored = loadModelListCache(cachePath);
+  return stored && stored.key === undefined && stored.models.length > 0 ? [...stored.models] : undefined;
+}
+
 function loadModelListCache(cachePath: string): ModelListCacheFile | null {
   try {
     const raw = fs.readFileSync(cachePath, 'utf-8');
@@ -196,6 +206,8 @@ export function formatModelDiscoveryReport(providerName: string, result: LiveMod
 
 export interface LiveModelRefreshOptions {
   readonly providerName: string;
+  /** Where the list is read from (scheme, host and port), for the words of a failed read. */
+  readonly address?: string | undefined;
   /**
    * Absolute path to this provider's on-disk model-list cache file. When
    * omitted, refresh runs in-memory only (no on-disk persistence, no TTL
@@ -342,14 +354,57 @@ async function refreshListing(opts: LiveModelRefreshOptions): Promise<{ result: 
     if (opts.skipUnavailableLocal && !cache && (code === 'ConnectionRefused' || code === 'ECONNREFUSED')) {
       return listed({ models: [], source: 'catalog', added: [], removed: [], skippedReason: 'local-endpoint-unavailable' });
     }
-    const message = summarizeError(err);
     const cannotServe = listingFailureMeansCannotServe(err) ? { cannotServe: true } : {};
-    logger.warn('[provider-models] Live model discovery failed', { provider: opts.providerName, error: message });
+    // The runtime's own words go to the log; the row says it plainly.
+    logger.warn('[provider-models] Live model discovery failed', { provider: opts.providerName, address: opts.address, error: summarizeError(err) });
+    const message = unreachableListingWords(opts.providerName, opts.address, err, cache?.fetchedAt);
     if (cache) {
       return listed({ models: cache.models, source: 'cache', added: [], removed: [], error: message, ...cannotServe, listedAt: cache.fetchedAt, ...cachedFacts }, cache.fetchedAt);
     }
     return listed({ models: [], source: 'catalog', added: [], removed: [], error: message, ...cannotServe });
   }
+}
+
+/** The scheme, host and port of a listing URL, for the words of a failed read (never its path or query). */
+export function listingAddress(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  try { return new URL(url).origin; } catch { return undefined; }
+}
+
+/** Why a listing failed, in plain words (the raw error is logged, not shown). */
+function plainListingReason(err: unknown): string {
+  const status = err && typeof err === 'object' && 'status' in err && typeof err.status === 'number' ? err.status : undefined;
+  if (status !== undefined) {
+    if (status === 401 || status === 403) return 'it did not accept the key';
+    if (status === 404) return 'it has no model list at that address';
+    if (status === 429) return 'it is limiting requests right now';
+    if (status >= 500) return `it had an error of its own (HTTP ${status})`;
+    return `it answered HTTP ${status}`;
+  }
+  const code = err && typeof err === 'object' && 'code' in err ? String(err.code) : '';
+  const name = err instanceof Error ? err.name : '';
+  const text = err instanceof Error ? err.message : String(err);
+  if (code === 'ConnectionRefused' || code === 'ECONNREFUSED') return 'nothing is listening at that address';
+  if (code === 'ENOTFOUND' || code === 'DNSException' || code === 'EAI_AGAIN') return 'that name could not be found';
+  if (name === 'TimeoutError' || name === 'AbortError' || code === 'ETIMEDOUT' || code === 'Timeout') return 'it did not answer in time';
+  if (code === 'FailedToOpenSocket' || code === 'ENETUNREACH' || code === 'EHOSTUNREACH') return 'this computer could not open a connection to it';
+  if (code === 'ConnectionClosed' || code === 'ECONNRESET') return 'it closed the connection';
+  if (code.startsWith('CERT_') || code.includes('CERT') || code.includes('SSL')) return 'its certificate was not trusted';
+  if (text === 'live model list was empty') return 'it listed no models';
+  if (text.endsWith('returned no model array')) return 'its answer was not a model list';
+  return 'the request failed';
+}
+
+/**
+ * A provider row whose read failed: "Could not reach <provider> at <address>:
+ * <plain reason>. Showing the list read <when>."
+ */
+export function unreachableListingWords(provider: string, address: string | undefined, err: unknown, storedAt: number | undefined): string {
+  const where = address ? ` at ${address}` : '';
+  const shown = storedAt !== undefined
+    ? `Showing the list read ${new Date(storedAt).toLocaleString('en-GB', { dateStyle: 'medium', timeStyle: 'short' })}.`
+    : 'No list was read from it yet; showing the models it came with.';
+  return `Could not reach ${provider}${where}: ${plainListingReason(err)}. ${shown}`;
 }
 
 const CHAT_MODEL_SITE = 'providers.live-model-discovery.chat-model';

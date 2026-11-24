@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { client as platformClient } from '../../lib/goodvibes';
 import { formatError } from '../../lib/errors';
+import { subscribeEvents } from '../../lib/event-stream';
 import { Button } from '../ui/Button';
 import { Field, Input } from '../ui/Field';
 import { SettingsBlock } from './dialog/parts';
@@ -64,6 +65,13 @@ async function invoke(operation: IntakeOperation | 'list', input: Record<string,
   return await platformClient.operator.invoke(`inbound.telegram.${operation}` as 'inbound.telegram.list', input as never);
 }
 
+/** Whether a `workspace` frame is LIST_CHANGED for the delegated Telegram intake (the envelope or its payload). */
+function isTelegramIntakeChange(frame: unknown): boolean {
+  const outer = (frame ?? {}) as { type?: unknown; list?: unknown; payload?: unknown };
+  const inner = (outer.payload ?? {}) as { type?: unknown; list?: unknown };
+  return [inner, outer].some((event) => event.type === 'LIST_CHANGED' && event.list === 'telegram-intake');
+}
+
 function holdText(result: CommandResult): string {
   const account = result.accountIdentity ? ` The verified bot is @${result.accountIdentity.username} (${result.accountIdentity.id}).` : '';
   return `${result.message ?? 'Held.'}${account}${result.nextStep ? ` Next: ${result.nextStep}` : ''}`;
@@ -95,6 +103,32 @@ export function TelegramDelegatedIntake() {
     }
   }, []);
   useEffect(() => { void refresh(); }, [refresh]);
+  // Kept current without a click: the daemon's LIST_CHANGED `telegram-intake` and the owner-inbox
+  // item a delegated message posts re-read the list, as do the window regaining focus and the
+  // network coming back (the fallback).
+  useEffect(() => {
+    const again = () => { void refresh(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') again(); };
+    window.addEventListener('focus', again);
+    window.addEventListener('online', again);
+    document.addEventListener('visibilitychange', onVisible);
+    const unsubscribe = subscribeEvents({
+      domains: ['gate', 'workspace'],
+      events: ['owner-inbox-update', 'workspace'],
+      onEvent: (name, payload) => {
+        // LIST_CHANGED `telegram-intake`: a delegated message waits for review, or the intake was changed.
+        if (name === 'workspace' && !isTelegramIntakeChange(payload)) return;
+        again();
+      },
+      onReady: (resumed) => { if (resumed) again(); },
+    });
+    return () => {
+      window.removeEventListener('focus', again);
+      window.removeEventListener('online', again);
+      document.removeEventListener('visibilitychange', onVisible);
+      unsubscribe();
+    };
+  }, [refresh]);
 
   const run = async (operation: IntakeOperation, input: Record<string, unknown>, done: (result: CommandResult) => string) => {
     if (pending) return;

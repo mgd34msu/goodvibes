@@ -77,10 +77,31 @@ function finish(admission: NativeConversationTurnAdmission, status: FinishedNati
 export function validateNativeConversationTurn(permit: NativeConversationTurnPermit, text: string, content?: readonly ContentPart[], projectId?: string): NativeConversationTurnSource {
   const source = readNativeConversationTurnPermit(permit);
   if (source.text !== text || (projectId !== undefined && source.projectId !== projectId)
-    || (content !== undefined && (content.length !== 1 || content[0]?.type !== 'text' || content[0].text !== text))) {
+    || (content !== undefined && !nativeContentMatches(source, text, content))) {
     throw new NativeConversationTurnAdmissionError('identity_mismatch');
   }
   return source;
+}
+
+/**
+ * A native turn's content is its own text, or, for a request that carried
+ * files, that text followed by what the host read from those files (the chat
+ * attachment path): text first, then at most one image per image attachment,
+ * each of a type one of its attachments has.
+ */
+function nativeContentMatches(source: NativeConversationTurnSource, text: string, content: readonly ContentPart[]): boolean {
+  const [first, ...rest] = content;
+  if (first?.type !== 'text') return false;
+  if (!source.attachments) return content.length === 1 && first.text === text;
+  if (!first.text.startsWith(text)) return false;
+  const imageTypes = source.attachments.map((attachment) => attachment.mimeType.toLowerCase()).filter((type) => type.startsWith('image/'));
+  return rest.length <= imageTypes.length && rest.every((part) => part.type === 'image' && imageTypes.includes(part.mediaType.toLowerCase()));
+}
+
+/** The content a native turn runs with: its text alone, unless the request carried files. */
+export function nativeTurnContent(permit: NativeConversationTurnPermit, text: string, content: ContentPart[] | undefined): ContentPart[] | undefined {
+  if (!content) return content;
+  return readNativeConversationTurnPermit(permit).attachments ? content : [{ type: 'text', text }];
 }
 
 /** Validates before queueing; the same logical source cannot run twice. */

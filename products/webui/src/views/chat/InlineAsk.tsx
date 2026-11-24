@@ -20,6 +20,7 @@ import { approvalReading, type ApprovalReading } from '../../lib/approvals';
 import { readingStateLine, type OpenAsk } from '../../lib/asks';
 import type { ApprovalRecord } from '../../lib/goodvibes';
 import { queryKeys } from '../../lib/queries';
+import { motionReduced } from '../../lib/ui-preferences';
 import { Menu, MenuItem, MenuMeta, MenuSeparator } from '../../components/ui/Menu';
 import { ModeSheetItems } from '../../components/shell/ModeChip';
 import { useOptionalShell } from '../../components/shell/ShellContext';
@@ -40,7 +41,7 @@ export function useChatAsks(sessionId: string): OpenAsk[] {
 function scrollToAsk(key: string): void {
   const element = document.getElementById(`ask-${key}`);
   if (!element) return;
-  element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  element.scrollIntoView({ behavior: motionReduced() ? 'auto' : 'smooth', block: 'center' });
   element.querySelector<HTMLElement>('button:not([disabled])')?.focus({ preventScroll: true });
 }
 
@@ -80,36 +81,41 @@ export function ChatAsksChip({ sessionId, onOpenSettings }: { sessionId: string;
 /**
  * On a phone, where Work and the other chats are behind the drawer: a banner at
  * the top of the chat when something outside this chat waits for the person,
- * naming the oldest and opening it with one tap (its chat, where the card is, or
- * its detail in Work). Reads the asks the app already holds; nothing on desktop,
- * where the sidebar's Work count is in view.
+ * naming the most urgent (the work board's order: a purchase window that runs
+ * out soonest first). With one waiting, "Open its chat" or "Open it" opens it
+ * (its chat, where the card is, or its detail in Work); with more, "Review N"
+ * opens Work on only what waits. While a purchase window runs, the banner
+ * says when the nearest one goes ahead. Reads the asks the app already holds;
+ * nothing on desktop, where the sidebar's Work count is in view.
  */
-export function ElsewhereAsksBanner({ sessionId, chatSessionIds, onOpenChat, onOpenAsk }: {
+export function ElsewhereAsksBanner({ sessionId, chatSessionIds, onOpenChat, onOpenAsk, onReviewAll }: {
   sessionId: string;
   chatSessionIds: ReadonlySet<string>;
   onOpenChat: (sessionId: string) => void;
   onOpenAsk?: ((key: string) => void) | undefined;
+  onReviewAll?: (() => void) | undefined;
 }) {
   const phone = useOptionalShell()?.mode === 'drawer';
   const { asks } = useOpenAsks(phone);
-  const elsewhere = useMemo(
-    () => asks.filter((ask) => !sessionId || ask.sessionId !== sessionId).sort((a, b) => a.askedAt - b.askedAt),
-    [asks, sessionId],
-  );
+  // useOpenAsks lists them most urgent first.
+  const elsewhere = useMemo(() => asks.filter((ask) => !sessionId || ask.sessionId !== sessionId), [asks, sessionId]);
   const first = elsewhere[0];
   if (!phone || !first) return null;
   const inChat = first.sessionId !== undefined && chatSessionIds.has(first.sessionId);
-  if (!inChat && !onOpenAsk) return null;
-  const open = () => (inChat && first.sessionId ? onOpenChat(first.sessionId) : onOpenAsk?.(first.key));
+  const several = elsewhere.length > 1 && onReviewAll !== undefined;
+  if (!several && !inChat && !onOpenAsk) return null;
+  const open = () => (several ? onReviewAll?.() : inChat && first.sessionId ? onOpenChat(first.sessionId) : onOpenAsk?.(first.key));
   const lead = elsewhere.length === 1 ? 'Waiting for you elsewhere' : `${String(elsewhere.length)} things wait for you elsewhere`;
+  const nearest = elsewhere.find((ask) => ask.presentation.countdown?.verb === 'goes ahead')?.presentation.countdown;
+  const nearestWords = nearest ? ` · nearest: goes ahead in ${String(Math.max(0, Math.ceil((nearest.at - Date.now()) / 60_000)))} min` : '';
   return (
     <div className="chat-elsewhere" role="status">
       <span className="chat-elsewhere__text">
-        <span className="chat-elsewhere__lead">{lead}: </span>
+        <span className="chat-elsewhere__lead">{lead}{nearestWords}: </span>
         {first.presentation.title}
       </span>
       <button type="button" className="chat-elsewhere__open" onClick={open}>
-        {inChat ? 'Open its chat' : 'Open it'}
+        {several ? `Review ${String(elsewhere.length)}` : inChat ? 'Open its chat' : 'Open it'}
       </button>
     </div>
   );

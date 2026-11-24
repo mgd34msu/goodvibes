@@ -112,6 +112,9 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
       const dialog = ctx.invokedByModel !== true && ctx.openSelection !== undefined;
       const names = description.actions.map((action) => `${action.word} (${action.label})`).join(', ');
       if ('bare' in parsed) {
+        // A command whose screen is the point (`/work`) opens it: its other actions are reached from that screen.
+        const opens = description.bareOpens ? description.actions.find((action) => action.id === description.bareOpens) : undefined;
+        if (dialog && opens) { await runComplete(description, opens, defaultsOf(opens as ActionDescription<never>), ctx); return; }
         if (dialog) { await runGuided(unknown, {}, ctx); return; }
         const report = description.actions.find((action) => action.id === description.report);
         if (!report) throw commandRefusal(`/${description.name} needs an action. The actions are: ${names}.`, `/help ${description.name} shows each one with its line.`, 'USAGE');

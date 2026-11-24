@@ -9,6 +9,7 @@
 import { revealOrNull, type Secret } from '../security/secret.js';
 import { GoogleConnectionOwner, sharedGoogleConnectionOwner, subscribeGoogleCredentialChanges } from './connection-owner.js';
 import type { GoogleApiFetchPort } from './api-client.js';
+import { googleConnectionRepairOf } from './connection-repair.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { GoogleBootCheckResult } from './token-manager.js';
@@ -58,6 +59,8 @@ export function daemonGoogleConnectionOwner(deps: DaemonGoogleConnectionDeps): G
         secretGet: async (key) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
       },
       fetch: deps.fetch ?? { fetch: (url: string, init: RequestInit) => fetch(url, init) },
+      // The repair the daemon installed for its store: a refused request starts the consent or the enable and is sent again.
+      repair: () => googleConnectionRepairOf(deps.secretsManager)?.requestRepair,
       ...(config === undefined && secrets === undefined ? {} : {
         onCredentialChange: (listener: () => void) => subscribeGoogleCredentialChanges({ config, secrets }, listener),
       }),

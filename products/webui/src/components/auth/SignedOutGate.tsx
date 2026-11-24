@@ -32,7 +32,7 @@ import { Camera, KeyRound, Radio, ShieldCheck } from 'lucide-react';
 import { useEffect, useState, useSyncExternalStore, type SyntheticEvent } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { GOODVIBES_BASE_URL, login, setExplicitAuthToken } from '../../lib/goodvibes';
-import { formatError, isAuthExpiredError } from '../../lib/errors';
+import { formatError, isAuthExpiredError, isDaemonUnreachableError } from '../../lib/errors';
 import { decodeRelayPairingCode, getStoredRelayPairing, storeRelayPairing, type RelayPairingPayload } from '../../lib/relay-pairing';
 import { RelayPairingOffer } from './RelayPairingOffer';
 import {
@@ -331,8 +331,10 @@ export function SignedOutGate({ pairingError, relayPairingError }: SignedOutGate
               {tokenError != null && (
                 <div className="banner warning" role="alert">
                   {isAuthExpiredError(tokenError)
-                    ? <span>That code didn&rsquo;t work. It may have expired; run <code>goodvibes pair</code> again.</span>
-                    : `Couldn't check that code: ${formatError(tokenError)}. Try again.`}
+                    ? <span>GoodVibes refused that code: it was already used, revoked, made for a different daemon, or mistyped. Run <code>goodvibes pair</code> on the computer running GoodVibes for a new one.</span>
+                    : isDaemonUnreachableError(tokenError)
+                      ? `The code was not checked: this page could not reach GoodVibes (${formatError(tokenError)}). A phone must be on the same network as the computer running GoodVibes, or use Tailscale. Try again.`
+                      : `Couldn't check that code: ${formatError(tokenError)}. Try again.`}
                 </div>
               )}
               <Button variant="primary" type="submit" disabled={tokenMutation.isPending || !token.trim()}>

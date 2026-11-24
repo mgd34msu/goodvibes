@@ -11,20 +11,23 @@ import type { ThemeJson } from '../types.js';
 export const GOODVIBES_THEME: ThemeJson = {
   $schema: 'https://opencode.ai/theme.json',
   theme: {
-    primary: { dark: '#5ee0e6', light: '#007a83' },
-    secondary: { dark: '#d18cf5', light: '#9a32c4' },
+    // Every colour that carries text reaches 4.5:1 on each surface it is drawn
+    // on (the terminal's own background, panel, element and selection): the
+    // smallest lift of the approved values that does.
+    primary: { dark: '#5ee0e6', light: '#007079' },
+    secondary: { dark: '#d18cf5', light: '#9832c2' },
     accent: { dark: '#a99af7', light: '#6450d0' },
-    error: { dark: '#f2767e', light: '#c8323c' },
-    warning: { dark: '#f0b660', light: '#9a6400' },
-    success: { dark: '#7ddcae', light: '#23824d' },
-    info: { dark: '#7aa7f5', light: '#2e62c8' },
+    error: { dark: '#f37d84', light: '#bc2f38' },
+    warning: { dark: '#f0b660', light: '#8c5b00' },
+    success: { dark: '#7ddcae', light: '#1f7244' },
+    info: { dark: '#7aa7f5', light: '#2d60c4' },
 
     text: { dark: '#e4e2ee', light: '#1c1b22' },
-    // Muted and faint text carry key hints, reasons and times, so both reach
-    // 4.5:1 on the panel and on elements: the smallest lift of the approved
-    // values that does (dark muted #8e8ba3, faint #636176; light faint #9794a4).
-    textMuted: { dark: '#9895ab', light: '#62606d' },
-    textFaint: { dark: '#9896a4', light: '#6c6a76' },
+    // Three text levels a person can tell apart: faint sits at 4.5:1 on the
+    // lightest (dark) or darkest (light) surface it is drawn on, muted at least
+    // 10 CIELAB L* above it toward text, and text at least 10 L* above muted.
+    textMuted: { dark: '#bcbac8', light: '#4d4c56' },
+    textFaint: { dark: '#a19fac', light: '#66646f' },
     selectedListItemText: { dark: '#10111a', light: '#ffffff' },
 
     background: 'transparent',
@@ -39,10 +42,10 @@ export const GOODVIBES_THEME: ThemeJson = {
 
     brand: { dark: '#5ee0e6', light: '#0077aa' },
     brandEnd: { dark: '#d18cf5', light: '#7c3aed' },
-    reasoning: { dark: '#c08af0', light: '#7c3aed' },
+    reasoning: { dark: '#c08af0', light: '#7a39e8' },
 
-    diffAdded: { dark: '#6fdcb0', light: '#23824d' },
-    diffRemoved: { dark: '#f2767e', light: '#c8323c' },
+    diffAdded: { dark: '#6fdcb0', light: '#217948' },
+    diffRemoved: { dark: '#f2767e', light: '#c6323b' },
     diffContext: 'textMuted',
     diffHunkHeader: 'info',
     diffHighlightAdded: { dark: '#a6f0cc', light: '#15693a' },
@@ -50,7 +53,7 @@ export const GOODVIBES_THEME: ThemeJson = {
     diffAddedBg: { dark: '#1c3230', light: '#e3edea' },
     diffRemovedBg: { dark: '#3a2031', light: '#f8e8ec' },
     diffContextBg: 'backgroundPanel',
-    diffLineNumber: 'textFaint',
+    diffLineNumber: { dark: '#a19fac', light: '#64626d' },
     diffAddedLineNumberBg: { dark: '#172a2a', light: '#d6e6e0' },
     diffRemovedLineNumberBg: { dark: '#2f1a28', light: '#f0dbe1' },
 
@@ -69,11 +72,11 @@ export const GOODVIBES_THEME: ThemeJson = {
     markdownImageText: 'markdownLinkText',
     markdownCodeBlock: 'text',
 
-    syntaxComment: { dark: '#6f6c85', light: '#8a8796' },
+    syntaxComment: { dark: '#9997a8', light: '#6c6975' },
     syntaxKeyword: { dark: '#d18cf5', light: '#9a32c4' },
-    syntaxFunction: { dark: '#5ee0e6', light: '#007a83' },
+    syntaxFunction: { dark: '#5ee0e6', light: '#00767f' },
     syntaxVariable: 'text',
-    syntaxString: { dark: '#9ee6a8', light: '#2d7d3a' },
+    syntaxString: { dark: '#9ee6a8', light: '#2c7938' },
     syntaxNumber: { dark: '#f5a97a', light: '#b04f12' },
     syntaxType: { dark: '#f0cf7a', light: '#8a6200' },
     syntaxOperator: { dark: '#8fb8f5', light: '#2e62c8' },

@@ -266,7 +266,8 @@ export function summarizeCredentials(
       canReadMail: false,
       canReadCalendar: false,
       canWriteCalendar: false,
-      detail: 'No Google credentials found. Say the word and I will connect an account.',
+      // A request that meets this starts the connection itself (connection-repair.ts); the summary states the fact only.
+      detail: 'No Google credentials found on this machine.',
     };
   }
 

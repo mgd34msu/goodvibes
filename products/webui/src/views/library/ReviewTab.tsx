@@ -26,6 +26,7 @@ import { ConsolidationProposals, ConsolidationRuns, PROPOSAL_KIND_LABEL } from '
 import { MemoryRecordPane } from '../memory/MemoryRecordPane';
 import { MemoryRecordRow } from '../memory/MemoryRecordRow';
 import { KnowledgeCandidatePane, KnowledgeCandidateRows, parseCandidate } from '../knowledge/KnowledgeCandidates';
+import { motionReduced } from '../../lib/ui-preferences';
 import {
   candidateItems,
   includesText,
@@ -87,7 +88,7 @@ export function ReviewTab({ query = '' }: ReviewTabProps) {
 
   useEffect(() => {
     if (highlight.size === 0) return;
-    listRef.current?.querySelector('.lib-row--highlight')?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
+    listRef.current?.querySelector('.lib-row--highlight')?.scrollIntoView?.({ behavior: motionReduced() ? 'auto' : 'smooth', block: 'nearest' });
   }, [highlight]);
 
   const selectedRecord: MemoryRecord | undefined = selection?.kind === 'record' ? queueById.get(selection.id) : undefined;

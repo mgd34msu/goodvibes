@@ -85,7 +85,7 @@ export class TerminalHostPairingController<
     if (this.disposed) return;
     this.discardUntilBoundary = false;
     if (!this.ui.canPresent()) {
-      this.ui.print('Close the pending shell prompt before starting pairing. No pairing request was made.');
+      this.ui.print('Answer or close the open question first, then pair. Nothing was sent to the host.');
       return;
     }
     const operation: Operation<Result> = {
@@ -97,7 +97,7 @@ export class TerminalHostPairingController<
     };
     this.operation = operation;
     this.ui.setPrompt('');
-    this.ui.print('Reading pairing preview. Escape, Ctrl-C or Ctrl-D cancels.');
+    this.ui.print('Checking the host before pairing. Escape, Ctrl-C or Ctrl-D cancels.');
     let preview: HostPairingPreview<Result>;
     try {
       this.policy.beforePreview?.(request, this.ui);
@@ -110,7 +110,7 @@ export class TerminalHostPairingController<
         this.finish(operation);
         const reason = error instanceof Error ? error.message : String(error);
         this.ui.print(
-          `Pairing preview failed: ${reason.replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'unknown error'}. No pairing request was made.`,
+          `Checking the host failed: ${reason.replace(/[\x00-\x1f\x7f]/g, ' ').trim() || 'unknown error'}. Nothing was sent to the host.`,
         );
       }
       return;
@@ -132,7 +132,7 @@ export class TerminalHostPairingController<
     operation.value = '';
     operation.invalidInput = false;
     this.ui.setPrompt('');
-    this.ui.print(`Type ${preview.result.confirmation} to ${preview.result.confirmationPrompt ?? 'create this host-bound administrative credential'}, or press Enter to cancel.`);
+    this.ui.print(`To ${preview.result.confirmationPrompt ?? 'give this device its own administrator key for this host'}, type ${preview.result.confirmation} and press Enter. Enter alone or Esc cancels.`);
   }
   /** Called for each token ahead of ordinary composer/modal/model routing. */
   handleToken(token: InputToken): boolean {
@@ -218,7 +218,7 @@ export class TerminalHostPairingController<
       this.ui.print(this.policy.format(result));
     } catch {
       if (this.current(operation))
-        this.ui.print(`Pairing interrupted. Run ${this.policy.command} to inspect its saved state before taking further action.`);
+        this.ui.print(`Pairing interrupted. Run ${this.policy.command} to see where it got to before doing anything else.`);
     } finally {
       this.finish(operation);
     }
@@ -242,7 +242,7 @@ export class TerminalHostPairingController<
     if (!this.operation) return false;
     this.discardUntilBoundary = true;
     this.cancel(!preservePrompt);
-    this.ui.print('Pairing input was interrupted by another prompt. Press Enter or Escape before answering the new prompt.');
+    this.ui.print('Another question opened while you were typing the pairing code, so pairing was cancelled. Press Enter or Escape, then answer the new question.');
     return true;
   }
   cancel(clearPrompt = true): boolean {
@@ -261,8 +261,8 @@ export class TerminalHostPairingController<
     } else {
       this.ui.print(
         operation.phase === 'applying'
-          ? `Pairing interrupted. Run ${this.policy.command} to inspect its saved state before taking further action; no automatic retry will occur.`
-          : 'Pairing cancelled before the migration request.',
+          ? `Pairing interrupted. Run ${this.policy.command} to see where it got to before doing anything else; it is not retried on its own.`
+          : 'Pairing cancelled. Nothing was sent to the host.',
       );
     }
     return true;

@@ -179,7 +179,7 @@ export function button(canvas: SurfaceCanvas, x: number, y: number, label: strin
   const toneBg = tone === 'danger' ? t.error : tone === 'warning' ? t.warning : t.brand;
   const style: KitStyle = chosen
     ? { fg: t.selectedListItemText, bg: toneBg, bold: true }
-    : { fg: t.textMuted, bg: t.border };
+    : { fg: t.text, bg: t.border };
   return canvas.put(x, y, ` ${label} `, style);
 }
 

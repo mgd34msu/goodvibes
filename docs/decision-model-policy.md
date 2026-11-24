@@ -1,10 +1,11 @@
 # Decision-model policies
 
 The `judgment.policy` setting controls decision-model use independently of tool
-permissions. In TUI or Agent, open `/settings`, choose **Judgment**, then
-**Decision models**, and choose **Hybrid (default)**, **Decision Model Only** or
-**No Decision Model** from the picker. WebUI shows the same choices in its
-Judgment settings, and `goodvibes-daemon config set judgment.policy <value>`
+permissions. Every `judgment.*` setting is in one advanced section, **Models and
+providers, Decision models (advanced)**, in both terminal programs (`/settings`,
+or `/settings decision-models`) and in the web UI's Settings; search finds each
+by its name or key. Choose **Hybrid (default)**, **Decision Model Only** or
+**No Decision Model** there, and `goodvibes-daemon config set judgment.policy <value>`
 sets the daemon's own copy. The stored values are `Hybrid`, `Decision Model Only`
 and `No Decision Model`; "(default)" is only how the default is shown.
 
@@ -56,13 +57,33 @@ recipient it cannot read, such as one sent from inside a script, is a judgment
 call. Spending over your
 limits and payment steps are put to you by the payment windows in every mode,
 `yolo` included. What is left is a judgment
-call, and the table says who answers it.
+call.
 
-| Policy | `ask-me` | `jev-decides` | `just-vibes` | `yolo` |
-| --- | --- | --- | --- | --- |
-| Hybrid (default) | Jev reads each judgment call's risk and you are asked only about the ones it reads as critical, irreversible or security-weakening; with no model set, or while it fails, you are asked about every judgment call your tool settings do not allow. | Jev decides every judgment call; with no model set, while it fails, or (while `jev-decides` is only the default, not your choice) on a model the shipped calibration did not measure, you are asked as in `ask-me`. | You are never interrupted: Jev decides judgment calls, and what Jev would not run (with no working model, every judgment call your tool settings do not allow) is held and listed at the end of the run. | The permission gate asks you nothing except about a change asked for from a channel; purchases outside your limits still come to you, and an act only you perform (answering an approval, granting access) is refused to the model. No decision model is consulted for permission. |
-| Decision Model Only | As Hybrid, except that while the set model fails, the call is refused with the model's error instead of asking you; the turn goes on. | As Hybrid, except that while the set model fails, the call is refused with the model's error instead of asking you; the turn goes on. | As Hybrid, except that while the set model fails, the call is refused with the model's error instead of being held; the run goes on. | Same as Hybrid. |
-| No Decision Model | You are asked about every judgment call your tool settings do not allow. | You are asked about every judgment call your tool settings do not allow, exactly as in `ask-me`. | You are never interrupted: every judgment call your tool settings do not allow is held and listed at the end of the run. | Same as Hybrid. |
+**One setting decides who answers a judgment call: When GoodVibes asks**
+(`permissions.mode`):
+
+- **Ask me:** you answer the risky ones. With a working decision model, Jev
+  reads each call and you are asked only about what it reads as critical,
+  irreversible or weakening a safety setting; without one, you are asked about
+  every judgment call your tool settings do not allow.
+- **Jev decides** (the default): Jev answers them. Without a working decision
+  model (or, while Jev decides is only the default and not your choice, on a
+  decision model the shipped calibration did not measure) you are asked, as in
+  Ask me.
+- **Just vibes:** nothing interrupts you. Jev answers what it can; anything that
+  needs you (with no working decision model, every judgment call your tool
+  settings do not allow) is held and listed at the end of the run.
+- **YOLO:** nothing asks you, except a change asked for from a channel;
+  purchases outside your limits still come to you, and an act only you perform
+  is refused to the model. No decision model is consulted.
+
+**The decision policy** (`judgment.policy`, "When the decision model is missing
+or fails") changes only what happens while a set decision model is failing:
+under **Hybrid** (the default) the call comes to you as if no model were set
+(held in Just vibes); under **Decision Model Only** it is refused with the
+model's error and the turn goes on. **No Decision Model** is the same as having
+none set. YOLO asks no decision model, so the policy does not change it. Most
+people never change the policy.
 
 The shipped calibration record covers the hosted endpoint and `jev-latest`
 (answered by `jev-1.14.0`). While `jev-decides` is only the default, Jev decides

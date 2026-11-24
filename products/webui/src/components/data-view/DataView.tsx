@@ -213,24 +213,32 @@ export function DetailPane({ title, meta, status, actions, tabs, onClose, closeL
   );
 }
 
-/** A labelled group of rows: a sentence-case label in --text-3, then the divided list. */
+/**
+ * A labelled group of rows: a sentence-case label in --text-3, its count in a
+ * pill so it never reads as part of the label ("Nov 23" then "2 events", not
+ * "Nov 23 2"), then the divided list. `unit` names what is counted.
+ */
 export function RowGroup({
   label,
   count,
+  unit,
   children,
   className,
 }: {
   label: string;
   count?: number;
+  /** What the count counts, singular and plural: ['event', 'events']. */
+  unit?: readonly [string, string];
   children: ReactNode;
   className?: string;
 }) {
   const id = useId();
+  const counted = count === undefined ? undefined : unit ? `${count} ${count === 1 ? unit[0] : unit[1]}` : String(count);
   return (
     <section className={['dv-group', className ?? ''].filter(Boolean).join(' ')} aria-labelledby={id}>
       <h3 id={id} className="dv-group__label">
         {label}
-        {count !== undefined && <span className="dv-group__count">{count}</span>}
+        {counted !== undefined && <span className="dv-group__count">{counted}</span>}
       </h3>
       <RowList aria-label={label}>{children}</RowList>
     </section>
@@ -296,9 +304,17 @@ export function Facts({ items }: { items: readonly { label: string; value: React
 }
 
 /** A disclosure: a quiet one-line summary that opens to more. */
-export function Disclosure({ summary, children, defaultOpen = false }: { summary: ReactNode; children: ReactNode; defaultOpen?: boolean }) {
+export function Disclosure({ summary, children, defaultOpen = false, onOpen }: {
+  summary: ReactNode; children: ReactNode; defaultOpen?: boolean;
+  /** Called when the person opens it (what it holds can be read then, not before). */
+  onOpen?: (() => void) | undefined;
+}) {
   return (
-    <details className="dv-disclosure" open={defaultOpen || undefined}>
+    <details
+      className="dv-disclosure"
+      open={defaultOpen || undefined}
+      onToggle={onOpen ? (event) => { if (event.currentTarget.open) onOpen(); } : undefined}
+    >
       <summary className="dv-disclosure__summary">{summary}</summary>
       <div className="dv-disclosure__body">{children}</div>
     </details>

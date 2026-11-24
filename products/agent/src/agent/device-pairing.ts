@@ -8,6 +8,7 @@
  * host credential is never printed or put in a QR code.
  */
 import {
+  SERVE_TO_NETWORK_QUESTION,
   PAIRING_HANDOFF_OFFER_KINDS,
   defaultPairingTokenName,
   formatPairingOffers,
@@ -71,7 +72,7 @@ async function pairingReadiness(
   verbs: DaemonVerbCaller,
   pairCommand: string,
   hostOnThisMachine: boolean,
-): Promise<{ readonly refused: Extract<AgentDevicePairingOutcome, { ok: false }> } | { readonly thisMachine: readonly string[] } | null> {
+): Promise<{ readonly refused: Extract<AgentDevicePairingOutcome, { ok: false }>; readonly servable?: true } | { readonly thisMachine: readonly string[] } | null> {
   let posture: OriginPosture;
   try {
     posture = (await verbs.invoke<{ readonly posture: OriginPosture }>('pairing.posture.get', {})).posture;
@@ -97,6 +98,8 @@ async function pairingReadiness(
         next: `On the host: ${reach.fix ?? 'make the web UI reachable from your network'}, then ${pairCommand}.`,
         text: pairingUnreachableLines(posture.origin, reach, pairCommand).join('\n'),
       },
+      // Serving the host's web UI to its network would let a phone open it.
+      servable: true,
     };
   }
   return { thisMachine: pairingThisMachineLines(posture.origin, reach, pairCommand) };
@@ -105,7 +108,17 @@ async function pairingReadiness(
 /** One request to the connected host: mint a device token and render its link, QR and posture. */
 export async function mintAgentDevicePairing(
   verbs: DaemonVerbCaller,
-  options: { readonly name?: string; readonly qr?: boolean; readonly pairCommand?: string } = {},
+  options: {
+    readonly name?: string; readonly qr?: boolean; readonly pairCommand?: string;
+    /**
+     * Asks the person, opening on No, when phones cannot reach the host yet:
+     * "Phones on your network cannot reach GoodVibes yet. Serve it to your
+     * network?". On yes the host serves its web UI to the network and the code
+     * is made in the same request (pairing.handoff.create `serveToNetwork`).
+     * Absent: No.
+     */
+    readonly askToServe?: ((question: string) => Promise<boolean>) | undefined;
+  } = {},
 ): Promise<AgentDevicePairingOutcome> {
   const reach = verbs.probe();
   if (!reach.available) {
@@ -114,14 +127,18 @@ export async function mintAgentDevicePairing(
   // A code a phone could not open is never made for a phone: when only the
   // host's machine can open it, the code is made for a browser there, said so, with no QR.
   const readiness = await pairingReadiness(verbs, options.pairCommand ?? 'goodvibes-agent pair', reach.thisMachine !== false);
-  if (readiness !== null && 'refused' in readiness) return readiness.refused;
-  const thisMachine = readiness?.thisMachine;
+  // The one real question, asked in place of a command to run; its No keeps the answer below.
+  const serveToNetwork = readiness !== null && (('refused' in readiness && readiness.servable === true) || 'thisMachine' in readiness)
+    && options.askToServe !== undefined && await options.askToServe(SERVE_TO_NETWORK_QUESTION);
+  if (!serveToNetwork && readiness !== null && 'refused' in readiness) return readiness.refused;
+  const thisMachine = serveToNetwork ? undefined : readiness !== null && 'thisMachine' in readiness ? readiness.thisMachine : undefined;
   let result: PairingHandoffCreateResult;
   try {
     result = await verbs.invoke<PairingHandoffCreateResult>('pairing.handoff.create', {
       name: options.name?.trim() || defaultPairingTokenName(),
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
       ...(thisMachine ? { forThisMachine: true } : {}),
+      ...(serveToNetwork ? { serveToNetwork: true } : {}),
     });
   } catch (error) {
     return {

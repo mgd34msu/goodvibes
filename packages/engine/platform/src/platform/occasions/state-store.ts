@@ -46,6 +46,7 @@ import { captureFileMutation } from '../utils/file-mutation.js';
 import { occasionStateReceipts } from './operation.js';
 import { PersistentStore } from '../state/persistent-store.js';
 import { StoreWriteQueue } from '../state/store-write-queue.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { logger } from '../utils/logger.js';
 import { groupWorkShared, type GroupWorkLink } from '../cluster/group-work.js';
 import type { AuthorityChange } from '../cluster/authority-record-file.js';
@@ -591,6 +592,8 @@ export class OccasionStateStore {
       }, beforePublish: () => { assertCurrent(); physical?.assertCurrent(); }, afterPublish: () => {
         this.snapshot = snapshot; this.publication += 1; options.afterPublish?.();
         this.publishToGroup();
+        // Answers, gifts, open items and interviews changed (also the daemon's own sweep): the dates views read them again.
+        noteListChanged({ list: 'dates', change: 'changed' });
       } });
       value = result;
     });

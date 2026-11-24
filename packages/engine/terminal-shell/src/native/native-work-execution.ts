@@ -51,6 +51,10 @@ export class NativeWorkExecutionControls {
   private generation = 0;
   private request = 0;
   private pending: AbortController | undefined;
+  /** The pending request when it is a status read the view made by itself; a key press replaces it. */
+  private automatic: AbortController | undefined;
+  /** The ledger changed while an automatic status read was pending: read once more when it ends. */
+  private readAgain = false;
   constructor(private readonly changed: () => void) {}
   /**
    * `snapshot` is the ledger the view shows: an action reads its attempt from it, never from a
@@ -65,6 +69,7 @@ export class NativeWorkExecutionControls {
     ++this.generation; ++this.request;
     const binding = this.binding; this.binding = undefined;
     const pending = this.pending; this.pending = undefined; this.state = undefined; this.observed.clear();
+    this.automatic = undefined; this.readAgain = false;
     pending?.abort();
     try { binding?.client.dispose(); } catch { /* local cleanup cannot retain an old host */ }
   }
@@ -78,15 +83,38 @@ export class NativeWorkExecutionControls {
     }
   }
   observedAttempt(workId: string): string | undefined { return this.observed.get(workId)?.attemptId; }
-  async run(action: NativeWorkExecutionAction, workId: string): Promise<NativeWorkExecutionState | undefined> {
+  /**
+   * Reads the execution status the view shows, with no key pressed: called when the view reads its
+   * first snapshot and on each ledger change. It reads the work last acted on, else the first work
+   * with a current active attempt, else the first with any current attempt. A request a person made
+   * is never interrupted; a change during an automatic read reads once more when it ends.
+   */
+  refresh(snapshot: WorkLedgerReadSnapshot): void {
+    if (!this.binding || snapshot.projectId !== this.binding.projectId) return;
+    if (this.pending) {
+      if (this.pending === this.automatic) this.readAgain = true;
+      return;
+    }
+    const current = ({ work, attempt }: WorkLedgerReadSnapshot['works'][number]): boolean =>
+      attempt !== null && work.currentAttemptId === attempt.id && attempt.workId === work.id;
+    const shown = this.state?.workId;
+    const workId = shown !== undefined && this.observed.has(shown) && snapshot.works.some(view => view.work.id === shown)
+      ? shown
+      : (snapshot.works.find(view => current(view) && view.attempt?.state === 'active') ?? snapshot.works.find(current))?.work.id;
+    if (workId !== undefined) void this.run('status', workId, true);
+  }
+  async run(action: NativeWorkExecutionAction, workId: string, automatic = false): Promise<NativeWorkExecutionState | undefined> {
     const binding = this.binding;
     if (!binding) return;
     const generation = this.generation;
     // A second mutation is never queued. Explicit Cancel may interrupt a pending
     // local request and separately ask the host to cancel the selected attempt.
-    if (this.pending && action !== 'cancel') return;
+    // An automatic status read gives way to any key a person presses.
+    if (this.pending && action !== 'cancel' && this.pending !== this.automatic) return;
     this.pending?.abort();
     const controller = new AbortController(); this.pending = controller;
+    this.automatic = automatic ? controller : undefined;
+    if (!automatic) this.readAgain = false;
     const request = ++this.request;
     const current = (): boolean => binding.current() && generation === this.generation && request === this.request && !controller.signal.aborted;
     if (!current()) { if (this.pending === controller) this.pending = undefined; controller.abort(); return; }
@@ -130,7 +158,8 @@ export class NativeWorkExecutionControls {
       // Retain the observed attempt across handoff/revision drift, including an
       // uncertain transport result. Only explicit start/resume selects a new one.
       this.observed.set(workId, identity);
-      this.state = { workId, action, busy: true, message: `Native ${action} request pending…` }; this.changed();
+      // An automatic read keeps the status already shown until its answer replaces it.
+      if (!automatic) { this.state = { workId, action, busy: true, message: `Native ${action} request pending…` }; this.changed(); }
       if (!current()) return;
       const result = await binding.client[action](identity, { signal: controller.signal });
       if (!current()) return;
@@ -150,7 +179,15 @@ export class NativeWorkExecutionControls {
       this.state = { workId, action, busy: false, message: failureMessage(error, action) };
       this.changed();
       return current() ? this.state : undefined;
-    } finally { if (generation === this.generation && request === this.request) this.pending = undefined; }
+    } finally {
+      if (generation === this.generation && request === this.request) {
+        this.pending = undefined;
+        const again = this.automatic === controller && this.readAgain;
+        this.automatic = undefined; this.readAgain = false;
+        const latest = again ? binding.snapshot() : undefined;
+        if (latest && binding.current()) this.refresh(latest);
+      }
+    }
   }
 }
 

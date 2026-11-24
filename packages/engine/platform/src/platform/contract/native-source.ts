@@ -5,11 +5,31 @@ import { types as nodeTypes } from 'node:util';
 import type { NativeSelectedDiffContext } from '../workflow/work-ledger/native-diff-context.js';
 import type { ContractPlan, PlanProblem } from './plan-schema.js';
 import type { Contract, ContractView, Criterion, NativeContractSource } from './types.js';
+import { MAX_ATTACHMENTS_PER_MESSAGE, type AttachmentFacts } from '../companion/attachment-limits.js';
 
 const SOURCE_KEYS = ['sourceId', 'sourceRevision', 'inputRevision', 'criteriaId', 'criteriaRevision', 'goal', 'criteria'];
 const REFERENCE_KEYS = ['sourceId', 'sourceRevision', 'inputRevision', 'criteriaId', 'criteriaRevision'] as const;
 const nativeApply = Reflect.apply, nativeWeakHas = WeakSet.prototype.has, nativeWeakAdd = WeakSet.prototype.add;
 const verifiedHistoricalContinuations = new WeakSet<NativeConversationContinuation>();
+
+/** The request's files as plain frozen facts (artifact ids and what the store said of them); anything else is refused. */
+function captureAttachments(value: unknown): readonly AttachmentFacts[] {
+  if (!Array.isArray(value) || nodeTypes.isProxy(value) || value.length === 0 || value.length > MAX_ATTACHMENTS_PER_MESSAGE) throw new Error('Invalid native contract source');
+  return Object.freeze(value.map((item: unknown) => {
+    if (item === null || typeof item !== 'object' || nodeTypes.isProxy(item) || Object.getPrototypeOf(item) !== Object.prototype) throw new Error('Invalid native contract source');
+    const entry = item as Record<string, unknown>;
+    const text = (key: string, optional: boolean): string | undefined => {
+      const field = entry[key];
+      if (field === undefined && optional) return undefined;
+      if (typeof field !== 'string' || field.length === 0 || field.length > 1000) throw new Error('Invalid native contract source');
+      return field;
+    };
+    if (typeof entry['sizeBytes'] !== 'number' || !Number.isSafeInteger(entry['sizeBytes']) || entry['sizeBytes'] < 0
+      || Object.keys(entry).some(key => !['artifactId', 'label', 'filename', 'mimeType', 'sizeBytes'].includes(key))) throw new Error('Invalid native contract source');
+    const label = text('label', true), filename = text('filename', true);
+    return Object.freeze({ artifactId: text('artifactId', false)!, ...(label ? { label } : {}), ...(filename ? { filename } : {}), mimeType: text('mimeType', false)!, sizeBytes: entry['sizeBytes'] });
+  }));
+}
 
 /** Validates, detaches and freezes a complete host-owned native source. Never infers missing criteria. */
 export function captureNativeContractSource(value: unknown): NativeContractSource {
@@ -17,7 +37,7 @@ export function captureNativeContractSource(value: unknown): NativeContractSourc
     || Object.getPrototypeOf(value) !== Object.prototype
     || Object.values(Object.getOwnPropertyDescriptors(value)).some(descriptor => !('value' in descriptor))) throw new Error('Invalid native contract source');
   const source = value as Record<string, unknown>;
-  if (Reflect.ownKeys(source).length !== SOURCE_KEYS.length + (Object.hasOwn(source, 'continuation') ? 1 : 0) || SOURCE_KEYS.some(key => !Object.hasOwn(source, key))
+  if (Reflect.ownKeys(source).length !== SOURCE_KEYS.length + (Object.hasOwn(source, 'continuation') ? 1 : 0) + (Object.hasOwn(source, 'attachments') ? 1 : 0) || SOURCE_KEYS.some(key => !Object.hasOwn(source, key))
     || REFERENCE_KEYS.some(key => typeof source[key] !== 'string' || !/^[\x21-\x7e][\x20-\x7e]{0,255}$/.test(source[key]))
     || typeof source['goal'] !== 'string' || source['goal'].trim().length === 0
     || !Array.isArray(source['criteria']) || nodeTypes.isProxy(source['criteria']) || source['criteria'].length === 0
@@ -42,8 +62,10 @@ export function captureNativeContractSource(value: unknown): NativeContractSourc
     // The strict constructor's exact immutable object, never a copied JSON flag.
     nativeApply(nativeWeakAdd, verifiedHistoricalContinuations, [continuation]);
   }
+  const attachments = Object.hasOwn(source, 'attachments') ? captureAttachments(source['attachments']) : undefined;
   return Object.freeze({
     ...(continuation ? { continuation } : {}),
+    ...(attachments ? { attachments } : {}),
     sourceId: source['sourceId'] as string,
     sourceRevision: source['sourceRevision'] as string,
     inputRevision: source['inputRevision'] as string,
@@ -65,9 +87,15 @@ export function nativeContractTaskSource(source: NativeContractSource): Pick<Nat
 
 /** Explicit JSON projection retains frozen context while giving judgment mutable JSON arrays. */
 export function nativeContractSourceData(source: NativeContractSource) {
-  const { continuation, ...original } = source;
+  const { continuation, attachments, ...original } = source;
   const selectedDiff = continuation?.selectedDiff;
-  return { ...original, criteria: [...source.criteria], ...(continuation ? { continuation: {
+  return { ...original, criteria: [...source.criteria], ...(attachments ? { attachments: attachments.map(attachment => ({
+    artifactId: attachment.artifactId,
+    ...(attachment.label !== undefined ? { label: attachment.label } : {}),
+    ...(attachment.filename !== undefined ? { filename: attachment.filename } : {}),
+    mimeType: attachment.mimeType,
+    sizeBytes: attachment.sizeBytes,
+  })) } : {}), ...(continuation ? { continuation: {
     ...(continuation.version === 2 ? { version: 2 as const } : {}), sessionId: continuation.sessionId, revision: continuation.revision, messages: continuation.messages.map(message => ({ ...message })),
     ...(selectedDiff ? { selectedDiff: selectedDiff.kind === 'session'
       ? { ...selectedDiff, provenance: { ...selectedDiff.provenance } }

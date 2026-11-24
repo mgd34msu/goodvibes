@@ -12,7 +12,7 @@
  * detection was never enabled in this browser.
  */
 import { Ear, MicOff } from 'lucide-react';
-import { useWakeState } from '../../lib/voice/useWake';
+import { listenAgain, useWakeState } from '../../lib/voice/useWake';
 import { wakeIndicatorCopy, wakeIndicatorVisible } from './wake-indicator';
 import '../../styles/components/voice.css';
 
@@ -35,6 +35,9 @@ export function WakeBanner() {
         : <MicOff size={16} aria-hidden="true" />}
       <span className="wake-banner__label">{copy.label}</span>
       <span className="wake-banner__detail">{copy.detail}</span>
+      {state.phase === 'latched' && (
+        <button type="button" className="wake-banner__action" onClick={listenAgain}>Listen again</button>
+      )}
     </div>
   );
 }

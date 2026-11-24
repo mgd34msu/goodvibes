@@ -3,7 +3,8 @@
  * web): `✕` and the headline ("The model didn't answer."), one dim line with
  * the cause and what changed ("OpenAI returned an error (500) three times.
  * Nothing was changed."), then the next steps as buttons (Try again, Use
- * another model, Details, or Choose a model / Sign in again for a refusal),
+ * another model, Details, or Choose a model / Sign in again in Settings for a
+ * refusal, which opens Models and providers, where the row signs in),
  * and the tip "name a backup model once" only when no fallback order is set.
  * The prompt above it stays as it was typed.
  *
@@ -35,6 +36,8 @@ export function failureReadingOf(message: ChatMessage, id: string): TurnFailureR
 /** The web's button words for a next step ("try again" → "Try again"). */
 function buttonLabel(action: TurnFailureAction, label: string): string {
   if (action === 'details') return 'Details';
+  // The sign-in is made in Models and providers, from the provider's own row.
+  if (action === 'sign-in') return 'Sign in again in Settings';
   return `${label.charAt(0).toUpperCase()}${label.slice(1)}`;
 }
 

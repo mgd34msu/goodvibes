@@ -17,7 +17,7 @@ import { formatConfidence, formatProvenanceLink, formatTimestamp, isBelowRecallF
  * principal ('shared-token', 'local', 'pairing:<id>', 'consolidation', a user name).
  * The owner's own credentials read as "you"; a paired device by its name.
  */
-function useReviewerLabel(reviewedBy: string | undefined): string {
+export function useReviewerLabel(reviewedBy: string | undefined): string {
   const pairingId = reviewedBy?.startsWith('pairing:') ? reviewedBy.slice('pairing:'.length) : '';
   const tokens = useQuery({
     queryKey: queryKeys.pairingTokens,

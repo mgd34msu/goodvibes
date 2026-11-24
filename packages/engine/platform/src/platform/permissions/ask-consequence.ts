@@ -197,6 +197,8 @@ export interface ConsequenceInput {
   readonly hosts?: readonly string[] | undefined;
   /** The reading says the call weakens a safety setting (a settings change). */
   readonly weakensSetting?: boolean | undefined;
+  /** How long a yes keeps acting, for a standing change ("Saved to your settings: it stays off until you turn it back on."). */
+  readonly lasting?: string | undefined;
 }
 
 /** The consequence: the terminal's sentence, the web form with the place folded in, and its tone. */
@@ -249,10 +251,10 @@ export function composeConsequence(input: ConsequenceInput): Consequence | undef
     undo = covered ? 'You can get it back with /checkpoint restore.' : 'GoodVibes keeps no copy.';
   }
 
-  const terminal = [what, reach, undo].filter((part): part is string => part !== undefined);
+  const terminal = [what, reach, input.lasting, undo].filter((part): part is string => part !== undefined);
   if (terminal.length === 0) return undefined;
   const webWhat = what !== undefined && folds ? what.replace(/\.$/, ` in ${input.placeShort}.`) : what;
-  const web = [webWhat, reachWeb, undo].filter((part): part is string => part !== undefined);
+  const web = [webWhat, reachWeb, input.lasting, undo].filter((part): part is string => part !== undefined);
   return { text: terminal.join(' '), withPlace: web.join(' '), tone: input.undo.cannotUndo ? 'cannot-undo' : 'plain' };
 }
 

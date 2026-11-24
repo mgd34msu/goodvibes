@@ -58,8 +58,10 @@ import { CardMaterialRefusedError, screenOutboundForCardMaterial } from './payme
 import { assertDeliveryCurrent } from '@goodvibes/engine/platform/platform/utils';
 import {
   beginGoogleConsent,
+  describeConsentForModel,
   GoogleApiClient,
   existingGoogleConnectionOwner,
+  googleConnectionRepairOf,
   GoogleConnectionOwner,
   sharedGoogleConnectionOwner,
   subscribeGoogleCredentialChanges,
@@ -67,6 +69,7 @@ import {
   type GoogleConnectionSources,
   type GoogleConsentSession,
   type GoogleLoopbackListenerFactory,
+  type GoogleRequestRepair,
 } from '@goodvibes/engine/platform/platform/google';
 import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
 import { createGoogleSettingsProjector, commitGoogleSettings, NO_GOOGLE_CLIENT_SECRET, retainGoogleConnectionOwners, retainGoogleCredentials, retainGooglePreparedEffectSource, type GooglePendingCredential } from './google-admission.js';
@@ -267,9 +270,14 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
   // One connection for the session, shared with the /google commands: calls
   // reuse the access token and its scopes, refresh once between them, and a
   // dead grant is latched instead of re-asked on every call.
+  // The process's connection repair (the daemon's, or the Agent's own): a missing
+  // connection, a missing scope, a dead grant or a disabled API is repaired from
+  // the call that met it, and the call's request is sent again when it completes.
+  const repair = () => (options.secretsManager ? googleConnectionRepairOf(options.secretsManager) : undefined);
   const connections = sharedGoogleConnectionOwner(options.secretsManager ?? options, () => new GoogleConnectionOwner({
     sources,
     fetch: { fetch: (url, init) => fetchImpl(url, init) },
+    repair: () => repair()?.requestRepair,
     // Held until a Google credential or client setting changes; no store read per call.
     ...(options.secretsManager ? { onCredentialChange: (listener: () => void) => subscribeGoogleCredentialChanges({
       config: options.configManager, secrets: options.secretsManager }, listener) } : {}),
@@ -608,7 +616,8 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         : effect ? options.captureConnectionCurrent?.() ?? captureNativeCurrent() : undefined;
       const ledger = getSessionUntrustedContentLedger();
       const ledgerRevision = ledger.getPublicationRevision();
-      const googleRevision = connections.revision;
+      // Moves to the new grant's revision only when this call's own repair stored it (below).
+      let googleRevision = connections.revision;
       // One owner per fact: the abort signal between requests; for an effect,
       // its recorded admission, the Google credential revision (moved by the
       // secret store and the OAuth client settings, never re-read here) and the
@@ -634,13 +643,28 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         return failure(STORE_UNREADABLE);
       }
       assertCurrent();
-      if (connection === null) return failure(NOT_CONNECTED);
+      if (connection === null) {
+        // Not connected: the connection starts from this call. The person is shown the consent link (the owner
+        // inbox, or the Agent's screen); the model is told it is open and what the person sees.
+        const owner = repair();
+        if (owner === undefined) return failure(NOT_CONNECTED);
+        return failure(describeConsentForModel(await owner.startConsent('not-connected'), `google action:"${action}"`));
+      }
+      // The repair this call's requests go through: a grant this call's own consent stored is the one it continues on.
+      const repairOwner = repair();
+      const callRepair: GoogleRequestRepair | undefined = repairOwner === undefined ? undefined : {
+        async repair(refusal, tokens) {
+          const outcome = await repairOwner.repair(refusal, tokens);
+          if (outcome.repaired) googleRevision = connections.revision;
+          return outcome;
+        },
+      };
       // The held token manager; this call's requests stop when the call is cancelled.
       const client = new GoogleApiClient(connection.tokens, { async fetch(url, init) {
         const signal = executionOptions?.signal;
         signal?.throwIfAborted();
         return await fetchImpl(url, { ...init, ...(signal ? { signal: init.signal ? AbortSignal.any([init.signal, signal]) : signal } : {}) });
-      } });
+      } }, Date.now, () => callRepair);
 
       // What the grant actually permits is only knowable AFTER a refresh.
       //
@@ -655,15 +679,34 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       // reason; this is the same fix on the tool path. The held manager
       // refreshes on its first use and keeps the scopes Google returned, so a
       // later call in the session reuses both without a token request.
-      const refreshed = await connection.tokens.accessToken();
+      let refreshed = await connection.tokens.accessToken();
       assertCurrent();
+      if (!refreshed.ok && refreshed.failure === 'grant-invalid' && callRepair !== undefined) {
+        // A dead grant: the fresh consent starts now and this call continues on the grant it returns.
+        const repaired = await callRepair.repair({ ok: false, status: null, reason: 'grant-invalid', problem: refreshed.problem, fix: refreshed.fix }, connection.tokens);
+        if (!repaired.repaired) return failure(`${repaired.problem} ${repaired.fix}`);
+        refreshed = await connection.tokens.accessToken();
+        assertCurrent();
+      }
       if (!refreshed.ok) {
         return failure([refreshed.problem, refreshed.fix].filter(Boolean).join(' '));
       }
-      const summary = summarizeCredentials(
+      let summary = summarizeCredentials(
         { ...connection.credentials, scopes: connection.tokens.scopes() },
         Date.now(),
       );
+      /** A grant without the scope an action needs: the fresh consent starts, and the call continues on its grant. */
+      const liveTokens = connection.tokens, liveCredentials = connection.credentials;
+      const regrant = async (needed: string): Promise<ToolOutput | null> => {
+        if (callRepair === undefined) return failure(`The connected Google account was not granted a scope that permits ${needed}, and no consent owner runs in this program to ask for it.`);
+        const repaired = await callRepair.repair({ ok: false, status: null, reason: 'missing-scopes', problem: `The connected Google account was not granted a scope that permits ${needed}.`, fix: '' }, liveTokens);
+        if (!repaired.repaired) return failure(`${repaired.problem} ${repaired.fix}`);
+        const again = await liveTokens.accessToken();
+        assertCurrent();
+        if (!again.ok) return failure([again.problem, again.fix].filter(Boolean).join(' '));
+        summary = summarizeCredentials({ ...liveCredentials, scopes: liveTokens.scopes() }, Date.now());
+        return null;
+      };
 
       if (action === 'status') {
         return ok(
@@ -809,7 +852,9 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         const body = readString(args.body);
         if (!to || !subject) return failure('google action:"mail.send" needs to and subject.');
         if (!summary.canSendMail) {
-          return failure('The connected Google account was not granted a scope that permits sending mail. Re-authorize with: /google reauthorize');
+          const refused = await regrant('sending mail');
+          if (refused !== null) return refused;
+          if (!summary.canSendMail) return failure('Google approved the fresh consent, but the grant it returned still does not permit sending mail.');
         }
         // The one exemption: a send whose EVERY recipient is the owner himself.
         //
@@ -892,7 +937,9 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
         return failure('google action:"calendar.create" needs summary, start and end.');
       }
       if (!summary.canWriteCalendar) {
-        return failure('The connected Google account was not granted a scope that permits writing to the calendar. Re-authorize with: /google reauthorize');
+        const refused = await regrant('writing to the calendar');
+        if (refused !== null) return refused;
+        if (!summary.canWriteCalendar) return failure('Google approved the fresh consent, but the grant it returned still does not permit writing to the calendar.');
       }
       // An event's title, location and description are what a stranger's text
       // would have to reach in order to plant something on the owner's calendar

@@ -97,7 +97,8 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
   // A click on a status bar segment opens its view; elsewhere on the row, Usage.
   input.onFooterTarget = (target) => {
     if (target === 'usage') commandContext.openUsage?.();
-    else if (target === 'mode') commandContext.openSettingsModal?.('permissions.mode');
+    // The mode opens /permissions: what is in force and why on its first row, the fix and the mode setting below it.
+    else if (target === 'mode') void runPickedCommand(commandContext.executeCommand, 'permissions', [], (message) => commandContext.print(message)).finally(render);
     else if (target === 'notices') commandContext.openNotifications?.();
     else if (target === 'context') commandContext.openContextInspector?.();
     else if (target === 'changes') commandContext.openChanges?.();

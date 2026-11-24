@@ -22,6 +22,7 @@
 
 import { buildGoogleConnection, resolveGoogleCredentials, type GoogleConnection, type GoogleConnectionSources } from './connection.js';
 import type { GoogleApiFetchPort } from './api-client.js';
+import type { GoogleRequestRepair } from './connection-repair.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
 import type { GoogleOAuthCredentials } from './credential-adoption.js';
 import { checkGoogleCredentialsAtBoot, type GoogleBootCheckResult } from './token-manager.js';
@@ -37,6 +38,8 @@ export interface GoogleConnectionOwnerOptions {
   readonly now?: () => number;
   /** Calls the listener when a Google credential or the OAuth client setting changes; see {@link subscribeGoogleCredentialChanges}. */
   readonly onCredentialChange?: ((listener: () => void) => () => void) | undefined;
+  /** The process's connection repair, read at each refused request (connection-repair.ts). */
+  readonly repair?: (() => GoogleRequestRepair | undefined) | undefined;
 }
 
 /** The settings and secrets a Google connection is built from. */
@@ -144,6 +147,7 @@ export class GoogleConnectionOwner {
     if (held !== null && sameGrant(held.credentials, credentials)) { settle(); return held; }
     const built = buildGoogleConnection(credentials, sources, {
       fetch: this.#options.fetch,
+      ...(this.#options.repair === undefined ? {} : { repair: this.#options.repair }),
       ...(options.signedInAccount === undefined ? {} : { signedInAccount: options.signedInAccount }),
     }, this.#now());
     this.#held = built;

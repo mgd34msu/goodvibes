@@ -18,16 +18,16 @@
 
 import { useState, type SyntheticEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BellRing, RefreshCw } from 'lucide-react';
+import { BellRing } from 'lucide-react';
 import { client as platformClient, IntentKey, isPressRefused, MAY_HAVE_BEEN_DONE } from '../../lib/goodvibes';
 import type { OperatorMethodOutput } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { DetailSection, EmptyState, Facts, SkeletonRows } from '../../components/data-view/DataView';
 import { ErrorState } from '../../components/feedback/ErrorState';
 import { Button } from '../../components/ui/Button';
 import { useConfirm } from '../../components/ui/ConfirmDialog';
 import { Field, Input } from '../../components/ui/Field';
-import { IconButton } from '../../components/ui/IconButton';
+import { ReadAt } from '../../components/data-view/ReadAt';
 import { StatusDot, type StatusTone } from '../../components/ui/StatusDot';
 import { Toggle } from '../../components/ui/Toggle';
 import { whenLabel } from '../../lib/when-label';
@@ -196,10 +196,12 @@ export function CheckInSettings() {
   const config = useQuery({
     queryKey: queryKeys.checkinConfig,
     queryFn: () => platformClient.operator.checkin.config.get(),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   const receipts = useQuery({
     queryKey: queryKeys.checkinReceipts,
     queryFn: () => platformClient.operator.checkin.receipts.list(),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
 
   // One run asked for: a press repeated after a lost answer gets the first run's receipt.
@@ -261,12 +263,7 @@ export function CheckInSettings() {
               {config.isSuccess && !editing && (
                 <Button size="sm" variant="ghost" onClick={() => setEditing(true)}>Edit</Button>
               )}
-              <IconButton
-                size="sm"
-                label="Refresh settings"
-                icon={<RefreshCw size={14} aria-hidden="true" />}
-                onClick={() => void config.refetch()}
-              />
+              <ReadAt at={config.dataUpdatedAt} onRefresh={() => void config.refetch()} refreshing={config.isFetching} />
             </>
           }
         >
@@ -322,12 +319,7 @@ export function CheckInSettings() {
         <DetailSection
           title="Recent receipts"
           actions={
-            <IconButton
-              size="sm"
-              label="Refresh receipts"
-              icon={<RefreshCw size={14} aria-hidden="true" />}
-              onClick={() => void receipts.refetch()}
-            />
+            <ReadAt at={receipts.dataUpdatedAt} onRefresh={() => void receipts.refetch()} refreshing={receipts.isFetching} />
           }
         >
           {receipts.isPending && <SkeletonRows count={3} label="Loading receipts" />}

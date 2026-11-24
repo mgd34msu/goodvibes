@@ -36,7 +36,7 @@ import type {
   RouteBindingManager,
   SurfaceRegistry,
 } from '../channels/index.js';
-import { buildDaemonClusterCoordinator, type ClusterCoordinator } from './facade-cluster.js';
+import { buildDaemonClusterCoordinator, withRestartForPendingGroupAction, type ClusterCoordinator } from './facade-cluster.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import type { AgentEvent } from '../../events/agents.js';
 import type { PlatformServiceManager } from './service-manager.js';
@@ -88,6 +88,11 @@ import type { DaemonConfig, DaemonDangerConfig, PendingSurfaceReply } from './ty
 import { requirePortAvailable } from './port-check.js';
 import { listenerWithinConfiguredHost, resolveHostBinding } from './host-resolver.js';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
+import { isWildcardHost } from '../config/control-plane-base-url.js';
+import { LanHttpsListener, type LanHttpsState } from './lan-https/listener.js';
+import { lanAuthorityCertificate } from './lan-https/authority.js';
+import { lanHttpsPageResponse } from './lan-https/page.js';
+import { lanHttpsOriginOf } from '../pairing/web-origin.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
 import { createJudgmentRuntimeScope, runInJudgmentRuntime } from '../runtime/judgment-runtime-scope.js';
@@ -217,6 +222,8 @@ export class DaemonServer {
   private readonly artifactStore: RuntimeServices['artifactStore'];
   private readonly serviceRegistry: ServiceRegistry;
   private readonly serveFactory: typeof Bun.serve;
+  /** The opt-in https listener on the local network beside the plain one (lan-https/listener.ts). */
+  private readonly lanHttps = new LanHttpsListener({ config: () => this.configManager, secrets: () => this.runtimeServices?.secretsManager });
   private readonly pendingSurfaceReplies = new Map<string, PendingSurfaceReply>();
   private readonly controlPlaneHelper: DaemonControlPlaneHelper;
   private readonly surfaceDeliveryHelper: DaemonSurfaceDeliveryHelper;
@@ -446,10 +453,22 @@ export class DaemonServer {
     // Whether this daemon is keeping itself current, asked over the wire
     // rather than read out of a log on the host, see routes/update.ts.
     registerUpdateGatewayMethods(this.runtimeServices.gatewayMethods, this.lifecycle);
+    // A join that turned sharing on finishes after a restart: the daemon restarts itself through its service.
+    if (config.clusterGroupVerbs) {
+      const lifecycle = this.lifecycle;
+      this.httpRouter.setClusterGroupVerbs(withRestartForPendingGroupAction(config.clusterGroupVerbs, () => lifecycle.restartThroughService()));
+    }
     // Relay reachability read through the SAME controller getRelayReachability()
     // returns, so an in-process surface and a client over the wire cannot
     // disagree about whether this daemon is reachable, see routes/relay.ts.
-    registerRelayGatewayMethods(this.runtimeServices.gatewayMethods, () => this.relayReachability, this.relayCodes);
+    registerRelayGatewayMethods(this.runtimeServices.gatewayMethods, () => this.relayReachability, this.relayCodes, (url) => {
+      // relay.enabled also backs the relay-connect capability; the settings subscriptions below start the registration.
+      const current = String(this.configManager.get('relay.url') ?? '').trim();
+      if (url === undefined && current.length === 0) return false;
+      if (url !== undefined && url !== current) this.configManager.set('relay.url', url);
+      if (this.configManager.get('relay.enabled') !== true) this.configManager.set('relay.enabled', true);
+      return true;
+    });
     this.httpRouter.setDaemonStatusProviders({
       // Update/crash receipts, and which node currently reads the inbox.
       peekReceipts: (owner) => this.peekDaemonReceipts(owner),
@@ -1009,12 +1028,13 @@ export class DaemonServer {
       this.settingsLifetime = replacing && this.server === replacing.server ? replacing.lifetime : null;
     };
     try {
-      const server = this.serveFactory({
-        port: this.port,
-        hostname: this.host,
+      // One request handler for the listener and, when switched on, the LAN https listener beside it (lan-https/listener.ts).
+      const serveWith = (address: { readonly port: number; readonly hostname: string; readonly tls?: Bun.TLSOptions | undefined }) => this.serveFactory({
+        port: address.port,
+        hostname: address.hostname,
         // Derived from the SSE heartbeat interval so a quiet stream outlives it (Bun's 10s default would not).
         idleTimeout: sseIdleTimeoutSeconds(),
-        ...(tlsState.tls ? { tls: tlsState.tls } : {}),
+        ...(address.tls ? { tls: address.tls } : {}),
         async fetch(req: Request, server: UpgradeCapableServer): Promise<Response | undefined> {
           configureJudgmentRequestLifetime(req, server);
           configureVoiceRequestLifetime(req, server);
@@ -1033,6 +1053,9 @@ export class DaemonServer {
             outsideConfiguredHost: outsideConfiguredHost(),
           });
           if (unserved) return unserved;
+          // The page and certificate a phone installs to trust the LAN https listener: public, no sign-in.
+          const lanPage = await lanHttpsPageResponse(req, () => self.lanAuthorityCertificate(), () => self.lanHttpsAddress(req));
+          if (lanPage) return lanPage;
           const upgrade = self.tryUpgradeControlPlaneWebSocket(req, server);
           if (upgrade === 'upgraded') return;
           if (upgrade) return upgrade;
@@ -1057,6 +1080,7 @@ export class DaemonServer {
           },
         },
       });
+      const server = serveWith({ port: this.port, hostname: this.host, ...(tlsState.tls ? { tls: tlsState.tls } : {}) });
       const current = (): boolean => this.listenerTransition === transition && !this.tornDown
         && this.settingsLifetime === lifetime && this.configManager.getConfigurationIncarnation() === incarnation;
       // Publication is async: mutations queued by the native factory retire its candidate too.
@@ -1070,6 +1094,8 @@ export class DaemonServer {
       this.restartCycle.setDown(false);
       this.acceptedTransportBinding = { host: this.boundHost, port: this.boundPort };
       if (replacing) await this.closeControlPlaneListener(replacing.server);
+      // Each bind (and so each start) makes the LAN https listener's certificate again for the addresses this machine has now.
+      await this.lanHttps.sync(listenerHost, (port, tls) => serveWith({ port, hostname: listenerHost, tls }));
       return true;
     } catch (error) {
       withdrawLifetime();
@@ -1077,7 +1103,56 @@ export class DaemonServer {
     }
   }
 
+  /** The LAN https authority's public certificate, or null when none was made (lan-https/authority.ts). */
+  private async lanAuthorityCertificate(): Promise<string | null> {
+    const secrets = this.runtimeServices?.secretsManager;
+    return secrets ? lanAuthorityCertificate(secrets) : null;
+  }
+
+  /** Where a phone that reached the plain listener at this request's host opens the LAN https listener, while it serves. */
+  private lanHttpsAddress(req: Request): string | undefined {
+    const state = this.lanHttps.state();
+    if (!state.serving || state.port === undefined) return undefined;
+    return lanHttpsOriginOf(new URL(req.url).origin, state.port);
+  }
+
+  /** What the LAN https listener is doing, for `webui https status` and the pairing posture. */
+  lanHttpsState(): LanHttpsState {
+    return this.lanHttps.state();
+  }
+
+  /** True when the serving listener is on this machine's own address and the new setting serves every interface with the same TLS mode. */
+  private wideningToEveryInterface(configuredHost: string): boolean {
+    if (this.server === null || !isLoopbackHost(this.host) || !isWildcardHost(configuredHost)) return false;
+    try {
+      return (this.tlsState?.mode ?? null) === resolveInboundTlsContext(this.configManager, 'controlPlane').mode;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Stop listening on the serving listener without cutting what it is
+   * answering (wideningToEveryInterface). It is closed for good, connections
+   * and all, at the next detach or at stop.
+   */
+  private retireControlPlaneListener(): void {
+    const server = this.server;
+    if (server === null) return;
+    void this.lanHttps.stop(true);
+    this.settingsLifetime = null;
+    this.server = null;
+    this.tlsState = null;
+    this.retiredListeners.add(server);
+    void Promise.resolve(server.stop(false)).finally(() => this.retiredListeners.delete(server));
+  }
+
+  private readonly retiredListeners = new Set<ReturnType<typeof Bun.serve>>();
+
   private async detachControlPlaneListener(): Promise<void> {
+    for (const retired of this.retiredListeners) void Promise.resolve(retired.stop(true)).catch(() => {});
+    this.retiredListeners.clear();
+    await this.lanHttps.stop(true);
     this.settingsLifetime = null;
     const server = this.server;
     this.server = null;
@@ -1156,7 +1231,14 @@ export class DaemonServer {
           return;
         }
       } else {
-        await this.detachControlPlaneListener();
+        // Widening from this machine to every interface, with the same TLS mode,
+        // lets the old listener finish what it is answering: every connection it
+        // holds came from this machine, which the new binding still serves. So a
+        // request that asked for this (pairing.serve.network, a pairing with
+        // serveToNetwork) gets its answer once the new listener is bound, instead
+        // of being cut by the rebind it caused. Any narrowing closes every connection at once.
+        if (this.wideningToEveryInterface(binding.host)) this.retireControlPlaneListener();
+        else await this.detachControlPlaneListener();
         if (!current()) return;
         incarnation = this.configManager.getConfigurationIncarnation();
         binding = this.configuredControlPlaneBinding();
@@ -1447,7 +1529,12 @@ export class DaemonServer {
     const unsubscribeStreamMode = this.configManager.subscribe('controlPlane.streamMode', (mode) => {
       this.controlPlaneGateway.setServerState({ streamingMode: readControlPlaneStreamingMode(mode) });
     });
-    this._configWatchUnsub = () => { watcher.unsubscribe(); unsubscribeStreamMode(); };
+    // Switching the LAN https listener on or off, or moving its port, starts, restarts or stops only it.
+    const unsubscribeLanHttps = [
+      this.configManager.subscribe('controlPlane.lanHttps.enabled', () => { void this.lanHttps.resync(); }),
+      this.configManager.subscribe('controlPlane.lanHttps.port', () => { void this.lanHttps.resync(); }),
+    ];
+    this._configWatchUnsub = () => { watcher.unsubscribe(); unsubscribeStreamMode(); for (const stop of unsubscribeLanHttps) stop(); };
   }
 
   /**

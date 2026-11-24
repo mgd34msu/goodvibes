@@ -9,17 +9,19 @@
  *
  * Shift+Tab cycles this session's mode (a runtime override; the saved default
  * changes only in settings). It writes nothing into the conversation: the
- * mode segment shows the new words and flashes for 1.5 seconds (one timer per
- * change). A change that cannot be made (a managed lock on the setting, a
+ * mode segment shows the new mode and what it does in one line (the preset's
+ * `short`) for 4 seconds, then the mode's words (one timer per change). A change that cannot be made (a managed lock on the setting, a
  * host that refuses it) is a notice.
  */
 import { DECISION_MODEL_SET_KEYS, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import { gatePresetLabel, nextPermissionMode, type PermissionModeValue } from '@goodvibes/engine/platform/platform/gate/presets';
+import { GATE_PRESETS, gatePresetLabel, nextPermissionMode, normalizePermissionMode, type PermissionModeValue } from '@goodvibes/engine/platform/platform/gate/presets';
 import { describeModeInForceWords, type ModeInForceWords } from '@goodvibes/engine/platform/platform/permissions';
 import { onDecisionModelEpisode } from '@goodvibes/engine/platform/platform/runtime/decision-policy';
 
 /** How long the mode segment flashes after a change. */
 export const MODE_FLASH_MS = 1500;
+/** How long a flash that carries a line (what the new mode does) stays: long enough to read it. */
+export const MODE_FLASH_MESSAGE_MS = 4000;
 
 type ModeSettings = Pick<ConfigManager, 'get' | 'subscribe'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>;
 
@@ -73,12 +75,13 @@ export class ModeFlash {
   constructor(private readonly clock: () => number = Date.now, private readonly schedule: ModeFlashScheduler = defaultScheduler) { }
   /** Flash the mode segment; with `message`, the segment shows that one line instead of the mode's words while it flashes. */
   start(message?: string): void {
-    const until = this.clock() + MODE_FLASH_MS;
+    const lasts = message ? MODE_FLASH_MESSAGE_MS : MODE_FLASH_MS;
+    const until = this.clock() + lasts;
     this.until = until;
     this.text = message ?? null;
     this.schedule(() => {
       if (this.until === until) this.onChange?.();
-    }, MODE_FLASH_MS);
+    }, lasts);
   }
   active(): boolean {
     return this.clock() < this.until;
@@ -147,6 +150,7 @@ export async function cycleSessionPermissionMode(context: SessionModeCycleContex
     context.requestRender();
     return;
   }
-  context.flash.start();
+  // The segment says what the new mode does, not only its name.
+  context.flash.start(`${gatePresetLabel(next)}: ${GATE_PRESETS[normalizePermissionMode(next)].short}`);
   context.requestRender();
 }

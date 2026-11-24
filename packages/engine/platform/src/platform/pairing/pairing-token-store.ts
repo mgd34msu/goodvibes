@@ -676,6 +676,7 @@ export class PairingTokenManager {
   /** The file identity native authority last confirmed durable; native reads confirm a new identity once. */
   #durableIdentity: string | undefined;
   readonly #revocationListeners = new Set<(principalIds: readonly string[]) => void>();
+  readonly #changeListeners = new Set<() => void>();
   private readonly authority: AuthorityRecordFile | undefined;
   /** The serving daemon's shared token, while one is bound (see {@link bindSharedTokenCustody}). */
   #sharedCustody: SharedTokenCustody | undefined;
@@ -743,6 +744,16 @@ export class PairingTokenManager {
   onRevoked(listener: (principalIds: readonly string[]) => void): () => void {
     this.#revocationListeners.add(listener);
     return () => { this.#revocationListeners.delete(listener); };
+  }
+
+  /**
+   * Told after the pairings changed (a device paired, an offer minted, a rename or a revoke): this
+   * process's changes, and another process's once this owner reads them. Called after the write
+   * that made the change has returned, never inside it. Returns the unsubscribe.
+   */
+  onChange(listener: () => void): () => void {
+    this.#changeListeners.add(listener);
+    return () => { this.#changeListeners.delete(listener); };
   }
 
   /** The pairing file's identity now: ABSENT_FILE when missing, undefined when it cannot be stated. */
@@ -1087,6 +1098,16 @@ export class PairingTokenManager {
     this.reindex();
     const ids = new Set(snapshot.tokens.map(token => token.id));
     for (const id of this.publishedTokenRevisions.keys()) if (!ids.has(id)) this.publishedTokenRevisions.delete(id);
+    // Deferred: publish runs inside a write that still holds the owner lock.
+    if (moved && this.#changeListeners.size > 0) {
+      const listeners = [...this.#changeListeners];
+      queueMicrotask(() => {
+        for (const listener of listeners) {
+          try { listener(); }
+          catch (error) { logger.warn('Pairing change listener failed', { error: String(error) }); }
+        }
+      });
+    }
     if (revoked.length === 0) return;
     for (const listener of [...this.#revocationListeners]) {
       try { listener(revoked); }

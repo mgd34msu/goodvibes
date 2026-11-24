@@ -263,6 +263,13 @@ function issueSays(existing: KnowledgeIssueRecord, input: KnowledgeIssueUpsertIn
   return true;
 }
 
+/** One committed change to a native request: the project, and which part of it was written. */
+export interface NativeRequestChange {
+  readonly projectId: string;
+  /** `intake`: its capture, admission or cancellation; `work-ledger`: its work and attempts; `execution`: its run, settlement or CI continuation. */
+  readonly store: 'intake' | 'work-ledger' | 'execution';
+}
+
 export class KnowledgeStore {
   private readonly sqlite: SQLiteStore;
   readonly #revisionSource = revisionSource('knowledge store', () => this.sqlite.contentRevision());
@@ -385,6 +392,29 @@ export class KnowledgeStore {
   }
 
   private readonly nativeExecutionStorage = new Map<string, NativeWorkExecutionStorage>();
+  private readonly nativeRequestListeners = new Set<(change: NativeRequestChange) => void>();
+
+  /**
+   * Told after every committed write to a native request (its capture and
+   * admission, the work ledger, its execution and settlement), off the commit
+   * stack. Returns the unsubscribe. Nothing is read to tell it.
+   */
+  onNativeRequestChange(listener: (change: NativeRequestChange) => void): () => void {
+    this.nativeRequestListeners.add(listener);
+    return () => { this.nativeRequestListeners.delete(listener); };
+  }
+
+  /** The storages' commit callback: never throws (a throw would fence the commit). */
+  private nativeRequestChanged(projectId: string, store: NativeRequestChange['store']): () => void {
+    return () => {
+      if (this.nativeRequestListeners.size === 0) return;
+      queueMicrotask(() => {
+        for (const listener of [...this.nativeRequestListeners]) {
+          try { listener({ projectId, store }); } catch { /* A listener cannot fail a native write. */ }
+        }
+      });
+    };
+  }
 
   /** Trusted native host only. The runtime must not expose this storage capability. */
   async openNativeWorkExecutionStorage(projectId: string): Promise<NativeWorkExecutionStorage> {
@@ -392,7 +422,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.nativeExecutionStorage.get(projectId);
     if (!storage) {
-      storage = createNativeWorkExecutionStorage(this.sqlite, projectId, () => {}, this.declareNativeExecutionFormat, this.declareNativeCiFormat, this.declareNativeSettlementFormat);
+      storage = createNativeWorkExecutionStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'execution'), this.declareNativeExecutionFormat, this.declareNativeCiFormat, this.declareNativeSettlementFormat);
       this.nativeExecutionStorage.set(projectId, storage);
     }
     return storage;
@@ -404,7 +434,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.nativeConversationStorage.get(projectId);
     if (!storage) {
-      storage = createNativeConversationStorage(this.sqlite, projectId, () => {}, this.declareNativeConversationFormat, this.declareNativeSettledFormat);
+      storage = createNativeConversationStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'intake'), this.declareNativeConversationFormat, this.declareNativeSettledFormat);
       this.nativeConversationStorage.set(projectId, storage);
     }
     return storage;
@@ -416,7 +446,7 @@ export class KnowledgeStore {
     if (this.closed) throw new Error('KnowledgeStore is closed');
     let storage = this.ledgerStorage.get(projectId);
     if (!storage) {
-      storage = createKnowledgeWorkLedgerStorage(this.sqlite, projectId, () => {}, undefined, this.declareNativeExplicitSourceFormat, this.declareHistoricalImportFormat);
+      storage = createKnowledgeWorkLedgerStorage(this.sqlite, projectId, this.nativeRequestChanged(projectId, 'work-ledger'), undefined, this.declareNativeExplicitSourceFormat, this.declareHistoricalImportFormat);
       this.ledgerStorage.set(projectId, storage);
     }
     return storage;

@@ -146,7 +146,7 @@ function hostedChanges(value: unknown): TurnChanges | undefined {
   return { files, commands, messages, unknown };
 }
 
-const REFUSALS: readonly TurnRefusalReason[] = ['no-provider', 'no-model', 'daemon-unreachable', 'workspace-not-registered'];
+const REFUSALS: readonly TurnRefusalReason[] = ['no-provider', 'no-model', 'daemon-unreachable', 'workspace-not-registered', 'model-no-longer-free'];
 
 /** The failure reading of a hosted turn's TURN_ERROR, from the facts its payload carries. */
 function hostedTurnFailure(payload: Record<string, unknown> | undefined, turnId: string): TurnFailureReading {

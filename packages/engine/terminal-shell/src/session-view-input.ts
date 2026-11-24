@@ -1,14 +1,15 @@
 /**
- * handler-session-view-route.ts, the keyboard while an agent or process is
- * open full screen, and the session chips' Tab cycling everywhere.
+ * session-view-input.ts, the keyboard while an agent or process is open full
+ * screen, and the session row's next/previous keys everywhere.
  *
  * Runs after the modals (a modal open takes every key first) and before the
  * work tree and the composer.
  *
- *   Tab / Shift+Tab   next / previous session chip, only while the composer
- *                     is empty and not completing a command (otherwise Tab
- *                     keeps its completion meaning and Shift+Tab its mode
- *                     cycling), and only when the chips row shows
+ *   Alt+N / Alt+P     next / previous session (the `next-session` and
+ *                     `previous-session` actions, rebindable), only when the
+ *                     session row shows. Tab and Shift+Tab are never taken
+ *                     here: Tab completes or folds, Shift+Tab changes when
+ *                     GoodVibes asks, in every state.
  *   ctrl+x            stop the agent or process: the first press asks, the
  *                     second (within 3 s) stops
  *   PageUp/PageDown   scroll the view
@@ -72,9 +73,10 @@ export interface SessionViewRouteState {
     readonly saveUndoState: () => void;
     readonly requestRender: () => void;
     readonly expandPastes?: ((text: string) => string) | undefined;
-}
-function isBackTab(token: InputToken): boolean {
-    return token.type === 'key' && token.logicalName === 'tab' && token.shift === true;
+    /** The keybinding action a key token is bound to (next-session / previous-session). */
+    readonly lookup?: ((token: InputToken & {
+        type: 'key';
+    }) => string | null | undefined) | undefined;
 }
 /** Returns true when the token was handled here. */
 export function handleSessionViewToken(state: SessionViewRouteState, token: InputToken): boolean {
@@ -83,11 +85,13 @@ export function handleSessionViewToken(state: SessionViewRouteState, token: Inpu
         return false;
     if (token.type === 'mouse' && c.handleMouse?.(token))
         return true;
-    const composerIdle = state.prompt.length === 0 && !state.commandMode;
-    if (token.type === 'key' && composerIdle && !token.ctrl && !token.meta && (token.logicalName === 'tab' || isBackTab(token)) && c.chipsVisible()) {
-        c.cycle(isBackTab(token) ? -1 : 1);
-        state.requestRender();
-        return true;
+    if (token.type === 'key' && c.chipsVisible()) {
+        const action = state.lookup?.(token);
+        if (action === 'next-session' || action === 'previous-session') {
+            c.cycle(action === 'previous-session' ? -1 : 1);
+            state.requestRender();
+            return true;
+        }
     }
     if (!c.active)
         return false;

@@ -14,9 +14,9 @@
  * at all (METHOD_NOT_FOUND on the list query) gets an honest "this daemon does not
  * serve memory" state, never a blank list that reads as "nothing is stored".
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useState } from 'react';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
-import { Database, Plus } from 'lucide-react';
+import { Database, Plus, SlidersHorizontal, X } from 'lucide-react';
 import {
   client as platformClient,
   type MemoryClass,
@@ -24,9 +24,10 @@ import {
   type MemoryScope,
   type MemorySearchInput,
 } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import { formatError, isMethodUnavailableError } from '../../lib/errors';
 import { EmptyState, ListDetail, RowGroup, SkeletonRows } from '../../components/data-view/DataView';
+import { ReadAt } from '../../components/data-view/ReadAt';
 import { Button } from '../../components/ui/Button';
 import { Checkbox } from '../../components/ui/Checkbox';
 import { Input } from '../../components/ui/Field';
@@ -38,7 +39,7 @@ import { MemoryRecordRow } from './MemoryRecordRow';
 import { MemoryRecordPane } from './MemoryRecordPane';
 import { MemorySearchHonestyNote } from './MemorySearchHonestyNote';
 import { MemoryCopiesPanel } from './MemoryCopiesPanel';
-import { MEMORY_CLASSES, MEMORY_SCOPES, splitTags } from './memory-helpers';
+import { ratingsMeaning, MEMORY_CLASSES, MEMORY_SCOPES, splitTags } from './memory-helpers';
 import '../../styles/components/memory.css';
 
 /** One page of records; "Show more" asks for the next page on top. */
@@ -51,16 +52,20 @@ export interface MemoryViewProps {
   onAddMemory?: () => void;
   /** Told whether the daemon serves memory at all, so the page can drop actions that would only fail. */
   onServedChange?: (served: boolean) => void;
+  /** The store's copies and restore are open (the Library header's "Copies and restore"). */
+  showCopies?: boolean;
 }
 
-export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryViewProps) {
+export function MemoryView({ query = '', onAddMemory, onServedChange, showCopies = false }: MemoryViewProps) {
   const [semantic, setSemantic] = useState(false);
   const [scopeFilter, setScopeFilter] = useState<MemoryScope | ''>('');
   const [clsFilter, setClsFilter] = useState<MemoryClass | ''>('');
   const [tagsInput, setTagsInput] = useState('');
   const [recall, setRecall] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [showCopies, setShowCopies] = useState(false);
+  // The filters stay folded behind one button until asked for; the ones in force show as chips.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filtersId = useId();
   const tagsSettled = useDebouncedValue(tagsInput);
 
   const { remove, saveReview, saveEdit } = useMemoryRecordMutations();
@@ -88,6 +93,7 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
     queryKey: [...queryKeys.memoryList, appliedFilters],
     queryFn: () => platformClient.operator.memory.search(appliedFilters),
     placeholderData: keepPreviousData,
+    ...NO_EVENT_LIST_FRESHNESS,
   });
   const records = useMemo(() => list.data?.records ?? [], [list.data]);
 
@@ -96,7 +102,13 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
     [selectedId, records],
   );
 
-  const filtersActive = semantic || recall || scopeFilter !== '' || clsFilter !== '' || tagsInput.trim() !== '';
+  const activeFilters: { key: string; label: string; clear: () => void }[] = [
+    ...(scopeFilter ? [{ key: 'scope', label: `Applies: ${sentence(scopeFilter)}`, clear: () => setScopeFilter('') }] : []),
+    ...(clsFilter ? [{ key: 'cls', label: `Kind: ${sentence(clsFilter)}`, clear: () => setClsFilter('') }] : []),
+    ...(tagsInput.trim() ? [{ key: 'tags', label: `Tagged: ${tagsInput.trim()}`, clear: () => setTagsInput('') }] : []),
+    ...(semantic ? [{ key: 'semantic', label: 'By meaning', clear: () => setSemantic(false) }] : []),
+    ...(recall ? [{ key: 'recall', label: 'Only what the agent would recall', clear: () => setRecall(false) }] : []),
+  ];
   function resetFilters() {
     setSemantic(false);
     setRecall(false);
@@ -138,14 +150,17 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
       {list.data?.records.length === 0 && (
         <EmptyState
           icon={<Database />}
-          title="No memory recorded yet"
+          title={browsing ? 'No memory recorded yet' : 'Nothing matches'}
           action={onAddMemory && <Button variant="secondary" icon={<Plus aria-hidden="true" />} onClick={onAddMemory}>Add memory</Button>}
         >
           {browsing ? 'Add a memory to start building what GoodVibes remembers.' : 'Nothing matches this search. Try fewer filters.'}
         </EmptyState>
       )}
       {list.data && records.length > 0 && (
-        <RowGroup label="Records" count={records.length}>
+        <p className="memory-rating-note">{ratingsMeaning(list.data.recallFloor)}</p>
+      )}
+      {list.data && records.length > 0 && (
+        <RowGroup label="Records" count={records.length} unit={['record', 'records']}>
           {records.map((record) => (
             <MemoryRecordRow
               key={record.id}
@@ -178,7 +193,33 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
       fallback={(err, reset) => <ErrorState error={err} onRetry={reset} title="Memory view failed" />}
     >
       <div className="lib-tab">
-        <div className="lib-toolbar memory-filters" role="group" aria-label="Memory filters">
+        <div className="lib-toolbar memory-filter-bar">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<SlidersHorizontal aria-hidden="true" />}
+            aria-expanded={filtersOpen}
+            aria-controls={filtersId}
+            onClick={() => setFiltersOpen((open) => !open)}
+          >
+            {activeFilters.length > 0 ? `Filters · ${String(activeFilters.length)}` : 'Filters'}
+          </Button>
+          {activeFilters.map((filter) => (
+            <span key={filter.key} className="gv-chip gv-chip--sm memory-filter-chip">
+              {filter.label}
+              <button type="button" className="memory-filter-chip__remove" aria-label={`Remove filter: ${filter.label}`} onClick={filter.clear}>
+                <X aria-hidden="true" />
+              </button>
+            </span>
+          ))}
+          {activeFilters.length > 0 && <Button variant="ghost" size="sm" onClick={resetFilters}>Clear all</Button>}
+          {/* Memory sends no live event: say when the records were read. */}
+          <span className="memory-filter-bar__end">
+            <ReadAt at={list.dataUpdatedAt} onRefresh={() => void list.refetch()} refreshing={list.isFetching} />
+          </span>
+        </div>
+        {filtersOpen && (
+        <div id={filtersId} className="lib-toolbar memory-filters" role="group" aria-label="Memory filters">
           {/* Each control under the question it answers. */}
           <div className="memory-filter">
             <span className="memory-filter__question" aria-hidden="true">Applies where?</span>
@@ -212,15 +253,13 @@ export function MemoryView({ query = '', onAddMemory, onServedChange }: MemoryVi
             <span className="memory-filter__question" aria-hidden="true">Match how?</span>
             <Checkbox checked={semantic} onChange={setSemantic}>By meaning, not exact words</Checkbox>
           </div>
-          <div className="memory-filter" title="Leaves out flagged records and records rated below the recall floor, so the list is what the agent would actually be given.">
+          <div className="memory-filter">
             <span className="memory-filter__question" aria-hidden="true">Show which?</span>
             <Checkbox checked={recall} onChange={setRecall}>Only what the agent would recall</Checkbox>
+            <span className="memory-filter__help">Leaves out flagged records and records rated below the floor.</span>
           </div>
-          {filtersActive && <Button variant="ghost" size="sm" onClick={resetFilters}>Reset filters</Button>}
-          <Button variant="ghost" size="sm" aria-expanded={showCopies} onClick={() => setShowCopies((open) => !open)}>
-            {showCopies ? 'Hide copies' : 'Copies and restore'}
-          </Button>
         </div>
+        )}
 
         {showCopies && <MemoryCopiesPanel />}
 

@@ -128,8 +128,8 @@ export function createConversationRenderer(presentation: ConversationPresentatio
      * turns is (the concept's turns hold only the turn's own text, beads, lanes and
      * answer; agent and WRFC state is the lanes' own spawn and merge rows).
      */
-    function drawConversationTurn(context: ConversationRenderContext, model: TurnModel, width: number): TurnRender {
-        const render = drawTurnRows(context, model, width);
+    function drawConversationTurn(context: ConversationRenderContext, model: TurnModel, width: number, newest = false): TurnRender {
+        const render = drawTurnRows(context, model, width, newest);
         // Where notices are shown elsewhere, a turn's failure or retry and a `!` command's output are still drawn here.
         const notices = context.systemNotices === 'elsewhere' ? model.notices.filter((notice) => notice.inTranscript === true) : model.notices;
         if (notices.length === 0)
@@ -149,12 +149,13 @@ export function createConversationRenderer(presentation: ConversationPresentatio
         }
         return { ...render, lines, errorLines, messageLines, trailingSeparator: true };
     }
-    function drawTurnRows(context: ConversationRenderContext, model: TurnModel, width: number): TurnRender {
+    function drawTurnRows(context: ConversationRenderContext, model: TurnModel, width: number, newest = false): TurnRender {
         const config = context.configManager;
         return renderTurn(model, {
             width,
             glyphSet: context.treeGlyphSet ?? 'rounded',
             focusId: context.focusId ?? null,
+            stepHint: newest,
             lineNumberMode: config?.get('display.lineNumbers') ?? 'off',
             collapseThreshold: config?.get('display.collapseThreshold') ?? 30,
             collapseState: context.collapseState,
@@ -168,8 +169,8 @@ export function createConversationRenderer(presentation: ConversationPresentatio
      */
     function renderConversationTurn(context: ConversationRenderContext, messages: readonly Message[], offset: number, unit: Extract<TranscriptUnit, {
         kind: 'turn';
-    }>, width: number, streamingIndex = -1): TurnRender {
-        const render = drawConversationTurn(context, buildConversationTurnModel(context, messages, offset, unit, streamingIndex), width);
+    }>, width: number, streamingIndex = -1, newest = false): TurnRender {
+        const render = drawConversationTurn(context, buildConversationTurnModel(context, messages, offset, unit, streamingIndex), width, newest);
         const base = context.history.getLineCount();
         const blockBase = context.blockRegistry.length;
         context.history.addLines(render.lines);
@@ -192,11 +193,13 @@ export function createConversationRenderer(presentation: ConversationPresentatio
      * Defaults to 0 when the full snapshot is rendered (no clearDisplay in effect).
      */
     msgIndexOffset = 0): void {
-        for (const unit of transcriptUnits(messages, msgIndexOffset)) {
+        const units = [...transcriptUnits(messages, msgIndexOffset)];
+        const newestTurn = units.map((unit) => unit.kind).lastIndexOf('turn');
+        for (const [position, unit] of units.entries()) {
             const before = context.history.getLineCount();
             let trailingSeparator: boolean;
             if (unit.kind === 'turn') {
-                const render = renderConversationTurn(context, messages, msgIndexOffset, unit, width);
+                const render = renderConversationTurn(context, messages, msgIndexOffset, unit, width, -1, position === newestTurn);
                 trailingSeparator = !presentation.rows.paragraphSpacing || render.trailingSeparator;
                 for (const [index, line] of render.messageLines)
                     messageLineRegistry[index] = before + line;

@@ -60,11 +60,15 @@ export interface VoiceCaptureWiringDeps {
   readonly enumerateInputDevices?: AudioInputDeviceEnumerator | undefined;
   /** Injected in tests; defaults to a real streaming player for the activation sound. */
   readonly player?: StreamingAudioPlayer;
+  /** The terminal's focus-in reports; a wake listener that stopped itself starts again on one. */
+  readonly subscribeFocusGained?: (listener: () => void) => () => void;
 }
 
 export interface VoiceCaptureWiring {
   /** The live footer row, or null when no microphone is open. */
   readonly status: () => VoiceCaptureIndicatorState | null;
+  /** `/voice wake-again`: start listening for the wake word again after it stopped itself. */
+  readonly listenForWakeAgain: () => Promise<string>;
   /** Teardown, for the shell's `unsubs` registry, releases any open device. */
   readonly unsubs: readonly (() => void)[];
 }
@@ -88,5 +92,5 @@ export function wireVoiceCapture(deps: VoiceCaptureWiringDeps): VoiceCaptureWiri
     { wireWakeRuntime, startWakeRuntime, playActivationSound },
     { ensureProvisioned: deps.ensureWakeProvisioned, enumerateInputDevices: deps.enumerateInputDevices ?? createInputDeviceEnumerator() },
   );
-  return { status: () => wake.status(), unsubs: unsubs };
+  return { status: () => wake.status(), listenForWakeAgain: () => wake.listenAgain(), unsubs: unsubs };
 }

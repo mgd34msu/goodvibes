@@ -231,6 +231,8 @@ export function renderCreated(result: CreateGroupResult): string[] {
 
 /** `cluster join`. */
 export function renderJoined(result: JoinGroupResult): string[] {
+  // A join that turned sharing on finishes after a restart: the daemon's one sentence says what happens next.
+  if (result.pending === true) return [result.warning ?? 'Sharing is on; the join finishes when the daemon restarts.'];
   return [
     `joined "${result.groupName}"  [${result.groupId}]`,
     `the group now has ${result.memberCount} machine${result.memberCount === 1 ? '' : 's'}.`,

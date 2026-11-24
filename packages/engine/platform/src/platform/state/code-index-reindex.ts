@@ -177,6 +177,23 @@ export class CodeIndexReindexScheduler {
     return this.last;
   }
 
+  /** Set once a build was asked for this session (`/codebase build`): edits are reindexed whatever the setting says. */
+  private keptCurrent = false;
+
+  /**
+   * A build was asked for: from now on, for this session, the product's own
+   * file writes keep the index current, whatever `storage.codeIndexEnabled`
+   * says (the memory governor's pause still applies).
+   */
+  keepCurrent(): void {
+    this.keptCurrent = true;
+  }
+
+  /** Whether a build asked for this session keeps the index current on edits. */
+  keptCurrentThisSession(): boolean {
+    return this.keptCurrent;
+  }
+
   /** Count of paths with a pending (debouncing) reindex. */
   pendingCount(): number {
     return this.timers.size;

@@ -35,6 +35,7 @@ export type SettingsSectionId =
   | 'devices'
   | 'people'
   | 'models'
+  | 'decision-models'
   | 'credentials'
   | 'usage'
   | 'voice'
@@ -97,8 +98,12 @@ const SECTION_SEARCH: Readonly<Record<SettingsSectionId, { keywords: readonly st
     items: ['Principals', 'Channel profiles'],
   },
   models: {
-    keywords: ['model', 'provider', 'llm', 'ai', 'route', 'context', 'price', 'openai', 'anthropic', 'judgment', 'decision', 'failover', 'fallback', 'backup', 'budget', 'volume'],
-    items: ['Current model', 'Providers', 'Models', 'Sign-in routes', 'Browse models', 'Decision models', 'Decision call-volume alerts'],
+    keywords: ['model', 'provider', 'llm', 'ai', 'route', 'context', 'price', 'openai', 'anthropic', 'failover', 'fallback', 'backup', 'budget'],
+    items: ['Current model', 'Providers', 'Models', 'Sign-in routes', 'Browse models'],
+  },
+  'decision-models': {
+    keywords: ['judgment', 'decision', 'jev', 'policy', 'hybrid', 'deadline', 'fallback', 'backup', 'volume', 'advanced', 'decision model'],
+    items: ['Decision models', 'Decision call-volume alerts'],
   },
   credentials: {
     keywords: ['secret', 'key', 'api key', 'subscription', 'accounts', 'store'],

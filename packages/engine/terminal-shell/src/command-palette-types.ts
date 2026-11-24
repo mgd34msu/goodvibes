@@ -35,6 +35,8 @@ export type PaletteRunMode = 'run' | 'fill';
 
 export interface PaletteSection {
   readonly group: PaletteGroup;
+  /** The heading drawn for the section when it is not the group's own name (a task group of Commands). */
+  readonly title?: string | undefined;
   readonly entries: readonly PaletteEntry[];
 }
 

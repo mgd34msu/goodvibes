@@ -10,7 +10,8 @@
  * Returns the lane's message while live updates are paused or stopped, else null.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
+import { useOptionalToast } from '../lib/toast';
 import { useQueryClient } from '@tanstack/react-query';
 import type { RuntimeEventDomain } from '@goodvibes/engine/contracts';
 import { getClientLifetime } from '../lib/client-lifetime';
@@ -31,8 +32,43 @@ const OWNER_INBOX_UPDATE_WIRE_EVENT = 'owner-inbox-update';
  * one app-wide stream and refetch every active query.
  */
 const APP_DOMAINS: readonly RuntimeEventDomain[] = [
-  'tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session', 'planner', 'config',
+  'tasks', 'contracts', 'gate', 'providers', 'knowledge', 'control-plane', 'fleet', 'ops', 'session', 'planner', 'config', 'workspace',
 ];
+
+/**
+ * LIST_CHANGED (the `workspace` frame): the daemon wrote one of these lists, so the
+ * views showing it read it again. The focus and reconnect re-reads stay as the
+ * fallback (lib/queries NO_EVENT_LIST_FRESHNESS).
+ */
+const LIST_CHANGED_KEYS: Readonly<Record<string, readonly (readonly unknown[])[]>> = {
+  memory: [['memory']],
+  checkpoints: [queryKeys.checkpoints],
+  'ci-watches': [queryKeys.ciWatches],
+  'check-ins': [queryKeys.checkinConfig, queryKeys.checkinReceipts],
+  people: [queryKeys.principals],
+  // Package E's lists: the inbox and the message read, the calendar's events and calendars, every
+  // occasions read, paired devices, local voice and the wake word, Tailscale.
+  mail: [['email']],
+  calendar: [['calendar']],
+  dates: [['occasions']],
+  'paired-devices': [queryKeys.pairingTokens],
+  voice: [['voice']],
+  tailscale: [queryKeys.tailscale],
+};
+
+/** Session changes are built from checkpoints: every `['sessions', <id>, 'changes']` read follows that list too. */
+const isSessionChangesKey = (query: { queryKey: readonly unknown[] }): boolean => query.queryKey[0] === 'sessions' && query.queryKey[2] === 'changes';
+
+/** The list a LIST_CHANGED frame names, read defensively (the frame or its `payload`). */
+function changedListOf(frame: unknown): string | undefined {
+  const outer = (frame ?? {}) as { type?: unknown; list?: unknown; payload?: unknown };
+  const inner = (outer.payload ?? {}) as { type?: unknown; list?: unknown };
+  // The daemon's envelope carries the type, and the event itself (with `list`) as its payload.
+  for (const event of [inner, outer]) {
+    if (event.type === 'LIST_CHANGED' && typeof event.list === 'string') return event.list;
+  }
+  return undefined;
+}
 
 /**
  * Frame name -> the query keys it revalidates. A domain frame is named after its domain;
@@ -63,7 +99,9 @@ const DOMAIN_INVALIDATIONS: Record<string, readonly (readonly unknown[])[]> = {
   // A setting changed from any surface (another tab or device, the daemon's CLI):
   // the one settings cache and the restart-pending report are re-read, at most once
   // per window, so a config.setMany burst costs one config.get.
-  config: [queryKeys.config, queryKeys.featureRestartStatus],
+  // A serving setting (network binding, https) changes who can reach the daemon: the origin's
+  // posture and the pairing page's reach are re-read with it.
+  config: [queryKeys.config, queryKeys.featureRestartStatus, queryKeys.originPosture, queryKeys.pairingAddress],
   [SESSION_UPDATE_WIRE_EVENT]: [queryKeys.sessions],
   [HOSTED_SESSION_UPDATE_WIRE_EVENT]: [queryKeys.hostedSessionsAll],
   // A device asked to pair as a node, or a request was answered from another surface:
@@ -85,9 +123,23 @@ const FALLBACK_REFRESH_MS = 15_000;
 const REFETCH_WINDOW_MS = 250;
 const WINDOWED_FRAMES: ReadonlySet<string> = new Set(['fleet', 'config']);
 
+/** A PROVIDER_WARNING frame's message, read defensively (the frame or its `payload`). */
+function providerWarningOf(frame: unknown): string | undefined {
+  const outer = (frame ?? {}) as { type?: unknown; message?: unknown; payload?: unknown };
+  const inner = (outer.payload ?? {}) as { type?: unknown; message?: unknown };
+  // The daemon's envelope carries the type, and the event itself (with `message`) as its payload.
+  for (const event of [inner, outer]) {
+    if (event.type === 'PROVIDER_WARNING' && typeof event.message === 'string' && event.message.trim()) return event.message.trim();
+  }
+  return undefined;
+}
+
 export function useRealtimeInvalidation(enabled: boolean): string | null {
   const queryClient = useQueryClient();
   const stream = useEventStreamState('app');
+  const toast = useOptionalToast();
+  const toastRef = useRef(toast);
+  useEffect(() => { toastRef.current = toast; }, [toast]);
 
   useEffect(() => {
     if (!enabled) return undefined;
@@ -131,8 +183,18 @@ export function useRealtimeInvalidation(enabled: boolean): string | null {
     };
     const unsubscribe = subscribeEvents({
       domains: APP_DOMAINS,
-      events: Object.keys(DOMAIN_INVALIDATIONS),
-      onEvent: (name) => {
+      events: [...Object.keys(DOMAIN_INVALIDATIONS), 'workspace'],
+      onEvent: (name, payload) => {
+        // A provider warning (a model you use stopped being free, a provider in trouble) is
+        // said in its own words, as the terminal app says it, besides re-reading the lists.
+        const warning = name === 'providers' ? providerWarningOf(payload) : undefined;
+        if (warning) toastRef.current?.toast({ title: 'Model provider', description: warning, tone: 'warning', durationMs: 0 });
+        if (name === 'workspace') {
+          const list = changedListOf(payload);
+          for (const key of (list ? LIST_CHANGED_KEYS[list] : undefined) ?? []) void queryClient.invalidateQueries({ queryKey: key });
+          if (list === 'checkpoints') void queryClient.invalidateQueries({ predicate: isSessionChangesKey });
+          return;
+        }
         if (WINDOWED_FRAMES.has(name)) { onWindowedFrame(name); return; }
         for (const key of DOMAIN_INVALIDATIONS[name] ?? []) invalidate(key, name);
       },

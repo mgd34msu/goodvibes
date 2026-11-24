@@ -21,13 +21,17 @@ import {
   Pin,
   PinOff,
   Plus,
+  MoreHorizontal,
+  Pencil,
   Search,
   Trash2,
 } from 'lucide-react';
-import { useEffect, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { ViewId } from '../../lib/router';
+import { whenLabel } from '../../lib/when-label';
 import { Tooltip } from '../ui/Tooltip';
 import { IconButton } from '../ui/IconButton';
+import { Menu, MenuItem } from '../ui/Menu';
 import { AccountMenu, type HealthSummary } from './AccountMenu';
 import { DESTINATIONS, destinationOf, type DestinationId } from './nav';
 import { Spark } from './Spark';
@@ -41,6 +45,13 @@ import {
 export interface RecentChat {
   id: string;
   title: string;
+  /** When the chat was last used; shown only beside a title another recent chat shares. */
+  updatedAt?: number;
+}
+
+/** The part of a title the sidebar shows before it cuts the row: two titles alike here look the same. */
+function titleKey(title: string): string {
+  return title.trim().toLowerCase().slice(0, 28);
 }
 
 export interface SidebarProps {
@@ -61,6 +72,10 @@ export interface SidebarProps {
   onNewChat: () => void;
   onOpenChat: (id: string) => void;
   onDeleteChat: (id: string, title: string) => void;
+  /** Open the chat with its title ready to edit. */
+  onRenameChat: (id: string) => void;
+  /** Open Work on only what waits for you (the account menu's "N waiting for you"). */
+  onReviewWaiting: () => void;
   onSearch: () => void;
   onSignOut: () => void;
   /** Open the settings dialog, on a section when one is named. */
@@ -118,6 +133,8 @@ export function SidebarContent({
   onNewChat,
   onOpenChat,
   onDeleteChat,
+  onRenameChat,
+  onReviewWaiting,
   onSearch,
   onSignOut,
   onOpenSettings,
@@ -125,6 +142,11 @@ export function SidebarContent({
   const shell = useShell();
   const compact = variant === 'rail';
   const current = destinationOf(view);
+  const lookAlike = useMemo(() => {
+    const seen = new Map<string, number>();
+    for (const chat of recentChats) seen.set(titleKey(chat.title), (seen.get(titleKey(chat.title)) ?? 0) + 1);
+    return new Set([...seen].filter(([, count]) => count > 1).map(([key]) => key));
+  }, [recentChats]);
 
   return (
     <div className={`shell-sidebar__inner shell-sidebar__inner--${variant}`}>
@@ -227,28 +249,39 @@ export function SidebarContent({
               {recentChats.map((chat) => {
                 const active = view === 'chat' && !draftChat && chat.id === activeChatId;
                 const deleting = deletingChatId === chat.id;
+                // Two chats that read alike are told apart by when each was last used.
+                const age = lookAlike.has(titleKey(chat.title)) ? whenLabel(chat.updatedAt) : '';
                 return (
                   <li key={chat.id} className="shell-recent__row" data-active={active || undefined}>
                     <button
                       type="button"
                       className="shell-nav-item shell-recent__open"
                       aria-current={active ? 'page' : undefined}
+                      aria-label={age ? `${chat.title}, ${age}` : undefined}
                       onClick={() => onOpenChat(chat.id)}
                     >
                       <span className="shell-nav-item__label">{chat.title}</span>
+                      {age && <span className="shell-recent__age" aria-hidden="true">{age}</span>}
                     </button>
-                    <IconButton
-                      size="sm"
-                      className="shell-recent__delete"
-                      label={deleting ? 'Deleting…' : `Delete ${chat.title} permanently`}
-                      icon={<Trash2 />}
-                      disabled={deletingChatId !== null}
-                      tooltipPlacement="right"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onDeleteChat(chat.id, chat.title);
-                      }}
-                    />
+                    <Menu
+                      label={`${chat.title}: more`}
+                      placement="right-start"
+                      width={200}
+                      trigger={(props) => (
+                        <IconButton
+                          {...props}
+                          size="sm"
+                          className="shell-recent__more"
+                          label={deleting ? 'Deleting…' : `More for ${chat.title}`}
+                          icon={<MoreHorizontal />}
+                          tooltipPlacement="right"
+                          disabled={deletingChatId !== null}
+                        />
+                      )}
+                    >
+                      <MenuItem icon={<Pencil />} onSelect={() => onRenameChat(chat.id)}>Rename</MenuItem>
+                      <MenuItem icon={<Trash2 />} danger onSelect={() => onDeleteChat(chat.id, chat.title)}>Delete chat…</MenuItem>
+                    </Menu>
                   </li>
                 );
               })}
@@ -274,6 +307,8 @@ export function SidebarContent({
           name={accountName}
           health={health}
           running={runningNow}
+          waiting={workAttention}
+          onReviewWaiting={onReviewWaiting}
           compact={compact}
           onOpenSettings={onOpenSettings}
           onSignOut={onSignOut}

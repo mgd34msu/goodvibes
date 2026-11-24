@@ -220,15 +220,7 @@ function gmailConfigRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
 
 function gmailVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
-    const verify = deps.verifyMail;
-    if (verify === undefined) {
-      return needsHuman(
-        'Mail connectivity was not checked.',
-        'This run had no way to open a real IMAP and SMTP session, so the credential is stored but unproven.',
-        'Say the word and I will open a real IMAP and SMTP session to check it.',
-      );
-    }
-    const outcome = await verify();
+    const outcome = await deps.verifyMail();
     return outcome.ok
       ? done(outcome.detail)
       : failed(
@@ -256,15 +248,7 @@ function calendarIcsRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
 
 function calendarVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
-    const verify = deps.verifyCalendar;
-    if (verify === undefined) {
-      return needsHuman(
-        'The calendar feed was not read.',
-        'This run had no way to fetch the calendar feed, so the address is stored but unproven.',
-        'Say the word and I will fetch the feed and read the events back.',
-      );
-    }
-    const outcome = await verify();
+    const outcome = await deps.verifyCalendar();
     return outcome.ok
       ? done(outcome.detail)
       : failed('Could not read the calendar feed.', outcome.detail, 'Copy the private address again and paste it here, I will store it.');
@@ -368,7 +352,7 @@ function oauthClientRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
  * refresh token); this step hands the person the link and waits on it.
  */
 function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
-  return async () => {
+  return async (spec) => {
     const storedToken = await secretState(deps.secrets, GOOGLE_SECRET_KEYS.oauthRefreshToken);
     if (storedToken === 'present') {
       return alreadyDone('The agent is already authorized; a refresh token is in the encrypted store.');
@@ -381,14 +365,17 @@ function oauthAuthorizeRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       );
     }
 
-    const clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
-    const secret = readString(await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthClientSecret));
+    let clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
+    let secret = readString(await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthClientSecret));
     if (clientId === null || secret === null) {
-      return failed(
-        'No OAuth client is configured.',
-        'Authorization needs a client id and secret, and one or both are missing.',
-        'Nothing to authorize against yet, say the word and I will set the client up first.',
-      );
+      // Nothing to authorize against yet: setting the client up runs first, as its own step would.
+      const client = await oauthClientRunner(deps)(spec);
+      if (client.outcome !== 'done' && client.outcome !== 'already-done') return client;
+      clientId = safeConfigString(deps.config, GOOGLE_CONFIG_KEYS.oauthClientId);
+      secret = readString(await deps.secrets.get(GOOGLE_SECRET_KEYS.oauthClientSecret));
+      if (clientId === null || secret === null) {
+        return failed('No OAuth client is configured.', 'The client step finished, but no client id and secret are stored.', 'Store the client with /google client <client-id> <client-secret>, then run the setup again.');
+      }
     }
 
     const session = beginGoogleConsent({
@@ -450,28 +437,19 @@ function oauthVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
       return failed(
         'There is no refresh token to check.',
         'Authorization did not store a refresh token, so there is nothing to verify.',
-        'Say the word and I will start the consent again.',
+        'Run /google reauthorize to start the consent again.',
       );
     }
 
     const warnings = publishingWarnings(deps.config, 'Publishing status is "Testing", so the stored credential expires seven days after it was issued.');
 
-    const prove = deps.proveConnection;
-    if (prove === undefined) {
-      // Stored but unproven is stated as exactly that, never as success.
-      return needsHuman(
-        'The credential is stored but was not proven.',
-        'This run had no way to make a real Google call, so the credential is stored but nothing has confirmed it can actually read mail or calendar.',
-        'Say the word and I will read your mail and calendar to prove it.',
-      );
-    }
-
-    const proof = await prove();
+    // The proof is a step of the setup: it reads the mailbox and the calendar with the stored credential.
+    const proof = await deps.proveConnection();
     if (!proof.ok) {
       return failed(
         'The credential is stored but does not work yet.',
         proof.problem ?? proof.detail,
-        proof.fix ?? 'Say the word and I will start a fresh consent covering mail and calendar together.',
+        proof.fix ?? 'Run /google reauthorize to ask for mail and calendar together in one consent.',
       );
     }
     return done(proof.detail, warnings);

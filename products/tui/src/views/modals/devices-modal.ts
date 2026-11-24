@@ -42,6 +42,8 @@ export interface DevicesModalDeps {
   readonly now?: () => number;
   /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
   readonly copyToClipboard?: (text: string) => boolean | void;
+  /** The daemon's LIST_CHANGED `paired-devices` notices while the screen is open; returns the unsubscribe. */
+  readonly watchPairedDevices?: (onChange: () => void) => () => void;
 }
 
 const DEVICE_ROW_PREFIX = 'device:';
@@ -83,8 +85,15 @@ class DevicesModalSurface implements ConfigModalSurface {
     { key: 's', id: 'revokeShared', label: 'revoke or replace shared token', confirm: true, enabledFor: () => true },
   ];
 
+  /** Stops following the daemon's paired-devices notices; set while the screen is open. */
+  private unwatch: () => void = () => {};
+
   onOpen(requestRender: () => void): void {
     this.requestRender = requestRender;
+    // A device paired, renamed or revoked through the daemon (a phone, the web app) redraws the list with no key:
+    // the render reads the device list again, which takes in the daemon's write.
+    this.unwatch();
+    this.unwatch = this.deps.watchPairedDevices?.(() => this.requestRender()) ?? (() => {});
     if (pendingReveal) {
       this.minted = pendingReveal;
       this.mintedRevealed = false;
@@ -93,7 +102,7 @@ class DevicesModalSurface implements ConfigModalSurface {
   }
 
   /** A one-time token held for display is dropped when the modal closes. */
-  onClose(): void { this.minted = null; this.mintedRevealed = false; }
+  onClose(): void { this.unwatch(); this.unwatch = () => {}; this.minted = null; this.mintedRevealed = false; }
 
   buildView(): ConfigModalView {
     const now = this.deps.now?.() ?? Date.now();

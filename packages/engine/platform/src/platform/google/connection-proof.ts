@@ -51,8 +51,9 @@ function classify(capability: 'mail' | 'calendar', failure: GoogleApiFailure): G
       detail: `${capability === 'mail' ? 'Mail' : 'Calendar'} refused the credential.`,
       problem:
         `The stored credential does not carry the ${capability === 'mail' ? 'Gmail' : 'Calendar'} scope. `
-        + 'A grant carries exactly the scopes that were approved, so this consent was approved without it.',
-      fix: 'Say the word and I will re-authorize, asking for mail and calendar together in one consent so this cannot happen again.',
+        + `A grant carries exactly the scopes that were approved, so this consent was approved without it. ${problem}`,
+      // The client already started the fresh consent asking for mail and calendar together, and says how it ended.
+      fix: failure.fix,
     };
   }
   if (failure.reason === 'api-disabled') {
@@ -60,7 +61,8 @@ function classify(capability: 'mail' | 'calendar', failure: GoogleApiFailure): G
       ok: false,
       detail: `${capability === 'mail' ? 'Mail' : 'Calendar'} is not enabled on the Cloud project.`,
       problem: `The credential is valid but the ${capability === 'mail' ? 'Gmail' : 'Calendar'} API is switched off on the project this client belongs to. ${problem}`,
-      fix: 'Say the word and I will enable both APIs through gcloud, which is signed in on this machine.',
+      // The client already put enabling it to the person's mode and ran it with gcloud, and says how that ended.
+      fix: failure.fix,
     };
   }
   return {

@@ -37,6 +37,8 @@ export interface VoiceCaptureShellDeps {
   readonly submitInput: (text: string) => void;
   readonly notify: (message: string) => void;
   readonly render: () => void;
+  /** The terminal's focus-in reports (the platform focus tracker). */
+  readonly subscribeFocusGained?: (listener: () => void) => () => void;
 }
 
 /**
@@ -61,8 +63,10 @@ export function installVoiceCapture(deps: VoiceCaptureShellDeps): () => VoiceCap
     submitTurn: (text) => deps.submitInput(text),
     notify: deps.notify,
     render: deps.render,
+    ...(deps.subscribeFocusGained ? { subscribeFocusGained: deps.subscribeFocusGained } : {}),
   });
   deps.commandContext.toggleVoiceInput = capture.toggleVoiceInput;
+  deps.commandContext.listenForWakeAgain = capture.listenForWakeAgain;
   deps.unsubs.push(...capture.unsubs);
   return capture.status;
 }

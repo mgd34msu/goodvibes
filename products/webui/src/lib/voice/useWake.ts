@@ -151,7 +151,29 @@ export function useWakeHost(onTranscript?: WakeTranscriptSink): WakeHostState {
     return wakeHost.setTranscriptSink(onTranscript);
   }, [onTranscript]);
 
+  // A detector that gave up starts again by itself when a microphone is plugged in or
+  // changed, or when this tab comes back into focus; the indicator's "Listen again" does
+  // the same at once.
+  useEffect(() => {
+    const again = () => { if (wakeHost.getState().phase === 'latched') wakeHost.clearLatch(); };
+    const onVisible = () => { if (document.visibilityState === 'visible') again(); };
+    window.addEventListener('focus', again);
+    document.addEventListener('visibilitychange', onVisible);
+    const devices = typeof navigator !== 'undefined' ? navigator.mediaDevices : undefined;
+    devices?.addEventListener?.('devicechange', again);
+    return () => {
+      window.removeEventListener('focus', again);
+      document.removeEventListener('visibilitychange', onVisible);
+      devices?.removeEventListener?.('devicechange', again);
+    };
+  }, []);
+
   return state;
+}
+
+/** "Listen again": start a detector that gave up, at once. */
+export function listenAgain(): void {
+  wakeHost.clearLatch();
 }
 
 /**

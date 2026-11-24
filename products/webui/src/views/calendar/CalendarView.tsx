@@ -27,7 +27,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, CalendarDays, ChevronLeft, ChevronRight, MoreHorizontal, Plus, RefreshCw } from 'lucide-react';
 import { client as platformClient } from '../../lib/goodvibes';
 import type { CalendarEventCreateInput, CalendarIcsImportInput } from '../../lib/goodvibes';
-import { queryKeys } from '../../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../../lib/queries';
 import {
   errorCode,
   formatError,
@@ -250,6 +250,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
       ...(calendarFilter ? { calendarId: calendarFilter } : {}),
       limit: eventLimit,
     }),
+    ...NO_EVENT_LIST_FRESHNESS,
   });
 
   const detail = useCalendarEventDetail(selectedId, calendarFilter || undefined);
@@ -260,6 +261,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
     queryKey: ['calendar', 'calendars'],
     retry: false,
     staleTime: 5 * 60_000,
+    ...NO_EVENT_LIST_FRESHNESS,
     queryFn: () => platformClient.operator.invoke('calendar.calendars.list', {}),
   });
   const calendarChoices = useMemo(() => {
@@ -676,7 +678,7 @@ export function CalendarView({ tabs }: CalendarViewProps = {}) {
         {noticeNode}
         <div data-testid="calendar-agenda">
           {groups.map(([key, dayItems]) => (
-            <RowGroup key={key} label={dayLabel(key)} count={dayItems.length}>
+            <RowGroup key={key} label={dayLabel(key)} count={dayItems.length} unit={['event', 'events']}>
               {dayItems.map((item) => (
                 <Row
                   key={item.id}

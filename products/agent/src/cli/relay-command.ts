@@ -5,6 +5,30 @@ import {
   type RelayActionWords,
 } from '../runtime/relay-host.ts';
 import type { CliCommandOutput } from './types.ts';
+import { askYesNoOnTerminal } from './management-commands.ts';
+import { RELAY_ADDRESS_HELP, relayAddressProblem, type RelayTurnOnAnswer } from '@goodvibes/engine/terminal-shell/relay-pairing-ask';
+import { RELAY_TURN_ON_QUESTION } from '@goodvibes/engine/platform/platform/relay';
+
+/** The same ask in a terminal: [y/N], and on yes the relay's address when none is set (checked; a wrong one is asked again). */
+async function askToTurnOnRelayOnTerminal(configuredUrl: string): Promise<RelayTurnOnAnswer> {
+  if (!await askYesNoOnTerminal(RELAY_TURN_ON_QUESTION)) return { turnOn: false };
+  const waiting = 'Turning the relay on and waiting for the host to register with it; the pairing follows when it does.\n';
+  if (configuredUrl.trim() !== '') { process.stdout.write(waiting); return { turnOn: true }; }
+  const { createInterface } = await import('node:readline/promises');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    process.stdout.write(`${RELAY_ADDRESS_HELP}\n`);
+    for (;;) {
+      const typed = (await rl.question('Relay address (wss://…, empty leaves the relay off): ')).trim();
+      if (typed === '') return { turnOn: false };
+      const problem = relayAddressProblem(typed);
+      if (problem === null) { process.stdout.write(waiting); return { turnOn: true, url: typed }; }
+      process.stdout.write(`${problem}\n`);
+    }
+  } finally {
+    rl.close();
+  }
+}
 import type { CliCommandRuntime } from './management.ts';
 
 /**
@@ -51,7 +75,10 @@ async function handleRelayStatus(runtime: CliCommandRuntime): Promise<CliCommand
 async function handleRelayPair(runtime: CliCommandRuntime, name: string | undefined): Promise<CliCommandOutput> {
   let answer;
   try {
-    answer = await mintRelayPairing(hostVerbs(runtime), name);
+    // In a terminal the relay being off is asked about in place ([y/N]); a script gets the answer as it stands.
+    const interactive = runtime.cli.flags.outputFormat === 'text' && process.stdin.isTTY === true;
+    const relayUrl = String(runtime.configManager.get('relay.url') ?? '');
+    answer = await mintRelayPairing(hostVerbs(runtime), name, { ...(interactive ? { ask: askToTurnOnRelayOnTerminal } : {}), ...(relayUrl ? { url: relayUrl } : {}) });
   } catch (error) {
     return hostFailure(runtime, 'Minting a relay pairing payload on the connected host', error);
   }

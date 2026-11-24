@@ -40,6 +40,26 @@
 
 /* An honest floating note above the mic (secure-context pointer, permission denied,
    recording/transcribing status). Scrolls inside its own box on narrow viewports. */
+.voice-mic-note__action {
+  display: block;
+  margin-top: 6px;
+  text-align: left;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.voice-mic-note__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}
+
 .voice-mic-note {
   position: absolute;
   bottom: calc(100% + 8px);
@@ -195,6 +215,22 @@
 
 .wake-banner__detail {
   opacity: 0.85;
+}
+
+/* A detector that gave up: start it again at once. */
+.wake-banner__action {
+  padding: 2px 10px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-full);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.wake-banner__action:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
 }
 
 .wake-banner.is-live .wake-banner__label::before {

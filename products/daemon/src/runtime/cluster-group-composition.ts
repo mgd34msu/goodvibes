@@ -18,6 +18,14 @@
  */
 import {
   acknowledgeRemoval,
+  clearPendingGroupAction,
+  decideLocalSetting,
+  forgetNode,
+  joinGroup,
+  readPendingGroupAction,
+  renameGroupTo,
+  rotateGroupKey,
+  type PendingGroupAction,
   ClusterGroupRuntime,
   findTombstone,
   clusterElectionTiming,
@@ -110,6 +118,8 @@ export function createClusterGroupComposition(options: {
   readonly authorityRecord?: AuthorityRecordFile | undefined;
   /** Where authority.status learns which members' records differ from this one. */
   readonly setAuthorityPeers?: ((peers: { divergence(): { readonly behindOn: readonly string[]; readonly behind: boolean } } | null) => void) | undefined;
+  /** Tells the owner once how a join that waited for a restart ended. */
+  readonly tellOwner?: ((title: string, detail: string) => void) | undefined;
 }): ClusterGroupComposition {
   const { resolveLocalSecretSync } = options.secretsManager;
   const settings = readClusterSettings(options.configManager,
@@ -181,6 +191,8 @@ export function createClusterGroupComposition(options: {
     now: () => clock.now(),
     electionSecret: () => settings.secret.state,
     authorityRecord: options.authorityRecord,
+    // A join the owner said yes to while sharing was off: saved now, applied when the daemon starts again.
+    enableSharing: () => { options.configManager.set('cluster.enabled', true); },
   };
   let acknowledging = false;
   removedFromGroup = () => {
@@ -233,6 +245,8 @@ export function createClusterGroupComposition(options: {
         await runtime.start();
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
         started = true;
+        await resumePendingGroupAction(context, options.tellOwner);
+        if (stopping) throw new Error('Cluster composition startup cancelled by stop');
         const outcome = await announceReturn(runtime, context, nodeId);
         if (stopping) throw new Error('Cluster composition startup cancelled by stop');
         if (outcome === 'retry') scheduleRejoin(0);
@@ -260,6 +274,67 @@ export function createClusterGroupComposition(options: {
   };
 }
 
+/** What a kept action is, in the owner's words, for the one report at start. */
+function describePendingAction(pending: PendingGroupAction): string {
+  switch (pending.kind) {
+    case 'join': return `the join of group ${pending.groupId}`;
+    case 'forget': return `the removal of ${pending.nodeId} from the group`;
+    case 'rotate': return pending.immediate ? 'the immediate replacement of the group key' : 'the replacement of the group key';
+    case 'rename': return `renaming the group to "${pending.name}"`;
+    case 'publish': return `sending this machine's ${pending.path} to the group`;
+    case 'accept': return `taking the group's ${pending.path} here`;
+  }
+}
+
+/**
+ * Finish a group action stored before a restart (group-operations.ts
+ * `turnOnSharing`): a join, a removal, a key rotation, a rename, or a
+ * shared-setting decision.
+ *
+ * The action was written to the secret store and read back before
+ * `cluster.enabled` was set, and is cleared only here, after it answered. So a
+ * crash leaves one of two states, both handled at the next start: the action
+ * stored and sharing never set (dropped here, and the owner told), or the
+ * action stored with sharing set (done here). A crash during the action itself
+ * leaves it stored, and the next start tries again; a join refusal that waiting
+ * will not change (a wrong key, a removal) ends it. The owner is told once.
+ */
+async function resumePendingGroupAction(context: GroupOperationsContext, tellOwner: ((title: string, detail: string) => void) | undefined): Promise<void> {
+  const pending = await readPendingGroupAction(context.secrets);
+  if (!pending) return;
+  const what = describePendingAction(pending);
+  if (!context.settings.enabled) {
+    await clearPendingGroupAction(context.secrets);
+    tellOwner?.(pending.kind === 'join' ? 'This machine did not join the group' : 'A group action was not done',
+      `Sharing inbound work with your other machines was not turned on before the daemon stopped, so ${what} was dropped. Run it again to finish it.`);
+    return;
+  }
+  if (pending.kind !== 'join') {
+    const done = pending.kind === 'forget' ? await forgetNode(context, pending.nodeId)
+      : pending.kind === 'rotate' ? await rotateGroupKey(context, { immediate: pending.immediate })
+        : pending.kind === 'rename' ? await renameGroupTo(context, pending.name)
+          : await decideLocalSetting(context, pending.path, pending.kind);
+    await clearPendingGroupAction(context.secrets);
+    if (done.ok) tellOwner?.('A group action finished after the restart', `Sharing is on and the group is up, so ${what} was done.`);
+    else tellOwner?.('A group action did not finish after the restart', `Sharing is on and the group is up, but ${what} was refused: ${done.error}. ${done.fix}.`);
+    return;
+  }
+  const result = await joinGroup(context, { groupId: pending.groupId, joinKey: pending.joinKey });
+  // A refusal or a removal will not change by waiting; nobody answering, or an answer that could not be checked, may.
+  if (!result.ok && !result.terminal && result.failure !== 'refused' && result.failure !== 'removed') {
+    // Nobody answered yet: kept, and tried again at the next start; the owner is told why now.
+    logger.warn('cluster: the join that waited for the restart did not finish yet', { group: pending.groupId, reason: result.error });
+    tellOwner?.('This machine has not joined the group yet', `${result.error}. The join is kept and tried again when the daemon next starts; ${result.fix}.`);
+    return;
+  }
+  await clearPendingGroupAction(context.secrets);
+  if (result.ok) {
+    tellOwner?.('This machine joined the group', `It joined "${result.data.groupName}" [${result.data.groupId}] with ${result.data.memberCount} machine(s).${result.data.warning ? ` ${result.data.warning}` : ''}`);
+  } else {
+    tellOwner?.('This machine did not join the group', `${result.error}. ${result.fix}.`);
+  }
+}
+
 /**
  * Build both halves of the LAN cluster, wired to each other.
  *
@@ -282,6 +357,8 @@ export function createClusterServices(options: {
   /** Optional host/test seams; defaults preserve the real UDP/system-clock path. */
   readonly transport?: ClusterTransport | undefined;
   readonly clock?: ClusterClock | undefined;
+  /** Tells the owner once how a join that waited for a restart ended. */
+  readonly tellOwner?: ((title: string, detail: string) => void) | undefined;
 }): { readonly clusterGroup: ClusterGroupComposition; readonly clusterCoordinator: ClusterCoordinator } {
   let coordinator: ClusterCoordinator | null = null;
   const clusterGroup = createClusterGroupComposition({

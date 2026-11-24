@@ -11,6 +11,7 @@ import { queryKeys } from '../lib/queries';
 import { modelOptionsSourceOf, useProviderModelOptions } from '../lib/use-provider-model-options';
 import { modelOptionsForProvider, providerOptionsFromResponse, reasoningOptionsForModel, sortProvidersConfiguredFirst } from '../lib/provider-models';
 import { modelRefreshSentence, pickerProviderOf } from '../lib/model-picker-data';
+import { filesThatFit, TOO_MANY_FILES } from './chat/composer-attachments';
 import { deriveProviderStatus } from '../lib/provider-status';
 import { shouldSteerComposerKey, shouldSubmitComposerKey } from '../lib/composer-keys';
 import { isSessionNotFoundError, formatError } from '../lib/errors';
@@ -35,6 +36,9 @@ import { QueuedMessagesPanel } from './chat/QueuedMessagesPanel';
 import { ChatAsksChip, ElsewhereAsksBanner, InlineAsks } from './chat/InlineAsk';
 import { useChatSend, type NewChatRoute } from './chat/useChatSend';
 import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
+import { openPaletteWith, runCommand } from '../lib/commands';
+import { motionReduced } from '../lib/ui-preferences';
+import { holdReload } from '../lib/reload-guard';
 import { useToast } from '../lib/toast';
 import { useWakeTranscriptSink } from '../lib/voice/useWake';
 import { useChatStream } from './chat/useChatStream';
@@ -73,6 +77,9 @@ function isSessionEffort(value: string): value is SessionEffort {
 /** How often the transcript is re-read while the live stream is paused. */
 const PAUSED_REFRESH_MS = 5000;
 
+/** The starter probes: stale at once, so showing the new-chat screen again or focusing the window reads them again. */
+const STARTER_PROBE_FRESHNESS = { staleTime: 0, refetchOnMount: 'always', refetchOnWindowFocus: true } as const;
+
 const SUGGESTION_ICONS: Record<SuggestionIcon, typeof Mail> = {
   calendar: CalendarDays,
   mail: Mail,
@@ -92,6 +99,9 @@ export function ChatView({
   userName,
   onOpenSettings,
   onOpenAsk,
+  onReviewAsks,
+  renameRequest,
+  onRenameRequestHandled,
 }: ChatViewProps) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
@@ -109,6 +119,8 @@ export function ChatView({
   // A /command the composer does not run, held instead of sent (cleared when the draft changes).
   const [heldCommand, setHeldCommand] = useState<{ word: string; known: boolean; steer: boolean } | null>(null);
   const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  // Said under the attached files when more were added than a message takes.
+  const [attachNote, setAttachNote] = useState<string>();
   // The streamed reply lives in a store, not in this view's state: a token
   // re-renders only the live bubble. This view re-renders when it gains or loses text.
   const [liveReply] = useState(createLiveReplyStore);
@@ -211,9 +223,16 @@ export function ChatView({
     () => new Map(allProviderOptions.map((provider) => [provider.id, modelOptionsForProvider(provider.value, catalogProviders)] as const)),
     [allProviderOptions, catalogProviders],
   );
+  // Why a provider's list was not read, from the last Refresh models answer: the model list carries it only
+  // for a provider that has a list, so a provider never read (no models yet) gets it from here, on its row.
+  const [refreshErrors, setRefreshErrors] = useState<Readonly<Record<string, string>>>({});
   const pickerProviders = useMemo(
-    () => allProviderOptions.map((provider) => pickerProviderOf(provider, modelsByProvider.get(provider.id) ?? [])),
-    [allProviderOptions, modelsByProvider],
+    () => allProviderOptions.map((provider) => {
+      const picked = pickerProviderOf(provider, modelsByProvider.get(provider.id) ?? []);
+      const fromRefresh = refreshErrors[provider.id];
+      return picked.listError || !fromRefresh ? picked : { ...picked, listError: fromRefresh };
+    }),
+    [allProviderOptions, modelsByProvider, refreshErrors],
   );
   const favoriteModels = useMemo(() => {
     const record = asRecord(modelCatalog.data);
@@ -249,6 +268,14 @@ export function ChatView({
     () => setSessionTitleDraft(activeSessionTitle === activeSessionId ? '' : activeSessionTitle),
     [activeSessionId, activeSessionTitle],
   );
+
+  // The sidebar's "Rename": once that chat is the one open, its title opens for editing.
+  useEffect(() => {
+    if (!renameRequest || renameRequest !== activeSessionId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- a request from the sidebar, handled once
+    setIsRenamingTitle(true);
+    onRenameRequestHandled?.();
+  }, [renameRequest, activeSessionId, onRenameRequestHandled]);
 
   const renameSession = useMutation({
     mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) => platformClient.chat.sessions.update(sessionId, { title }),
@@ -317,6 +344,15 @@ export function ChatView({
 
   const refreshModelLists = async (providerId?: string): Promise<string> => {
     const answer = await platformClient.operator.models.refresh(providerId);
+    setRefreshErrors((known) => {
+      const next: Record<string, string> = { ...known };
+      for (const report of answer.providers as readonly { providerId?: unknown; error?: unknown; notAsked?: unknown }[]) {
+        if (typeof report.providerId !== 'string' || report.notAsked === true) continue;
+        if (typeof report.error === 'string' && report.error) next[report.providerId] = report.error;
+        else delete next[report.providerId];
+      }
+      return next;
+    });
     await queryClient.invalidateQueries({ queryKey: ['models'] });
     return modelRefreshSentence(answer.providers);
   };
@@ -493,7 +529,7 @@ export function ChatView({
   const jumpToMessage = useCallback((messageId: string) => {
     const element = findMessageElement(scrollRef.current, messageId);
     if (!element) return;
-    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    element.scrollIntoView({ block: 'center', behavior: motionReduced() ? 'auto' : 'smooth' });
     setHighlightedMessageId(messageId);
   }, []);
   // A message still waiting behind the running reply is shown once, in the queue
@@ -534,7 +570,7 @@ export function ChatView({
     const target = pendingScrollTarget;
     const element = findMessageElement(scrollRef.current, target.messageId);
     if (!element) return;
-    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    element.scrollIntoView({ block: 'center', behavior: motionReduced() ? 'auto' : 'smooth' });
     setHighlightedMessageId(target.messageId);
     setPendingScrollTarget(null);
   }, [pendingScrollTarget, activeSessionId, lineageNodes]);
@@ -660,11 +696,20 @@ export function ChatView({
     if (send.isPending || (!body && !files.length)) return;
     const slash = options.asText ? { kind: 'text' as const } : parseSlashCommand(body);
     if (slash.kind === 'command' && !files.length) {
+      const run = slash.command.run;
+      // A palette entry that is not registered (no palette mounted) is held like any command this composer cannot run.
+      const ran = run.kind === 'new-chat' ? true : run.kind === 'palette-command' ? runCommand(run.id) : openPaletteWith(run.query);
+      if (!ran) {
+        setHeldCommand({ word: `/${slash.command.name}`, known: false, steer: options.steer === true });
+        return;
+      }
       setDraft('');
       setHeldCommand(null);
-      onActiveSessionChange('');
-      onDraftSessionRequestedChange(true);
-      composerRef.current?.focus();
+      if (run.kind === 'new-chat') {
+        onActiveSessionChange('');
+        onDraftSessionRequestedChange(true);
+        composerRef.current?.focus();
+      }
       return;
     }
     // A /command this composer does not run is not sent to the model: the text
@@ -678,6 +723,7 @@ export function ChatView({
     const filesToSend = [...files];
     setDraft('');
     setAttachedFiles([]);
+    setAttachNote(undefined);
     composerRef.current?.focus();
     send.mutate({
       body,
@@ -747,7 +793,11 @@ export function ChatView({
   }
 
   function addAttachedFiles(files: File[]) {
-    if (files.length) setAttachedFiles((current) => [...current, ...files]);
+    if (!files.length) return;
+    // The daemon's limit, said when the files are added, never first at send.
+    const { taken, refused } = filesThatFit(attachedFiles.length, files);
+    setAttachNote(refused ? TOO_MANY_FILES : undefined);
+    if (taken.length) setAttachedFiles((current) => [...current, ...taken]);
   }
 
   function regenerateFrom(messageId: string) {
@@ -776,7 +826,7 @@ export function ChatView({
   function scrollMessagesToBottom() {
     const container = scrollRef.current;
     if (!container) return;
-    container.scrollTo({ top: container.scrollHeight, behavior: 'smooth' });
+    container.scrollTo({ top: container.scrollHeight, behavior: motionReduced() ? 'auto' : 'smooth' });
     setShowJumpToBottom(false);
   }
 
@@ -788,6 +838,7 @@ export function ChatView({
 
   function removeAttachedFile(index: number) {
     setAttachedFiles((current) => current.filter((_file, fileIndex) => fileIndex !== index));
+    setAttachNote(undefined);
   }
 
   function finishRenamingTitle() {
@@ -834,22 +885,26 @@ export function ChatView({
   // A new chat: no session yet and nothing sent. The greeting and the centered
   // composer show only here; the first send turns it into a conversation.
   const isNewChat = !activeSessionId && lineageNodes.length === 0 && !hasLiveText && !isStreaming && !send.isPending;
+  // An update reload waits while a reply streams or a message is being sent (lib/reload-guard).
+  const replyInFlight = isStreaming || send.isPending || isActiveTurnState(turnState);
+  useEffect(() => (replyInFlight ? holdReload() : undefined), [replyInFlight]);
   // The calendar and mail starters show only when that account answers a one-item
   // read (the same reads Settings shows the account status from, sharing their cache).
-  // Read once per page while a new chat is open; nothing is read in a conversation.
+  // Read each time the new-chat screen is shown and when the window regains focus while it
+  // is, so an account connected a minute ago shows its starter; nothing is read in a conversation.
   const calendarProbe = useQuery({
     queryKey: queryKeys.calendarProbe,
     queryFn: () => platformClient.operator.calendar.events.list({ limit: 1 }),
     enabled: isNewChat,
     retry: false,
-    staleTime: Infinity,
+    ...STARTER_PROBE_FRESHNESS,
   });
   const mailProbe = useQuery({
     queryKey: queryKeys.emailInbox(1, false, ''),
     queryFn: () => platformClient.operator.email.inbox.list({ limit: 1 }),
     enabled: isNewChat,
     retry: false,
-    staleTime: Infinity,
+    ...STARTER_PROBE_FRESHNESS,
   });
   const suggestions = availableSuggestions({ calendar: calendarProbe.isSuccess, mail: mailProbe.isSuccess });
   const workingLabel = workingStatusLabel(
@@ -931,6 +986,7 @@ export function ChatView({
         chatSessionIds={chatSessionIds}
         onOpenChat={onActiveSessionChange}
         onOpenAsk={onOpenAsk}
+        onReviewAll={onReviewAsks}
       />
       <MessageList
         nodes={transcriptNodes}
@@ -1008,6 +1064,7 @@ export function ChatView({
           onFileSelection={handleFileSelection}
           onFilesAdded={addAttachedFiles}
           onRemoveAttachedFile={removeAttachedFile}
+          attachNote={attachNote}
         />
         {/* Starters are for an empty composer: once something is typed (a slash command
             among them, whose menu opens where they sit) they step aside. */}

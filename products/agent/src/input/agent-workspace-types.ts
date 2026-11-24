@@ -18,16 +18,21 @@ export const AGENT_WORKSPACE_GROUP_ORDER: readonly AgentWorkspaceCategoryGroup[]
   'START', 'DAY-TO-DAY', 'LOCAL BEHAVIOR', 'CAPABILITIES', 'OPERATIONS', 'SETUP', 'ONBOARDING', 'FINISH',
 ];
 
-/** What each group is called on screen, for the job its areas do; the group key stays the name the workspace filters by. */
+/**
+ * What each group is called on screen, for the job its areas do; the group key
+ * stays the name the workspace filters by. Home stands alone, with no title;
+ * groups with the same title next to each other share one heading (the setup
+ * areas and Finish).
+ */
 export const AGENT_WORKSPACE_GROUP_TITLES: Readonly<Record<AgentWorkspaceCategoryGroup, string>> = {
-  START: 'START',
-  'DAY-TO-DAY': 'GET THINGS DONE',
-  'LOCAL BEHAVIOR': 'REMEMBER & TEACH',
-  CAPABILITIES: 'TOOLS & KNOWLEDGE',
-  OPERATIONS: 'HOMES & HOST',
-  SETUP: 'SET UP',
-  ONBOARDING: 'SET UP',
-  FINISH: 'FINISH SETUP',
+  START: '',
+  'DAY-TO-DAY': 'Get things done',
+  'LOCAL BEHAVIOR': 'Memory & habits',
+  CAPABILITIES: 'Tools & knowledge',
+  OPERATIONS: 'Where it runs',
+  SETUP: 'Set up',
+  ONBOARDING: 'Set up',
+  FINISH: 'Set up',
 };
 
 export type AgentWorkspaceFocusPane = 'categories' | 'actions';

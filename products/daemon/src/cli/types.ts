@@ -28,6 +28,8 @@ export interface DaemonCliFlags {
   readonly check: boolean;
   /** `sessions list --all`: include sessions that have already ended. */
   readonly all: boolean;
+  /** `pair --lan`: serve the web UI to the network first, then print the code for a phone. */
+  readonly lan: boolean;
   readonly provider: string | undefined;
   readonly model: string | undefined;
   /** `serve` only: the address to BIND. */

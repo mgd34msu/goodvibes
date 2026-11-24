@@ -89,7 +89,7 @@ function phaseCopy(state: WakeHostState): WakeIndicatorCopy {
         label: 'Wake detection stopped',
         detail: state.refusal?.detail
           ?? state.error
-          ?? 'Wake detection stopped and will not restart on its own. Turn it off and on again to retry.',
+          ?? 'Wake detection stopped. It starts again when a microphone is plugged in or this tab comes back into focus; Listen again starts it now.',
         live: false,
         attention: true,
       };

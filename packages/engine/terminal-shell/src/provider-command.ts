@@ -11,12 +11,13 @@ import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, rmSync, writeS
 import { dirname } from 'node:path';
 import {
   atomicWriteFileSync,
-  createOAuthLocalListener,
   getSubscriptionProviderConfig,
   listAvailableSubscriptionProviders,
   subscriptionExportForm,
+  beginSubscriptionSignIn,
+  finishSubscriptionSignIn,
+  type SubscriptionSignInDeps,
   type ConfigManager,
-  type OAuthProviderConfig,
   type ProviderSubscription,
   type SecretsManager,
   type SubscriptionGrant,
@@ -36,7 +37,6 @@ import type { CommandActionContext, CommandDescription, FixedChoice, InputDescri
 import { choiceInput, listInput, readAction, textInput } from './described-command-kit.js';
 import { addCustomProvider, customProviderNames, removeCustomProvider } from './local-provider-commands.js';
 import { MODELS_LIST } from './model-command.js';
-import { readAuthorizationInput } from './settings-subscriptions.js';
 
 type AuthDeps = Parameters<typeof inspectProviderAuth>[1];
 
@@ -108,7 +108,10 @@ const CUSTOM = defineList<ProviderCommandContext>({
   operator: { terminalOnly: 'Providers of your own are files of the terminal app that added them.' },
 });
 
-const SIGN_IN_TERMINAL_ONLY = 'Subscription sign-ins are made and kept by a terminal app on this machine.';
+/** Why these actions run in a terminal app: the sign-ins they read or move are kept on the daemon's machine. */
+const SIGN_IN_TERMINAL_ONLY = 'Subscription sign-ins are kept on the daemon\'s machine; this is done from a terminal app there.';
+/** Starting and finishing a sign-in is also offered by the web app, through its own daemon methods. */
+const SIGN_IN_ALSO_WEB = 'This command runs in a terminal app; any client of the daemon, the web app among them, starts and finishes a sign-in with providers.subscription.signIn.begin and providers.subscription.signIn.finish.';
 
 const SUBSCRIPTION_PROVIDERS = defineList<ProviderCommandContext>({
   name: 'subscriptions.available',
@@ -233,70 +236,49 @@ function oauthConfigOf(ctx: ProviderCommandContext, provider: string) {
   return resolved;
 }
 
-/** The address a sign-in returns to: the local listener's, or the address the provider shows the code at. */
-function returnConfig(config: OAuthProviderConfig, listens: boolean): OAuthProviderConfig {
-  if (!listens || !config.localCallback) return config.manualRedirectUri ? { ...config, redirectUri: config.manualRedirectUri } : config;
-  return config;
+/** The sign-in code path the daemon's providers.subscription.signIn.* methods share (config/subscription-sign-in.ts). */
+function signInDeps(ctx: ProviderCommandContext): SubscriptionSignInDeps {
+  const services = host().requireServiceRegistry(ctx);
+  return { manager: host().requireSubscriptionManager(ctx), service: (provider) => services.get(provider) };
 }
 
 async function startSignIn(ctx: ProviderCommandContext, provider: string, openBrowser: boolean, waitForBrowser: boolean): Promise<string> {
   const manager = host().requireSubscriptionManager(ctx);
-  const resolved = oauthConfigOf(ctx, provider);
-  const listens = host().signInListens && waitForBrowser && Boolean(resolved.oauth.localCallback);
-  let config = returnConfig(resolved.oauth, listens);
-  let listener: Awaited<ReturnType<typeof createOAuthLocalListener>> | null = null;
-  let listenerNote: string | undefined;
-  if (listens && resolved.oauth.localCallback) {
-    listener = await createOAuthLocalListener({
-      expectedState: '',
-      host: resolved.oauth.localCallback.host,
-      port: resolved.oauth.localCallback.port,
-      path: resolved.oauth.localCallback.path,
-    }).catch((error: unknown) => {
-      // Without it the sign-in finishes with the pasted code, and the reason is shown.
-      listenerNote = `It cannot finish on its own (${summarizeError(error)}).`;
-      return null;
-    });
-  }
+  oauthConfigOf(ctx, provider);
+  // The browser can only come back here when it opens on this machine.
+  const started = await beginSubscriptionSignIn(signInDeps(ctx), provider, host().signInListens && waitForBrowser && openBrowser);
   try {
-    if (listener) config = { ...config, redirectUri: listener.redirectUri };
-    const started = await manager.beginOAuthLogin(provider, config);
-    listener?.setExpectedState(started.pending.state);
     const opened = openBrowser ? await openExternalUrl(started.authorizationUrl) : false;
-    const waits = Boolean(listener) && (resolved.oauth.localCallback?.autoComplete ?? true) && opened;
+    const waits = started.completion !== null && opened;
     const finishLine = `/provider finish ${provider} <code or address>`;
     // The address is printed before any wait, so a browser that opened elsewhere
     // (another display, an SSH hop) never leaves the person without it.
     ctx.print([
-      `Signing in to ${provider} (${host().formatSource(resolved.source)}).`,
+      `Signing in to ${provider} (${host().formatSource(started.source)}).`,
       openBrowser ? (opened ? 'Your browser opened at:' : 'Your browser did not open; open this address:') : 'Open this address:',
       `  ${started.authorizationUrl}`,
-      ...(listenerNote ? [listenerNote] : []),
+      ...(started.listenerNote ? [started.listenerNote] : []),
       waits
         ? `Waiting for the browser to come back. If it opened somewhere else, finish with: ${finishLine}`
         : `When the page shows a code (or an address), finish with: ${finishLine}`,
     ].join('\n'));
-    if (!waits || !listener) return '';
+    if (!waits || !started.completion) return '';
     try {
-      const callback = await listener.waitForCode();
-      return signedInLines(provider, await manager.completeOAuthLogin(provider, config, callback.code));
+      return signedInLines(provider, await started.completion);
     } catch (error) {
       // A finish typed meanwhile already stored the sign-in.
       if (!manager.getPending(provider) && manager.get(provider)) return '';
       throw commandRefusal(`The sign-in to ${provider} did not finish on its own (${summarizeError(error)}); it is still waiting.`, `Finish with: ${finishLine}`, 'OAUTH_PENDING');
     }
   } finally {
-    listener?.close();
+    started.close();
   }
 }
 
 async function finishSignIn(ctx: ProviderCommandContext, provider: string, codeOrAddress: string): Promise<string> {
-  const manager = host().requireSubscriptionManager(ctx);
-  const resolved = oauthConfigOf(ctx, provider);
-  const authorization = readAuthorizationInput(codeOrAddress, manager.getPending(provider)?.state);
-  if (!authorization.ok) throw commandRefusal(authorization.reason, undefined, 'OAUTH_CODE_REFUSED');
+  oauthConfigOf(ctx, provider);
   try {
-    return signedInLines(provider, await manager.completeOAuthLogin(provider, returnConfig(resolved.oauth, false), authorization.code));
+    return signedInLines(provider, await finishSubscriptionSignIn(signInDeps(ctx), provider, codeOrAddress));
   } catch (error) {
     if (readRefusal(error)) throw error;
     throw commandRefusal(`The sign-in to ${provider} did not finish: ${summarizeError(error)}`, `Start again: /provider sign-in ${provider}`, 'NOT_DONE');
@@ -472,7 +454,7 @@ export const PROVIDER_COMMAND: CommandDescription<ProviderCommandContext> = {
       ],
       sentence: 'A sign-in to {provider} starts in your browser; once it finishes, the sign-in is kept until you change it (signing out ends it).', done: '',
       touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'sign-out',
-      operator: { terminalOnly: SIGN_IN_TERMINAL_ONLY },
+      operator: { terminalOnly: SIGN_IN_ALSO_WEB },
       example: { provider: 'openai' },
       async run(values, ctx) {
         return startSignIn(ctx, values.provider!, values.browser !== 'print', values.finish !== 'paste');
@@ -486,7 +468,7 @@ export const PROVIDER_COMMAND: CommandDescription<ProviderCommandContext> = {
       ],
       sentence: 'The sign-in to {provider} is finished with the code you give and kept until you change it (signing out ends it).', done: '',
       touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'sign-out',
-      operator: { terminalOnly: SIGN_IN_TERMINAL_ONLY },
+      operator: { terminalOnly: SIGN_IN_ALSO_WEB },
       example: { provider: 'openai' },
       async run(values, ctx) {
         if (!values.code) throw commandRefusal('Not signed in: no code was given.');

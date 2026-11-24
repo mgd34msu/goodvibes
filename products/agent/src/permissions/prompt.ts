@@ -16,8 +16,8 @@ export type { PermissionPromptRequest, PermissionPromptDecision, PermissionReque
  * same card, buttons and keys as the terminal app's. Its keys are terminal-shell
  * ask-card-input.ts, through shell/blocking-input.ts: `y` yes, `a` don't ask
  * again (when the ask can be remembered), `n` no, `d` details, typing a
- * reason to refuse; Enter presses the selected button, which opens on
- * `Yes, once`, or on `No` for what cannot be undone.
+ * reason to refuse; Enter presses the selected button, which opens on the
+ * yes, or on `No` for what cannot be undone or weakens a protection.
  */
 export class PermissionPromptUI {
   /** The approval card as a modal layer, stamped over the dimmed screen above every other modal. */

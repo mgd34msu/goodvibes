@@ -72,7 +72,7 @@ function assertHostOwner(broker: ConversationRewindHostBroker, hostId: string, i
   const owner = broker.hostPrincipal(hostId);
   if (owner !== undefined && owner !== callerKey(invocation)) {
     throw new GatewayVerbError(
-      `Host ${JSON.stringify(hostId)} was registered by a different principal, so this caller cannot ${what} it. Register this surface's own host for the session instead.`,
+      `Host ${JSON.stringify(hostId)} was registered by a different sign-in or device, so this caller cannot ${what} it. Register this surface's own host for the session instead.`,
       'FORBIDDEN',
       403,
       'hostId',

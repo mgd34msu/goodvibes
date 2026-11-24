@@ -11,14 +11,14 @@
  *   ↑↓       scroll; inside the remember choices, move (1-9 pick one)
  *   typing   starts "why not", the reason sent with the refusal
  *
- * Enter presses the selected button, which opens on `Yes, once`, or on `No`
- * for what cannot be undone (renderer/ask-card.ts askCardDefaultChoice), so
+ * Enter presses the selected button, which opens on the yes, or on `No` for
+ * what cannot be undone or weakens a protection (renderer/ask-card.ts askCardDefaultChoice), so
  * Enter never allows that and never remembers anything. A command waiting on
  * its terminal takes every printable key as its answer. Ctrl+C and the typing
  * rule (a sentence being typed when the card appeared keeps going to the
  * composer) are the products' blocking-input, before this.
  */
-import type { PermissionPromptRequest, RememberTier } from '@goodvibes/engine/platform/platform/permissions';
+import { MODEL_CHOICE_REASON, type PermissionPromptRequest, type RememberTier } from '@goodvibes/engine/platform/platform/permissions';
 import { applyHunkKey, hunkSelectionAnswer } from './hunk-selection.js';
 import { askPresentationFor } from './permission-prompt-facts.js';
 import { askCardButtons, askCardChoice, isCommandPromptAsk, type AskCardState } from './renderer/ask-card.js';
@@ -124,6 +124,9 @@ export function handleAskCardKey<T extends AskCardPending>(req: T, data: string)
       case 'no':
       case 'object':
         return answered(false);
+      // "Choose another model": refused, with the reason the turn reads as that choice.
+      case 'choose-model':
+        return answered(false, false, undefined, { reason: MODEL_CHOICE_REASON });
       default:
         return null;
     }
@@ -163,6 +166,9 @@ export function handleAskCardKey<T extends AskCardPending>(req: T, data: string)
   if (key === 'y') return answered(true);
   if (key === 'n') return answered(false);
   if (key === 'a' && remember.offered) return openRemember();
+  // A choice with a key of its own ("m" for Choose another model).
+  const keyed = buttons.find((b) => b.key === key && b.id === 'choose-model');
+  if (keyed) return press(keyed.id) ?? keep(req);
   // Any other printable key starts "why not", seeded with it.
   if (isPrintable(data) && presentation.typeToRefuse) return keep({ ...req, replyMode: 'deny-reason', replyBuffer: data });
   return keep(req);

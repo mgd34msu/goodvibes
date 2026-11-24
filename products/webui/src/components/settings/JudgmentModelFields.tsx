@@ -65,7 +65,7 @@ export function JudgmentModelField({
         onChange={(model) => void save(model)}
       />
       <p>
-        Set the matching provider and endpoint in Judgment settings. Credentials use references,
+        Set the matching provider and endpoint on this page. Credentials use references,
         never inline keys.
       </p>
       <details>

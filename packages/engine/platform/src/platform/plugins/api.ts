@@ -234,9 +234,9 @@ function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'regis
       + `add "${capability}" to "capabilities" in its manifest.json`);
   }
   return new Error(unapplied !== undefined
-    ? `plugin '${pluginName}' may not register ${what}: ${describeUnappliedTier(pluginName, unapplied)}, then enable or reload it`
+    ? `plugin '${pluginName}' may not register ${what}: ${describeUnappliedTier(pluginName, unapplied)}; that starts it again at the tier`
     : `plugin '${pluginName}' may not register ${what}: its trust tier is '${grant.tier}', and '${capability}' needs 'limited'. `
-      + `Run /plugin trust ${pluginName} limited, then enable or reload it`);
+      + `Run /plugin trust ${pluginName} limited; that starts it again at that tier`);
 }
 
 /**

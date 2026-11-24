@@ -79,9 +79,11 @@ export interface AskCardProps {
   onDecided?: (ask: OpenAsk, decided: DecidedWords) => void;
   /** Shown above the question (Work: who asked and when). */
   lead?: ReactNode;
+  /** The asker takes the request back ("Withdraw this request"), beside the answers; offered only to the person who asked. */
+  withdraw?: { readonly run: () => void; readonly busy: boolean } | undefined;
 }
 
-export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, lead }: AskCardProps) {
+export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, lead, withdraw }: AskCardProps) {
   const p = ask.presentation;
   const record = ask.approval;
   const cannotUndo = p.mark === 'cannot-undo';
@@ -104,6 +106,11 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
   const busy = actions.busy;
 
   const decided = (words: string) => onDecided?.(ask, { words, at: Date.now() });
+  // "You said yes and to remember: Any bun command in this project": the reach the person picked, in the tier's own label.
+  const rememberedWords = (tier: string | undefined): string => {
+    const label = p.remember.offered ? p.remember.tiers.find((entry) => entry.tier === tier)?.label : undefined;
+    return label ? `You said yes and to remember: ${label}` : 'You said yes and to remember it';
+  };
 
   const run = (choice: AskChoice, extra: { text?: string; rememberTier?: string } = {}) => {
     if (choice.id === 'remember' && extra.rememberTier === undefined) { setMode({ step: 'remember' }); return; }
@@ -123,9 +130,13 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
     }).then((applied) => {
       if (!applied) return;
       decided(
-        choice.id === 'once' && p.kind === 'answer-command-prompt' ? 'You sent the answer'
-          : choice.id === 'once' && record ? 'You said yes once'
-            : choice.id === 'remember' ? 'You said yes and not to ask again'
+        // A yes that is not remembered folds to the presentation's own line ("You switched it off; it
+        // stays off until you turn it back on"); from a daemon that sends none, a plain yes that
+        // claims neither once nor lasting.
+        choice.id === 'once' && choice.said ? choice.said
+          : choice.id === 'once' && p.kind === 'answer-command-prompt' ? 'You sent the answer'
+          : choice.id === 'once' && record ? 'You said yes'
+            : choice.id === 'remember' ? rememberedWords(extra.rememberTier)
               : choice.id === 'apply-selected' ? `You applied ${selectedHunks?.length ?? 0} of ${hunks?.length ?? 0} changes`
                 : choice.id === 'no' && record ? `You said no${reason ? `: ${reason}` : ''}`
                   : choice.id === 'own-words' ? `Answered: ${reason ?? ''}`
@@ -157,6 +168,9 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
   ) : null;
 
   const countdown = countdownWords(ask, Date.now());
+  // A purchase that goes ahead by itself says when in the warning colour while its window runs; that it goes
+  // ahead even when the notice never reached the person is the presentation's consequence, on the card's face.
+  const goesAhead = answerable && p.countdown?.verb === 'goes ahead';
 
   const choices = (
     <div className="ask-card__choices">
@@ -172,6 +186,11 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
             {choiceLabel(choice, question)}
           </Button>
         ))}
+        {withdraw && (
+          <Button size="sm" variant="ghost" className="ask-card__withdraw" disabled={busy || withdraw.busy} onClick={withdraw.run}>
+            Withdraw this request
+          </Button>
+        )}
       </div>
       {!p.remember.offered && record && cannotUndo && <span className="ask-card__note">{capitalized(p.remember.why)}</span>}
     </div>
@@ -251,7 +270,7 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
         <pre className="ask-card__output" aria-label="What the command printed last">{execPrompt.recentOutput}</pre>
       )}
       {consequence}
-      {countdown && <p className="ask-card__dim">{capitalized(countdown)}.</p>}
+      {countdown && <p className={goesAhead ? 'ask-card__countdown' : 'ask-card__dim'}>{capitalized(countdown)}.</p>}
       {answerable && hunks && hunks.length > 0 && p.choices.some((choice) => choice.id === 'apply-selected') && (
         <ul className="ask-card__hunks" aria-label="Changes to apply">
           {hunks.map((hunk, index) => (
@@ -280,6 +299,11 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
         />
       )}
       {answerable && (mode.step === 'choose' ? choices : rememberStep ?? textStep)}
+      {!answerable && withdraw && (
+        <div className="ask-card__buttons">
+          <Button size="sm" variant="ghost" className="ask-card__withdraw" disabled={withdraw.busy} onClick={withdraw.run}>Withdraw this request</Button>
+        </div>
+      )}
       {refused && <p className="ask-card__dim">{refused}</p>}
       <p className="ask-card__links">
         {p.why && (

@@ -55,3 +55,8 @@ export { DaemonControlPlaneHelper } from './control-plane.js';
 export type { DaemonControlPlaneContext } from './control-plane.js';
 
 export { defaultDownloadBaseUrl } from './auto-updater.js';
+
+/** The opt-in LAN https listener: its certificate authority, the page a phone installs it from, and their words. */
+export { forgetLanAuthority, lanAuthorityCertificate, lanServerNames, LAN_AUTHORITY_SECRET_KEY } from './lan-https/authority.js';
+export { LAN_HTTPS_CA_PATH, LAN_HTTPS_INSTALL_WORDS, LAN_HTTPS_PAGE_PATH, lanAuthorityFingerprint } from './lan-https/page.js';
+export type { LanHttpsState } from './lan-https/listener.js';

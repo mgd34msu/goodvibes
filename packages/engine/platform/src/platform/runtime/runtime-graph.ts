@@ -68,6 +68,7 @@ import { MemoryStore } from '../state/memory-store.js';
 import { emitProviderVoiceUsage } from './emitters/providers.js';
 import { emitPlanStrategySelected } from './emitters/planner.js';
 import { emitAuthorityChanged } from './emitters/security.js';
+import { noteListChanged } from './list-changes.js';
 import { openAuthorityRecordFile } from '../cluster/authority-record-file.js';
 import { revocationRetentionFloorMinutes } from '../cluster/group-settings.js';
 import { registerRuntimePollers, createRuntimeStopRequests } from './disposal.js';
@@ -314,6 +315,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     pairingTokensOpened = store;
     scope.registry.add('pairing rotation limit', bindPairingRotationLimit(store, { configManager, featureFlags }));
     scope.registry.add('pairing last-seen', () => store.flushLastSeen());
+    // A device paired, an offer minted, renamed or revoked: every paired-devices view reads them again.
+    scope.registry.add('paired devices change events', store.onChange(() => noteListChanged({ list: 'paired-devices', change: 'changed' })));
     return store;
   };
   const pairingTokensAtStart = (product.pairingTokens ?? 'open') === 'open';
@@ -962,6 +965,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const agentToolDependencies: AgentToolDependencies = {
     contractRunner,
     contractHooks: contractRunner.hooks(),
+    // A native request's files, read for the agents that do its work (the store artifacts.create writes).
+    artifacts: artifactStore,
     ...(product.profileCapture === false ? {} : { personalCapture }),
     sandboxEscalationHandler,
     execPromptAnswerHandler,

@@ -196,7 +196,8 @@ export function createDaemonBootOperations(runtime: RuntimeServices): DaemonBoot
         runtime.runtimeDispatch.syncIntegration({
           id: 'google', displayName: 'Google', category: 'communication',
           status: check.usable ? 'healthy' : 'degraded', enabled: true, successCount: 0, errorCount: check.usable ? 0 : 1,
-          ...(check.usable ? {} : { lastErrorAt: Date.now(), lastError: `${check.detail} Connect the Google account again (the Agent's /google connect, or the web UI's Google setup).` }),
+          // The fact only: the first request that needs Google opens the consent (google/connection-repair.ts).
+          ...(check.usable ? {} : { lastErrorAt: Date.now(), lastError: check.detail }),
           meta: { needsReauthorization: check.needsReauthorization, scopes: [...check.scopes] },
         }, 'boot.google');
       }, () => undefined);

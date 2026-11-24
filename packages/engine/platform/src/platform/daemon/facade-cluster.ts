@@ -149,6 +149,49 @@ function telegramIngressGate(
   };
 }
 
+/** The one answer when the daemon cannot restart itself to finish a join. */
+export const RESTART_BY_HAND_TO_JOIN = 'Restart this daemon to finish joining: it was started by hand, so GoodVibes cannot restart it.';
+/** The same answer for the other group actions kept for the restart. */
+export const RESTART_BY_HAND_TO_FINISH = 'Restart this daemon to finish it: it was started by hand, so GoodVibes cannot restart it.';
+
+type GroupVerbs = import('./http/cluster-group-routes.js').ClusterGroupVerbs;
+type RestartOutcome = { readonly outcome: 'restarting' | 'by-hand' | 'failed'; readonly detail?: string | undefined };
+
+/**
+ * The group verbs with the restart a kept action needs: a join, removal, key
+ * rotation, rename, publish or accept asked for while sharing was off (stored
+ * as pending, `cluster.enabled` set) restarts the daemon through its service,
+ * and the action finishes at the next start, where the owner is told once. A
+ * daemon started by hand answers that it must be restarted by hand and keeps
+ * the action for its next start.
+ */
+export function withRestartForPendingGroupAction(verbs: GroupVerbs, restart: () => Promise<RestartOutcome>): GroupVerbs {
+  const finish = async <T extends { readonly pending?: true }>(
+    result: import('../cluster/index.js').GroupOperationResult<T>,
+    join: boolean,
+  ): Promise<import('../cluster/index.js').GroupOperationResult<T>> => {
+    if (!result.ok || result.data.pending !== true) return result;
+    const restarted = await restart();
+    const message = restarted.outcome === 'restarting'
+      ? join
+        ? 'Sharing is on. The daemon is restarting to bring the group up; it joins at its next start and tells you once it has.'
+        : 'Sharing is on. The daemon is restarting to bring the group up; this finishes at its next start and you are told once it has.'
+      : restarted.outcome === 'by-hand'
+        ? (join ? RESTART_BY_HAND_TO_JOIN : RESTART_BY_HAND_TO_FINISH)
+        : `Sharing is on and this is kept, but the daemon could not restart itself (${restarted.detail ?? 'no reason given'}). Restart this daemon to finish it.`;
+    return { ok: true, data: { ...result.data, restart: restarted.outcome, warning: message } };
+  };
+  return {
+    ...verbs,
+    join: async (input) => finish(await verbs.join(input), true),
+    forget: async (nodeId, options) => finish(await verbs.forget(nodeId, options), false),
+    rotate: async (input) => finish(await verbs.rotate(input), false),
+    rename: async (name, options) => finish(await verbs.rename(name, options), false),
+    publish: async (path, options) => finish(await verbs.publish(path, options), false),
+    accept: async (path, options) => finish(await verbs.accept(path, options), false),
+  };
+}
+
 /**
  * Build (or adopt) the coordinator, and tell it how to find out what this node
  * can serve.

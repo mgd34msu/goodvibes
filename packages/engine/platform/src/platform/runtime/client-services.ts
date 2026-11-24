@@ -683,6 +683,8 @@ function composeClientRuntimeServices(
   });
   agents.agentOrchestrator.setDependencies({
     contractRunner: contracts.runner,
+    // A native request's files, read for the agents that do its work (the store artifacts.create writes).
+    artifacts: artifactStore,
     contractHooks: contracts.runner.hooks(),
     sandboxEscalationHandler: approvalHandlers.sandboxEscalationHandler,
     execPromptAnswerHandler: approvalHandlers.execPromptAnswerHandler,

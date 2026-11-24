@@ -154,7 +154,7 @@ export class SessionFocus {
     return this.sessions().length > 1;
   }
 
-  /** Tab (+1) / Shift+Tab (-1): show the next or previous session. False when there is nothing to cycle to. */
+  /** next-session (+1) / previous-session (-1), Alt+N / Alt+P by default: show the next or previous session. False when there is nothing to cycle to. */
   cycle(delta: 1 | -1): boolean {
     const list = this.sessions();
     if (list.length < 2) return false;

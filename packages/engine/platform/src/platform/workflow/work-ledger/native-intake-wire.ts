@@ -2,6 +2,7 @@
 import { nativeConversationContinuationRefSchema, nativeConversationContinuationSchema } from './native-continuation-context.js';
 import { nativeClassicConversationAdmissionSchema } from './native-intake-policy.js';
 import { nativeSelectedDiffSelector, nativeSelectedDiffSelectorSchema, nativeSelectedDiffContextSchema } from './native-diff-context.js';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '../../companion/attachment-limits.js';
 import { array, enum as enumSchema, literal, number, strictObject, string, union, type z } from 'zod/v4';
 
 const id = string().min(1).max(200);
@@ -10,8 +11,16 @@ const revision = number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const text = string().min(1).max(20_000, 'Must contain at most 20000 UTF-16 code units')
   .regex(/\S/, 'Must contain non-whitespace text');
 export const nativeConversationIntakeUnsupportedSourceSchema = strictObject({ kind: enumSchema(['image', 'file', 'context']), label: id });
+/** A file sent with the request: an artifact uploaded first with artifacts.create, as a chat message's attachment is. */
+export const nativeConversationIntakeAttachmentRequestSchema = strictObject({ artifactId: id, label: id.optional() });
+/** What the request keeps of each attachment, read from the artifact store when it was captured; part of its source revision. */
+export const nativeConversationIntakeAttachmentSchema = strictObject({
+  artifactId: id, label: id.optional(), filename: string().min(1).max(1000).optional(), mimeType: string().min(1).max(255), sizeBytes: number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+});
 export const nativeConversationIntakeCaptureRequestSchema = strictObject({
   requestId: id, inputId: id, text, continuation: strictObject({ sessionId: id, selectedDiff: nativeSelectedDiffSelectorSchema.optional() }).optional(), unsupportedSources: array(nativeConversationIntakeUnsupportedSourceSchema).max(100),
+  // The limit (MAX_ATTACHMENTS_PER_MESSAGE) is checked by the intake host first, so a request over it is told so plainly.
+  attachments: array(nativeConversationIntakeAttachmentRequestSchema).min(1).optional(),
 });
 export const nativeConversationIntakeLookupRequestSchema = strictObject({ inputId: id });
 export const nativeConversationIntakeTransitionRequestSchema = strictObject({ inputId: id, sourceRevision: id });
@@ -25,6 +34,7 @@ export const nativeConversationIntakeWorkReceiptSchema = strictObject({
   source: strictObject({ version: literal(2), sourceId: id, sourceRevision: id, sessionId: id,
     offsetEncoding: literal('utf16'), proposalRevision: id, spans: array(spanSchema).min(1).max(100),
     continuation: nativeConversationContinuationSchema.optional(),
+    attachments: array(nativeConversationIntakeAttachmentSchema).min(1).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
     admissionDecisionId: id, judgmentDecisionIds: array(id).min(1).max(128) }),
   goal: text, criteria: array(text).min(1).max(100),
 }).refine(value => {
@@ -37,7 +47,8 @@ const common = { projectId: id, requestId: id, sourceRef: nativeConversationInta
 export const nativeConversationIntakeResultSchema = union([
   strictObject({ kind: literal('captured'), ...common }),
   strictObject({ kind: literal('processing'), ...common, stage: enumSchema(['routing', 'extracting', 'checking', 'deciding', 'waiting']), recovery: enumSchema(['pending', 'required']) }),
-  strictObject({ kind: literal('turn'), ...common, route: enumSchema(['converse', 'answer']), text, continuation: nativeConversationContinuationSchema.optional() }),
+  strictObject({ kind: literal('turn'), ...common, route: enumSchema(['converse', 'answer']), text, continuation: nativeConversationContinuationSchema.optional(),
+    attachments: array(nativeConversationIntakeAttachmentSchema).min(1).max(MAX_ATTACHMENTS_PER_MESSAGE).optional() }),
   strictObject({ kind: literal('blocked'), ...common, reason: enumSchema(['unsupported-source', 'missing-context']), recovery: literal('required'),
     /** Resuming a blocked input changes nothing; the only way forward is to cancel it and capture a new input. */
     next: literal('cancel-and-resubmit').optional() }),
@@ -58,6 +69,7 @@ export const nativeConversationIntakeLookupResultSchema = union([
 ]);
 
 export type NativeConversationIntakeUnsupportedSource = z.infer<typeof nativeConversationIntakeUnsupportedSourceSchema>;
+export type NativeConversationIntakeAttachment = z.infer<typeof nativeConversationIntakeAttachmentSchema>;
 export type NativeConversationIntakeCaptureRequest = z.infer<typeof nativeConversationIntakeCaptureRequestSchema>;
 export type NativeConversationIntakeLookupRequest = z.infer<typeof nativeConversationIntakeLookupRequestSchema>;
 export type NativeConversationIntakeTransitionRequest = z.infer<typeof nativeConversationIntakeTransitionRequestSchema>;

@@ -16,6 +16,7 @@ export { PrincipalStore } from './store.js';
 export {
   PrincipalRegistryError,
   UNKNOWN_PRINCIPAL_ID,
+  UNKNOWN_SENDER_LABEL,
   OWNER_PRINCIPAL_ID,
   PRINCIPAL_KINDS,
   unknownPrincipal,

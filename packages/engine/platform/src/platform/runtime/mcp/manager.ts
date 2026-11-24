@@ -55,6 +55,9 @@ interface TrackedServer {
 /** The setting that turns automatic reconnect on and off, named in what the user is told. */
 const RECONNECT_SETTING = 'runtime.mcpLifecycle';
 
+/** Why a server that refused its credentials is not retried, and what brings it back. */
+export const MCP_CREDENTIALS_REFUSED = 'the server refused its credentials, so it is not retried; it reconnects as soon as its entry is saved with new ones (/mcp add under the same name, with its --header or --env)';
+
 export class McpLifecycleManager {
   readonly #servers = new Map<string, TrackedServer>();
   readonly #config: McpReconnectConfig;
@@ -180,8 +183,9 @@ export class McpLifecycleManager {
   /**
    * The server refused this host's credentials. Reconnecting would repeat the
    * same refusal, so nothing is scheduled: the server waits in `auth_required`
-   * until a connect is requested again (`/mcp reload`, after the credentials
-   * are set). A report after a deliberate stop is stale and ignored.
+   * until a connect is requested again, which saving its entry does (the
+   * registry reloads the configuration after every save). A report after a
+   * deliberate stop is stale and ignored.
    */
   authRequired(serverName: string, reason: string, authType: string): void {
     const tracked = this.#servers.get(serverName);
@@ -195,7 +199,7 @@ export class McpLifecycleManager {
     if (!this.#move(entry, 'auth_required')) return;
     entry.lastError = reason;
     entry.disconnectedAt = Date.now();
-    entry.stoppedReason = 'the server refused its credentials; set them, then run /mcp reload';
+    entry.stoppedReason = MCP_CREDENTIALS_REFUSED;
     this.#emit({ type: 'MCP_AUTH_REQUIRED', serverId: serverName, authType });
     logger.info('McpLifecycleManager: server needs credentials; not reconnecting', { server: serverName, authType, reason });
   }

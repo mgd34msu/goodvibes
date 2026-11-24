@@ -8,7 +8,7 @@ export class ModelPickerModal extends PlatformModelPicker {
   constructor(
     favorites: Pick<FavoritesStore, 'getRecentModels'>,
     benchmarks: Pick<BenchmarkStore, 'getBenchmarks'>,
-    providers: Pick<ProviderRegistry, 'getSyntheticModelInfoFromCatalog'>,
+    providers: Pick<ProviderRegistry, 'getSyntheticModelInfoFromCatalog'> & Partial<Pick<ProviderRegistry, 'modelListReading'>>,
   ) {
     super(favorites, benchmarks, providers, { searchFocusedOnOpen: false, resetAvailabilityOnOpen: false, effortStyle: 'descriptions' });
   }

@@ -48,6 +48,7 @@ import { undeclaredSendRecipients } from '../gate/send-recipients.js';
 import { callShellTexts, neverRunMatchIn, parseNeverRunPattern, type CallShellTexts, type NeverRunMatch, type NeverRunPattern } from '../gate/never-run.js';
 import { toolDecisionOf } from './denial.js';
 import { processHeldForOwner, type HeldForOwnerCall, type HeldForOwnerLedger } from './held-for-owner.js';
+import { MODEL_CHOICE_REASON, MODEL_PRICE_CHANGE_MODE } from './ask-presentation.js';
 import { processJevDecisions, type JevDecisionLedger, type JevDecisionRuleEffect } from './jev-decisions.js';
 import { readModeCategory, toolCategoryOf, type ToolDecision, type ToolDefinition } from '../types/tools.js';
 import { projectIdentity, type CompiledProjectRules, type UserPermissionRuleStore } from './user-rule-store.js';
@@ -1822,6 +1823,58 @@ export class PermissionManager {
   }
 
   /**
+   * Puts a model whose price moved away from free since it was chosen to the
+   * owner before the first send to it (providers/model-price-changes.ts), in
+   * the ordinary approval prompt, when his mode has him decide (Ask me, Plan,
+   * and Jev decides without a working decision model; core/orchestrator.ts
+   * decidePriceChange routes the other modes). With no one to answer (a headless
+   * run that answers no prompts) it is refused, as every such ask is. Nothing
+   * is offered to remember: the provider registry keeps a yes for this change.
+   */
+  async askModelPriceChange(question: { readonly registryKey: string; readonly name: string; readonly provider: string; readonly price?: string | undefined },
+    options?: { readonly signal?: AbortSignal | undefined }): Promise<'keep' | 'refuse' | 'choose-model'> {
+    const signal = options?.signal;
+    assertPermissionActive(signal);
+    const args: Record<string, unknown> = { mode: MODEL_PRICE_CHANGE_MODE, registryKey: question.registryKey, model: question.name, provider: question.provider,
+      ...(question.price ? { price: question.price } : {}) };
+    const reply = await awaitPermission(() => this.requestPermission({
+      callId: crypto.randomUUID(), tool: 'model', args, category: 'execute',
+      analysis: { classification: 'model-price-change', riskLevel: 'high', summary: `${question.name} is no longer free`,
+        reasons: ['The model catalog no longer lists this model as free, so sending to it is charged.'] },
+      workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
+      rememberOptions: [],
+    }, { signal }), signal);
+    assertPermissionActive(signal);
+    if (reply.approved) return 'keep';
+    return reply.reason === MODEL_CHOICE_REASON ? 'choose-model' : 'refuse';
+  }
+
+  /**
+   * Puts enabling a Google API on the owner's Cloud project to him, in the
+   * ordinary approval prompt on its normal default, when his mode has him
+   * decide (google/connection-repair.ts decideGoogleApiEnable routes the other
+   * modes). A request of his was refused because the API is off; a yes runs
+   * `gcloud services enable` as the signed-in gcloud account and the request
+   * is sent again. With no one to answer it is refused, as every such ask is.
+   */
+  async askEnableGoogleApis(question: { readonly services: readonly string[]; readonly project: string; readonly account: string },
+    options?: { readonly signal?: AbortSignal | undefined }): Promise<boolean> {
+    const signal = options?.signal;
+    assertPermissionActive(signal);
+    const command = `gcloud services enable ${question.services.join(' ')} --project=${question.project}`;
+    const args: Record<string, unknown> = { mode: 'enable-apis', command, services: [...question.services], project: question.project, account: question.account };
+    const reply = await awaitPermission(() => this.requestPermission({
+      callId: crypto.randomUUID(), tool: 'google', args, category: 'execute',
+      analysis: { classification: 'google-enable-apis', riskLevel: 'medium', summary: `Turn on ${question.services.join(' and ')} on Google Cloud project ${question.project}`,
+        reasons: [`A Google request was refused because the API is off on the project. GoodVibes runs ${command} as ${question.account}, then sends the request again.`] },
+      workingDirectory: this.configReader.getWorkingDirectory() ?? undefined,
+      rememberOptions: [],
+    }, { signal }), signal);
+    assertPermissionActive(signal);
+    return reply.approved;
+  }
+
+  /**
    * Runs one call through the gate.
    *
    * @param attribution When present, rides on the brokered ask so a surface can
@@ -2402,7 +2455,7 @@ export class PermissionManager {
     const key = this.getApprovalKey(input.toolName, input.args);
     const approvalKey = ownerOnly === undefined ? key : ownerOnlySessionKey(ownerOnly, key, input.args);
     // Approving it later is the owner's session answer for this exact call, as if he had been asked now.
-    const held = this.heldForOwner().hold({ key: approvalKey, toolName: input.toolName, summary: analysis.summary, reason }, () => {
+    const held = this.heldForOwner().hold({ key: approvalKey, toolName: input.toolName, summary: analysis.summary, reason, ...(ownerOnly !== undefined ? { ownerOnly } : {}) }, () => {
       this.sessionApprovals.set(approvalKey, true);
       this.sessionApprovalRevision++;
     });

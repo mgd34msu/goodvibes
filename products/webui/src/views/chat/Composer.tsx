@@ -64,14 +64,16 @@ export interface ComposerProps {
   replyRunning?: boolean;
   /**
    * The draft was a `/command` this composer does not run: it was not sent, the
-   * text stays in place, and the composer says so. `known` marks `/new` typed
-   * with words after it.
+   * text stays in place, and the composer says so. `known` marks a listed
+   * command typed with words after it.
    */
   heldCommand?: { word: string; known: boolean } | null;
   /** Send the held draft to the model as an ordinary message after all. */
   onSendHeldAsText?: () => void;
   onFileSelection: (event: ChangeEvent<HTMLInputElement>) => void;
   onRemoveAttachedFile: (index: number) => void;
+  /** Said under the attached files when more were added than a message takes. */
+  attachNote?: string | undefined;
   /**
    * Optional list of slash-command hints shown when the user types "/" at the
    * start of the composer. Defaults to empty, no menu.
@@ -99,7 +101,8 @@ interface AttachmentChipProps {
   onRemove: (index: number) => void;
 }
 
-function AttachmentChip({ file, index, onRemove }: AttachmentChipProps) {
+/** One attached file before it is sent; also the native request form's. */
+export function AttachmentChip({ file, index, onRemove }: AttachmentChipProps) {
   const [thumbUrl, setThumbUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -150,6 +153,10 @@ interface SlashMenuProps {
 }
 
 function SlashMenu({ commands, activeIndex, onSelect, menuId, optionIdPrefix }: SlashMenuProps) {
+  // The arrow keys move through a list that scrolls: the active command stays in view.
+  useEffect(() => {
+    document.getElementById(`${optionIdPrefix}-${activeIndex}`)?.scrollIntoView({ block: 'nearest' });
+  }, [activeIndex, optionIdPrefix]);
   if (!commands.length) return null;
 
   return (
@@ -206,6 +213,7 @@ export function Composer({
   onSendHeldAsText,
   onFileSelection,
   onRemoveAttachedFile,
+  attachNote,
   slashCommands = [],
   onFilesAdded,
 }: ComposerProps) {
@@ -426,8 +434,8 @@ export function Composer({
         <div className="composer-error composer-command-note" role="alert">
           <span>
             {heldCommand.known
-              ? `Not sent: ${heldCommand.word} takes nothing after it here. Send ${heldCommand.word} alone to start a new chat; ${paletteKey} opens every other command.`
-              : `Not sent: ${heldCommand.word} is not a command here. Type /new to start a new chat; ${paletteKey} opens every other command.`}
+              ? `Not sent: ${heldCommand.word} takes nothing after it here. Send ${heldCommand.word} alone and fill in what it asks.`
+              : `Not sent: ${heldCommand.word} is not a command here. Type / to see what this chat can do; ${paletteKey} opens everything else.`}
           </span>
           {onSendHeldAsText && (
             <button type="button" className="composer-command-note__send" onClick={onSendHeldAsText}>
@@ -460,6 +468,7 @@ export function Composer({
             ))}
           </div>
         )}
+        {attachNote && <p className="composer-attach-note" role="alert">{attachNote}</p>}
 
         <textarea
           ref={composerRef}

@@ -39,6 +39,9 @@ import { isKnownConfigKey } from '../config/config-key-guard.js';
 import { isSecretConfigKey, persistSecretBackedConfigValue, type SecretBackedSecretStore } from '../config/secret-config.js';
 
 export const CONFIG_SUBCOMMANDS = ['list', 'get', 'set', 'unset'] as const;
+
+/** The settings the service definition is written from; the daemon service rewrites it when one is saved. */
+const SERVICE_DEFINITION_KEYS: ReadonlySet<string> = new Set(['service.restartOnFailure', 'service.logPath']);
 export type ConfigSubcommand = (typeof CONFIG_SUBCOMMANDS)[number];
 
 export function isConfigSubcommand(value: string | undefined): value is ConfigSubcommand {
@@ -258,6 +261,9 @@ async function setResult(deps: ConfigCommandDeps, key: string, rawValue: string)
     lines: [
       `${key} = ${printable}`,
       ...(storedInSecretStore && credentialText?.trim() ? ['  the credential is in the secret store; the settings file holds only the reference above.'] : []),
+      ...(SERVICE_DEFINITION_KEYS.has(key)
+        ? ['  the daemon service rewrites its service definition with it (at once when it runs, else at its next start); it takes effect at the next daemon start.']
+        : []),
       '  written to disk. A running daemon applies most keys live, including a move to another control-plane',
       '  port; a key that is only read when the daemon starts applies the next time it starts. A host change',
       '  that keeps the same port (between loopback and all interfaces) cannot be bound while the old',

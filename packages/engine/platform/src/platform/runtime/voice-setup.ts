@@ -51,6 +51,7 @@ import {
 } from './wake-setup.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import type { WakeInstallProvisionOutcome } from '../voice/wake/install-provision.js';
+import { noteListChanged } from './list-changes.js';
 
 
 /** What voice.local.install resolves with (the wire receipt). */
@@ -217,8 +218,14 @@ export function createVoiceSetupService(deps: VoiceSetupServiceDeps): VoiceSetup
     const run = settled.then(() => runInstall(stop.signal)).then(
       (receipt) => { lastInstall = { startedAt, finishedAt: Date.now(), receipt }; return receipt; },
       (error: unknown) => { lastInstall = { startedAt, finishedAt: Date.now(), error: error instanceof Error ? error.message : String(error) }; throw error; },
-    ).finally(() => { if (inFlight === entry) inFlight = undefined; });
+    ).finally(() => {
+      if (inFlight === entry) inFlight = undefined;
+      // The install ended (its receipt or why it stopped is in status now): every voice view reads it again.
+      noteListChanged({ list: 'voice', change: 'changed' });
+    });
     entry = { run, startedAt, stop, pinned: false, waiters: 0 };
+    // A run started: the voice views show it running.
+    noteListChanged({ list: 'voice', change: 'changed' });
     return entry;
   };
   /** The run a new caller shares: the live one, or a fresh one when the live run was stopped. */

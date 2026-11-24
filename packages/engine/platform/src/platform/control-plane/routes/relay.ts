@@ -17,6 +17,7 @@ import { AuthorityRecordUnavailableError } from '../../cluster/authority-record-
 import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
+import { describeRelayStatus } from '../../relay/status-words.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 
 /** The controller surface these verbs need, declared rather than imported whole. */
@@ -30,6 +31,62 @@ export interface RelayReachabilityService {
   mintPairing(code: string): Promise<unknown>;
   /** End every relay connection that presented a code `revoked` answers true for. */
   closeConnectionsPresenting?(revoked: (code: string) => boolean, reason: string): Promise<number>;
+  /** Be told each time `status` may have changed; returns the unsubscribe. */
+  onStatusChange?(listener: () => void): () => void;
+  /** The relay address in `relay.url` now. */
+  readonly relayUrl?: string | undefined;
+}
+
+/** The status in plain words, with the relay's address. */
+function wordsOf(service: RelayReachabilityService | null): string {
+  return describeRelayStatus(statusOf(service), service?.relayUrl ?? '', service?.lastRefusal ?? null);
+}
+
+/**
+ * Turns the relay on for this daemon (`relay.enabled`, which also backs the
+ * relay-connect capability, and `relay.url` when given): the owner's yes to
+ * letting devices reach this machine through the relay. Answers false, and
+ * changes nothing, when no relay address is set and none was given.
+ */
+export type RelayTurnOn = (url: string | undefined) => boolean;
+
+/** The statuses a registration rests in: a pairing is minted, or refused with the reason, once one is reached. */
+const SETTLED_STATUSES: ReadonlySet<string> = new Set(['registered', 'refused', 'failed', 'disabled', 'stopped']);
+
+/**
+ * The registration's status once it rests: at once when it already does,
+ * else at the first status change that rests (the host's own answer), or the
+ * caller leaving. No timer.
+ */
+function settledStatus(accessor: RelayReachabilityAccessor, signal: AbortSignal | undefined): Promise<string> {
+  const current = (): string => statusOf(accessor());
+  const service = accessor();
+  if (SETTLED_STATUSES.has(current()) || !service?.onStatusChange) return Promise.resolve(current());
+  return new Promise<string>((resolve, reject) => {
+    const finish = (): void => {
+      unsubscribe();
+      signal?.removeEventListener('abort', leave);
+    };
+    const leave = (): void => { finish(); reject(signal?.reason instanceof Error ? signal.reason : new Error('The pairing request was cancelled.')); };
+    const unsubscribe = service.onStatusChange!(() => {
+      if (SETTLED_STATUSES.has(current())) { finish(); resolve(current()); }
+    });
+    if (signal?.aborted) { leave(); return; }
+    signal?.addEventListener('abort', leave, { once: true });
+    if (SETTLED_STATUSES.has(current())) { finish(); resolve(current()); }
+  });
+}
+
+function readTurnOn(params: Record<string, unknown>): { readonly turnOn: boolean; readonly url: string | undefined } {
+  const turnOn = params.turnOn;
+  if (turnOn !== undefined && typeof turnOn !== 'boolean') throw new GatewayVerbError('turnOn must be true or false', 'INVALID_ARGUMENT', 400, 'turnOn');
+  const url = params.url;
+  if (url !== undefined && typeof url !== 'string') throw new GatewayVerbError('url must be a string', 'INVALID_ARGUMENT', 400, 'url');
+  const trimmed = typeof url === 'string' ? url.trim() : '';
+  if (trimmed.length > 0 && !/^wss?:\/\//i.test(trimmed)) {
+    throw new GatewayVerbError('url must be the relay\'s wss:// address', 'INVALID_ARGUMENT', 400, 'url');
+  }
+  return { turnOn: turnOn === true, url: trimmed.length > 0 ? trimmed : undefined };
 }
 
 /** A relay refusal as the verbs report it. */
@@ -65,6 +122,8 @@ export function createRelayReachabilityHandler(accessor: RelayReachabilityAccess
     return {
       status: statusOf(service),
       configured: isConfigured(service),
+      words: wordsOf(service),
+      ...(service?.relayUrl ? { relayUrl: service.relayUrl } : {}),
       ...(rendezvousId ? { rendezvousId } : {}),
       ...(refusal ? { refusal: { code: refusal.code, message: refusal.message, state: refusal.state, next: [...refusal.next], retryable: refusal.retryable } } : {}),
     };
@@ -81,14 +140,27 @@ function optionalName(params: Record<string, unknown>): string | undefined {
   return raw;
 }
 
-export function createRelayPairingMintHandler(accessor: RelayReachabilityAccessor, codes: RelayCodes): GatewayMethodHandler {
+export function createRelayPairingMintHandler(accessor: RelayReachabilityAccessor, codes: RelayCodes, turnOnRelay?: RelayTurnOn): GatewayMethodHandler {
   return async (invocation) => {
+    const params = readInvocationParams(invocation);
+    const name = optionalName(params);
+    const { turnOn, url } = readTurnOn(params);
+    // The owner's yes, asked by the caller: the relay is turned on here, and the
+    // pairing below waits for the registration that follows.
+    if (turnOn && statusOf(accessor()) === 'disabled') {
+      if (!turnOnRelay) throw new GatewayVerbError('This daemon cannot turn its relay on from a call', 'UNAVAILABLE', 409);
+      if (!turnOnRelay(url)) {
+        throw new GatewayVerbError('No relay address is set on this daemon, so the relay was not turned on; send the relay\'s wss:// address as url', 'RELAY_URL_REQUIRED', 400, 'url');
+      }
+    }
+    // A registration on its way (idle, connecting, reconnecting) is waited for:
+    // the host's own answer, registered or refused, decides the pairing.
+    await settledStatus(accessor, invocation.signal);
     const service = accessor();
-    const name = optionalName(readInvocationParams(invocation));
     // Null rather than a refusal, and the status alongside it: "there is
-    // nothing to pair against yet" is an answer a caller renders, and the
-    // status is what tells them whether to wait or to turn the relay on.
-    if (!service) return { pairing: null, status: statusOf(service) };
+    // nothing to pair against" is an answer a caller renders, and the status
+    // says why (turned off, refused, failed).
+    if (!service) return { pairing: null, status: statusOf(service), words: wordsOf(service) };
     // Each pairing carries a relay code of its own, so one device's relay
     // access can be revoked without touching any other's.
     // A paired device asking for its own relay code: revoking that device revokes the code with it.
@@ -112,7 +184,7 @@ export function createRelayPairingMintHandler(accessor: RelayReachabilityAccesso
     }
     // No live registration to pair against.
     if (pairing === null) await withdrawMinted(codes, minted.id);
-    return { pairing, status: statusOf(service), ...(pairing !== null ? { codeId: minted.id, codeName: minted.name } : {}) };
+    return { pairing, status: statusOf(service), words: wordsOf(service), ...(pairing !== null ? { codeId: minted.id, codeName: minted.name } : {}) };
   };
 }
 
@@ -153,10 +225,11 @@ export function registerRelayGatewayMethods(
   catalog: GatewayMethodCatalog,
   accessor: RelayReachabilityAccessor,
   codes: RelayCodes,
+  turnOnRelay?: RelayTurnOn,
 ): void {
   const handlers: Readonly<Record<string, GatewayMethodHandler>> = {
     'relay.reachability.get': createRelayReachabilityHandler(accessor),
-    'relay.pairing.mint': createRelayPairingMintHandler(accessor, codes),
+    'relay.pairing.mint': createRelayPairingMintHandler(accessor, codes, turnOnRelay),
     'relay.codes.list': createRelayCodesListHandler(codes),
     'relay.codes.revoke': createRelayCodeRevokeHandler(codes, accessor),
   };

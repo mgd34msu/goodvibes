@@ -10,6 +10,7 @@
  * than crash or drop it (no zod on this path, see src/lib/object.ts).
  */
 
+import { UNKNOWN_SENDER_LABEL } from '@goodvibes/engine/platform/platform/principals/types';
 import { asArray, firstString, readPath } from './object';
 import { companionSessionsFromListResponse } from './companion-chat';
 
@@ -237,13 +238,14 @@ export function retentionLabel(record: UnionSessionRecord): string | null {
  * Attribution label (principals.*, platform 1.6.1's initiative family). Returns null when
  * the wire never stamped this session with attribution at all (attributedPrincipalKnown
  * is null, most sessions), so a plain, unattributed session renders no line. Otherwise
- * "known:false" (unmapped sender identity) renders "unknown principal" PLAINLY, never
+ * "known:false" (unmapped sender identity) renders the platform's UNKNOWN_SENDER_LABEL
+ * ("someone you have not added yet") PLAINLY, never
  * silently as the resolved name and never hidden.
  */
 export function attributionLabel(record: Pick<UnionSessionRecord, 'attributedPrincipalName' | 'attributedPrincipalKnown'>): string | null {
   if (record.attributedPrincipalKnown === null) return null;
-  if (!record.attributedPrincipalKnown) return 'unknown principal';
-  return record.attributedPrincipalName || 'unknown principal';
+  if (!record.attributedPrincipalKnown) return UNKNOWN_SENDER_LABEL;
+  return record.attributedPrincipalName || UNKNOWN_SENDER_LABEL;
 }
 
 /**

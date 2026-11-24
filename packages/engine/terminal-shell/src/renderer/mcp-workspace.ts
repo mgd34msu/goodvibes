@@ -106,7 +106,8 @@ export function createMcpWorkspaceRenderer(policy: {
       'Tools for <server>: <count>',
       'Tools: <count>',
       'Loading the tool list from connected MCP servers.',
-      'No tools cached for the selected server. Press t to refresh.',
+      'No tools yet: they show here when the selected server connects (Ctrl+T reads them again).',
+      'The selected server offers no tools (Ctrl+T reads them again).',
       'Cancel and return to the server browser',
       '<n> more lines',
       ...(['browse', 'form', 'delete-confirm', 'reload-confirm'] as const).flatMap((mode) =>
@@ -199,7 +200,9 @@ export function createMcpWorkspaceRenderer(policy: {
         body(
           workspace.loadingTools
             ? 'Loading the tool list from connected MCP servers.'
-            : 'No tools cached for the selected server. Press t to refresh.',
+            : workspace.selectedServer?.connected
+              ? 'The selected server offers no tools (Ctrl+T reads them again).'
+              : 'No tools yet: they show here when the selected server connects (Ctrl+T reads them again).',
         ),
       );
     } else {

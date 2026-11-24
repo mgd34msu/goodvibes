@@ -42,7 +42,7 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     key: 'judgment.policy', type: 'enum', 
     label: 'When the decision model is missing or fails',
     enumValues: ['Hybrid', 'Decision Model Only', 'No Decision Model'],
-    description: 'Hybrid (default) uses the set decision model and, when none is set or it fails, continues without it: decisions take their fallbacks and a failure is shown once with the model, what failed and the next step. Decision Model Only stops the operation and reports when the set decision model fails. No Decision Model makes no decision-model calls. With no decision model set, every policy continues without one.',
+    description: 'Who answers is set in one place, When GoodVibes asks (permissions.mode); this setting only says what happens while a set decision model fails, or that none is used. Hybrid (default): while it fails, each decision takes its own fallback (a permission call comes to you instead, or is held to the end of the run in Just vibes), and the failure is shown once with the model, what failed and the next step. Decision Model Only: while it fails, a call it would have decided is refused with its error and the turn goes on. No Decision Model: no decision model is asked, as with none set, and every decision takes its fallback (a permission call comes to you, or is held in Just vibes). YOLO asks no decision model, so this setting does not change it.',
   },
   {
     key: 'judgment.endpoint',

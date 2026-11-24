@@ -511,6 +511,7 @@ export class OpenAIProvider implements LLMProvider {
     const [api, plan] = await Promise.all([
       runLiveModelRefresh({
         providerName: this.name,
+        address: 'https://api.openai.com',
         recordTo: options.recordTo,
         borrowFrom: options.borrowFrom,
         cachePath: this.modelsCachePath,

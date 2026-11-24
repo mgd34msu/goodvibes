@@ -363,6 +363,25 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
   const call = async <T>(path: string, method: 'GET' | 'POST' = 'GET', body?: unknown): Promise<DaemonVerbOutcome<T>> =>
     printableAnswer(await callDaemonVerb<T>(resolved.target, path, { method, ...(body === undefined ? {} : { body }) }, input.fetchImpl));
 
+  /**
+   * A group action the daemon refuses because sharing is off: the one ask,
+   * opening on No (it changes how the daemon takes work), then the same action
+   * again with the owner's yes, which the daemon keeps, turns sharing on for and
+   * finishes after it restarts. --yes is the same answer for a script.
+   */
+  const callTurningSharingOn = async <T>(path: string, body: Record<string, unknown>): Promise<DaemonVerbOutcome<T>> => {
+    const first = await call<T>(path, 'POST', body);
+    if (first.ok || first.daemonCode !== 'CLUSTER_SHARING_OFF') return first;
+    const canAsk = input.prompt !== undefined || (isTerminal && Boolean(process.stdin.isTTY) && !parsed.json);
+    const yes = parsed.yes || (canAsk && /^y(es)?$/i.test(await (input.prompt ?? ((question: string) => askOnStdin(question, parsed.json)))(
+      `${ACTION_TURN_ON_SHARING_QUESTION} [y/N] `)));
+    if (!yes) return first;
+    return call<T>(path, 'POST', { ...body, turnOnSharing: true });
+  };
+  /** A kept action says what happens next (the restart, or why the person restarts it), not a result it does not have yet. */
+  const pendingLines = (data: { readonly pending?: true; readonly warning?: string }): readonly string[] | null =>
+    data.pending === true ? [data.warning ?? 'Sharing is on; this finishes when the daemon next starts.'] : null;
+
   const irreversible = describeIrreversibleClusterCommand(parsed);
   if (irreversible !== null && !parsed.yes) {
     // Only a person at a terminal can be asked; a script, a --json run or a slash command must say --yes.
@@ -417,9 +436,9 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
         : refused(result, parsed.json);
     }
     case 'rotate': {
-      const result = await call<RotateKeyResult>('/api/cluster/rotate', 'POST', { immediate: parsed.now });
+      const result = await callTurningSharingOn<RotateKeyResult>('/api/cluster/rotate', { immediate: parsed.now });
       return result.ok
-        ? success(result.data, renderRotated(result.data), parsed.json)
+        ? success(result.data, pendingLines(result.data) ?? renderRotated(result.data), parsed.json)
         : refused(result, parsed.json);
     }
     case 'leave': {
@@ -432,17 +451,19 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
     }
     case 'rename': {
       const name = parsed.name ?? parsed.positional ?? '';
-      const result = await call<{ groupId: string; groupName: string }>('/api/cluster/rename', 'POST', { name });
+      const result = await callTurningSharingOn<{ groupId: string; groupName: string; pending?: true; warning?: string }>('/api/cluster/rename', { name });
       return result.ok
-        ? success(result.data, [`the group is now called "${result.data.groupName}"`,
+        ? success(result.data, pendingLines(result.data) ?? [`the group is now called "${result.data.groupName}"`,
           'this name is visible to anything on this network, and every machine in the',
           'group will pick it up shortly.'], parsed.json)
         : refused(result, parsed.json);
     }
     case 'publish':
     case 'accept': {
-      const result = await call<SettingDecisionResult>(`/api/cluster/${parsed.subcommand}`, 'POST', { path: parsed.positional });
+      const result = await callTurningSharingOn<SettingDecisionResult>(`/api/cluster/${parsed.subcommand}`, { path: parsed.positional });
       if (!result.ok) return refused(result, parsed.json);
+      const kept = pendingLines(result.data);
+      if (kept !== null) return success(result.data, kept, parsed.json);
       const user = result.data.path.startsWith('user:') ? result.data.path.slice('user:'.length) : null;
       const said = user !== null
         ? (result.data.decision === 'accepted'
@@ -456,9 +477,9 @@ export async function runClusterCommand(input: RunClusterCommandInput): Promise<
       return success(result.data, [said], parsed.json);
     }
     case 'forget': {
-      const result = await call<ForgetNodeResult>('/api/cluster/forget', 'POST', { nodeId: parsed.positional });
+      const result = await callTurningSharingOn<ForgetNodeResult>('/api/cluster/forget', { nodeId: parsed.positional });
       return result.ok
-        ? success(result.data, renderForgotten(result.data), parsed.json)
+        ? success(result.data, pendingLines(result.data) ?? renderForgotten(result.data), parsed.json)
         : refused(result, parsed.json);
     }
     case 'join':
@@ -540,11 +561,25 @@ async function runJoin(
     }
   }
 
-  const result = await call<JoinGroupResult>('/api/cluster/join', 'POST', { groupId, joinKey });
+  let result = await call<JoinGroupResult>('/api/cluster/join', 'POST', { groupId, joinKey });
+  if (!result.ok && result.daemonCode === 'CLUSTER_SHARING_OFF') {
+    // Sharing is off on this machine: one ask, opening on No (it changes how the daemon takes work).
+    // --yes is the same answer for a script; a run that cannot ask says how to give it.
+    const canAsk = input.prompt !== undefined || (isTerminal && Boolean(process.stdin.isTTY) && !parsed.json);
+    const yes = parsed.yes || (canAsk && /^y(es)?$/i.test(await (input.prompt ?? ((question: string) => askOnStdin(question, parsed.json)))(
+      `${JOIN_TURN_ON_SHARING_QUESTION} [y/N] `)));
+    if (!yes) return refused(result, parsed.json);
+    result = await call<JoinGroupResult>('/api/cluster/join', 'POST', { groupId, joinKey, turnOnSharing: true });
+  }
   return result.ok
     ? success(result.data, renderJoined(result.data), parsed.json)
     : refused(result, parsed.json);
 }
+
+/** The one ask a join puts when sharing is off on this machine; it opens on No. */
+export const JOIN_TURN_ON_SHARING_QUESTION = 'Sharing inbound work with your other machines is off on this machine. Turn it on, so this machine takes work with the group? The daemon restarts to bring the group up.';
+/** The same ask for forget, rotate, rename, publish and accept, which need the group up; it opens on No. */
+export const ACTION_TURN_ON_SHARING_QUESTION = 'Sharing inbound work with your other machines is off on this machine, so this cannot reach the group. Turn it on, so this machine takes work with the group? The daemon restarts to bring the group up, and this finishes then.';
 
 /** The decision site the join group reading is logged under. */
 export const CLUSTER_JOIN_GROUP_SITE = 'terminal-shell.cluster-join';

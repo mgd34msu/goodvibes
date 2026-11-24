@@ -2,6 +2,7 @@ import { effectivePermissionMode, isSettableGatePresetName, type GatePresetName 
 import { currentExecutionModeOwner, withExecutionModeOwner, type ExecutionModeOwner } from '../gate/execution-context.js';
 import { emitPresetChanged } from '../runtime/emitters/gate.js';
 import { readNativeConversationTurnPermit, type NativeConversationTurnPermit } from '../workflow/work-ledger/native-intake-client.js';
+import type { ContentPart } from '../providers/interface.js';
 import { readNativeConversationTurnStatus } from '../core/native-turn-admission.js';
 /**
  * Each hosted session owns its conversation, orchestrator, tool registry and
@@ -213,7 +214,8 @@ export interface HostedSessionRuntime {
    */
   submit(text: string, correlationId?: string, options?: { readonly operatorInput?: boolean | undefined; readonly answersContractQuestion?: string | undefined }): Promise<void>;
   /** Dedicated native delivery; refuses queue acceptance and requires actual completion. */
-  submitNative(permit: NativeConversationTurnPermit, inputId: string, correlationId: string): Promise<void>;
+  /** `content`: what the model receives when the request carried files (the text with them); its text alone otherwise. */
+  submitNative(permit: NativeConversationTurnPermit, inputId: string, correlationId: string, content?: ContentPart[]): Promise<void>;
   /** Interrupt the in-flight turn. Returns whether one was running. */
   cancel(): boolean;
   cancelNative(permit: NativeConversationTurnPermit): boolean;
@@ -575,7 +577,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
         });
       } finally { busyEnded(); }
     },
-    submitNative: async (permit, inputId, correlationId): Promise<void> => {
+    submitNative: async (permit, inputId, correlationId, content): Promise<void> => {
       const source = readNativeConversationTurnPermit(permit);
       const before = readNativeConversationTurnStatus(permit);
       // `retryable` is a turn that failed before any effect; it may run again.
@@ -591,7 +593,7 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
       try {
         await withUntrustedContentScope(contentScope, () => {
           ledger.startTurn();
-          return withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, undefined, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
+          return withExecutionModeOwner(modeOwner, () => orchestrator.handleUserInput(source.text, content, { nativeConversationTurnPermit: permit, requireImmediateNativeTurn: true,
             origin: { source: 'native-hosted-conversation', surface: 'service', ownerDirect: true, metadata: { inputId, correlationId } } }));
         });
       } finally { busyEnded(); }

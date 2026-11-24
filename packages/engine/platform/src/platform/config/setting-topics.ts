@@ -99,7 +99,7 @@ export const SETTING_TOPICS: readonly SettingTopic[] = [
         id: 'models',
         label: 'Model',
         description: 'The model new chats use, and the providers that serve it.',
-        namespaces: ['provider', 'judgment', 'pricing', 'cache', 'webSearch'],
+        namespaces: ['provider', 'pricing', 'cache', 'webSearch'],
       },
       {
         id: 'credentials',
@@ -112,6 +112,13 @@ export const SETTING_TOPICS: readonly SettingTopic[] = [
         label: 'Usage',
         description: 'What each provider has used, budgets, and payments.',
         namespaces: ['payments', 'telemetry', 'batch'],
+      },
+      {
+        // Who answers is one setting, When GoodVibes asks (Permissions); these are the decision model behind it.
+        id: 'decision-models',
+        label: 'Decision models (advanced)',
+        description: 'Jev, the decision model behind "Jev decides": which one, its backups, how long it may take and what happens when it fails. Who answers is set in Permissions; most people leave these alone.',
+        namespaces: ['judgment'],
       },
     ],
   },

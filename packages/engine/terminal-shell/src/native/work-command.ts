@@ -14,6 +14,11 @@ import {
   type NativeConversationIntakeState,
 } from './native-conversation-intake.js';
 import { nativeWorkSubmissionLines } from './native-work-submission.js';
+import { NATIVE_SUBMISSION_MAX_BYTES, NativeWorkSourceError, validateNativeWorkSource, type NativeWorkSource } from './native-work-submission-source.js';
+import { randomUUID } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { writeFileAtomic } from '@goodvibes/engine/platform/platform/utils';
 import { nativeWorkExecutionLines, type NativeWorkExecutionAction } from './native-work-execution.js';
 import type { NativeWorkLedgerView } from './work-ledger-view.js';
 import { commandRefusal } from '../command-confirmation.js';
@@ -83,6 +88,34 @@ async function submission(ctx: CommandActionContext, act: 'submit' | 'status' | 
   return clean(nativeWorkSubmissionLines(result));
 }
 
+/** A path typed in quotes ("my file.json" or 'my file.json') is the path without them. */
+function unquote(path: string): string {
+  const trimmed = path.trim();
+  return /^(["']).*\1$/.test(trimmed) ? trimmed.slice(1, -1) : trimmed;
+}
+
+/**
+ * The New work form: the goal and its criteria become the same JSON a file
+ * takes, checked by the same rule (1 to 100 criteria, each and the goal at
+ * most 20,000 characters, 262,144 bytes in all), kept in a private file, and
+ * submitted the way a file is.
+ */
+async function submitNewWork(ctx: CommandActionContext, goal: string, criteriaText: string): Promise<string> {
+  const criteria = criteriaText.split(/\r?\n/).map((line) => line.trim()).filter((line) => line.length > 0);
+  let source: NativeWorkSource;
+  try {
+    source = validateNativeWorkSource({ goal: goal.trim(), criteria });
+    const json = `${JSON.stringify(source, null, 2)}\n`;
+    if (new TextEncoder().encode(json).byteLength > NATIVE_SUBMISSION_MAX_BYTES) throw new NativeWorkSourceError('The work is longer than 262,144 bytes.');
+    const path = join(tmpdir(), 'goodvibes-new-work', `${randomUUID()}.json`);
+    writeFileAtomic(path, json, { mkdirp: true, mode: 0o600 });
+    return await submission(ctx, 'submit', path);
+  } catch (error) {
+    if (error instanceof NativeWorkSourceError) throw commandRefusal(`Nothing was sent: ${error.message}`);
+    throw error;
+  }
+}
+
 async function intake(context: CommandActionContext, act: 'status' | 'retry' | 'resume' | 'cancel'): Promise<void> {
   const ctx = context as CommandActionContext & IntakeContext;
   const actions = ctx.nativeConversationIntake;
@@ -122,12 +155,14 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
   name: 'work',
   // --yes confirms only right after the action word: the same word in the text is text.
   leadingFlagsOnly: true,
-  title: 'Native work',
-  summary: 'Work on the host: open it, start, cancel or resume it, submit it from a file, recover input, import old records, and ask for work',
+  title: 'Work',
+  // Bare `/work` opens the work view; its other actions are in the view's keys, the palette and typed.
+  bareOpens: 'open',
+  summary: 'Work on the host: open it, ask for new work with what done means, start, check, stop or resume it, submit it from a file, recover input, import old records',
   group: 'Agents and work',
   firstScreenRows: [
-    'open', 'request',
-    { label: 'Start, check, cancel or resume work…', actions: ['start', 'status', 'cancel', 'resume'] },
+    'open', 'new', 'request',
+    { label: 'Start, check, stop or resume work…', actions: ['start', 'status', 'cancel', 'resume'] },
     { label: 'Submit work from a file…', actions: ['submit-file', 'submission', 'submission-retry', 'submission-discard'] },
     { label: 'Input waiting to be admitted…', actions: ['intake', 'intake-retry', 'intake-resume', 'intake-cancel'] },
     { label: 'Import old planning records…', actions: ['import-preview', 'import', 'import-status', 'import-reconsider', 'import-recover', 'import-cancel', 'import-restart'] },
@@ -135,9 +170,9 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
   ],
   actions: [
     doAction<CommandActionContext>({
-      id: 'open', label: 'Open native work', word: 'open', touches: 'reads',
+      id: 'open', label: 'Open the work view', word: 'open', touches: 'reads',
       inputs: [{ ...PROJECT, help: 'A daemon project to select first', required: { default: '', defaultMeans: 'the project already selected' } }],
-      sentence: 'Opens the native work view, at the project named.', example: { project: 'proj-1a2b' },
+      sentence: 'Opens the work view, at the project named.', example: { project: 'proj-1a2b' },
       operator: { terminalOnly: 'It is a terminal screen.' },
       async run(values, ctx) { hostOf().open(ctx, values.project ?? ''); },
     }),
@@ -147,15 +182,25 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
       sentence: '"{goal}" is sent to the host as a new work request; nothing else starts until the host admits it.', example: { goal: 'add retries to the uploader' },
       async run(values, ctx) { await requestsOf().submit(ctx, values.goal!); },
     }),
+    hostChange({
+      id: 'new', label: 'Ask for new work, and say what done means', word: 'new',
+      inputs: [
+        textInput({ id: 'criteria', label: 'Done when', help: 'What must be true when it is done, one per line (1 to 100)', why: 'what done means', kind: 'long-text', typed: { flag: '--done-when' } }),
+        textInput({ id: 'goal', label: 'What you want done', help: 'In your own words', why: 'your own words for the work', kind: 'long-text', typed: { tail: true } }),
+      ],
+      sentence: '"{goal}" is sent to the host as new work, done when: {criteria}. It is kept here until the host has it.', example: { goal: 'add retries to the uploader', criteria: 'an upload that fails twice still finishes' },
+      run: (values, ctx) => submitNewWork(ctx, values.goal ?? '', values.criteria ?? ''),
+    }),
     hostChange({ id: 'start', label: 'Start a piece of work', word: 'start', inputs: [WORK], sentence: 'Work {work} starts on the host.', example: { work: 'work-1a2b' }, run: (values, ctx) => execute(ctx, 'start', values.work!) }),
-    readAction<CommandActionContext>({ id: 'status', label: 'See a piece of work', word: 'status', inputs: [WORK], sentence: 'Shows where work {work} stands on the host.', example: { work: 'work-1a2b' }, operator: HOST_ONLY, run: (values, ctx) => execute(ctx, 'status', values.work!) }),
-    hostChange({ id: 'cancel', label: 'Cancel a piece of work', word: 'cancel', inputs: [WORK], sentence: 'Work {work} is cancelled on the host.', example: { work: 'work-1a2b' }, risk: 'cannot-be-undone', run: (values, ctx) => execute(ctx, 'cancel', values.work!) }),
-    hostChange({ id: 'resume', label: 'Resume a piece of work', word: 'resume', inputs: [WORK], sentence: 'Work {work} goes on from where it stopped on the host.', example: { work: 'work-1a2b' }, run: (values, ctx) => execute(ctx, 'resume', values.work!) }),
+    readAction<CommandActionContext>({ id: 'status', label: 'Check on a piece of work', word: 'status', inputs: [WORK], sentence: 'Shows where work {work} stands on the host.', example: { work: 'work-1a2b' }, operator: HOST_ONLY, run: (values, ctx) => execute(ctx, 'status', values.work!) }),
+    hostChange({ id: 'cancel', label: 'Stop a piece of work', word: 'cancel', inputs: [WORK], sentence: 'Work {work} is stopped on the host.', example: { work: 'work-1a2b' }, risk: 'cannot-be-undone', run: (values, ctx) => execute(ctx, 'cancel', values.work!) }),
+    hostChange({ id: 'resume', label: 'Resume a piece of work after a stop', word: 'resume', inputs: [WORK], sentence: 'Work {work} goes on from where it stopped on the host.', example: { work: 'work-1a2b' }, run: (values, ctx) => execute(ctx, 'resume', values.work!) }),
     hostChange({
       id: 'submit-file', label: 'Submit work from a file', word: 'submit-file',
-      inputs: [textInput({ id: 'path', label: 'File', help: 'A JSON file describing the work', why: 'a file on this machine', kind: 'path', typed: { position: 1 } })],
+      // The rest of the line is the path, so a path with spaces needs no quoting or %20.
+      inputs: [textInput({ id: 'path', label: 'File', help: 'A JSON file with "goal" and "criteria"', why: 'a file on this machine', kind: 'path', typed: { tail: true } })],
       sentence: 'The work described in {path} is sent to the host; it is kept here until the host has it.', example: { path: 'work.json' },
-      run: (values, ctx) => submission(ctx, 'submit', values.path!),
+      run: (values, ctx) => submission(ctx, 'submit', unquote(values.path ?? '')),
     }),
     readAction<CommandActionContext>({ id: 'submission', label: 'See the submitted file\'s state', word: 'submission', sentence: 'Shows whether the work last submitted from a file reached the host.', operator: HOST_ONLY, run: (_values, ctx) => submission(ctx, 'status', '') }),
     hostChange({ id: 'submission-retry', label: 'Send the submitted file again', word: 'submission-retry', inputs: [], sentence: 'The work last submitted from a file is sent to the host again; the host keeps it once.', example: {}, run: (_values, ctx) => submission(ctx, 'retry', '') }),

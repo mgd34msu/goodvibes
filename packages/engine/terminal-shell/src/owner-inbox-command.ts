@@ -29,6 +29,12 @@ import { JEV_DECISION_CHOICES } from '@goodvibes/engine/platform/platform/permis
 
 export interface OwnerInboxCommandContext extends CommandActionContext {
   readonly renderRequest: () => void;
+  /**
+   * Told when a list holds only this computer's items because the connected
+   * daemon did not answer (its address when known), so a screen showing the
+   * list can say so as a failure and read it again when the daemon answers.
+   */
+  readonly noteDaemonUnanswered?: ((daemon: string | undefined) => void) | undefined;
 }
 
 export interface OwnerInboxCommandPolicy<Context> {
@@ -181,12 +187,24 @@ function inboxOf(context: unknown): OwnerInboxPort {
   if ('unavailable' in inbox) throw commandRefusal(inbox.unavailable);
   return inbox;
 }
-/** The lines above a list that holds only this machine's items because the daemon did not answer. */
-function unreachableNotice(report: Pick<OwnerInboxListReport, 'unreachable' | 'daemon'>): string[] {
+/**
+ * The lines above a list that holds only this machine's items because the daemon did not answer.
+ * A person reads plain words; a model also gets the failure and its next step.
+ */
+function unreachableNotice(report: Pick<OwnerInboxListReport, 'unreachable' | 'daemon'>, forModel: boolean): string[] {
   if (report.unreachable === undefined) return [];
   const which = report.daemon !== undefined ? `The daemon at ${report.daemon}` : 'The daemon';
-  return [`${which} did not answer (${report.unreachable}); showing only what is held on this machine, so its approvals and questions are missing.`, ''];
+  if (forModel) return [`${which} did not answer (${report.unreachable}); showing only what is held on this machine, so its approvals and questions are missing.`, ''];
+  return [`${which} did not answer.`, 'Showing only what is held on this computer. Approvals and questions held by that daemon are not included.', ''];
 }
+
+/** A list read while the daemon did not answer: the screen showing it is told, and "nothing" is said of this computer only. */
+function unanswered(report: Pick<OwnerInboxListReport, 'unreachable' | 'daemon'>, ctx: unknown): boolean {
+  if (report.unreachable === undefined) return false;
+  (ctx as Partial<OwnerInboxCommandContext>).noteDaemonUnanswered?.(report.daemon);
+  return true;
+}
+const forModel = (ctx: unknown): boolean => (ctx as Partial<OwnerInboxCommandContext>).invokedByModel === true;
 function failed(what: string, error: unknown): never {
   throw commandRefusal(`Could not ${what}: ${error instanceof Error ? error.message : String(error)}.`, 'Check the daemon with /status, then retry.');
 }
@@ -278,8 +296,11 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           let report: OwnerInboxListReport;
           try { report = await listEveryOwnerItemReport(inboxOf(ctx), { status: 'open' }); } catch (error) { return failed('read the inbox', error); }
           const { items } = report;
-          if (items.length === 0) return [...unreachableNotice(report), 'Nothing is waiting on you.'].join('\n');
-          return [...unreachableNotice(report), `Waiting on you (${items.length}):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`), '', 'Show one: /questions show <id>   Answer: /questions answer <id> <choice|text>'].join('\n');
+          const partial = unanswered(report, ctx);
+          const notice = unreachableNotice(report, forModel(ctx));
+          // Without the daemon's items "nothing is waiting on you" would be a guess: only this computer is spoken for.
+          if (items.length === 0) return [...notice, partial ? 'Nothing is waiting on this computer.' : 'Nothing is waiting on you.'].join('\n');
+          return [...notice, partial ? `On this computer (${items.length}):` : `Waiting on you (${items.length}):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`), '', 'Show one: /questions show <id>   Answer: /questions answer <id> <choice|text>'].join('\n');
         },
       }),
       readAction<Context>({
@@ -289,8 +310,10 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           let report: OwnerInboxListReport;
           try { report = await listEveryOwnerItemReport(inboxOf(ctx), { status: 'all' }); } catch (error) { return failed('read the inbox', error); }
           const { items } = report;
-          if (items.length === 0) return [...unreachableNotice(report), 'Nothing has been asked of you yet.'].join('\n');
-          return [...unreachableNotice(report), `Owner inbox (${items.length}, newest first):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`)].join('\n');
+          const partial = unanswered(report, ctx);
+          const notice = unreachableNotice(report, forModel(ctx));
+          if (items.length === 0) return [...notice, partial ? 'Nothing has been asked of you on this computer.' : 'Nothing has been asked of you yet.'].join('\n');
+          return [...notice, partial ? `On this computer (${items.length}, newest first):` : `Owner inbox (${items.length}, newest first):`, ...items.map((item) => `  ${formatOwnerItemLine(item)}`)].join('\n');
         },
       }),
       readAction<Context>({
@@ -401,7 +424,7 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           try {
             [allOpen, allClosed] = await Promise.all([read({ status: 'open', kinds: ['decision'] }), read({ status: 'closed' })]);
           } catch (error) { return failed('read the decisions', error); }
-          const notice = unreachableNotice(reach);
+          const notice = unreachableNotice(reach, forModel(ctx));
           const inWindow = (at: number): boolean => window === undefined || (at >= window.from && at < window.to);
           const open = allOpen.filter((item) => inWindow(item.createdAt));
           const closed = allClosed.filter((item) => inWindow(item.closedAt ?? item.createdAt));

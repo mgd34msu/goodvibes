@@ -7,11 +7,14 @@ import { captureJevDecisionContext, validateJevDecision, type JevDecision, type 
 import { captureNativeConversationContinuation, canonicalNativeConversationContinuation, nativeConversationContinuationSchema, type NativeConversationContinuation } from './native-continuation-context.js';
 import type { WorkLedgerStorage, WorkLedgerSubmission } from './types.js';
 import { nativeClassicConversationAdmissionSchema, type NativeClassicConversationAdmission } from './native-intake-policy.js';
+import { nativeConversationIntakeAttachmentSchema } from './native-intake-wire.js';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '../../companion/attachment-limits.js';
 
 export const NATIVE_CONVERSATION_MAX_PROPOSALS = 3;
 export const NATIVE_CONVERSATION_MAX_DECISIONS = 32;
 export interface NativeConversationKey { readonly principalId: string; readonly inputId: string; }
 export interface NativeConversationUnsupportedSource { readonly kind: 'image' | 'file' | 'context'; readonly label: string; }
+export interface NativeConversationAttachment { readonly artifactId: string; readonly label?: string | undefined; readonly filename?: string | undefined; readonly mimeType: string; readonly sizeBytes: number; }
 export interface NativeConversationSpan { readonly partId: 'input'; readonly start: number; readonly end: number; }
 export interface NativeConversationProposal { readonly sourceRevision: string; readonly spans: readonly NativeConversationSpan[]; }
 export interface NativeConversationOwner {
@@ -24,6 +27,8 @@ export interface NativeConversationCapture extends NativeConversationKey {
   readonly classic?: NativeClassicConversationAdmission;
   readonly version: 1 | 2; readonly bindingRefs?: NativeConversationBindingRefs; readonly projectId: string; readonly requestId: string;
   readonly text: string; readonly continuation?: NativeConversationContinuation | undefined; readonly unsupportedSources: readonly NativeConversationUnsupportedSource[];
+  /** Files sent with it (version 2 only), as the artifact store described them at capture; bound by the source revision. */
+  readonly attachments?: readonly NativeConversationAttachment[] | undefined;
   readonly sourceId: string; readonly sourceRevision: string; readonly sessionId: string; readonly owner: NativeConversationOwner;
   readonly generation: number; readonly state: 'captured' | 'processing' | 'turn' | 'blocked' | 'refused' | 'associated' | 'cancelled';
   readonly stage: 'routing' | 'extracting' | 'checking' | 'deciding' | 'waiting' | null;
@@ -73,6 +78,7 @@ export function nativeConversationSourceId(projectId: string, principalId: strin
 function immutableSource(value: Omit<NativeConversationCapture, 'decisions'>) {
   return { version: value.version, projectId: value.projectId, principalId: value.principalId, inputId: value.inputId, requestId: value.requestId,
     text: value.text, ...(value.continuation ? { continuation: value.continuation } : {}), unsupportedSources: value.unsupportedSources,
+    ...(value.attachments ? { attachments: value.attachments } : {}),
     sourceId: value.sourceId, sourceRevision: value.sourceRevision, sessionId: value.sessionId, owner: value.owner, ...(value.bindingRefs ? { bindingRefs: value.bindingRefs } : {}) };
 }
 /** Durable client-held content commitment: actual saved capture adoption and
@@ -166,6 +172,7 @@ const captureFields = {
     .refine(value => value.trim().length > 0),
   continuation: nativeConversationContinuationSchema.optional(),
   unsupportedSources: array(strictObject({ kind: enumSchema(['image', 'file', 'context']), label: string().min(1).max(200) })).max(100),
+  attachments: array(nativeConversationIntakeAttachmentSchema).min(1).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
   sourceId: id, sourceRevision: id, sessionId: id,
   // The owner's own credential holds every scope the daemon has (more than a hundred); the bound is that catalog's order of size, not a guess under it.
   owner: strictObject({ authorityId: id, authorityRevision: id, authorityScopes: array(id).max(1000), scopeId: id, scopeRevision: id, projectRoot: string().min(1).max(4096) }),
@@ -202,6 +209,8 @@ export function parseNativeConversationCapture(value: unknown, original?: Native
     if (!Array.isArray(decisions) || decisions.length > NATIVE_CONVERSATION_MAX_DECISIONS
       || new Set(parsed.owner.authorityScopes).size !== parsed.owner.authorityScopes.length
       || (parsed.version === 1 && parsed.continuation?.version === 2)
+      // A version-one record's revision hash does not cover attachments, so it may not carry any.
+      || (parsed.version === 1 && parsed.attachments !== undefined)
       || (parsed.version === 2 && (!refs || new Set([parsed.sourceId, ...Object.values(refs)]).size !== 5))) throw new Error();
     if (!sameSource && !privateHas(issuedSources, value as object) && ((parsed.version === 1 && parsed.sourceId !== nativeConversationSourceId(parsed.projectId, parsed.principalId, parsed.inputId))
       || parsed.sourceRevision !== nativeConversationSourceRevision(parsed))) throw new Error();

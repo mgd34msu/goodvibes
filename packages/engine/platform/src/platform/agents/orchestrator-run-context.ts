@@ -26,6 +26,11 @@ export interface AgentOrchestratorRunContext {
   readonly autonomousPort?: import('../tools/agent/contract-binding.js').ContractActionPort | undefined;
   /** Nonserialized source getter supplied by the native contract construction binding. */
   readonly autonomousSource?: (() => import('../permissions/autonomous.js').AutonomousToolSource) | undefined;
+  /** The files of the native request this run works on (its contract's source), and the store to read them from. */
+  readonly taskAttachments?: {
+    readonly attachments: readonly import('../companion/attachment-limits.js').AttachmentFacts[];
+    readonly artifacts: Pick<import('../companion/companion-chat-attachments.js').CompanionChatArtifactStore, 'readContent'> | null;
+  } | undefined;
   /** Revalidate captured byte authority immediately before each initial/retried provider admission. */
   readonly beforeProviderRequest?: (() => Promise<void>) | undefined;
   readonly workingDirectory: string;

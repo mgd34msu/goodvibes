@@ -111,7 +111,20 @@ export interface RelayReachability {
    * requests aborted. Resolves to how many connections were closed.
    */
   closeConnectionsPresenting(revoked: (code: string) => boolean, reason: string): Promise<number>;
+  /**
+   * Be told each time `status` may have changed: the live registration's own
+   * status changes, a start that failed, a stop. Returns the unsubscribe.
+   */
+  onStatusChange(listener: () => void): () => void;
+  /** The relay address in `relay.url` now ('' when none is set). */
+  readonly relayUrl: string;
 }
+
+/**
+ * The one ask a pairing through the relay puts to the owner when the relay is
+ * off; it opens on No. A yes is `relay.pairing.mint` with `turnOn: true`.
+ */
+export const RELAY_TURN_ON_QUESTION = 'Devices cannot reach this machine through the relay yet. Turn the relay on so they can?';
 
 /** Whether all three gates are satisfied. */
 export function isRelayReachabilityEnabled(config: RelayReachabilityConfig, featureFlagEnabled: boolean): boolean {
@@ -137,6 +150,12 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
   // Why the last start failed before a registration existed; cleared by a
   // start that succeeds and by a stop. The next reconcile starts again.
   let startFailure: RelayRegistrationRefusal | null = null;
+  const statusListeners = new Set<() => void>();
+  function notifyStatus(): void {
+    for (const listener of [...statusListeners]) {
+      try { listener(); } catch { /* A status observer never changes the registration. */ }
+    }
+  }
 
   function startFailureOf(error: unknown): RelayRegistrationRefusal {
     return {
@@ -180,7 +199,10 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
       dispatch: options.dispatch,
       ...(options.webSocketImpl ? { webSocketImpl: options.webSocketImpl } : {}),
       ...(options.logger ? { logger: options.logger } : {}),
-      ...(options.onStatusChange ? { onStatusChange: options.onStatusChange } : {}),
+      onStatusChange: (status) => {
+        options.onStatusChange?.(status);
+        notifyStatus();
+      },
     });
     registration = next;
     registeredWith = { url: config.url, rid };
@@ -193,6 +215,7 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     registration = null;
     registeredWith = null;
     startFailure = null;
+    notifyStatus();
   }
 
   const controller: RelayReachability = {
@@ -203,7 +226,7 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
       const attempt = startRegistration(myGeneration).then(() => {
         if (myGeneration === generation) startFailure = null;
       }, (error: unknown) => {
-        if (myGeneration === generation) startFailure = startFailureOf(error);
+        if (myGeneration === generation) { startFailure = startFailureOf(error); notifyStatus(); }
         throw error;
       }).finally(() => {
         if (starting === attempt) starting = null;
@@ -249,6 +272,13 @@ export function createRelayReachability(options: RelayReachabilityOptions): Rela
     },
     async closeConnectionsPresenting(revoked: (code: string) => boolean, reason: string): Promise<number> {
       return registration ? registration.closePipesPresenting(revoked, reason) : 0;
+    },
+    onStatusChange(listener: () => void): () => void {
+      statusListeners.add(listener);
+      return () => { statusListeners.delete(listener); };
+    },
+    get relayUrl(): string {
+      return readConfig().url.trim();
     },
   };
   return controller;

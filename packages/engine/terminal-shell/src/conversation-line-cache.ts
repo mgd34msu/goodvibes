@@ -154,7 +154,8 @@ export interface LineCacheContext {
 /** Product rendering is injected; invalidation, scratch isolation and replay are shared. */
 export interface LineCacheRenderer<Context extends LineCacheContext> {
   readonly buildTurnModel: (context: Context, messages: readonly Message[], offset: number, unit: Extract<TranscriptUnit, { kind: 'turn' }>, streamingIndex: number) => TurnModel;
-  readonly drawTurn: (context: Context, model: TurnModel, width: number) => TurnRender;
+  /** `stepHint`: the newest turn while nothing has focus (its last folded row says `alt+↑ step through`). */
+  readonly drawTurn: (context: Context, model: TurnModel, width: number, stepHint?: boolean) => TurnRender;
   readonly drawMessage: (context: Context, message: Message, width: number, index: number) => void;
   readonly messageKind?: ((context: Context, index: number) => Part) | undefined;
   readonly separator: 'prose' | 'all';
@@ -231,11 +232,16 @@ export class MessageLineCache<Context extends LineCacheContext> {
     this._lastTail = null;
     this._live = false;
 
-    for (const unit of transcriptUnits(messages, msgIndexOffset)) {
+    const units = transcriptUnits(messages, msgIndexOffset);
+    const newestTurn = units.map((unit) => unit.kind).lastIndexOf('turn');
+    for (const [position, unit] of units.entries()) {
       const id = unitId(unit);
+      // The newest turn, while nothing has focus, carries the step-through hint: part of its key.
+      const stepHint = position === newestTurn && focus === null;
       const base = context.history.getLineCount();
       const lastIndex = unit.kind === 'turn' ? unit.end : unit.index;
-      const settledEntry = reuseSettled ? this.entries.get(id) : undefined;
+      // The newest turn is keyed again each pass: its step-through hint follows focus anywhere in the transcript.
+      const settledEntry = reuseSettled && position !== newestTurn ? this.entries.get(id) : undefined;
       if (settledEntry && settledEntry.live !== true && this.isCurrent(settledEntry, focus, context.collapseState)) {
         this.apply(context, settledEntry, base, messageLineRegistry);
         touched.add(id);
@@ -254,7 +260,7 @@ export class MessageLineCache<Context extends LineCacheContext> {
         turnModel = this.renderer.buildTurnModel(scratchContext, messages, msgIndexOffset, unit, streamingPlaceholderAbsIdx);
         if (turnModel.live) this._live = true;
         key = [
-          'turn', ...common, streaming,
+          'turn', ...common, streaming, stepHint,
           turnModel.live ? context.frame ?? 0 : null,
           turnHasOpenDiff(turnModel) ? semanticSummaryGeneration() : null,
           ...turnSignature(turnModel),
@@ -274,7 +280,7 @@ export class MessageLineCache<Context extends LineCacheContext> {
       }
 
       const missesBefore = syntaxHighlightMisses();
-      const drawn = this.renderScratch(scratchContext, unit, turnModel, messages, msgIndexOffset, width, key, readKeys, focus, streaming);
+      const drawn = this.renderScratch(scratchContext, unit, turnModel, messages, msgIndexOffset, width, key, readKeys, focus, streaming, stepHint);
       const live = turnModel?.live === true;
       const entry: CacheEntry = syntaxHighlightMisses() !== missesBefore
         ? { ...drawn, live, highlightGeneration: syntaxHighlightGeneration() }
@@ -318,6 +324,7 @@ export class MessageLineCache<Context extends LineCacheContext> {
     readKeys: Set<string>,
     focus: string | null,
     streaming: boolean,
+    stepHint = false,
   ): CacheEntry {
     const lines: Line[] = [];
     const blocks: BlockMeta[] = [];
@@ -328,7 +335,7 @@ export class MessageLineCache<Context extends LineCacheContext> {
     let trailingSeparator = false;
 
     if (unit.kind === 'turn' && turnModel) {
-      const render = this.renderer.drawTurn(context, turnModel, width);
+      const render = this.renderer.drawTurn(context, turnModel, width, stepHint);
       for (const line of render.lines) lines.push(line);
       for (const block of render.blocks) blocks.push(block);
       for (const error of render.errorLines) errors.push(error);

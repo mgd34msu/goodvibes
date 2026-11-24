@@ -61,7 +61,7 @@ async function refreshDaemonModelLists(ctx: ModelCommandContext): Promise<string
     const read = answer.providers.filter((report) => report.source === 'live').length;
     const failed = answer.providers.filter((report) => report.error !== undefined);
     return `The daemon read its lists again too (what the web UI and the other programs show): ${read} provider${read === 1 ? '' : 's'} answered`
-      + `${failed.length > 0 ? `; could not read ${failed.map((report) => `${report.providerId} (${report.error})`).join(', ')}` : ''}.`;
+      + `.${failed.length > 0 ? ` ${failed.map((report) => report.error).join(' ')}` : ''}`;
   } catch (error) {
     return `The daemon's lists were not read again: ${summarizeError(error)}.`;
   }
@@ -150,8 +150,8 @@ function providerRefreshLine(name: string, count: number, report: ProviderApiLiv
     return `  ${name}: could not be read, its server is not running; ${count === 0 ? 'no models until it runs' : `${models} kept from its last list`}`;
   }
   if (report.error) {
-    const from = report.source === 'cache' ? 'its last list' : 'the built-in catalog';
-    return `  ${name}: could not be read (${report.error}); ${count === 0 ? 'no models' : `${models} from ${from}`}`;
+    // The sentence says what failed and which list is shown.
+    return `  ${name}: ${report.error} (${count === 0 ? 'no models' : models})`;
   }
   if (report.source === 'live') {
     const changes = [

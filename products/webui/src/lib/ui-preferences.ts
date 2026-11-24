@@ -12,15 +12,80 @@ export interface WebUiPreferences {
    * nothing renders until the owner opts in.
    */
   memoryProvenanceChipEnabled: boolean;
-  /** Code blocks wrap long lines instead of scrolling sideways (the toggle on every code block). */
+  /** Code blocks wrap long lines instead of scrolling sideways (the toggle on every code block), once chosen. */
   codeBlockWrap: boolean;
+  /**
+   * The person used the wrap toggle. Until then a code block wraps on a screen
+   * narrower than 640 px and scrolls on a wider one (codeBlockWrapFor); a stored
+   * `codeBlockWrap` written before this flag existed was never a choice, so it is
+   * read as not chosen.
+   */
+  codeBlockWrapChosen: boolean;
+  /**
+   * Hold still in this browser even when the system does not ask for reduced
+   * motion: menus, panels and toasts appear without moving, the "Thinking…" line
+   * does not shimmer, nothing scrolls smoothly. The system's own setting always
+   * applies too.
+   */
+  reduceMotion: boolean;
+  /** Setup checklist steps the person chose "Skip for now" on, in this browser (SetupChecklist). */
+  setupSkipped: readonly string[];
+  /**
+   * The person agreed to dictate with this browser's own speech service (which sends the
+   * audio to the browser's maker) while the daemon has no speech-to-text provider: the mic
+   * then dictates with one tap. Shown and turned off in Settings, Voice.
+   */
+  browserDictation: boolean;
 }
 
 export const DEFAULT_WEBUI_PREFERENCES: WebUiPreferences = {
   codeBlockLineNumbers: false,
   memoryProvenanceChipEnabled: false,
   codeBlockWrap: false,
+  codeBlockWrapChosen: false,
+  reduceMotion: false,
+  setupSkipped: [],
+  browserDictation: false,
 };
+
+const SYSTEM_REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
+
+/** Whether motion is reduced right now: this browser's setting, or the system's. */
+export function motionReduced(): boolean {
+  if (readWebUiPreferences().reduceMotion) return true;
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(SYSTEM_REDUCED_MOTION).matches;
+}
+
+/**
+ * Keep the setting on the page root (`data-motion="reduce"`), which the
+ * stylesheets read like the system query: set at boot, and again whenever the
+ * preference changes in this tab or another.
+ */
+export function applyMotionPreference(): void {
+  if (typeof document === 'undefined') return;
+  const apply = () => {
+    const root = document.documentElement;
+    if (readWebUiPreferences().reduceMotion) root.dataset.motion = 'reduce';
+    else delete root.dataset.motion;
+  };
+  apply();
+  window.addEventListener('storage', apply);
+  window.addEventListener(WEBUI_PREFERENCES_EVENT, apply);
+}
+
+/** Below this width an unchosen code block wraps (a phone held upright). */
+export const CODE_WRAP_QUERY = '(max-width: 639px)';
+
+/** Whether code blocks wrap: the person's choice once made, else by the screen's width. */
+export function codeBlockWrapFor(preferences: Pick<WebUiPreferences, 'codeBlockWrap' | 'codeBlockWrapChosen'>, narrow: boolean): boolean {
+  return preferences.codeBlockWrapChosen ? preferences.codeBlockWrap : narrow;
+}
+
+/** The wrap toggle: records the choice so the width no longer decides. */
+export function chooseCodeBlockWrap(wrap: boolean): WebUiPreferences {
+  writeWebUiPreference('codeBlockWrapChosen', true);
+  return writeWebUiPreference('codeBlockWrap', wrap);
+}
 
 type PreferenceKey = keyof WebUiPreferences;
 
@@ -44,6 +109,10 @@ export function readWebUiPreferences(): WebUiPreferences {
       codeBlockLineNumbers: Boolean(parsed.codeBlockLineNumbers),
       memoryProvenanceChipEnabled: Boolean(parsed.memoryProvenanceChipEnabled),
       codeBlockWrap: Boolean(parsed.codeBlockWrap),
+      codeBlockWrapChosen: parsed.codeBlockWrapChosen === true,
+      reduceMotion: parsed.reduceMotion === true,
+      browserDictation: parsed.browserDictation === true,
+      setupSkipped: Array.isArray(parsed.setupSkipped) ? parsed.setupSkipped.filter((id): id is string => typeof id === 'string') : [],
     };
   } catch {
     return DEFAULT_WEBUI_PREFERENCES;

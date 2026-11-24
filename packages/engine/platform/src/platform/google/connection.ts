@@ -21,6 +21,7 @@
  */
 
 import { GoogleApiClient, type GoogleApiFetchPort } from './api-client.js';
+import type { GoogleRequestRepair } from './connection-repair.js';
 import { GoogleTokenManager, type GoogleRefreshOutcome } from './token-manager.js';
 import { refreshAccessToken, type GoogleFetchPort } from './oauth-loopback.js';
 import {
@@ -249,6 +250,8 @@ export interface GoogleConnectionPorts {
    * diagnosed as an account mix-up instead of a shrug.
    */
   readonly signedInAccount?: string | null;
+  /** The process's connection repair, read at each refused request (connection-repair.ts). */
+  readonly repair?: (() => GoogleRequestRepair | undefined) | undefined;
 }
 
 /**
@@ -284,7 +287,7 @@ export function buildGoogleConnection(
 
   const tokens = new GoogleTokenManager(credentials, { refresh: refreshFn(ports.fetch, context) });
   return {
-    client: new GoogleApiClient(tokens, ports.fetch),
+    client: new GoogleApiClient(tokens, ports.fetch, Date.now, ports.repair),
     tokens,
     credentials,
     summary: summarizeCredentials(credentials, now),

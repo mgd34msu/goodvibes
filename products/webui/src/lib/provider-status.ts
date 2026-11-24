@@ -268,28 +268,34 @@ export function providerStatePhrase(status: ProviderStatus): string {
 
 /**
  * What fixes a provider whose state needs the person, for its row:
- *   - a subscription sign-in that expired or is expiring: sign in again, which a
- *     terminal app on the daemon's machine does (`/provider sign-in <id>`; the
- *     browser cannot hold a subscription sign-in), so the row carries that command;
+ *   - a subscription sign-in that expired or is expiring: sign in again, from this
+ *     page, through the daemon (components/settings/SubscriptionSignIn);
  *   - another route that expired: the daemon's own repair hint;
  *   - status unavailable: why, and what to do about it.
  * Null when nothing needs doing.
  */
 export interface ProviderRepair {
-  /** The button's word, when the fix is a command to copy. */
-  readonly action?: string;
-  /** The command that fixes it, run in the terminal app. */
-  readonly command?: string;
+  /** The subscription to sign in to again (the `provider` of `providers.subscription.signIn.begin`). */
+  readonly signIn?: string;
   /** What to do, in one short sentence. */
   readonly says: string;
+}
+
+/** The subscription a provider signs in to, when one of its routes is a subscription sign-in. */
+export function subscriptionSignInOf(status: ProviderStatus): string | undefined {
+  return status.routes.find((route) => route.route === 'subscription-oauth' && route.providerId)?.providerId;
+}
+
+/** The provider's API-key route, when it takes a key (`providers.apiKey.set`). */
+export function apiKeyRouteOf(status: ProviderStatus): ProviderRouteStatus | undefined {
+  return status.routes.find((route) => route.route === 'api-key');
 }
 
 export function providerRepair(status: ProviderStatus): ProviderRepair | null {
   if (status.freshness === 'expired' || status.freshness === 'expiring') {
     const route = status.routes.find((candidate) => candidate.freshness === status.freshness);
     if (route?.route === 'subscription-oauth' && route.providerId) {
-      const command = `/provider sign-in ${route.providerId}`;
-      return { action: 'Sign in again', command, says: `Sign in again in the terminal app: ${command}` };
+      return { signIn: route.providerId, says: status.freshness === 'expired' ? 'Sign in again to keep using the subscription.' : 'Sign in again before the subscription sign-in runs out.' };
     }
     const hint = route?.repairHints[0];
     return { says: hint ?? 'Open it to see which sign-in needs renewing.' };

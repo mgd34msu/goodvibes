@@ -93,7 +93,7 @@ export function handleBlockingShellInput(options: BlockingInputHandlerOptions): 
     }
     const req: PendingPermissionState = routed.card.addressed ? { ...pendingPermission, addressed: true } : pendingPermission;
     // The card's own keys (terminal-shell ask-card-input.ts): the terminal app's scheme. Enter
-    // presses the selected button, which opens on "Yes, once", or "No" for what cannot be undone.
+    // presses the selected button, which opens on the yes, or "No" for what cannot be undone or weakens a protection.
     const result = handleAskCardKey(req, data);
     if (result.handled) render();
     return { handled: result.handled, pendingPermission: result.pending, recoveryPending };

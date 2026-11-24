@@ -66,12 +66,23 @@ export interface TerminalWakeRuntime {
   status(): VoiceCaptureIndicatorState<WakeKind> | null;
   settings(): WakeRuntimeSettings;
   stop(): Promise<void>;
+  /** Wake is on but nothing listens: its listener stopped itself, or its start was refused. */
+  stopped(): boolean;
+  /** The running listener stopped itself after its own restarts failed (not a refused start). */
+  gaveUp(): boolean;
+  /**
+   * Start listening again after it stopped itself: the one "listen again" action, also run by
+   * itself when the terminal regains focus or the wake input device setting changes. Says what
+   * happened, in one sentence.
+   */
+  listenAgain(): Promise<string>;
 }
 /**
  * A listener that stopped itself (a start stall, a restart that could not load
  * its models, an unreadable recorder failure) sits idle with the reason in
  * `lastError`. Wake is still enabled, so that must not look like "wake off":
- * it shows as the stopped chip until the feature is toggled.
+ * it shows as the stopped chip until it starts again (focus regained, the input
+ * device setting changed, or /voice wake-again).
  */
 function stoppedWithReason(state: WakeListenerState, phase: WakeListenerState['phase']): boolean {
   return phase === 'idle' && state.lastError !== null;
@@ -292,7 +303,7 @@ export function createTerminalWakeRuntime(policy: {
             deps.notify(
               restarting
                 ? policy.captureFailure(error.message, failureDetail)
-                : `[Wake] Listening for the wake word stopped: ${failureDetail}. It stays off until you turn "Listen for the wake word" off and on again in /settings open.`,
+                : `[Wake] Listening for the wake word stopped: ${failureDetail}. It starts again by itself when this terminal regains focus or the wake microphone setting changes; /voice wake-again starts it now.`,
             );
             deps.render();
           },
@@ -408,7 +419,14 @@ export function createTerminalWakeRuntime(policy: {
       deps.notify(`[Wake] Could not apply the wake settings: ${message}`);
       deps.render();
     };
+    /** The running listener stopped itself (its supervisor gave up): it sits idle with the reason. */
+    const gaveUp = (): boolean => {
+      if (!listener) return false;
+      const state = listener.state();
+      return stoppedWithReason(state, state.phase);
+    };
     const runtime: TerminalWakeRuntime = {
+      gaveUp,
       async refresh() {
         try {
           await refreshNow();
@@ -431,12 +449,33 @@ export function createTerminalWakeRuntime(policy: {
       },
       settings: resolve,
       stop,
+      stopped() {
+        if (starting) return false;
+        if (!listener) return refusal !== null;
+        return gaveUp();
+      },
+      async listenAgain() {
+        if (!resolve().active) {
+          deps.render();
+          return 'Listening for the wake word is off here, so there is nothing to start again ("Listen for the wake word" in /settings open).';
+        }
+        if (starting) return 'The wake-word detector is starting.';
+        if (listener && !runtime.stopped()) return 'Already listening for the wake word.';
+        await stop().catch(() => undefined);
+        await runtime.refresh();
+        return runtime.stopped()
+          ? `Listening for the wake word did not start again: ${runtime.status()?.detail ?? 'see the notice above'}.`
+          : 'Listening for the wake word again.';
+      },
     };
     return runtime;
   }
   function startWakeRuntime(
     runtime: TerminalWakeRuntime,
-    deps: Pick<TerminalWakeRuntimeDeps, 'subscribeConfig'>,
+    deps: Pick<TerminalWakeRuntimeDeps, 'subscribeConfig'> & {
+      /** The terminal's focus-in reports (focus reporting): a listener that stopped itself starts again on one. */
+      readonly subscribeFocusGained?: ((listener: () => void) => () => void) | undefined;
+    },
   ): readonly (() => void)[] {
     const apply = (): void => {
       void runtime.refresh();
@@ -461,6 +500,13 @@ export function createTerminalWakeRuntime(policy: {
       deps.subscribeConfig('voice.wake.enabled', apply),
       deps.subscribeConfig(`voice.wake.surfaces.${policy.surface}`, apply),
       ...restartKeys.map((key) => deps.subscribeConfig(key, restart)),
+      // A listener whose own restarts gave up (a device that went away, a recorder that kept failing)
+      // starts again when the person comes back to this terminal. A changed input device setting is a
+      // restart key above, so it starts again on that too.
+      ...(deps.subscribeFocusGained ? [deps.subscribeFocusGained(() => {
+        // Said by the chip, not a notice: a start that fails again posts its own notice.
+        if (runtime.gaveUp()) void runtime.listenAgain();
+      })] : []),
       () => {
         void runtime.stop();
       },

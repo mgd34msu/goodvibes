@@ -39,10 +39,10 @@ export async function runSetupPairingCommand(runtime: CliCommandRuntime, termina
       if (option.value !== undefined && option.value.trim().length > 0) { named = true; name = option.value; continue; }
       if (option.value === undefined && args[index + 1] && !args[index + 1]!.startsWith('--')) { named = true; name = args[++index]!; continue; }
     }
-    console.error('Usage: goodvibes-agent setup pair [--name <device-name>] [--apply]. --apply requires fresh terminal confirmation; --yes is unsupported.');
+    console.error('Usage: goodvibes-agent setup pair [--name <device-name>] [--apply]. --apply asks you to confirm in the terminal; there is no --yes.');
     return 2;
   }
-  if (apply && runtime.cli.flags.outputFormat !== 'text') { console.error('Pairing --apply requires a visible terminal confirmation; machine-readable output modes are preview-only.'); return 2; }
+  if (apply && runtime.cli.flags.outputFormat !== 'text') { console.error('Pairing with --apply is confirmed on screen, so it needs text output; with --output json it only shows what pairing would do.'); return 2; }
   const controller = new AbortController();
   const interrupt = () => controller.abort();
   process.on('SIGINT', interrupt); process.on('SIGTERM', interrupt);
@@ -70,8 +70,8 @@ export async function runSetupPairingCommand(runtime: CliCommandRuntime, termina
       io.write(`  Next: run goodvibes-agent setup pair --apply${named ? ` --name ${JSON.stringify(name)}` : ''} in a terminal to confirm and pair.`);
     }
     if (!apply || !preview.confirm || !preview.result.confirmation) return controller.signal.aborted ? 130 : preview.result.status === 'preview' || preview.result.status === 'already-paired' ? 0 : 1;
-    if (!io.interactive) { io.write('No credential was created. Run --apply in a terminal to review and confirm persistent administrative access.'); return 2; }
-    const answer = await io.question(`Type ${preview.result.confirmation} to ${preview.result.confirmationPrompt ?? 'create this host-bound administrative credential'}, or press Enter to cancel: `, controller.signal);
+    if (!io.interactive) { io.write('Nothing was created. Pairing gives lasting administrator access, so it is confirmed only in a terminal: run goodvibes-agent setup pair --apply there.'); return 2; }
+    const answer = await io.question(`To ${preview.result.confirmationPrompt ?? 'give this Agent its own administrator key for this host'}, type ${preview.result.confirmation} and press Enter (Enter alone cancels): `, controller.signal);
     confirmInvoked = true;
     const result = await preview.confirm(answer, controller.signal);
     io.write(formatSetupPairing(result));
@@ -80,9 +80,9 @@ export async function runSetupPairingCommand(runtime: CliCommandRuntime, termina
     // Only an interruption, or a failure after the credential request was issued, leaves an outcome to inspect;
     // an earlier failure is a plain error and its cause is shown.
     if (controller.signal.aborted || confirmInvoked) {
-      io.write('Pairing interrupted. If a request may have started, run goodvibes-agent setup pair to inspect its outcome before taking further action.');
+      io.write('Pairing interrupted. If a request may have been sent, run goodvibes-agent setup pair to see where it got to before doing anything else.');
     } else {
-      console.error(`Pairing failed before any credential was requested: ${summarizeError(error)}`);
+      console.error(`Pairing failed before anything was sent to the host: ${summarizeError(error)}`);
     }
     return controller.signal.aborted ? 130 : 1;
   }

@@ -25,7 +25,7 @@ export type McpWorkspaceForm = McpWorkspaceFormBase;
 
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { CommandContext } from './command-registry.ts';
-import { requireMcpApi, requireShellPaths } from './commands/runtime-services.ts';
+import { requireMcpApi, requireReadModels, requireShellPaths } from './commands/runtime-services.ts';
 
 export type McpWorkspaceMode = PlatformMcpWorkspaceMode;
 
@@ -47,6 +47,10 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
       createForm: serverConfigToForm,
       showToolStatusOnOpen: true,
       requestRender: (context) => context.renderRequest(),
+      connections: (context) => {
+        const mcp = requireReadModels(context).mcp;
+        return { connected: () => mcp.getSnapshot().connectedServerNames, subscribe: (listener) => mcp.subscribe(listener) };
+      },
     });
   }
   protected publishStatus(text: string, tone: 'info' | 'warning' | 'error' = 'info'): void {

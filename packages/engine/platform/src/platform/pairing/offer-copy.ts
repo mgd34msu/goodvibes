@@ -74,6 +74,13 @@ export function pairingUnreachableSteps(
   ];
 }
 
+/**
+ * The one question every pairing surface asks when phones cannot reach the
+ * daemon yet, in place of a command to run; it opens on No (it opens this
+ * machine to the network). Its yes is pairing.handoff.create `serveToNetwork`.
+ */
+export const SERVE_TO_NETWORK_QUESTION = 'Phones on your network cannot reach GoodVibes yet. Serve it to your network?';
+
 /** The pair-again sentence the daemon puts in its answer, for a client that has no command of its own (the web UI). */
 export const PAIRING_PAIR_AGAIN = 'Pair again, then scan the new code with the phone.';
 
@@ -124,10 +131,16 @@ export function pairingNoWebUiLines(pairCommand: string): string[] {
 }
 
 /** The list `pair` leads with when it prints a code: the web UI is reachable, scan, then the offers. */
-export function pairingReadySteps(origin: string, offers: readonly PairingHandoffOfferKind[]): string[] {
+export function pairingReadySteps(origin: string, offers: readonly PairingHandoffOfferKind[], certificatePage?: string): string[] {
+  // Reachability is read from the settings, not tested from the phone's network: a firewall or another network still stops it.
+  let host = origin;
+  try { host = new URL(origin).hostname; } catch { /* an origin that is not a URL is named as written */ }
   return formatPairingSteps([
     { state: 'done', text: `The daemon serves the web UI at ${origin}, open to other devices.` },
-    { state: 'next', text: 'Scan the code below with the phone\'s camera; it opens the web app already signed in.' },
+    // The daemon's own LAN certificate (daemon/lan-https): the phone trusts it once before the https address opens.
+    ...(certificatePage ? [{ state: 'next' as const, text: `On the phone, open ${certificatePage} and install the GoodVibes certificate (once per phone; the page says how on iPhone and Android, and how to remove it).` }] : []),
+    { state: 'next', text: 'Scan the code below with the phone\'s camera; it opens the web app already signed in.',
+      detail: `(If the phone cannot open it, it must be on the same network as ${host} with no firewall between, or reach it through Tailscale: Settings, Network, Tailscale in the web app on this computer.)` },
     { state: 'then', text: offers.length > 0
       ? `In the web app, accept or decline each offer: ${offers.map((kind) => PAIRING_OFFER_COPY[kind].title).join(', ')}.`
       : 'Nothing else: the phone is paired once the web app opens.' },

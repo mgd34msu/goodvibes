@@ -524,6 +524,15 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         confirmation: 'Direct user interaction only.',
         note: 'Moves the keyboard onto the conversation work tree: arrows move and fold, Enter opens a tool call, y copies, Esc returns to the composer.',
       };
+    case 'next-session':
+    case 'previous-session':
+      return {
+        supported: false,
+        effect: 'visible-ui-navigation',
+        preferredMode: 'direct-user-interaction',
+        confirmation: 'Direct user interaction only.',
+        note: 'Shows the next or previous agent or process from the session row above the conversation.',
+      };
   }
 }
 

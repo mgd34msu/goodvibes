@@ -55,6 +55,7 @@
 
 import { openGoogleConnection, type GoogleConnectionSources } from './connection.js';
 import type { GoogleConnectionOwner } from './connection-owner.js';
+import type { GoogleConnectionRepair, GoogleConsentStart } from './connection-repair.js';
 import type { GoogleApiFetchPort, GoogleApiResult, RecentMessageIds } from './api-client.js';
 import type { GoogleFetchPort } from './oauth-loopback.js';
 import type { HistoryDeltaDeps } from './history-delta.js';
@@ -93,6 +94,12 @@ export interface GmailInboundReaderUnavailable {
   readonly detail: string;
   /** The one remedial step, or '' when there is nothing the owner can do but wait. */
   readonly fix: string;
+  /**
+   * Set when this resolution started (or joined) a consent: resolves true when
+   * the person approved and the grant is stored, so the caller resolves again
+   * on that completion instead of at its next start.
+   */
+  readonly repairing?: Promise<boolean> | undefined;
 }
 
 export type GmailInboundReaderResolution =
@@ -105,12 +112,25 @@ export type GmailInboundReaderResolution =
  */
 export type GmailInboundReaderProvider = () => Promise<GmailInboundReaderResolution>;
 
+const NOT_CONNECTED_DETAIL = 'No Google account is connected on this machine, so there is no Gmail mailbox to read.';
+
 const NOT_CONNECTED: GmailInboundReaderUnavailable = {
   kind: 'unavailable',
-  detail: 'No Google account is connected on this machine, so there is no Gmail mailbox to read.',
-  fix: 'Say the word and I will connect a Google account, or set up IMAP with '
+  detail: NOT_CONNECTED_DETAIL,
+  fix: 'Set surfaces.email.inbound.source to "gmail" to connect a Google account for it (the consent link is shown at once), or set '
     + 'surfaces.email.user to read a mailbox over IMAP instead.',
 };
+
+/** The unavailable arm for a consent this resolution started: what the person sees, and its completion. */
+function consentStarted(detail: string, start: GoogleConsentStart): GmailInboundReaderUnavailable {
+  if (!start.started) return { kind: 'unavailable', detail: `${detail} ${start.problem}`, fix: start.fix };
+  return {
+    kind: 'unavailable',
+    detail,
+    fix: `A consent asking for mail and calendar together is open${start.joined ? ' already' : ''}: approve ${start.consentUrl} in your browser, and the mailbox is read as soon as you do.`,
+    repairing: start.completed.then((outcome) => outcome.ok),
+  };
+}
 
 export interface GmailInboundReaderSources {
   readonly sources: GoogleConnectionSources;
@@ -118,6 +138,10 @@ export interface GmailInboundReaderSources {
   readonly now?: (() => number) | undefined;
   /** The process's held connection; without it a connection is opened for this resolution. */
   readonly connectionOwner?: GoogleConnectionOwner | undefined;
+  /** The process's connection repair: a broken or missing grant starts a consent from here. */
+  readonly repair?: GoogleConnectionRepair | undefined;
+  /** Whether the owner asked for Gmail inbound (`surfaces.email.inbound.source` is "gmail"); only then does a missing connection start one. */
+  readonly wantsGmail?: (() => boolean) | undefined;
 }
 
 /**
@@ -146,13 +170,18 @@ export async function resolveGmailInboundReader(
       fix: 'Check that the credential store is readable, then restart the daemon.',
     };
   }
-  if (connection === null) return NOT_CONNECTED;
+  if (connection === null) {
+    // Only an owner who asked for Gmail inbound is connected from here; on an IMAP machine this is the ordinary answer.
+    if (input.repair === undefined || input.wantsGmail?.() !== true) return NOT_CONNECTED;
+    return consentStarted(NOT_CONNECTED_DETAIL, await input.repair.startConsent('not-connected'));
+  }
 
   // One call that does four jobs, see the module header. Wrapped because a
   // transport that throws rather than answering must not reject out of start().
   let profile: GoogleApiResult<{ readonly emailAddress: string }>;
   try {
-    profile = await connection.client.getProfile();
+    // Without the repair: start-up never waits on a person. A refusal the repair can act on is handed to it below, not awaited.
+    profile = await connection.client.withoutRepair().getProfile();
   } catch (error) {
     return {
       kind: 'unavailable',
@@ -161,7 +190,20 @@ export async function resolveGmailInboundReader(
     };
   }
   if (!profile.ok) {
-    return { kind: 'unavailable', detail: profile.problem, fix: profile.fix };
+    const repairable = profile.reason === 'grant-invalid' || profile.reason === 'missing-scopes' || profile.reason === 'api-disabled';
+    if (input.repair === undefined || !repairable) return { kind: 'unavailable', detail: profile.problem, fix: profile.fix };
+    // The start completes without this mailbox; the consent (or the enable) runs in the background, the person gets
+    // one notice with the link, and the selection is made again when it completes.
+    const repairing = input.repair.repair(profile, connection.tokens, {
+      notice: (link) => `Google needs you to approve access again: ${link}. Mail from this account resumes when you do.`,
+    }).then((outcome) => outcome.repaired, () => false);
+    return {
+      kind: 'unavailable',
+      detail: profile.problem,
+      fix: profile.reason === 'api-disabled' ? 'Enabling the API is being decided; mail from this account resumes once it is enabled.'
+        : 'A consent link was sent to you; mail from this account resumes when you approve it.',
+      repairing,
+    };
   }
 
   // After the profile call the token has been refreshed, so this is the grant's
@@ -171,15 +213,13 @@ export async function resolveGmailInboundReader(
   // `collectHistoryDelta` read it as the second would announce a terminal
   // no-gmail-scope failure for a mailbox that may be perfectly readable.
   if (connection.tokens.scopes().length === 0) {
-    return {
-      kind: 'unavailable',
-      detail: 'The connected Google credential works, but its granted scope list could not be '
-        + 'determined: neither the stored credential nor the token response named any scopes. '
-        + 'Whether it may read message bodies is therefore unknown, and this refuses to guess '
-        + 'rather than start a reader that would report a working mailbox as unreadable.',
-      fix: 'Re-authorize the Google account so the grant is recorded with its scopes: '
-        + 'say the word and I will re-authorize the account so the grant records its scopes.',
-    };
+    const detail = 'The connected Google credential works, but its granted scope list could not be '
+      + 'determined: neither the stored credential nor the token response named any scopes. '
+      + 'Whether it may read message bodies is therefore unknown, and this refuses to guess '
+      + 'rather than start a reader that would report a working mailbox as unreadable.';
+    // A fresh consent returns a grant that records its scopes; the reader is resolved again when it completes.
+    if (input.repair !== undefined) return consentStarted(detail, await input.repair.startConsent('missing-scopes'));
+    return { kind: 'unavailable', detail, fix: 'A fresh consent records the scopes; this program has no consent owner running, so none was started.' };
   }
 
   const client = connection.client;

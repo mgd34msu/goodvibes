@@ -9,7 +9,8 @@ import {
 } from './connected-host-routes.ts';
 import type { AgentWorkspaceChannelStatus } from './agent-workspace-channels.ts';
 import { buildAgentWorkspaceChannels } from './agent-workspace-channels.ts';
-import { createChannelPrincipalAttributionResolver, type ChannelPrincipalAttributionResolver, UNKNOWN_PRINCIPAL_LABEL } from '../agent/principal-attribution.ts';
+import { createChannelPrincipalAttributionResolver, type ChannelPrincipalAttributionResolver } from '../agent/principal-attribution.ts';
+import { UNKNOWN_SENDER_LABEL } from '@goodvibes/engine/platform/platform/channels';
 import { renderForModel, untrustedFrom } from '../agent/untrusted-content.ts';
 import { clampReadLimit } from '@goodvibes/engine/terminal-shell/agent-turn/read-helpers';
 
@@ -338,7 +339,7 @@ async function routeBindingTriage(
     state: routeState(result, bindings.length === 0),
     totalBindings: bindings.length,
     bindings: bindingViews,
-    policy: `Read-only route continuity. External ids are digested so channel identifiers are not printed into chat. Sender attribution shows the resolved principal when the channel identity maps to one, and "${UNKNOWN_PRINCIPAL_LABEL}" otherwise.`,
+    policy: `Read-only route continuity. External ids are digested so channel identifiers are not printed into chat. Each sender shows as the person or device its channel identity belongs to, and as "${UNKNOWN_SENDER_LABEL}" otherwise.`,
   };
 }
 
@@ -511,7 +512,7 @@ export function formatAgentWorkspaceChannelTriage(triage: AgentWorkspaceChannelT
     lines.push(`  state: ${bindings.state}; total: ${bindings.totalBindings}`);
     const routeRows = Array.isArray(bindings.bindings) ? bindings.bindings.filter(isRecord) : [];
     for (const binding of routeRows.slice(0, 5)) {
-      lines.push(`  - ${readString(binding, 'id')}: ${readString(binding, 'surfaceKind')} ${readString(binding, 'kind')} sender=${readString(binding, 'principalLabel', UNKNOWN_PRINCIPAL_LABEL)}`);
+      lines.push(`  - ${readString(binding, 'id')}: ${readString(binding, 'surfaceKind')} ${readString(binding, 'kind')} sender=${readString(binding, 'principalLabel', UNKNOWN_SENDER_LABEL)}`);
     }
     if (routeRows.length === 0) lines.push('  no route bindings reported');
   }

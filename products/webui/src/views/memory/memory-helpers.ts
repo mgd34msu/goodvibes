@@ -34,11 +34,20 @@ export const MEMORY_SCOPE_LINES: Readonly<Record<MemoryScope, string>> = {
  * who saved or reviewed it, or the agent), not a measurement, and records rated
  * below the recall floor are not brought into answers.
  */
-export function confidenceMeaning(recallFloor: number | undefined): string {
-  const floor = recallFloor === undefined
+/** "Records rated below 60% are not brought into answers.": the store's recall floor in a sentence. */
+export function recallFloorSentence(recallFloor: number | undefined): string {
+  return recallFloor === undefined
     ? 'Records rated too low are not brought into answers.'
     : `Records rated below ${String(recallFloor)}% are not brought into answers.`;
-  return `How sure this record is said to be: a rating given when it was saved or reviewed, not a measurement. ${floor}`;
+}
+
+export function confidenceMeaning(recallFloor: number | undefined): string {
+  return `How sure this record is said to be: a rating given when it was saved or reviewed, not a measurement. ${recallFloorSentence(recallFloor)}`;
+}
+
+/** What the ratings on the list mean, said once above the records. */
+export function ratingsMeaning(recallFloor: number | undefined): string {
+  return `Each rating is how sure a record is said to be, given when it was saved or reviewed; it is not a measurement. ${recallFloorSentence(recallFloor)}`;
 }
 
 export const MEMORY_REVIEW_STATES: readonly MemoryReviewState[] = ['fresh', 'reviewed', 'stale', 'contradicted'];
@@ -111,11 +120,6 @@ export function isBelowRecallFloor(record: MemoryRecord, recallFloor: number): b
 
 export function formatConfidence(confidence: number): string {
   return `${Math.round(confidence)}%`;
-}
-
-/** The row's words for a confidence: "rated 82% sure". */
-export function confidenceRating(confidence: number): string {
-  return `rated ${formatConfidence(confidence)} sure`;
 }
 
 export function formatProvenanceLink(link: MemoryProvenanceLink): string {

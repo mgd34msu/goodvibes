@@ -14,7 +14,6 @@
 export const INTENTIONALLY_INTERNAL: Readonly<Record<string, string>> = {
   'channel-profiles': 'daemon-owned registry; consumers reach it through the channel-profiles.* verbs',
   checkin: 'daemon-owned scheduler; consumers configure it through checkin.* config keys and verbs',
-  principals: 'daemon-owned registry; consumers reach it through the principals.* verbs',
   push: 'daemon-owned subscription store; consumers reach it through the push.* verbs',
 };
 

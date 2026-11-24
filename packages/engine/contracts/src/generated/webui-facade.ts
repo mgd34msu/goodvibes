@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.4.8
- * Methods: 651 total, 536 REST-routed, 115 ws-only invoke.
+ * Methods: 655 total, 536 REST-routed, 119 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -2254,6 +2254,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "pairing.handoff.complete",
   "pairing.handoff.create",
   "pairing.posture.get",
+  "pairing.serve.network",
   "pairing.tokens.create",
   "pairing.tokens.delete",
   "pairing.tokens.list",
@@ -2262,6 +2263,9 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "pairing.tokens.revokeShared",
   "permissions.rules.delete",
   "permissions.rules.list",
+  "providers.apiKey.set",
+  "providers.subscription.signIn.begin",
+  "providers.subscription.signIn.finish",
   "push.subscriptions.create",
   "push.subscriptions.delete",
   "push.subscriptions.list",
@@ -2738,6 +2742,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "pairing.handoff.complete": "ws-invoke",
   "pairing.handoff.create": "ws-invoke",
   "pairing.posture.get": "ws-invoke",
+  "pairing.serve.network": "ws-invoke",
   "pairing.tokens.create": "ws-invoke",
   "pairing.tokens.delete": "ws-invoke",
   "pairing.tokens.list": "ws-invoke",
@@ -2783,8 +2788,11 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "models.current.set": "rest",
   "models.list": "rest",
   "models.refresh": "rest",
+  "providers.apiKey.set": "ws-invoke",
   "providers.get": "rest",
   "providers.list": "rest",
+  "providers.subscription.signIn.begin": "ws-invoke",
+  "providers.subscription.signIn.finish": "ws-invoke",
   "providers.usage.get": "rest",
   "push.subscriptions.create": "ws-invoke",
   "push.subscriptions.delete": "ws-invoke",
@@ -4062,6 +4070,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "withPlace": "sample",
               "tone": "plain"
             },
+            "weakensSafety": false,
             "choices": [
               {
                 "id": "sample",
@@ -4069,7 +4078,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "key": "sample",
                 "default": false,
                 "danger": false,
-                "value": "sample"
+                "value": "sample",
+                "said": "sample"
               }
             ],
             "remember": {
@@ -4456,6 +4466,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -4463,7 +4474,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -4633,6 +4645,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -4640,7 +4653,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -4815,6 +4829,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "withPlace": "sample",
               "tone": "plain"
             },
+            "weakensSafety": false,
             "choices": [
               {
                 "id": "sample",
@@ -4822,7 +4837,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "key": "sample",
                 "default": false,
                 "danger": false,
-                "value": "sample"
+                "value": "sample",
+                "said": "sample"
               }
             ],
             "remember": {
@@ -4988,6 +5004,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -4995,7 +5012,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -5148,6 +5166,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "withPlace": "sample",
             "tone": "plain"
           },
+          "weakensSafety": false,
           "choices": [
             {
               "id": "sample",
@@ -5155,7 +5174,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "key": "sample",
               "default": false,
               "danger": false,
-              "value": "sample"
+              "value": "sample",
+              "said": "sample"
             }
           ],
           "remember": {
@@ -11315,6 +11335,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "goal": "sample",
           "criteria": [
             "sample"
+          ],
+          "attachments": [
+            {
+              "artifactId": "sample",
+              "label": "sample",
+              "filename": "sample",
+              "mimeType": "sample",
+              "sizeBytes": 0
+            }
           ]
         },
         "nativeDecisions": {
@@ -11421,6 +11450,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "goal": "sample",
               "criteria": [
                 "sample"
+              ],
+              "attachments": [
+                {
+                  "artifactId": "sample",
+                  "label": "sample",
+                  "filename": "sample",
+                  "mimeType": "sample",
+                  "sizeBytes": 0
+                }
               ]
             },
             "proposedUnits": [
@@ -12543,6 +12581,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "goal": "sample",
         "criteria": [
           "sample"
+        ],
+        "attachments": [
+          {
+            "artifactId": "sample",
+            "label": "sample",
+            "filename": "sample",
+            "mimeType": "sample",
+            "sizeBytes": 0
+          }
         ]
       },
       "nativeDecisions": {
@@ -12649,6 +12696,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "goal": "sample",
             "criteria": [
               "sample"
+            ],
+            "attachments": [
+              {
+                "artifactId": "sample",
+                "label": "sample",
+                "filename": "sample",
+                "mimeType": "sample",
+                "sizeBytes": 0
+              }
             ]
           },
           "proposedUnits": [
@@ -13770,6 +13826,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             "goal": "sample",
             "criteria": [
               "sample"
+            ],
+            "attachments": [
+              {
+                "artifactId": "sample",
+                "label": "sample",
+                "filename": "sample",
+                "mimeType": "sample",
+                "sizeBytes": 0
+              }
             ]
           },
           "nativeDecisions": {
@@ -13876,6 +13941,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "goal": "sample",
                 "criteria": [
                   "sample"
+                ],
+                "attachments": [
+                  {
+                    "artifactId": "sample",
+                    "label": "sample",
+                    "filename": "sample",
+                    "mimeType": "sample",
+                    "sizeBytes": 0
+                  }
                 ]
               },
               "proposedUnits": [
@@ -15033,6 +15107,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "goal": "sample",
           "criteria": [
             "sample"
+          ],
+          "attachments": [
+            {
+              "artifactId": "sample",
+              "label": "sample",
+              "filename": "sample",
+              "mimeType": "sample",
+              "sizeBytes": 0
+            }
           ]
         },
         "nativeDecisions": {
@@ -15139,6 +15222,15 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "goal": "sample",
               "criteria": [
                 "sample"
+              ],
+              "attachments": [
+                {
+                  "artifactId": "sample",
+                  "label": "sample",
+                  "filename": "sample",
+                  "mimeType": "sample",
+                  "sizeBytes": 0
+                }
               ]
             },
             "proposedUnits": [
@@ -16900,7 +16992,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   },
   "relay.pairing.mint": {
     "input": {
-      "name": "sample"
+      "name": "sample",
+      "turnOn": false,
+      "url": "sample"
     },
     "output": {
       "pairing": {
@@ -16912,6 +17006,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "label": "sample"
       },
       "status": "disabled",
+      "words": "sample",
       "codeId": "sample",
       "codeName": "sample"
     }
@@ -16921,6 +17016,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "output": {
       "status": "disabled",
       "configured": false,
+      "words": "sample",
+      "relayUrl": "sample",
       "rendezvousId": "sample",
       "refusal": {
         "code": "sample",
@@ -26947,7 +27044,8 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "sample"
       ],
       "fromSharedToken": false,
-      "forThisMachine": false
+      "forThisMachine": false,
+      "serveToNetwork": false
     },
     "output": {
       "token": {
@@ -26998,6 +27096,38 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
     "input": {
       "origin": "sample"
     },
+    "output": {
+      "posture": {
+        "origin": "sample",
+        "scheme": "sample",
+        "privateNetwork": false,
+        "secureContext": false,
+        "notice": "sample",
+        "capabilities": [
+          {
+            "capability": "sample",
+            "available": false,
+            "reason": "sample"
+          }
+        ],
+        "reach": {
+          "otherDevices": false,
+          "reason": "sample",
+          "fix": "sample",
+          "steps": [
+            {
+              "state": "done",
+              "text": "sample",
+              "detail": "sample",
+              "command": false
+            }
+          ]
+        }
+      }
+    }
+  },
+  "pairing.serve.network": {
+    "input": {},
     "output": {
       "posture": {
         "origin": "sample",
@@ -28158,6 +28288,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
                 "effectiveByRequested": {}
               },
               "textWork": "text",
+              "priceTier": "free",
               "recommended": "sample"
             }
           ],
@@ -28204,6 +28335,18 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "notAsked": false
         }
       ]
+    }
+  },
+  "providers.apiKey.set": {
+    "input": {
+      "provider": "sample",
+      "key": "sample"
+    },
+    "output": {
+      "provider": "sample",
+      "keyName": "sample",
+      "scope": "sample",
+      "signedIn": false
     }
   },
   "providers.get": {
@@ -28422,6 +28565,29 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           ]
         }
       ]
+    }
+  },
+  "providers.subscription.signIn.begin": {
+    "input": {
+      "provider": "sample"
+    },
+    "output": {
+      "provider": "sample",
+      "authorizationUrl": "sample",
+      "finishes": "on-its-own",
+      "listenerNote": "sample"
+    }
+  },
+  "providers.subscription.signIn.finish": {
+    "input": {
+      "provider": "sample",
+      "code": "sample"
+    },
+    "output": {
+      "provider": "sample",
+      "signedIn": false,
+      "tokenType": "sample",
+      "expiresAt": 0
     }
   },
   "providers.usage.get": {
@@ -29629,7 +29795,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "detail": "sample"
       },
       "publicBaseUrlUpdated": false,
-      "receiptRecorded": false
+      "receiptRecorded": false,
+      "answers": {
+        "ok": false,
+        "detail": "sample"
+      }
     }
   },
   "tailscale.serve.stop": {
@@ -34400,6 +34570,12 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "unsupportedSources": [
         {
           "kind": "image",
+          "label": "sample"
+        }
+      ],
+      "attachments": [
+        {
+          "artifactId": "sample",
           "label": "sample"
         }
       ]

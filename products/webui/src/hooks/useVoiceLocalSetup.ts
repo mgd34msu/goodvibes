@@ -23,7 +23,7 @@
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { client as platformClient } from '../lib/goodvibes';
-import { queryKeys } from '../lib/queries';
+import { NO_EVENT_LIST_FRESHNESS, queryKeys } from '../lib/queries';
 import { formatError } from '../lib/errors';
 import {
   readVoiceLocalInstallResult,
@@ -56,6 +56,7 @@ export function useVoiceLocalStatus(enabled: boolean) {
     enabled,
     staleTime: 30_000,
     retry: false,
+    ...NO_EVENT_LIST_FRESHNESS,
   });
 }
 

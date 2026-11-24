@@ -34,7 +34,9 @@ export type KeyAction =
   | 'failure-other-model'
   | 'failure-details'
   | 'failure-retry'
-  | 'failure-sign-in';
+  | 'failure-sign-in'
+  | 'next-session'
+  | 'previous-session';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open help: every command and keyboard shortcut in one searchable list',
@@ -63,6 +65,7 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'next-error-line-end', 'kill-line', 'clear-prompt', 'undo',
   'redo', 'paste', 'focus-work-tree', 'cycle-permission-mode',
   'open-notifications', 'failure-other-model', 'failure-details', 'failure-retry', 'failure-sign-in',
+  'next-session', 'previous-session',
 ], {
   // Ctrl+P: the same help list as ? and /help, in both terminal programs.
   'command-palette':       [{ key: 'p', ctrl: true }],

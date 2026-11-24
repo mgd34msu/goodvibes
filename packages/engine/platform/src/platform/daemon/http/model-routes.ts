@@ -21,7 +21,7 @@ import type { ConfiguredVia, ProviderConfiguredStatus } from '../../providers/co
 import { findModelDefinition } from '../../providers/registry-models.js';
 import { resolveModelReference } from '../../providers/model-id-resolution.js';
 import { providerDisplayLabel } from '../../providers/provider-labels.js';
-import { catalogTextWork, type CatalogTextWork } from '../../providers/model-catalog-facts.js';
+import { catalogTextWork, modelPriceTier, type CatalogTextWork, type ModelPriceTier } from '../../providers/model-catalog-facts.js';
 import { recommendModels } from '../../providers/model-recommendations.js';
 import {
   REASONING_EFFORT_SEVERITY,
@@ -64,6 +64,8 @@ export interface ProviderModelEntry {
    * embedding model), `unknown` the catalog does not say.
    */
   readonly textWork: CatalogTextWork;
+  /** What it costs to use (modelPriceTier): `free`, `paid`, `subscription` or `unknown`; a picker shows it beside the model. */
+  readonly priceTier: ModelPriceTier;
   /** On the provider's recommended shortlist (recommendModels): why, in catalog facts. Absent otherwise. */
   readonly recommended?: string | undefined;
 }
@@ -245,6 +247,7 @@ async function handleListProviderModels(context: ModelRouteContext): Promise<Res
       label: model.displayName ?? model.id,
       contextWindow: model.contextWindow > 0 ? model.contextWindow : undefined,
       textWork: catalogTextWork(model.provider, model.id),
+      priceTier: modelPriceTier(model),
       ...(reasoningSpec
         ? { reasoningOptions: {
           levels: [...reasoningSpec.values], source: reasoningSpec.source,

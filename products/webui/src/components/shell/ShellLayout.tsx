@@ -157,6 +157,8 @@ export function ShellLayout({
             onNavigate={closeDrawerThen(sidebar.onNavigate)}
             onNewChat={closeDrawerThen(sidebar.onNewChat)}
             onOpenChat={closeDrawerThen(sidebar.onOpenChat)}
+            onRenameChat={closeDrawerThen(sidebar.onRenameChat)}
+            onReviewWaiting={closeDrawerThen(sidebar.onReviewWaiting)}
             onSearch={closeDrawerThen(sidebar.onSearch)}
             onOpenSettings={closeDrawerThen(sidebar.onOpenSettings)}
           />

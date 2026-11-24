@@ -13,6 +13,8 @@ import { networkInterfaces } from 'node:os';
 import { readControlPlaneBinding } from '../../config/control-plane-base-url.js';
 import { activeTailscaleServeOrigin } from '../../remote-access/tailscale.js';
 import { jsonErrorResponse } from './error-response.js';
+import { lanHttpsPort } from '../../pairing/web-origin.js';
+import { lanServerNames } from '../lan-https/authority.js';
 
 const READ_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -64,6 +66,12 @@ export function ownBrowserOrigins(config: { get(key: string): unknown }, listene
     add(hostOrigin(scheme, host, port));
   } else {
     add(hostOrigin(scheme, host, port));
+  }
+  // The LAN https listener beside a network bind (controlPlane.lanHttps): the names and addresses its certificate carries.
+  const lanPort = lanHttpsPort(config);
+  if (lanPort !== undefined && !(LOOPBACK_NAMES.includes(host) || host.startsWith('127.'))) {
+    const names = lanServerNames();
+    for (const name of [...names.dnsNames, ...names.addresses]) add(hostOrigin('https', name, lanPort));
   }
   add(originOf(config.get('web.publicBaseUrl')));
   add(originOf(binding.publicBaseUrl));

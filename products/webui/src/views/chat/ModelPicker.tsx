@@ -6,8 +6,8 @@
  * filter box at the top searches every connected provider's models at once.
  *
  * Providers the person is connected to come first; the others follow, marked
- * Not connected, with the one action that connects them (Settings, or the
- * terminal command to copy when only a terminal can sign in). Only models that
+ * Not connected, with the one action that connects them: Settings, Models and
+ * providers, where a subscription is signed in to from the page. Only models that
  * can hold a conversation are listed (the catalog's `textWork`).
  *
  * A pick applies to this chat only; the menu says so, and "Make this the
@@ -26,7 +26,6 @@ import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useSta
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, RefreshCw, Search } from 'lucide-react';
 import { PHONE_QUERY, useFittedPosition, useMediaQuery, useOutsidePress } from '../../components/ui/overlay';
-import { copyOutcomeMessage, copyText } from '../../lib/copy-text';
 
 /** One model the menu can pick. */
 export interface PickerModel {
@@ -39,6 +38,8 @@ export interface PickerModel {
   readonly kindUnknown: boolean;
   /** On the provider's recommended short list (models.list `recommended`): why, in catalog facts. */
   readonly recommended?: string | undefined;
+  /** What it costs to use, in the platform's words ("free", "paid", "subscription", "price not known"). */
+  readonly price?: string | undefined;
 }
 
 /** One provider in the menu. */
@@ -52,7 +53,7 @@ export interface PickerProvider {
   /** Why its last reading from the provider failed. */
   readonly listError?: string | undefined;
   /** How to connect it, for one that is not connected. */
-  readonly connect: { readonly kind: 'settings' } | { readonly kind: 'command'; readonly command: string };
+  readonly connect: { readonly kind: 'settings'; readonly subscription: boolean };
 }
 
 export interface ModelPickerProps {
@@ -123,11 +124,8 @@ function ageWords(ms: number): string {
 /** What the menu says about a provider's list when it is not fresh; null when it is. */
 export function listFreshness(provider: Pick<PickerProvider, 'listedAt' | 'listError' | 'connected'>, now: number): string | null {
   if (!provider.connected) return null;
-  if (provider.listError) {
-    return provider.listedAt !== undefined
-      ? `Could not read its list now; this one was read ${ageWords(now - provider.listedAt)}`
-      : 'Could not read its list now';
-  }
+  // A failed read is said once, on the provider's row, in the daemon's own sentence.
+  if (provider.listError) return null;
   if (provider.listedAt !== undefined && now - provider.listedAt > LIST_LIFETIME_MS) return `List read ${ageWords(now - provider.listedAt)}`;
   return null;
 }
@@ -208,7 +206,7 @@ export function ModelPicker(props: ModelPickerProps) {
       label: model.label,
       // The terminal picker's words for a model the catalog does not describe; in the
       // recommended group, why the model is on it.
-      hint: [withProvider ? provider?.label : null, model.kindUnknown ? 'kind unknown' : null].filter(Boolean).join(' · ') || undefined,
+      hint: [withProvider ? provider?.label : null, model.price ?? null, model.kindUnknown ? 'kind unknown' : null].filter(Boolean).join(' · ') || undefined,
       ...(why && model.recommended ? { detail: model.recommended } : {}),
       checked: model.registryKey === current.registryKey,
       deeper,
@@ -229,13 +227,8 @@ export function ModelPicker(props: ModelPickerProps) {
     ).finally(() => setRefreshing(false));
   };
 
-  const connect = (provider: PickerProvider) => {
-    if (provider.connect.kind === 'settings') { close(false); props.onOpenSettings(); return; }
-    const command = provider.connect.command;
-    void copyText(command).then((outcome) => setStatus(outcome === 'copied'
-      ? `Copied: run ${command} in the terminal app.`
-      : `Run ${command} in the terminal app. ${copyOutcomeMessage(outcome) ?? ''}`.trim()));
-  };
+  // A provider not connected is connected in Settings, Models and providers (a subscription is signed in to there).
+  const connect = (_provider: PickerProvider) => { close(false); props.onOpenSettings(); };
 
   const rows: Row[] = useMemo(() => {
     const out: Row[] = [];
@@ -262,9 +255,11 @@ export function ModelPicker(props: ModelPickerProps) {
       const others = providers.filter((provider) => !provider.connected);
       if (connected.length > 0) out.push({ id: 'h:connected', kind: 'header', label: 'Connected' });
       for (const provider of connected) {
-        // The row says it in a few words; the provider's own step says it whole.
-        const stale = provider.listError ? 'list not read now' : listFreshness(provider, now) && provider.listedAt !== undefined ? `list read ${ageWords(now - provider.listedAt)}` : null;
+        // A failed read: the daemon's whole sentence ("Could not reach <provider> at <address>: <reason>.
+        // Showing the list read <when>."), here only; an old list in a few words.
+        const stale = !provider.listError && listFreshness(provider, now) && provider.listedAt !== undefined ? `list read ${ageWords(now - provider.listedAt)}` : null;
         out.push({ id: `provider:${provider.id}`, kind: 'item', label: provider.label,
+          ...(provider.listError ? { detail: provider.listError } : {}),
           hint: [`${provider.models.length} model${provider.models.length === 1 ? '' : 's'}`, stale].filter(Boolean).join(' · '),
           checked: provider.id === currentProvider?.id, deeper: true,
           onActivate: () => { setStep({ kind: 'model', providerId: provider.id }); setActive(0); } });
@@ -272,7 +267,7 @@ export function ModelPicker(props: ModelPickerProps) {
       if (others.length > 0) out.push({ id: 'h:others', kind: 'header', label: 'Not connected' });
       for (const provider of others) {
         out.push({ id: `provider:${provider.id}`, kind: 'item', label: provider.label,
-          hint: provider.connect.kind === 'settings' ? 'Connect in Settings' : `Copy ${provider.connect.command}`,
+          hint: provider.connect.subscription ? 'Sign in in Settings' : 'Connect in Settings',
           onActivate: () => connect(provider) });
       }
       out.push({ id: 'refresh:all', kind: 'item', label: <><RefreshCw size={14} aria-hidden /> Refresh models</>, hint: 'every provider', disabled: refreshing, onActivate: () => refresh() });

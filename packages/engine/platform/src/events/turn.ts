@@ -213,7 +213,7 @@ export type TurnEvent =
      * up). The turn still ends with this TURN_ERROR, so every reader of how a
      * turn ended settles it the same way (transport-core/turn-settlement.ts).
      */
-    refusal?: 'no-provider' | 'no-model' | 'daemon-unreachable' | 'workspace-not-registered' | undefined;
+    refusal?: 'no-provider' | 'no-model' | 'daemon-unreachable' | 'workspace-not-registered' | 'model-no-longer-free' | undefined;
   }
   /**
    * Turn was cancelled by the user or system. `requestedAt` (epoch ms) is when

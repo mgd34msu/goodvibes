@@ -2,6 +2,7 @@ import { Plug, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import AppShell from './components/shell/AppShell';
 import { ModeChip } from './components/shell/ModeChip';
+import { UpdateReload } from './components/shell/UpdateReload';
 import { ShellLayout } from './components/shell/ShellLayout';
 import { viewTitle } from './components/shell/nav';
 import { PowerChip } from './components/status/PowerChip';
@@ -421,6 +422,8 @@ export default function App() {
     handleNavigate('work', { tab: 'all' });
     setWorkFocusKey(key);
   }, [handleNavigate]);
+  // "Review 6": Work showing only what waits for you, the most urgent first.
+  const reviewWaitingInWork = useCallback(() => handleNavigate('work', { tab: 'waiting' }), [handleNavigate]);
 
   // The settings dialog lives in the URL (?settings=<section>): opening pushes a
   // history entry, so Back closes it; switching sections replaces the entry.
@@ -455,7 +458,8 @@ export default function App() {
   const recentChats = useMemo(
     () => chatSessionItems.map((session, index) => {
       const id = bestId(session) || String(index);
-      return { id, title: bestTitle(session, id) };
+      const updatedAt = Number(asRecord(session).updatedAt ?? asRecord(session).createdAt ?? 0);
+      return { id, title: bestTitle(session, id), ...(Number.isFinite(updatedAt) && updatedAt > 0 ? { updatedAt } : {}) };
     }),
     [chatSessionItems],
   );
@@ -495,6 +499,12 @@ export default function App() {
     setMissingChatNotice(false);
     setUrlState({ view: 'chat', session: sessionId });
   }, [setUrlState]);
+  // A chat the sidebar asked to rename: it opens with its title ready to edit (the chat header's own rename).
+  const [renameChatId, setRenameChatId] = useState('');
+  const handleRenameChat = useCallback((sessionId: string) => {
+    handleOpenChat(sessionId);
+    setRenameChatId(sessionId);
+  }, [handleOpenChat]);
   const confirmDialog = useConfirm();
   const askConfirm = confirmDialog.ask;
   const handleDeleteChat = useCallback((sessionId: string, chatTitle: string) => {
@@ -693,6 +703,8 @@ export default function App() {
       onNewChat={handleNewChat}
       onOpenChat={handleOpenChat}
       onDeleteChat={handleDeleteChat}
+      onRenameChat={handleRenameChat}
+      onReviewWaiting={reviewWaitingInWork}
       onSearch={handleSearch}
       onSignOut={handleSignOut}
       onOpenSettings={openSettings}
@@ -707,15 +719,7 @@ export default function App() {
           <PowerChip />
           <WakeChip />
           {health.compatibility?.status === 'restart-required' && (
-            <div
-              className="status-strip__segment status-strip__segment--compatibility-warning"
-              role="status"
-              aria-label={health.compatibility.message}
-              title={health.compatibility.message}
-            >
-              <TriangleAlert className="status-strip__icon" aria-hidden="true" size={12} />
-              <span className="status-strip__label">Reload to update</span>
-            </div>
+            <UpdateReload message={health.compatibility.message} />
           )}
         </>
       )}
@@ -776,6 +780,9 @@ export default function App() {
           userName={signedInName || profileName}
           onOpenSettings={openSettings}
           onOpenAsk={openAskInWork}
+          onReviewAsks={reviewWaitingInWork}
+          renameRequest={renameChatId}
+          onRenameRequestHandled={() => setRenameChatId('')}
         />
       )}
       {activeView === 'work' && (

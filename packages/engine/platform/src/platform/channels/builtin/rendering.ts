@@ -11,7 +11,7 @@ import type {
 } from '../types.js';
 import { describeActionFailure, type ChannelActionOutcome } from '../action-outcome.js';
 import { hostApprovalPresentation } from '../../permissions/ask-facts-host.js';
-import type { AskPresentation } from '../../permissions/ask-presentation.js';
+import { ONCE_LABEL, type AskPresentation } from '../../permissions/ask-presentation.js';
 import type { BuiltinChannelRuntimeDeps } from './shared.js';
 import { isManagedSurface } from './surfaces.js';
 import { isTruncatedDirectory } from './targets.js';
@@ -226,11 +226,14 @@ export function formatApprovalMessage(approval: SharedApprovalRecord, presentati
     case 'claimed':
       lines.push('Reply yes or no.');
       break;
-    case 'approved':
+    case 'approved': {
+      // "once" only for a call that keeps nothing in force; a standing change's consequence above says how long it lasts.
+      const actsOnce = presentation.choices.some((choice) => choice.id === 'once' && choice.label === ONCE_LABEL);
       lines.push(approval.decision?.rememberTier !== undefined || approval.decision?.remember === true
         ? `Approved${by ? ` by ${by}` : ''}, and remembered.`
-        : `Approved once${by ? ` by ${by}` : ''}.`);
+        : `Approved${actsOnce ? ' once' : ''}${by ? ` by ${by}` : ''}.`);
       break;
+    }
     case 'denied':
       lines.push(`Refused${by ? ` by ${by}` : ''}${reason ? `: ${reason}` : '.'}`);
       break;

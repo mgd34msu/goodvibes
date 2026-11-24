@@ -45,9 +45,17 @@ export class ConfirmDialog implements SurfaceModal, ConfirmView {
     if (this.scroll + this.body.visible >= this.body.total) this.seenToEnd = true;
   }
 
-  /** Confirming what was not all shown is refused: the body moves on a page instead. */
+  /** What is typed in the field (options.field), when there is one. */
+  fieldValue = '';
+
+  /** Confirming what was not all shown is refused: the body moves on a page instead. A field must hold a good value. */
   private confirm(host: SurfaceModalHost): void {
     if (!this.seenToEnd) { this.scrollBy(Math.max(1, this.body.visible - 1)); return; }
+    const field = this.options.field;
+    if (field) {
+      if (field.check(this.fieldValue) !== null) return;
+      field.onValue(this.fieldValue);
+    }
     this.answer(host, true);
   }
 
@@ -58,6 +66,16 @@ export class ConfirmDialog implements SurfaceModal, ConfirmView {
   }
 
   handleToken(token: InputToken, host: SurfaceModalHost): void {
+    // With a field, typing goes into it; the buttons, Enter and Esc answer.
+    if (this.options.field) {
+      if (token.type === 'text') { this.fieldValue += token.value.replace(/[\x00-\x1f\x7f]/g, ''); return; }
+      if (token.type === 'key' && (token.logicalName === 'backspace' || token.logicalName === 'delete')) { this.fieldValue = this.fieldValue.slice(0, -1); return; }
+      if (token.type === 'key' && token.logicalName === 'space') { this.fieldValue += ' '; return; }
+      if (token.type === 'key' && !token.ctrl && !token.meta && (token.logicalName ?? '').length === 1) {
+        this.fieldValue += token.shift ? token.logicalName.toUpperCase() : token.logicalName;
+        return;
+      }
+    }
     if (token.type === 'text') {
       const ch = token.value.toLowerCase();
       if (ch === 'y') this.confirm(host);

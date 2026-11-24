@@ -1,13 +1,14 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { PublicPairingToken } from '@goodvibes/engine/platform/platform/pairing';
 import { registerDevicesCommand } from '@goodvibes/engine/terminal-shell/devices-command';
+import { askToTurnOnRelay } from '@goodvibes/engine/terminal-shell/relay-pairing-ask';
 import { CHANNELS_LIST } from '@goodvibes/engine/terminal-shell/channels-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { mintAgentDevicePairing } from '../../agent/device-pairing.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import {
   formatRelayStatus, listRelayCodes, mintRelayPairing, readRelayStatus, relayHostFailure, relayPairingOutcome, revokeRelayCode,
-  type RelayActionWords,
+  type RelayActionWords, type RelayPairAnswer,
 } from '../../runtime/relay-host.ts';
 import { invokeConnectedHostMethod } from '../connected-host-routes.ts';
 import { readAgentHostPairingStatus, runAgentHostPair, runAgentHostUnpair } from './onboarding-runtime.ts';
@@ -65,7 +66,19 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
     },
     devices: (ctx) => ctx.platform.devices,
     async pairDevice(ctx, name) {
-      const outcome = await mintAgentDevicePairing(hostVerbs(ctx), { ...(name ? { name } : {}), pairCommand: '/devices pair device' });
+      // When phones cannot reach the host yet, the one real question is asked in place (opening on No):
+      // yes serves the host's web UI to its network and makes the code in the same request; No keeps the this-computer link.
+      const confirm = ctx.confirm;
+      const askToServe = confirm
+        ? (question: string) => confirm({
+          title: 'Serve GoodVibes to your network?',
+          body: `${question}\nPhones and other devices on your network could then open GoodVibes; each still needs a pairing code to sign in. It stays served to your network until you take it back.`,
+          confirmLabel: 'Serve it to my network',
+          cancelLabel: 'Keep it on this computer',
+          tone: 'warning',
+        })
+        : undefined;
+      const outcome = await mintAgentDevicePairing(hostVerbs(ctx), { ...(name ? { name } : {}), pairCommand: '/devices pair device', ...(askToServe ? { askToServe } : {}) });
       if (!outcome.ok) throw commandRefusal(outcome.error, outcome.next);
       return outcome.text;
     },
@@ -73,8 +86,37 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
     hostStatus: async (ctx) => await readAgentHostPairingStatus(ctx),
     unpairHost: async (ctx) => await runAgentHostUnpair(ctx, 'devices'),
     async pairRelay(ctx, name) {
-      const answer = await relayCall('Minting a relay pairing payload on the connected host', () => mintRelayPairing(hostVerbs(ctx), name || undefined));
-      const outcome = relayPairingOutcome(answer, DEVICES_RELAY_WORDS);
+      // The relay off: asked in place (opening on No), with the relay's address in the same step when none is set;
+      // yes saves it, turns the relay on and pairs in the same run (terminal-shell/relay-pairing-ask.ts).
+      const confirm = ctx.confirm;
+      const relayUrl = String(requirePlatform(ctx).configManager.get('relay.url') ?? '');
+      // The yes, with the address the relay is turned on at; the same call then waits for the host to register.
+      let saidYes: (address: string) => void = () => undefined;
+      const turnedOn = new Promise<string>((resolve) => { saidYes = resolve; });
+      const ask = confirm
+        ? async (configuredUrl: string) => {
+          const said = await askToTurnOnRelay(confirm, configuredUrl);
+          if (said.turnOn) saidYes(said.url || configuredUrl);
+          return said;
+        }
+        : undefined;
+      const outcomeText = (answer: RelayPairAnswer): string => {
+        const outcome = relayPairingOutcome(answer, DEVICES_RELAY_WORDS);
+        return outcome.ok ? outcome.text : `${outcome.error} ${outcome.next}`;
+      };
+      const minting = relayCall('Minting a relay pairing payload on the connected host',
+        () => mintRelayPairing(hostVerbs(ctx), name || undefined, { ...(ask ? { ask } : {}), ...(relayUrl ? { url: relayUrl } : {}) }))
+        .then((answer) => ({ answer }), (error: unknown) => ({ error }));
+      const first = await Promise.race([minting, turnedOn.then((address) => ({ waiting: address }))]);
+      if ('waiting' in first) {
+        // The screen is not held while the relay is not answering yet: the pairing is said here when it comes.
+        void minting.then((done) => {
+          ctx.print('answer' in done ? outcomeText(done.answer) : done.error instanceof Error ? done.error.message : String(done.error));
+        });
+        return `The relay is on at ${first.waiting}, and it is not answering yet. The pairing shows here as soon as it does; you can carry on meanwhile.`;
+      }
+      if ('error' in first) throw first.error;
+      const outcome = relayPairingOutcome(first.answer, DEVICES_RELAY_WORDS);
       if (!outcome.ok) throw commandRefusal(outcome.error, outcome.next);
       return outcome.text;
     },

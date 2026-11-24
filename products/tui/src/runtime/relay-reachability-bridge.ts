@@ -18,6 +18,7 @@
 import type { RelayRegistrationStatus } from '@goodvibes/engine/daemon-api';
 import { encodeRelayPairingString, type RelayPairingPayload } from '@goodvibes/engine/transport-core/relay';
 import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import { mintRelayPairingInOneRun, type RelayTurnOnAnswer } from '@goodvibes/engine/terminal-shell/relay-pairing-ask';
 
 /**
  * What /devices relay-status can be told: the daemon-side registration states, plus
@@ -85,8 +86,12 @@ export type RelayPairingReading =
 
 export interface RelayReadAccessors {
   relayStatus(): Promise<RelayStatusReading>;
-  /** Mint a pairing for one device; `name` labels its relay code. */
-  mintRelayPairing(name?: string): Promise<RelayPairingReading>;
+  /**
+   * Mint a pairing for one device in one run; `name` labels its relay code. With `ask`, a relay that is
+   * off is put to the person first (terminal-shell/relay-pairing-ask.ts); a yes turns it on (with the
+   * address typed when none is set) and the same `relay.pairing.mint` call waits for the host to register.
+   */
+  mintRelayPairing(name?: string, options?: { readonly ask?: ((configuredUrl: string) => Promise<RelayTurnOnAnswer>) | undefined; readonly configuredUrl?: string | undefined }): Promise<RelayPairingReading>;
   listRelayCodes(): Promise<RelayCodesReading>;
   revokeRelayCode(id: string): Promise<RelayCodeRevokeReading>;
 }
@@ -141,9 +146,12 @@ export function createRelayReadAccessors(verbs: DaemonVerbCaller): RelayReadAcce
         return { status: 'unavailable', reason: failureReason(error) };
       }
     },
-    async mintRelayPairing(name) {
+    async mintRelayPairing(name, options = {}) {
       try {
-        const answer = await verbs.invoke<{ pairing?: unknown; status?: unknown; codeId?: unknown; codeName?: unknown }>('relay.pairing.mint', name ? { name } : {});
+        const answer = await mintRelayPairingInOneRun<{ pairing: unknown; status: string; codeId?: string; codeName?: string }>(
+          <T>(method: string, input: Record<string, unknown>) => verbs.invoke<T>(method, input),
+          { name, configuredUrl: options.configuredUrl, ask: options.ask },
+        );
         if (isPairingPayload(answer?.pairing)) {
           return { minted: {
             payload: answer.pairing, encoded: encodeRelayPairingString(answer.pairing),

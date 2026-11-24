@@ -231,13 +231,14 @@ export {
   parseIntervalWords,
 } from './schedule-words.js';
 export type { ScheduleCadence, ScheduleRunOutcome, WordForm } from './schedule-words.js';
-export { agoWords, readWorkBoard } from './work-board.js';
+export { agoWords, askUrgency, compareAsksByUrgency, readWorkBoard } from './work-board.js';
 export type {
   BoardAction,
   BoardGroup,
   BoardRefType,
   BoardRow,
   BoardTone,
+  BoardUrgency,
   WorkBoard,
   WorkBoardAsk,
   WorkBoardNode,

@@ -14,6 +14,8 @@ import type {
 import {
   fetchModelIdsFromListing,
   runLiveModelRefresh,
+  storedProviderModelIds,
+  listingAddress,
   type LiveModelDiscoveryResult,
   type ProviderModelRefreshOptions,
 } from './live-model-discovery.js';
@@ -165,6 +167,8 @@ export class AnthropicCompatProvider implements LLMProvider {
     this.modelListing = opts.modelListing ?? 'anthropic-endpoint';
     this.modelListingUrl = opts.modelListingUrl;
     this.modelsCachePath = opts.modelsCachePath;
+    // The list read last, until the fresh read at start answers.
+    if (this.modelListing !== 'none') this._models = storedProviderModelIds(this.modelsCachePath) ?? this._models;
     this.modelSource = this.modelListing === 'none'
       ? (this.declaredModels.length > 0 ? { kind: 'dated-static', asOf: opts.modelsAsOf ?? 'declared' } : { kind: 'catalog-backed' })
       : { kind: 'live-discovery' };
@@ -223,6 +227,7 @@ export class AnthropicCompatProvider implements LLMProvider {
   async refreshModels(force = false, options: ProviderModelRefreshOptions = {}): Promise<LiveModelDiscoveryResult> {
     const result = await runLiveModelRefresh({
       providerName: this.name,
+      address: listingAddress(this.modelListingUrl ?? this.baseURL),
       recordTo: options.recordTo,
       borrowFrom: options.borrowFrom,
       cachePath: this.modelsCachePath,

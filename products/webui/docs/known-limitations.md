@@ -10,14 +10,18 @@ mistaken for hidden contracts.
 - Edit-with-branching keeps superseded turns viewable, but branches are linear
   alternatives on one conversation. There is no tree browser across branches.
 - Attachments upload as daemon artifacts before send; large outputs open in the
-  artifacts slide-over. There is no dedicated attachment-management panel.
+  artifacts slide-over, and the chat header's Files button lists every file
+  attached to or made in the chat. A file cannot be removed from a chat once
+  it is sent.
 
 ## Voice
 
 - Dictation and spoken replies depend on the daemon's configured speech
   providers. With no speech-to-text provider configured, the dictation
-  control explains what to add rather than recording; there is no in-browser
-  transcription fallback. The daemon's managed local engines
+  control explains what to add rather than recording, and, where the browser
+  has its own speech recognition and the page is on HTTPS, offers to dictate
+  with the browser's speech service instead, saying first that it sends the
+  audio to the browser's maker. The daemon's managed local engines
   (`voice.local.install`) count as a configured provider once installed.
 - Wake-word detection runs inside the tab, but it still needs the daemon: the
   models are provisioned on and served by the daemon, and the confirmed
@@ -62,6 +66,8 @@ mistaken for hidden contracts.
   too, they select the text and say "Selected: press Ctrl+C (Cmd+C on a Mac) to
   copy it." The microphone (voice input) and the camera scanner need HTTPS too
   and say so.
+- "Skip for now" on a setup step (Settings, General), Reduce motion and the
+  code-wrap choice are kept in this browser only.
 
 ## Knowledge/Wiki
 
@@ -100,19 +106,31 @@ mistaken for hidden contracts.
   (`sessions.search`) and the text of messages (`chat.messages.search`).
 - Several verb families emit no wire event yet (fleet workstream rows,
   checkpoints, CI watches, check-in, principals, memory, local-voice status).
-  Their freshness comes from mutation-driven invalidation, polling, and
-  manual refresh, not realtime push.
-- Session gate presets and context usage answer only for the session that is the
-  daemon's own live local runtime; other sessions show an honest unavailable
-  state.
+  Each such list (mail, calendar, occasions, memory and its review queue and
+  consolidation receipts, checkpoints and session changes, CI watches,
+  check-ins, who is who and channel profiles, paired devices, Tailscale, local
+  voice, the delegated Telegram intake) is read again when its view opens, when
+  the window or tab regains focus and when the connection comes back, keeping
+  what is on screen until the new answer arrives; several say when they were
+  last read ("Read 2 min ago · Refresh"; a CI watch says "status from 5m ago"
+  beside Check now). The Telegram intake also follows the owner-inbox event.
+- Each of those lists also follows the daemon's LIST_CHANGED event, so a
+  change made from another program, device or the daemon itself shows with no
+  click; session changes follow the checkpoints list. A native request (New, Ask for work to be
+  done) follows NATIVE_REQUEST_CHANGED.
+- Session gate presets and context usage answer for the daemon's own runtime
+  session and every session it hosts (a web chat runs under the daemon-wide
+  mode). A session another program runs (the terminal app's or the Agent's own
+  conversation), or an active channel session the daemon keeps no context
+  figure for, shows an honest unavailable state.
 
 ## Route shims
 
 - Hand-written per-route shims stay retired. The method-to-route table is
-  generated from `@goodvibes/engine/contracts/generated/webui-facade`,
-  and a drift test pins the derived table against it so a hand-written row
-  can never shadow a generated one. Method types remain contract-derived
-  (`src/lib/contract-bridge-types.ts`).
+  generated from `@goodvibes/engine/contracts/generated/webui-facade`
+  (refreshed with the operator contract by `bun run refresh:contracts`, which
+  `contracts:check` holds to the contract), so there is no hand-written row to
+  drift. Method types remain contract-derived (`src/lib/contract-bridge-types.ts`).
 
 ## Screenshots
 

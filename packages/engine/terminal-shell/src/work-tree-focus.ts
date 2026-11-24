@@ -158,7 +158,9 @@ export class WorkTreeController {
   /** The focused row id, or null while the keyboard is in the composer. */
   get focus(): string | null { return this.focusId; }
   /** Spinner frame for running beads. */
-  get frame(): number { return this.liveFrame; }
+  get frame(): number { return this.reduceMotion ? 0 : this.liveFrame; }
+  /** `display.reduceMotion`: running rows keep one mark instead of spinning (set by the program each frame). */
+  reduceMotion = false;
   get focused(): boolean { return this.focusId !== null; }
 
   /**
@@ -221,7 +223,8 @@ export class WorkTreeController {
    * last build drew something live and the frame moved on.
    */
   tickLive(now = Date.now()): void {
-    const frame = Math.floor(now / 150);
+    // With reduced motion a running bead keeps one mark and only its time moves, once a second.
+    const frame = Math.floor(now / (this.reduceMotion ? 1000 : 150));
     if (frame === this.liveFrame) return;
     this.liveFrame = frame;
     if (this.deps.drewLive()) (this.deps.markLiveDirty ?? this.deps.markDirty)();

@@ -10,6 +10,7 @@ These are the package-facing docs for the GoodVibes Agent `3.3.x` release line.
 - [Knowledge, artifacts, and multimodal](knowledge-artifacts-and-multimodal.md)
 - [Tools and commands](tools-and-commands.md)
 - [Headless run](headless-run.md)
+- [Screen readers and accessibility](accessibility.md)
 - [Channels, remote access, and API](channels-remote-and-api.md)
 - [Providers and routing](providers-and-routing.md)
 - [Voice and live TTS](voice-and-live-tts.md)

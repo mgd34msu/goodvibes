@@ -10,7 +10,7 @@ import { basename, dirname, isAbsolute, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { resolveDaemonServiceDefault } from '@goodvibes/engine/platform/platform/daemon/daemon-service-default';
-import { MANAGED_SERVICE_DESCRIPTION as PLATFORM_SERVICE_DESCRIPTION, PlatformServiceManager } from '@goodvibes/engine/platform/platform/daemon/service-manager';
+import { MANAGED_SERVICE_DESCRIPTION as PLATFORM_SERVICE_DESCRIPTION, PlatformServiceManager, isProductServiceDefinition } from '@goodvibes/engine/platform/platform/daemon/service-manager';
 
 /** Structurally derived from `PlatformServiceManager`'s own constructor, the
  * platform's public `platform/daemon` entry point only re-exports the class and
@@ -26,12 +26,6 @@ export type ManagedServiceActionRunner = NonNullable<ManagedServiceManagerOption
 export const MANAGED_SERVICE_NAME = resolveDaemonServiceDefault();
 /** The description every GoodVibes-written definition carries (platform managed-service-definition.ts owns it). */
 export const MANAGED_SERVICE_DESCRIPTION = PLATFORM_SERVICE_DESCRIPTION;
-/**
- * The description the 3.3.1 daemon gave a unit it wrote itself (boot promotion,
- * update adoption, the web UI's install). Such a unit is still GoodVibes's own
- * after an update, so it is recognised; nothing writes it any more.
- */
-const EARLIER_DAEMON_SERVICE_DESCRIPTION = 'goodvibes omnichannel daemon host';
 
 /**
  * Who wrote the service definition at a path: `absent` (nothing there),
@@ -65,7 +59,7 @@ function readDefinitionFile(path: string): DefinitionFile {
 export function readManagedDefinitionOwner(path: string): ManagedDefinitionOwner {
   const file = readDefinitionFile(path);
   if ('state' in file) return file.state;
-  return [MANAGED_SERVICE_DESCRIPTION, EARLIER_DAEMON_SERVICE_DESCRIPTION].some((mark) => file.contents.includes(mark)) ? 'product' : 'other';
+  return isProductServiceDefinition(file.contents) ? 'product' : 'other';
 }
 
 /**

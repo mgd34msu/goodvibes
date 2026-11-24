@@ -4,9 +4,10 @@
  *   col 1   GoodVibes, bold, in the theme's brand -> brandEnd gradient
  *           (the theme's gradient, never the protected splash constant)
  *   then    the version (faint) and the session title (muted)
- *   right   only while the serving backend is not the configured one: the
+ *   right   while the serving backend is not the configured one: the
  *           serving model and the failover marker in the warning color,
- *           ending at width-2
+ *           ending at width-2; otherwise, faint, where the work runs
+ *           (`daemon connected`, `this computer`) when the program gives it.
  *
  * No rule row under it; on the main screen one empty row (withHeaderGap)
  * keeps the output off it. The branch and the model are on the status bar,
@@ -33,7 +34,7 @@ export interface HeaderPresentation {
     readonly truncateModel?: boolean | undefined;
 }
 export function createHeaderRenderer(presentation: HeaderPresentation) {
-    return (width: number, model: string, title?: string | undefined, gitInfo?: GitHeaderInfo | undefined, version = presentation.defaultVersion, modelNote?: string | undefined, view?: HeaderView | undefined): Line[] => renderHeaderLine(presentation, width, model, title, gitInfo, version, modelNote, view);
+    return (width: number, model: string, title?: string | undefined, gitInfo?: GitHeaderInfo | undefined, version = presentation.defaultVersion, modelNote?: string | undefined, view?: HeaderView | undefined, where?: string | undefined): Line[] => renderHeaderLine(presentation, width, model, title, gitInfo, version, modelNote, view, where);
 }
 const BRAND_X = 1;
 const GAP = 3;
@@ -82,7 +83,7 @@ function put(line: Line, x: number, endX: number, seg: Seg): number {
  * @param modelNote - The failover marker (core/active-model-identity.ts), set
  *                    only while serving differs from the configured model.
  */
-function renderHeaderLine(presentation: HeaderPresentation, width: number, model: string, title?: string | undefined, _gitInfo?: GitHeaderInfo | undefined, version: string = presentation.defaultVersion, modelNote?: string | undefined, view?: HeaderView | undefined): Line[] {
+function renderHeaderLine(presentation: HeaderPresentation, width: number, model: string, title?: string | undefined, _gitInfo?: GitHeaderInfo | undefined, version: string = presentation.defaultVersion, modelNote?: string | undefined, view?: HeaderView | undefined, where?: string | undefined): Line[] {
     const BRAND = presentation.brand;
     version = (presentation.versionPrefix ?? '') + version;
     const t = activeTokens();
@@ -124,6 +125,10 @@ function renderHeaderLine(presentation: HeaderPresentation, width: number, model
     if (note) {
         const rx = put(line, rightX, end, { text: model, fg: t.text });
         put(line, rx, end, { text: note, fg: t.warning });
+    }
+    else if (where && fits(getDisplayWidth(where)) && (!title || x + 2 + getDisplayWidth(title) + GAP <= end - getDisplayWidth(where))) {
+        // Where this program's work runs (`daemon connected`, `this computer`), faint at the right end.
+        put(line, end - getDisplayWidth(where), end, { text: where, fg: t.textFaint });
     }
     return [line];
 }

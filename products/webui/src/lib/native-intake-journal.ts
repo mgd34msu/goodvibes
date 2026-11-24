@@ -133,23 +133,31 @@ function continuationSnapshotShape(value: unknown): boolean {
     exactObject(value.selectedDiff, ["kind", "baselineId", "revision", "fileIndex", "hunkIndex"]);
 }
 
+/** A saved request's files: the artifact ids it was sent with (and their labels), never their bytes. */
+function attachmentsSnapshotShape(value: unknown): boolean {
+  return Array.isArray(value) && value.length > 0 && value.every((entry: unknown) =>
+    (exactObject(entry, ["artifactId"]) || exactObject(entry, ["artifactId", "label"])) &&
+    typeof (entry as { artifactId: unknown }).artifactId === "string");
+}
+
+/** The saved command: its four fields, plus a continuation and files when it has them. */
+function commandSnapshotShape(value: unknown): value is Record<string, unknown> {
+  const base = ["requestId", "inputId", "text", "unsupportedSources"];
+  const hasContinuation = typeof value === "object" && value !== null && "continuation" in value;
+  const hasAttachments = typeof value === "object" && value !== null && "attachments" in value;
+  if (!exactObject(value, [...base, ...(hasContinuation ? ["continuation"] : []), ...(hasAttachments ? ["attachments"] : [])])) return false;
+  const command = value as Record<string, unknown>;
+  return (!hasContinuation || continuationSnapshotShape(command.continuation)) &&
+    (!hasAttachments || attachmentsSnapshotShape(command.attachments));
+}
+
 function recordSnapshot(value: unknown): NativeIntakeBrowserRecord {
   if (
     !exactObject(value, ["binding", "command", "createdAt"]) ||
     typeof value.createdAt !== "number" ||
     !Number.isSafeInteger(value.createdAt) ||
     value.createdAt < 0 ||
-    !(
-      exactObject(value.command, ["requestId", "inputId", "text", "unsupportedSources"]) ||
-      (exactObject(value.command, [
-        "requestId",
-        "inputId",
-        "text",
-        "unsupportedSources",
-        "continuation",
-      ]) &&
-        continuationSnapshotShape(value.command.continuation))
-    ) ||
+    !commandSnapshotShape(value.command) ||
     !Array.isArray(value.command.unsupportedSources) ||
     value.command.unsupportedSources.length > 100 ||
     !value.command.unsupportedSources.every((marker: unknown) =>

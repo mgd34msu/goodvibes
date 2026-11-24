@@ -1,6 +1,8 @@
 import { nativeConversationContinuationSchema } from './native-continuation-context.js';
 import { array, discriminatedUnion, enum as enumSchema, literal, NEVER, number, strictObject, string, union, unknown as unknownSchema, type z } from 'zod/v4';
 import { nativeConversationSpanSchema, nativeConversationProposalRevision, validateNativeConversationProposal } from './native-intake-types.js';
+import { nativeConversationIntakeAttachmentSchema } from './native-intake-wire.js';
+import { MAX_ATTACHMENTS_PER_MESSAGE } from '../../companion/attachment-limits.js';
 import { LEGACY_IMPORT_MAX_BYTES, validateLegacyWorkLedgerManifest, type LegacyMigrationManifest } from './legacy-import.js';
 
 const id = string().min(1).max(200);
@@ -59,6 +61,8 @@ export const workLedgerNativeExplicitSourceSchema = workLedgerExplicitSourceSche
 export const workLedgerExtractedSourceSchema = strictObject({
   version: literal(2), sourceId: id, sourceRevision: id, inputId: id, sessionId: id,
   continuation: nativeConversationContinuationSchema.optional(),
+  /** The files the request was sent with (the intake's artifacts, by id; the same store, no copy), for whoever does the work. */
+  attachments: array(nativeConversationIntakeAttachmentSchema).min(1).max(MAX_ATTACHMENTS_PER_MESSAGE).optional(),
   extraction: strictObject({
     version: literal(1), offsetEncoding: literal('utf16'),
     spans: array(nativeConversationSpanSchema).min(1).max(100),

@@ -5,9 +5,12 @@
  * resolved against src/tokens/base/color/{dark/dark,light/light}.json5 (dark = the
  * default dark mode, light = the default light mode).
  *
- * Authored from the official published palette. Values that miss a contrast
- * floor against the panel carry the smallest adjustment that reaches it; each
- * one is noted beside its token with the published value.
+ * Authored from the official published palette. Every colour that carries text
+ * reaches 4.5:1 on each surface it is drawn on (background, panel, element,
+ * menu, selection, diff fills): a published value that does not carries the
+ * smallest lift toward white (dark) or black (light) that does. The three text
+ * levels stay apart: faint at the floor, muted at least 10 CIELAB L* above it,
+ * text at least 10 L* above muted.
  * Plain data, no module-scope calls.
  */
 
@@ -16,29 +19,28 @@ import type { ThemeJson } from '../types.js';
 export const GITHUB_THEME: ThemeJson = {
   $schema: 'https://opencode.ai/theme.json',
   theme: {
-    primary: { dark: '#4493f8', light: '#0969da' },
-    secondary: { dark: '#ab7df8', light: '#8250df' },
-    accent: { dark: '#39c5cf', light: '#1b7c83' },
-    error: { dark: '#f85149', light: '#d1242f' },
-    warning: { dark: '#d29922', light: '#9a6700' },
-    success: { dark: '#3fb950', light: '#1a7f37' },
-    info: { dark: '#4493f8', light: '#0969da' },
+    primary: { dark: '#60a3f9', light: '#085cc0' },
+    secondary: { dark: '#b58df9', light: '#7045c0' },
+    accent: { dark: '#39c5cf', light: '#17696f' },
+    error: { dark: '#fa7973', light: '#ba202a' },
+    warning: { dark: '#d29922', light: '#815700' },
+    success: { dark: '#3fb950', light: '#176e30' },
+    info: { dark: '#60a3f9', light: '#085cc0' },
     text: { dark: '#f0f6fc', light: '#1f2328' },
-    textMuted: { dark: '#9198a1', light: '#59636e' },
-    // Faint carries key hints, reasons and times: at least 4.5:1 on the panel and
-    // on elements (published #656c76 / #818b98).
-    textFaint: { dark: '#888e95', light: '#676e79' },
+    textMuted: { dark: '#b8bcc2', light: '#414850' },
+    textFaint: { dark: '#9ca1a7', light: '#5a6069' },
     selectedListItemText: { dark: '#0d1117', light: '#ffffff' },
     background: { dark: '#0d1117', light: '#ffffff' },
     backgroundPanel: { dark: '#151b23', light: '#f6f8fa' },
     backgroundElement: { dark: '#212830', light: '#eff2f5' },
     backgroundMenu: { dark: '#212830', light: '#eff2f5' },
+    backgroundSelected: { dark: '#273950', light: '#cadcf1' },
     border: { dark: '#3d444d', light: '#d1d9e0' },
     borderActive: { dark: '#656c76', light: '#818b98' },
     borderSubtle: { dark: '#212830', light: '#eff2f5' },
-    reasoning: { dark: '#ab7df8', light: '#8250df' },
-    diffAdded: { dark: '#3fb950', light: '#1a7f37' },
-    diffRemoved: { dark: '#f85149', light: '#d1242f' },
+    reasoning: { dark: '#b58df9', light: '#7045c0' },
+    diffAdded: { dark: '#3fb950', light: '#197934' },
+    diffRemoved: { dark: '#f85850', light: '#c7222d' },
     diffContext: 'textMuted',
     diffHunkHeader: { dark: '#4493f8', light: '#0969da' },
     diffHighlightAdded: { dark: '#56d364', light: '#116329' },
@@ -55,7 +57,7 @@ export const GITHUB_THEME: ThemeJson = {
     markdownLinkText: { dark: '#58a6ff', light: '#0969da' },
     markdownCode: { dark: '#a5d6ff', light: '#0a3069' },
     markdownBlockQuote: { dark: '#9198a1', light: '#59636e' },
-    markdownEmph: { dark: '#d2a8ff', light: '#8250df' },
+    markdownEmph: { dark: '#d2a8ff', light: '#814fdd' },
     markdownStrong: 'text',
     markdownHorizontalRule: { dark: '#3d444d', light: '#d1d9e0' },
     markdownListItem: { dark: '#ffa657', light: '#953800' },
@@ -65,7 +67,7 @@ export const GITHUB_THEME: ThemeJson = {
     markdownCodeBlock: 'text',
     syntaxComment: { dark: '#9198a1', light: '#59636e' },
     syntaxKeyword: { dark: '#ff7b72', light: '#cf222e' },
-    syntaxFunction: { dark: '#d2a8ff', light: '#8250df' },
+    syntaxFunction: { dark: '#d2a8ff', light: '#814fdd' },
     syntaxVariable: { dark: '#ffa657', light: '#953800' },
     syntaxString: { dark: '#a5d6ff', light: '#0a3069' },
     syntaxNumber: { dark: '#79c0ff', light: '#0550ae' },

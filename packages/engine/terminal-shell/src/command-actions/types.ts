@@ -63,7 +63,8 @@ export interface InputDescription {
     /** `orIfGiven`: further inputs, each meaning its own value when given (the first given wins; `input` is tried first). */
     | { readonly impliedBy: { readonly input: string; readonly ifGiven: string; readonly ifNot: string; readonly orIfGiven?: readonly { readonly input: string; readonly value: string }[] | undefined } }
     /** `switchOn`: the option is a bare switch (`--keep`) whose presence means that value. `repeats`: given once per value. */
-    | { readonly flag: `--${string}`; readonly repeats?: true | undefined; readonly switchOn?: string | undefined }
+    /** `untilNextFlag`: the value is every word up to the next `--option` (or `--`) or the end, so `--title Tomato blight notes` needs no quotes. */
+    | { readonly flag: `--${string}`; readonly repeats?: true | undefined; readonly switchOn?: string | undefined; readonly untilNextFlag?: true | undefined }
     | { readonly tail: true };
   /** The form step it is asked in (1, 2, ...); inputs of one step are shown together as one page. */
   readonly step?: number | undefined;
@@ -128,8 +129,9 @@ export interface ActionDescription<Ctx> {
   /**
    * On a command's report action: it reads only this machine's own files and
    * settings, never a mailbox, a daemon or remote host, or a provider, and costs
-   * nothing to run. The Agent workspace runs such a report when one of the
-   * command's rows is selected; any other report waits for Ctrl+R.
+   * nothing to run. The Agent workspace reads every report by itself; it marks
+   * an old reading "may be out of date" only for a report without this flag,
+   * since only those change on their own.
    */
   readonly readsOnlyThisMachine?: true | undefined;
   /**
@@ -150,6 +152,12 @@ export interface CommandDescription<Ctx> {
   readonly group: string;
   /** The action id a bare command runs where no list can be shown (a model, a script); first row of the list. */
   readonly report?: string | undefined;
+  /**
+   * The action a bare command runs where a screen can be shown, in place of
+   * the action list: a command whose screen is the point (`/work` opens the
+   * work view). Every action stays reachable typed and from that screen.
+   */
+  readonly bareOpens?: string | undefined;
   /**
    * The last blank of an action is text a person wrote (a message, a note):
    * `--yes` confirms only right after the action word, and the same word inside

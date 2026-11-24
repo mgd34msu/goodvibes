@@ -9,7 +9,7 @@ import type {
   ConfigModalView,
 } from '../../input/config-modal-types.ts';
 import { describeOriginPosture, generateQrMatrix, renderQrToString, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes/engine/platform/platform/pairing';
-import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice } from '@goodvibes/engine/platform/platform/pairing';
+import { formatPairingOffers, formatPostureCapabilities, pairingPostureNotice, SERVE_TO_NETWORK_QUESTION } from '@goodvibes/engine/platform/platform/pairing';
 
 // ---------------------------------------------------------------------------
 // Device Pairing config-modal surface. Shows the web-app origin, the per-device
@@ -132,6 +132,13 @@ export interface PairingModalDeps {
    * serve is active.
    */
   readonly stopTailscaleServe?: () => Promise<PairingTailscaleStopResult | null>;
+  /**
+   * The owner's yes to SERVE_TO_NETWORK_QUESTION, asked in place when a phone
+   * could not open the code: the daemon serves its web UI to the network and
+   * answers with a code for the address phones can open. Throws with the reason.
+   * Absent: the this-computer link is shown without the question.
+   */
+  readonly serveToNetwork?: () => Promise<PairingModalConnectionInfo>;
 }
 
 // Fixed-width placeholder, deliberately NOT derived from the real secret's
@@ -160,13 +167,26 @@ class PairingModalSurface implements ConfigModalSurface {
   private serving = false;
   /** The serve this daemon has on (from the probe, then each serve or stop result); null when none. */
   private activeServe: PairingTailscaleServeReceipt | null = null;
+  /**
+   * The serve-to-network question for this open: 'ask' while it is on screen,
+   * 'serving' while the daemon works on the yes, 'answered' after either
+   * answer (or when it does not apply). Asked again on the next open.
+   */
+  private network: 'ask' | 'serving' | 'answered' = 'answered';
+  /** Why the last yes did not serve, shown under the question; null when none. */
+  private networkError: string | null = null;
 
   constructor(private readonly deps: PairingModalDeps) {}
 
+  /** The question is on screen: the code's own keys wait until it is answered. */
+  private asking(): boolean { return this.network !== 'answered'; }
+
   readonly actions = [
-    { key: 'v', id: 'toggleReveal', label: 'reveal token', enabledFor: () => this.unreachable === null },
-    { key: 'c', id: 'copyLink', label: 'copy link', enabledFor: () => Boolean(this.deps.copyToClipboard) && this.unreachable === null },
-    { key: 'r', id: 'newToken', label: 'new device token', enabledFor: () => this.unreachable === null },
+    // The two answers of the serve-to-network question, chosen with Enter (No is first, so it opens on No).
+    { key: 'enter', id: 'answerNetwork', label: 'choose', enabledFor: (row: ConfigModalRow | null) => this.network === 'ask' && (row?.id === 'network:no' || row?.id === 'network:yes') },
+    { key: 'v', id: 'toggleReveal', label: 'reveal token', enabledFor: () => this.unreachable === null && !this.asking() },
+    { key: 'c', id: 'copyLink', label: 'copy link', enabledFor: () => Boolean(this.deps.copyToClipboard) && this.unreachable === null && !this.asking() },
+    { key: 'r', id: 'newToken', label: 'new device token', enabledFor: () => this.unreachable === null && !this.asking() },
     // The one-action serve affordance, offered ONLY when tailscale is detected
     // and not already serving https; a second 't' press (the standard confirm)
     // runs tailscale.serve.run. Absence keeps this key unadvertised and inert.
@@ -219,7 +239,13 @@ class PairingModalSurface implements ConfigModalSurface {
     this.unreachable = null;
     this.infoError = null;
     this.revealed = false;
+    // A yes in flight finishes on its own and is shown on the next open; otherwise the question is asked again then.
+    if (this.network !== 'serving') { this.network = 'answered'; this.networkError = null; }
+    this.networkAsked = false;
   }
+
+  /** Set once the question has been put for this open, so a No is not asked again on the next render. */
+  private networkAsked = false;
 
   private ensureInfo(fresh = false): PairingModalConnectionInfo | null {
     if (this.info === undefined) {
@@ -245,15 +271,26 @@ class PairingModalSurface implements ConfigModalSurface {
       // No code is shown: there is no web UI to open. The steps end in the command that fixes it.
       const rows: ConfigModalRow[] = this.unreachable.lines.map((line, i) => infoRow(`step:${i}`, line, i === 0 ? { fg: MODAL_TONES.reasoning } : {}));
       this.appendTailscaleRows(rows);
-      const hints: string[] = [];
-      if (this.tailscale?.available && !this.serving) hints.push('t serve over tailscale');
-      if (this.deps.stopTailscaleServe && this.activeServe && !this.serving) hints.push('x stop serving');
-      return { title: 'Device Pairing', tabs: [{ id: 'pairing', label: 'Pairing', rows, hints }] };
+      // The serve and stop keys come from the action table's own hints.
+      return { title: 'Device Pairing', tabs: [{ id: 'pairing', label: 'Pairing', rows, hints: [] }] };
     }
     if (!info) {
       return { title: 'Device Pairing', degraded: this.infoError
           ? `Device pairing is unavailable: ${this.infoError}`
           : 'Device pairing is unavailable: this session has no pairing token store.', tabs: [{ id: 'pairing', label: 'Pairing', rows: [] }] };
+    }
+    // A phone could not open this code: ask, in place and opening on No, whether to serve GoodVibes to the network.
+    if (info.thisMachineOnly && this.deps.serveToNetwork && !this.networkAsked) { this.networkAsked = true; this.network = 'ask'; }
+    if (this.asking()) {
+      const rows: ConfigModalRow[] = [infoRow('network:question', SERVE_TO_NETWORK_QUESTION, { fg: MODAL_TONES.reasoning })];
+      if (this.network === 'serving') {
+        rows.push(infoRow('network:serving', 'Serving GoodVibes to your network; the code for phones appears here when the daemon is listening again…', { fg: MODAL_TONES.dim }));
+        return { title: 'Device Pairing', tabs: [{ id: 'pairing', label: 'Pairing', rows, hints: [] }] };
+      }
+      rows.push({ id: 'network:no', label: 'No, keep the link for this computer only' });
+      rows.push({ id: 'network:yes', label: 'Yes, serve it to my network (what goodvibes-daemon webui enable --lan does)' });
+      if (this.networkError) rows.push(infoRow('network:error', `Not served: ${this.networkError}`, { fg: MODAL_TONES.warn }));
+      return { title: 'Device Pairing', tabs: [{ id: 'pairing', label: 'Pairing', rows, hints: [] }] };
     }
     const { url, token, tokenName, deepLink, offers, posture, thisMachineOnly } = info;
     const displayToken = this.revealed ? token : SECRET_MASK;
@@ -308,9 +345,8 @@ class PairingModalSurface implements ConfigModalSurface {
       qr.split('\n').forEach((line, i) => rows.push(infoRow(`qr:${i}`, line, { fg: MODAL_TONES.qrDark, bg: MODAL_TONES.qrLight })));
     }
 
-    const hints = [this.revealed ? 'v hide token' : 'v reveal token'];
-    if (this.tailscale?.available && !this.serving) hints.push('t serve over tailscale');
-    if (this.deps.stopTailscaleServe && this.activeServe && !this.serving) hints.push('x stop serving');
+    // The keys come from the action table's own hints (reveal, copy, new token, serve, stop).
+    const hints: string[] = [];
     return {
       title: 'Device Pairing',
       tabs: [{ id: 'pairing', label: 'Pairing', rows, hints }],
@@ -350,6 +386,7 @@ class PairingModalSurface implements ConfigModalSurface {
 
   onAction(id: string, ctx: ConfigModalActionContext): void {
     const info = this.ensureInfo();
+    if (id === 'answerNetwork') { this.answerNetwork(ctx.row?.id === 'network:yes', ctx); return; }
     if (id === 'toggleReveal') { this.revealed = !this.revealed; this.requestRender(); return; }
     if (id === 'tailscaleServe') { this.runTailscaleServe(ctx); return; }
     if (id === 'tailscaleStop') { this.stopTailscaleServe(ctx); return; }
@@ -379,6 +416,33 @@ class PairingModalSurface implements ConfigModalSurface {
       ctx.setStatus(`New device token${fresh.thisMachineOnly ? '' : ' and QR'} shown. The previous one no longer works unless a device already paired with it; paired devices are listed by /devices, and in the web UI under Settings, Devices and pairing.`);
       return;
     }
+  }
+
+  /**
+   * No keeps the this-computer link on screen. Yes asks the daemon to serve its
+   * web UI to the network; its answer is the code for phones, shown here in
+   * place of the this-computer link. A refusal keeps the question with its reason.
+   */
+  private answerNetwork(yes: boolean, ctx: ConfigModalActionContext): void {
+    if (!yes || !this.deps.serveToNetwork) { this.network = 'answered'; this.requestRender(); return; }
+    this.network = 'serving';
+    this.networkError = null;
+    this.requestRender();
+    this.deps.serveToNetwork()
+      .then((served) => {
+        this.info = served;
+        this.held = served;
+        this.revealed = false;
+        this.network = 'answered';
+        ctx.setStatus(`GoodVibes is served to your network; phones can open ${served.url}.`);
+        this.requestRender();
+      })
+      .catch((error: unknown) => {
+        this.network = 'ask';
+        // In full: the daemon's reason ends in the command that fixes it.
+        this.networkError = error instanceof Error ? error.message : String(error);
+        this.requestRender();
+      });
   }
 
   /**

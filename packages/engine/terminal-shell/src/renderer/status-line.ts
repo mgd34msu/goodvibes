@@ -2,6 +2,8 @@
  * status-line.ts, the one row directly under the composer: the status bar.
  *
  * Left, in order:
+ *   - what main is doing, one word, never dropped: `working` while a turn
+ *     runs, `waiting for you` (warning) while an ask is open, nothing at rest;
  *   - `Permissions:` (faint) and the mode in force (ModeInForceWords): the chosen
  *     mode's label (`Jev decides`) when it is in force; when it is not, what
  *     is (`asking you, for now`, warning), then the choice and when it takes effect
@@ -21,10 +23,12 @@
  *   Ctrl+C again" exit guard, a copy receipt), or the keys of the view the
  *   keyboard is in (the work tree, an agent or process view) and its trail.
  *
- * Right, two columns between segments, ending at width-4: the cost (when the
+ * Right, all faint (background facts), two columns between segments, ending at width-4: the cost (when the
  * model is priced), `context 34%`, `branch main, changed` (`, changed` only
  * while the working tree differs from HEAD; absent outside a repository),
- * `model rt-1`, then the `ctrl+p` keycap with "menu".
+ * `model rt-1`, then the `ctrl+p` keycap with "menu" (or the keycap the
+ * product gives in `menu`: the Agent's `ctrl+g workspace`, which gives way
+ * just after the model rather than first).
  *
  * Every segment is a click target (tagRegion): the mode opens the mode
  * picker, the notices the notifications, context the context inspector,
@@ -33,12 +37,12 @@
  *
  * When the row is short, pieces give way in this order until it fits: the
  * menu keycap, the cost, optional chips; the choice shortens (`Jev decides
- * once a decision model is set` to `you chose Jev decides`; the rest is on a click); the
+ * once a decision model is set` to `Jev decides: no decision model set`; the rest is on a click); the
  * notices lose their keycap (the count stays), the branch loses its state
  * word (`branch main`), the context goes, the branch goes; a failure
  * (`decision model unreachable`, `decision model failing`) shortens
  * (`unreachable`); the background summary (unless it holds focus), the model,
- * the notices, the mode's keycap; last a failure goes. `Permissions:` with the mode
+ * the notices, the mode's keycap; last a failure goes. The state word, `Permissions:` with the mode
  * in force (`asking you, for now`) and the choice, the kept chips and the esc hint
  * always stay. A segment given up
  * before a later step freed the room comes back when it fits (the model, then
@@ -64,7 +68,7 @@ const KEY_GAP = 2;
 /** The room a background summary keeps before the model gives way to it. */
 const SUMMARY_MIN = 20;
 /** What a click on a part of the status line opens. */
-export type StatusTarget = 'mode' | 'notices' | 'context' | 'changes' | 'model' | 'usage' | 'agents' | 'commands';
+export type StatusTarget = 'mode' | 'notices' | 'context' | 'changes' | 'model' | 'usage' | 'agents' | 'commands' | 'workspace';
 /** A chip at the left end of the status line. */
 export interface StatusChip {
     readonly text: string;
@@ -130,6 +134,12 @@ export interface StatusLineOptions {
     /** Product pointer routing records metadata without changing the painted row. */
     readonly tagRegion?: ((line: Line, start: number, end: number, target: StatusTarget) => void) | undefined;
     readonly width: number;
+    /**
+     * What main is doing, one word at the left end, never dropped: `working`
+     * while a turn runs, `waiting for you` (warning) while an ask is open;
+     * nothing at rest.
+     */
+    readonly state?: ('working' | 'waiting' | null) | undefined;
     /** The mode segment; absent inside an agent or process view. */
     readonly asks?: (StatusAsks | null) | undefined;
     /** Chips after the mode segment, drawn left to right; see the file header. */
@@ -153,6 +163,14 @@ export interface StatusLineOptions {
      * fold, open, copy, back).
      */
     readonly keys?: (readonly KitHint[] | null) | undefined;
+    /**
+     * The keycap at the right end and what a click on it opens, in place of
+     * `ctrl+p menu` (the Agent names its workspace there: `ctrl+g workspace`).
+     */
+    readonly menu?: ({
+        readonly hints: readonly KitHint[];
+        readonly target: StatusTarget;
+    } | null) | undefined;
     /** A piece drawn after the keys (an agent view keeps main in sight: "◐ main · working"). */
     readonly trail?: ({
         readonly text: string;
@@ -204,13 +222,13 @@ function contextRuns(state: StatusContextState): Run[] {
     const t = activeTokens();
     const label: Run = { text: 'context ', fg: t.textFaint };
     if (state.available === false)
-        return [label, { text: 'unavailable', fg: t.textMuted }];
+        return [label, { text: 'unavailable', fg: t.textFaint }];
     if (state.windowTokens === null)
-        return [label, { text: 'unknown', fg: t.textMuted }];
+        return [label, { text: 'unknown', fg: t.textFaint }];
     const used = contextFraction(state);
     const threshold = Math.max(0, Math.min(1, state.compactFraction > 0 ? state.compactFraction : 1));
     const hot = used >= threshold ? t.error : used >= CONTEXT_WARN_FRACTION ? t.warning : null;
-    return [label, { text: `${Math.round(used * 100)}%`, fg: hot ?? t.textMuted, bold: hot !== null }];
+    return [label, { text: `${Math.round(used * 100)}%`, fg: hot ?? t.textFaint, bold: hot !== null }];
 }
 /** The mode's reason in its short form: "decision model unreachable" → "unreachable"; null when it has none. */
 function shortBecause(because: string): string | null {
@@ -219,8 +237,9 @@ function shortBecause(because: string): string | null {
 }
 /** How much of the mode segment is drawn. */
 interface AsksForm {
-    /** The choice and when it takes effect (`Jev decides once a decision model is set`), or in a few words (`you chose Jev decides`). */
-    readonly choice: 'full' | 'short';
+    /** The choice and when it takes effect (`Jev decides once a decision model is set`), or in a few words with its cause (`Jev decides: no decision model set`). */
+    /** `name`: only the chosen mode's name (`Jev decides`), the last form before a product's own keycap gives way. */
+    readonly choice: 'full' | 'short' | 'name';
     /** A failure reason (`decision model unreachable`), whole, short or gone. */
     readonly because: 'full' | 'short' | 'none';
     readonly key: boolean;
@@ -238,7 +257,7 @@ function asksWordRuns(asks: StatusAsks, form: AsksForm): Run[] {
         return [paint('Permissions: ', t.textFaint), paint(asks.chosen, t.textMuted, false)];
     // The mode in force leads; the choice follows; a failure comes last.
     const runs: Run[] = [paint('Permissions: ', t.textFaint), paint(asks.inForce, t.warning, true)];
-    const choice = form.choice === 'full' ? asks.chosenWhen ?? asks.chosen : asks.chosenShort ?? asks.chosen;
+    const choice = form.choice === 'full' ? asks.chosenWhen ?? asks.chosen : form.choice === 'short' ? asks.chosenShort ?? asks.chosen : asks.chosen;
     runs.push(paint(' · ', t.textFaint), paint(choice, t.textMuted, false));
     // Only a failure is drawn here: a reason that states a choice is what the choice's own words say.
     // A failure with no short form stays whole until it goes.
@@ -262,11 +281,12 @@ function noticesWidth(notices: StatusNotices, withKey: boolean): number {
 /** `branch main, changed`; with `short`, the state word goes (`branch main`). */
 function branchRuns(branch: StatusBranch, short = false): Run[] {
     const t = activeTokens();
-    return [{ text: 'branch ', fg: t.textFaint }, { text: branch.changed && !short ? `${branch.name}, changed` : branch.name, fg: t.textMuted }];
+    return [{ text: 'branch ', fg: t.textFaint }, { text: branch.changed && !short ? `${branch.name}, changed` : branch.name, fg: t.textFaint }];
 }
+// The right side is background facts: faint, so the left side (what is happening, what asks you) leads.
 function modelRuns(model: string): Run[] {
     const t = activeTokens();
-    return [{ text: 'model ', fg: t.textFaint }, { text: model, fg: t.textMuted }];
+    return [{ text: 'model ', fg: t.textFaint }, { text: model, fg: t.textFaint }];
 }
 function backgroundSummary(bg: StatusBackgroundState): string {
     const parts: string[] = [];
@@ -327,6 +347,8 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     const branch = options.branch ?? null;
     const model = options.model ?? null;
     const cost = options.cost ?? null;
+    const menuHints: readonly KitHint[] = options.menu?.hints ?? MENU;
+    const menuTarget: StatusTarget = options.menu?.target ?? 'commands';
     const plan: Plan = {
         asks: { choice: 'full', because: 'full', key: true },
         chips: [...chips],
@@ -346,8 +368,13 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         : 0;
     // Fixed left content after the chips (a notice's text or a view's keys) takes what it needs, up to the row.
     const leadW = notice ? getDisplayWidth(notice.text) : keys ? keycapHintsWidth(keys.slice(0, 1)) : 0;
+    const stateRun: Run | null = options.state === 'waiting'
+        ? { text: 'waiting for you', fg: t.warning, bold: true }
+        : options.state === 'working' ? { text: 'working', fg: t.text, bold: true } : null;
     const leftWidths = (p: Plan): number[] => {
         const widths: number[] = [];
+        if (stateRun)
+            widths.push(getDisplayWidth(stateRun.text));
         if (asks)
             widths.push(asksWidth(asks, p.asks));
         if (p.chips.length > 0)
@@ -379,15 +406,18 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         const right = rightWidths(p);
         const leftW = left.reduce((s, w, i) => s + (i > 0 ? GAP : 0) + w, 0);
         const rightW = right.reduce((s, w, i) => s + (i > 0 ? RIGHT_GAP : 0) + w, 0)
-            + (p.menu ? (right.length > 0 ? GAP : 0) + keycapHintsWidth(MENU) : 0);
+            + (p.menu ? (right.length > 0 ? GAP : 0) + keycapHintsWidth(menuHints) : 0);
         return LEFT_X + leftW + (rightW > 0 ? GAP + rightW : 0);
     };
     const fits = (): boolean => total(plan) <= rightEdge;
     // The decision model failing or out of reach, as opposed to a choice the owner made.
     const failureReason = asks?.failure === true && asks.because !== undefined;
     // Give way in the order of the file header, stopping as soon as the row fits.
+    // A keycap given in place of the menu (`ctrl+g workspace`) is how the product is used, so it
+    // outlasts the model and comes back first; the plain menu keycap is the first to give way.
+    const dropMenu = (): void => { plan.menu = false; };
     const steps: Array<() => void> = [
-        () => { plan.menu = false; },
+        ...(options.menu ? [] : [dropMenu]),
         () => { plan.cost = false; },
         ...chips.map(() => () => {
             const idx = plan.chips.map((c) => c.keep === true).lastIndexOf(false);
@@ -406,6 +436,11 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         () => { plan.notices = false; },
         () => { plan.asks = { ...plan.asks, key: false }; },
         ...(failureReason ? [() => { plan.asks = { ...plan.asks, because: 'none' }; }] : []),
+        // A product's own keycap (the Agent's `ctrl+g workspace`) is how a person finds that
+        // product's main screen: it is the last thing to give way, after everything optional,
+        // and after the choice has shortened to its name (the rest is a click on the mode away).
+        ...(options.menu && asks?.inForce ? [() => { plan.asks = { ...plan.asks, choice: 'name' as const }; }] : []),
+        ...(options.menu ? [dropMenu] : []),
     ];
     for (const step of steps) {
         if (fits())
@@ -414,12 +449,15 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     }
     // A later step can free more room than an earlier drop needed (the reason
     // going): give the dropped segments back, most important first, until one does not fit.
+    const restoreMenu: [() => boolean, () => void, () => void] = [() => !plan.menu, () => { plan.menu = true; }, () => { plan.menu = false; }];
     const restores: Array<[() => boolean, () => void, () => void]> = [
+        ...(options.menu ? [restoreMenu] : []),
         [() => model !== null && !plan.model, () => { plan.model = true; }, () => { plan.model = false; }],
         [() => ctx !== null && !plan.context, () => { plan.context = true; }, () => { plan.context = false; }],
         [() => branch !== null && !plan.branch, () => { plan.branch = true; }, () => { plan.branch = false; }],
         [() => cost !== null && !plan.cost, () => { plan.cost = true; }, () => { plan.cost = false; }],
-        [() => !plan.menu, () => { plan.menu = true; }, () => { plan.menu = false; }],
+        ...(options.menu ? [] : [restoreMenu]),
+        [() => plan.asks.choice === 'name', () => { plan.asks = { ...plan.asks, choice: 'short' }; }, () => { plan.asks = { ...plan.asks, choice: 'name' }; }],
         [() => plan.asks.choice === 'short', () => { plan.asks = { ...plan.asks, choice: 'full' }; }, () => { plan.asks = { ...plan.asks, choice: 'short' }; }],
     ];
     for (const [dropped, restore, undo] of restores) {
@@ -436,14 +474,14 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     let rx = rightEdge;
     const rightStart = (w: number): number => rx - w;
     if (plan.menu) {
-        const w = keycapHintsWidth(MENU);
-        paintKeycapHints(line, rightStart(w), rx, MENU, { fg: t.textFaint });
-        options.tagRegion?.(line, rx - w, rx, 'commands');
+        const w = keycapHintsWidth(menuHints);
+        paintKeycapHints(line, rightStart(w), rx, menuHints, { fg: t.textFaint });
+        options.tagRegion?.(line, rx - w, rx, menuTarget);
         rx -= w + GAP;
     }
     const rightSegments: Array<{ runs: Run[]; target: StatusTarget }> = [];
     if (plan.cost && cost)
-        rightSegments.push({ runs: [{ text: cost, fg: t.textMuted }], target: 'usage' });
+        rightSegments.push({ runs: [{ text: cost, fg: t.textFaint }], target: 'usage' });
     if (plan.context && ctx)
         rightSegments.push({ runs: contextRuns(ctx), target: 'context' });
     if (plan.branch && branch)
@@ -468,8 +506,11 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     const leftMax = Math.max(LEFT_X, rx);
     let x = LEFT_X;
     const next = (): number => (x > LEFT_X ? x + GAP : x);
+    if (stateRun)
+        x = putText(line, x, rightEdge, stateRun);
     if (asks) {
-        const start = x;
+        const start = next();
+        x = start;
         x = putRuns(line, x, rightEdge, asksWordRuns(asks, plan.asks));
         if (plan.asks.key && asks.key)
             x = putText(line, x + KEY_GAP, rightEdge, keycapRun(asks.key));

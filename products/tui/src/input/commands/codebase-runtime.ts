@@ -53,11 +53,11 @@ function renderAutoInjectionState(flagEnabled: boolean, settingEnabled: boolean)
 }
 
 /** Honest last-reindex activity line (tool-site incremental reindex). */
-function renderReindexActivity(activity: CodeIndexReindexActivity | null, now: number, autoStart: boolean): string {
+function renderReindexActivity(activity: CodeIndexReindexActivity | null, now: number, keptCurrent: boolean): string {
   if (!activity) {
-    return autoStart
+    return keptCurrent
       ? '  last reindex: none this session (writes/edits reindex touched files once the index is built)'
-      : '  last reindex: off: edits do not update the index (storage.codeIndexEnabled is off; run /codebase build again or turn it on)';
+      : '  last reindex: off: edits do not update the index until it is built in this session (/codebase build) or storage.codeIndexEnabled is on';
   }
   const agoSec = Math.max(0, Math.round((now - activity.at) / 1000));
   const detail = activity.status === 'error'
@@ -71,6 +71,8 @@ function renderReindexActivity(activity: CodeIndexReindexActivity | null, now: n
 interface CodeIndexStatusExtras {
   readonly flagEnabled: boolean;
   readonly reindexActivity: CodeIndexReindexActivity | null;
+  /** A build was asked for this session, so edits keep the index current. */
+  readonly keptCurrent: boolean;
   readonly now?: number;
 }
 
@@ -91,7 +93,7 @@ function renderCodeIndexStatus(stats: CodeIndexStats, configManager: Pick<Config
   );
   // Passive code auto-injection state (flag + setting) and the last tool-site reindex.
   lines.push(renderAutoInjectionState(extras.flagEnabled, autoStart));
-  lines.push(renderReindexActivity(extras.reindexActivity, extras.now ?? Date.now(), autoStart));
+  lines.push(renderReindexActivity(extras.reindexActivity, extras.now ?? Date.now(), autoStart || extras.keptCurrent));
   if ([CODE_INDEX_MAX_FILES, CODE_INDEX_MAX_FILE_BYTES, CODE_INDEX_MAX_TOTAL_BYTES].every(limit => limit === Infinity)) {
     lines.push('  limits: no file count or byte limits');
   } else {
@@ -185,6 +187,7 @@ export function registerCodebaseRuntimeCommands(registry: CommandRegistry): void
           return renderCodeIndexStatus(storeOf(ctx).stats(), ctx.platform.configManager, {
             flagEnabled: ctx.session.isPassiveCodeInjectionFlagEnabled?.() ?? false,
             reindexActivity: ctx.session.codeIndexReindexScheduler?.lastActivity() ?? null,
+            keptCurrent: ctx.session.codeIndexReindexScheduler?.keptCurrentThisSession() ?? false,
           });
         },
       }),
@@ -198,7 +201,9 @@ export function registerCodebaseRuntimeCommands(registry: CommandRegistry): void
             throw commandRefusal(progress ? `A build is already running (${progress.scanned}/${progress.total} files read).` : 'A build is already running.');
           }
           store.scheduleBuild();
-          return 'Build started: /codebase status, or Your agents (F2) under Background services (b), shows how it goes.';
+          // Asked for, so it is kept current on this session's file writes whatever storage.codeIndexEnabled says.
+          ctx.session.codeIndexReindexScheduler?.keepCurrent();
+          return 'Build started: /codebase status, or Your agents (F2) under Background services (b), shows how it goes. Edits made in this session keep it current.';
         },
       }),
       readAction<CommandContext>({

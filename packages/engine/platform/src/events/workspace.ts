@@ -6,6 +6,31 @@
  */
 
 export type WorkspaceEvent =
+  /**
+   * A list a client shows changed (runtime/list-changes.ts): a memory record,
+   * a workspace checkpoint, a CI watch, a check-in setting or receipt, a person
+   * or device in the people list, the mailbox, the calendar, dates, paired
+   * devices, delegated Telegram messages, the local voice install, Tailscale.
+   * A view showing that list reads it again.
+   */
+  | {
+      type: 'LIST_CHANGED';
+      list: 'memory' | 'checkpoints' | 'ci-watches' | 'check-ins' | 'people'
+        | 'mail' | 'calendar' | 'dates' | 'paired-devices' | 'telegram-intake' | 'voice' | 'tailscale' | 'relay';
+      change: 'created' | 'changed' | 'deleted';
+      id?: string | undefined;
+    }
+  /**
+   * A native request changed: a write to it committed (its capture, a host
+   * decision, admission or cancellation in `intake`; its work or attempts in
+   * `work-ledger`; its run, settlement or CI continuation in `execution`). A
+   * view showing native requests reads them again; nothing else is carried.
+   */
+  | {
+      type: 'NATIVE_REQUEST_CHANGED';
+      projectId: string;
+      store: 'intake' | 'work-ledger' | 'execution';
+    }
   /** Emitted when the daemon begins to move to another working directory (every service stops and starts again there). */
   | {
       type: 'WORKSPACE_SWAP_STARTED';

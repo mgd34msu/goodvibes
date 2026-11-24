@@ -3,9 +3,101 @@
  * almost everything lives in library.css; this file holds the one memory-only rule.
  */
 
-/* The rating ("Rated 82% sure") stays on one line beside the row. */
-.memory-record-row .dv-value {
+/* The rating beside the row: a small bar, the number, and whether it is brought into answers. */
+.memory-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   white-space: nowrap;
+  font-size: var(--text-meta);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.memory-rating__bar {
+  display: inline-block;
+  width: 36px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--line-strong);
+  overflow: hidden;
+}
+
+.memory-rating__bar > span {
+  display: block;
+  height: 100%;
+  background: var(--text-2);
+}
+
+.memory-rating__tag {
+  padding: 0 6px;
+  border-radius: var(--radius-full);
+  background: var(--ok-soft);
+  color: var(--ok);
+  font-size: var(--text-xs);
+}
+
+.memory-rating__tag--out {
+  background: var(--surface-2);
+  color: var(--text-3);
+}
+
+/* What a rating is, said once above the records. */
+.memory-rating-note {
+  margin: 0 0 8px;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  line-height: var(--leading-meta);
+}
+
+/* One Filters button, and the filters in force as chips that remove themselves. */
+.memory-filter-bar {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.memory-filter-bar__end {
+  margin-left: auto;
+}
+
+.memory-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.memory-filter-chip__remove {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+}
+
+.memory-filter-chip__remove svg {
+  width: 12px;
+  height: 12px;
+}
+
+.memory-filter-chip__remove:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--radius-xs);
+}
+
+.memory-filter__help {
+  max-width: 16rem;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  white-space: normal;
+}
+
+@media (max-width: 899px) {
+  .memory-rating__bar {
+    display: none;
+  }
 }
 
 /* Scope as radios, each with the line saying where it applies and who sees it. */

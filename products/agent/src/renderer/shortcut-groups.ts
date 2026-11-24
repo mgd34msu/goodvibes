@@ -17,7 +17,11 @@ const FIXED_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['@', 'Open file picker'],
   ['/', 'Slash command mode'],
   ['?', 'Help: every command and keyboard shortcut'],
-  ['Tab', 'Collapse/expand block; swap focus between input and the Agent workspace'],
+  ['Tab', 'Collapse/expand the nearest block; inside the Agent workspace, move between its area list and its action list'],
+  ['Shift+Tab', 'Change when GoodVibes asks, for this session (always; never switches sessions)'],
+  // One step per press; the status line names what the next Esc does. Each step
+  // also has a key of its own: Ctrl+U clears the prompt, Ctrl+C interrupts.
+  ['Esc', 'One step back: close the top overlay, else clear the prompt, else leave an agent or process view, else stop the running turn'],
   ['F2', 'Open Your agents'],
 ];
 
@@ -25,7 +29,7 @@ const FIXED_ROWS: ReadonlyArray<readonly [string, string]> = [
 const SESSION_ROWS: ReadonlyArray<readonly [string, string]> = [
   ['Enter on lane', 'Open that agent; typing steers it'],
   ['Enter on ▶ bead', "Open that process's live output"],
-  ['Tab / Shift+Tab', 'Next / prev session (empty composer)'],
+  ['Alt+N / Alt+P', 'Next / previous session in the session row (rebindable: next-session, previous-session)'],
   ['Esc in a view', 'Go up one level; stops nothing'],
   ['ctrl+x in view', 'Stop what the view shows (twice)'],
 ];

@@ -6,11 +6,12 @@
  * supported posture: the app works, but three browser-gated capabilities, service
  * worker/PWA install, push, microphone, are unavailable there, each labeled with the
  * daemon's OWN "needs https, available via tailscale" wording rather than a client-
- * fabricated guess. This hook fetches that posture ONCE for `window.location.origin`
- * (an origin's posture cannot change within a session, a browser reload is the only
- * way this page's own scheme/host could ever change) and every consumer (MicButton,
- * NotificationSettings, the pairing hand-off flow) reads the same cached result rather
- * than each re-deriving it.
+ * fabricated guess. This hook reads that posture for `window.location.origin`; the
+ * page's own scheme and host do not change, but what the daemon serves does (network
+ * serving or https switched on), so it is read again on window focus, on a reconnect,
+ * on a `config` frame and after the pairing page's network step. Every consumer
+ * (MicButton, NotificationSettings, the pairing hand-off flow) reads the same cached
+ * result rather than each re-deriving it.
  *
  * Requires an authenticated principal (the route 401s otherwise), callers gate
  * `enabled` on their own auth state; it defaults to true for call sites that only ever
@@ -33,7 +34,10 @@ export function useOriginPosture(enabled = true): UseOriginPosture {
       typeof window === 'undefined' ? undefined : window.location.origin,
     ),
     enabled,
-    staleTime: Infinity,
+    // Serving to the network or over https changes it: read again on window focus, on a
+    // reconnect (every active query is), on a `config` frame (useRealtimeInvalidation) and
+    // straight after the pairing page's own network step.
+    refetchOnWindowFocus: true,
     gcTime: Infinity,
     retry: false,
   });

@@ -14,7 +14,7 @@
  * microphone is announced once instead of on every state tick.
  */
 import { Ear, MicOff } from 'lucide-react';
-import { useWakeState } from '../../lib/voice/useWake';
+import { listenAgain, useWakeState } from '../../lib/voice/useWake';
 import { wakeIndicatorCopy, wakeIndicatorVisible } from './wake-indicator';
 
 export function WakeChip() {
@@ -23,6 +23,24 @@ export function WakeChip() {
 
   const copy = wakeIndicatorCopy(state);
   const modifier = copy.live ? 'live' : copy.attention ? 'attention' : 'idle';
+
+  // A detector that gave up: the chip itself is "Listen again".
+  if (state.phase === 'latched') {
+    return (
+      <button
+        type="button"
+        className={`status-strip__segment status-strip__segment--button status-strip__segment--wake status-strip__segment--wake-${modifier}`}
+        aria-label={`Wake word: ${copy.label}. ${copy.detail} Listen again.`}
+        title={copy.detail}
+        data-testid="wake-chip"
+        data-wake-phase={state.phase}
+        onClick={listenAgain}
+      >
+        <MicOff className="status-strip__icon" aria-hidden="true" size={11} />
+        <span className="status-strip__label">{copy.label} · Listen again</span>
+      </button>
+    );
+  }
 
   return (
     <div

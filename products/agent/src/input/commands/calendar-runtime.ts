@@ -17,6 +17,7 @@ import {
   renderSubscribedSection,
   subscribeCalendarFeed,
   subscriptionRegistryForRead,
+  subscriptionRegistryForWrite,
   unsubscribeCalendarFeed,
 } from './calendar-subscription-runtime.ts';
 import { calendarAccounts, connectCalendar, disconnectCalendar, fetchProviderUpcoming, sourceLabel, useCalendarApp } from './calendar-connect-runtime.ts';
@@ -82,7 +83,24 @@ function feedsForRead(ctx: CommandContext): ReturnType<typeof subscriptionRegist
   }
 }
 
-function allEvents(ctx: CommandContext): string {
+/**
+ * Before the calendar is read: the subscribed feeds whose refresh interval has passed are read
+ * again (conditional GETs, the boot pass's own `force: false` call), so a feed is never older than
+ * its interval when it is shown. Through the write registry, which holds no untrusted-content
+ * recorder (the read below records what is shown). A feed that cannot be read keeps its last
+ * events and its status says why; nothing here stops the read.
+ */
+async function refreshDueFeeds(ctx: CommandContext): Promise<void> {
+  try {
+    const registry = subscriptionRegistryForWrite(ctx);
+    if (registry?.hasAny()) await registry.refresh(undefined, { force: false });
+  } catch {
+    // The feeds' own status records a failed read; the calendar is shown with what is held.
+  }
+}
+
+async function allEvents(ctx: CommandContext): Promise<string> {
+  await refreshDueFeeds(ctx);
   const snap = registryFromContext(ctx).snapshot();
   const unreadable = [
     snap.unreadable ? `  The store file cannot be read (${snap.unreadable}); the next change keeps a copy of it before replacing it.` : '',
@@ -94,6 +112,7 @@ function allEvents(ctx: CommandContext): string {
 }
 
 async function upcomingEvents(ctx: CommandContext, days: number): Promise<string> {
+  await refreshDueFeeds(ctx);
   const registry = registryFromContext(ctx);
   const local = renderEventList([...registry.upcoming(days)], registry.snapshot().path);
   const subs = feedsForRead(ctx);

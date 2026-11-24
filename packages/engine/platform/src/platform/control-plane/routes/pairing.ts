@@ -32,7 +32,7 @@ export type PairingGatewayService = Pick<
 
 function requirePrincipal(invocation: GatewayMethodInvocation): void {
   if (!invocation.context.principalId) {
-    throw new GatewayVerbError('Pairing verbs require an authenticated principal', 'UNAUTHENTICATED', 401);
+    throw new GatewayVerbError('Sign in first: pairing needs a signed-in user or a paired device', 'UNAUTHENTICATED', 401);
   }
 }
 

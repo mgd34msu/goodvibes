@@ -27,6 +27,18 @@ export interface ManagedServiceDefinitionShape {
 /** The description every GoodVibes-written definition carries; `readManagedDefinitionOwner` recognises the file by it. */
 export const MANAGED_SERVICE_DESCRIPTION = 'GoodVibes daemon (shared session broker + companion host)';
 
+/**
+ * The description the 3.3.1 daemon gave a unit it wrote itself (boot promotion,
+ * update adoption, the web UI's install). Such a unit is still GoodVibes's own
+ * after an update, so it is recognised; nothing writes it any more.
+ */
+const EARLIER_DAEMON_SERVICE_DESCRIPTION = 'goodvibes omnichannel daemon host';
+
+/** Whether a definition file's text is one GoodVibes wrote: it names one of the descriptions above. */
+export function isProductServiceDefinition(contents: string): boolean {
+  return [MANAGED_SERVICE_DESCRIPTION, EARLIER_DAEMON_SERVICE_DESCRIPTION].some((mark) => contents.includes(mark));
+}
+
 export interface ManagedDaemonServiceDefinitionInput {
   readonly name: string;
   /** The daemon executable the service runs. */

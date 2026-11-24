@@ -1,5 +1,6 @@
 /**
- * General: appearance (theme with GoodVibes Neon, density), language, the
+ * General: what is set up and what is left (SetupChecklist), appearance (theme
+ * with GoodVibes Neon, density), language, reduce motion, the
  * code-block line-number preference (formerly Admin's "Display Preferences"),
  * the connected daemon's own update status, then the display / ui / behavior /
  * daemon / update config groups.
@@ -9,10 +10,13 @@ import { useWebUiPreferences } from '../../../../lib/ui-preferences';
 import type { Theme } from '../../../../lib/theme';
 import { Segmented } from '../../../ui/Segmented';
 import { Toggle } from '../../../ui/Toggle';
+import { useMediaQuery } from '../../../ui/overlay';
 import { ConfigGroupList, useConfigSettings } from '../ConfigSettings';
 import { SettingRow, SettingsBlock } from '../parts';
 import { groupsForSection } from '../sections';
 import { DaemonUpdates } from '../../DaemonUpdates';
+import { SetupChecklist } from '../../SetupChecklist';
+import { openSettingsSection } from '../../../../views/personal/openSettings';
 
 type BaseTheme = Exclude<Theme, 'neon'>;
 
@@ -25,11 +29,13 @@ const THEME_OPTIONS: readonly { value: BaseTheme; label: string }[] = [
 export function GeneralSection() {
   const { theme, setTheme, density, setDensity } = useTheme();
   const [preferences, setPreference] = useWebUiPreferences();
+  const systemReduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const { groups } = useConfigSettings();
   const neon = theme === 'neon';
 
   return (
     <>
+      <SetupChecklist onOpenSection={openSettingsSection} />
       <SettingsBlock title="Appearance" description="Applies to this browser only.">
         <div className="settings-rows">
           <SettingRow
@@ -68,6 +74,20 @@ export function GeneralSection() {
             label="Language"
             description="The interface is in English. Dates, times and numbers follow this browser's regional settings."
             control={<span className="settings-row__value">English</span>}
+          />
+          <SettingRow
+            label="Reduce motion"
+            description={systemReduced
+              ? 'Your system already asks for less motion, so nothing here moves; this keeps it so in this browser either way.'
+              : 'Menus, panels and notices appear without moving, and the "Thinking…" line holds still.'}
+            control={(
+              <Toggle
+                checked={preferences.reduceMotion || systemReduced}
+                disabled={systemReduced}
+                aria-label="Reduce motion"
+                onChange={(on) => setPreference('reduceMotion', on)}
+              />
+            )}
           />
           <SettingRow
             label="Line numbers in code blocks"

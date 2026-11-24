@@ -13,6 +13,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { PrincipalStore } from './store.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import {
   PrincipalRegistryError,
   identityKey,
@@ -143,7 +144,7 @@ export class PrincipalRegistry {
     if (!name) throw new PrincipalRegistryError('name is required', 'INVALID_ARGUMENT');
     const kind = requireKind(input.kind);
     const identities = normalizeIdentities(input.identities);
-    return this.mutate((records) => {
+    const created = this.mutate((records) => {
       this.assertIdentitiesFree(records, identities, null);
       const now = Date.now();
       const record: PrincipalRecord = {
@@ -157,10 +158,12 @@ export class PrincipalRegistry {
       };
       return { next: [...records, record], result: record };
     });
+    noteListChanged({ list: 'people', change: 'created', id: created.id });
+    return created;
   }
 
   async update(id: string, input: UpdatePrincipalInput): Promise<PrincipalRecord> {
-    return this.mutate((records) => {
+    const updated = this.mutate((records) => {
       const index = records.findIndex((r) => r.id === id);
       if (index === -1) throw new PrincipalRegistryError(`No principal with id ${id}`, 'NOT_FOUND');
       const current = records[index]!;
@@ -182,13 +185,17 @@ export class PrincipalRegistry {
       nextRecords[index] = next;
       return { next: nextRecords, result: next };
     });
+    noteListChanged({ list: 'people', change: 'changed', id: updated.id });
+    return updated;
   }
 
   async delete(id: string): Promise<boolean> {
-    return this.mutate((records) => {
+    const removed = this.mutate((records) => {
       if (!records.some((r) => r.id === id)) return { next: null, result: false };
       return { next: records.filter((r) => r.id !== id), result: true };
     });
+    if (removed) noteListChanged({ list: 'people', change: 'deleted', id });
+    return removed;
   }
 
   /**

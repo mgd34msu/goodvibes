@@ -14,6 +14,8 @@ export interface VoiceCaptureBindings {
   readonly notify: (message: string) => void;
   readonly render: () => void;
   readonly player?: StreamingAudioPlayer | undefined;
+  /** The terminal's focus-in reports; a wake listener that stopped itself starts again on one. */
+  readonly subscribeFocusGained?: ((listener: () => void) => () => void) | undefined;
 }
 export function createVoiceCapturePorts(
   deps: VoiceCaptureBindings,
@@ -41,7 +43,7 @@ export function wireTerminalWakeCapture(
     readonly wireWakeRuntime: (deps: TerminalWakeRuntimeDeps) => TerminalWakeRuntime;
     readonly startWakeRuntime: (
       runtime: TerminalWakeRuntime,
-      deps: Pick<TerminalWakeRuntimeDeps, 'subscribeConfig'>,
+      deps: Pick<TerminalWakeRuntimeDeps, 'subscribeConfig'> & { readonly subscribeFocusGained?: VoiceCaptureBindings['subscribeFocusGained'] },
     ) => readonly (() => void)[];
     readonly playActivationSound: typeof playActivationSound;
   },
@@ -63,7 +65,7 @@ export function wireTerminalWakeCapture(
     warn: ports.warn,
     ...extra,
   });
-  return { wake, unsubs: runtime.startWakeRuntime(wake, { subscribeConfig: ports.subscribeConfig }) };
+  return { wake, unsubs: runtime.startWakeRuntime(wake, { subscribeConfig: ports.subscribeConfig, subscribeFocusGained: deps.subscribeFocusGained }) };
 }
 /**
  * Voice drafts share composer writes; a pending pairing prompt must first relinquish ownership.

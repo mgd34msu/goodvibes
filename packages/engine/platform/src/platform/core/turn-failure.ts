@@ -19,7 +19,9 @@ export type TurnRefusalReason =
   /** The Agent sends turns to the GoodVibes service, and it is not running. */
   | 'daemon-unreachable'
   /** The GoodVibes service does not host this folder yet. */
-  | 'workspace-not-registered';
+  | 'workspace-not-registered'
+  /** The selected model is no longer free, and the person did not keep using it (or chose another model). */
+  | 'model-no-longer-free';
 
 /** What the person can do next; each surface puts it on its own key or button. */
 export type TurnFailureAction = 'retry' | 'other-model' | 'details' | 'sign-in' | 'choose-model' | 'start-daemon';
@@ -153,6 +155,7 @@ function causeOf(input: TurnFailureInput, provider: string): string {
     case 'no-model': return 'No model is set up yet.';
     case 'daemon-unreachable': return 'The GoodVibes service isn\'t running.';
     case 'workspace-not-registered': return 'The GoodVibes service doesn\'t know this folder yet.';
+    case 'model-no-longer-free': return `${input.model ?? 'This model'} is no longer free, so nothing was sent.`;
     case undefined: break;
   }
   const stop = input.stopReason;
@@ -195,6 +198,10 @@ export function readTurnFailure(input: TurnFailureInput): TurnFailureReading {
       break;
     case 'workspace-not-registered':
       next.push({ action: 'retry', label: 'try again' });
+      break;
+    case 'model-no-longer-free':
+      next.push({ action: 'choose-model', label: 'choose another model' });
+      next.push({ action: 'retry', label: 'send it anyway (asks again)' });
       break;
     case undefined:
       if (input.status === 401 || input.status === 403) next.push({ action: 'sign-in', label: 'sign in again' });

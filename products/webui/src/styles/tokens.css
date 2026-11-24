@@ -326,4 +326,31 @@
     --motion-rail: 0ms;
     --motion-slow: 0ms;
   }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* The same, from Settings > General > Reduce motion (this browser), when the system does not ask for it. */
+:root[data-motion="reduce"] {
+  --motion-fast: 0ms;
+  --motion-menu: 0ms;
+  --motion-base: 0ms;
+  --motion-rail: 0ms;
+  --motion-slow: 0ms;
+}
+
+:root[data-motion="reduce"] *,
+:root[data-motion="reduce"] *::before,
+:root[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }

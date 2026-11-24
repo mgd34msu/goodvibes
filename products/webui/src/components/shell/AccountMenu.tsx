@@ -15,6 +15,7 @@ import { Row, RowList } from '../ui/Row';
 import { Sheet } from '../ui/Sheet';
 import type { DaemonHealth } from '../../lib/daemon-health';
 import { useTheme } from '../../hooks/useTheme';
+import { formatShortcut } from '../../lib/shortcut-keys';
 import { Menu, MenuCheckboxItem, MenuItem, MenuMeta, MenuRadioGroup, MenuSeparator } from '../ui/Menu';
 import { StatusDot, type StatusTone } from '../ui/StatusDot';
 import { Tooltip } from '../ui/Tooltip';
@@ -121,7 +122,7 @@ export function AccountMenu({ name, health, running, waiting, onReviewWaiting, c
       {setupLeft > 0 && (
         <MenuItem icon={<ListChecks />} hint={`${String(setupLeft)} left`} onSelect={() => onOpenSettings('general')}>Finish setting up</MenuItem>
       )}
-      <MenuItem icon={<Settings />} hint="Ctrl ," onSelect={() => onOpenSettings()}>Settings</MenuItem>
+      <MenuItem icon={<Settings />} hint={formatShortcut('mod+,')} onSelect={() => onOpenSettings()}>Settings</MenuItem>
       <MenuItem icon={<Smartphone />} onSelect={() => onOpenSettings('devices')}>Devices and pairing</MenuItem>
       <MenuItem icon={<Users />} onSelect={() => onOpenSettings('people')}>People and channels</MenuItem>
       <MenuItem icon={<BellRing />} onSelect={() => onOpenSettings('checkins')}>Check-ins</MenuItem>

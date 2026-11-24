@@ -37,6 +37,7 @@ import { homeOwnerInbox } from '@goodvibes/engine/platform/platform/runtime/clie
 import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { createEmptyCell } from '@goodvibes/engine/platform/platform/types/grid';
 import { activeTokens } from './renderer/theme.js';
+import { routeCardInput, type CardTypeahead } from './blocking-permission-input.js';
 import { beginModal, finishModal, layoutHintRows, modalInnerWidth, standardModalWidth, wrapLines, type KitHint, type SurfaceLayer } from './renderer/surface-kit.js';
 import { paintKeycapHints } from './renderer/surface-kit-parts.js';
 
@@ -63,6 +64,8 @@ interface CardState {
   readonly index: number;
   /** The one-line answer is open, with what is typed. */
   readonly typing?: string | undefined;
+  /** The card opened by itself: keys typed as it appears stay with the composer (routeCardInput). */
+  readonly typeahead: CardTypeahead;
 }
 
 /** How long the answered line stays: long enough to be read, then it goes. */
@@ -135,7 +138,7 @@ export class OwnerQuestionCard {
     const facts = { ...this.#deps.facts(), currentSessionId: this.#deps.sessionId() };
     const presentation = presentInboxAsk(item, facts);
     const first = presentation.choices.findIndex((choice) => choice.default === true);
-    this.#state = { item, presentation, index: Math.max(0, first) };
+    this.#state = { item, presentation, index: Math.max(0, first), typeahead: { openedAt: Date.now() } };
   }
 
   #changed(item: OwnerItem): void {
@@ -174,8 +177,14 @@ export class OwnerQuestionCard {
    * one-line answer is open. Every other key goes to the composer.
    */
   handleInput(data: string): boolean {
-    const state = this.#state;
-    if (!state || !this.#drawn) return false;
+    const shown = this.#state;
+    if (!shown || !this.#drawn) return false;
+    // It opened by itself: a key typed as it appeared, or in the same burst, is the composer's (the caller
+    // asks only while the composer is empty; with a draft every key is the composer's already).
+    const routed = shown.typeahead.addressed ? undefined : routeCardInput(data, shown.typeahead, Date.now());
+    const state: CardState = routed ? { ...shown, typeahead: routed.card } : shown;
+    this.#state = state;
+    if (routed && !routed.answer) return false;
     const choices = state.presentation.choices;
     const set = (next: CardState): boolean => { this.#state = next; this.#deps.render(); return true; };
     if (state.typing !== undefined) {

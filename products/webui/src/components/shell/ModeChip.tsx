@@ -6,8 +6,8 @@
  * · Jev decides once a decision model is set` while it cannot be used (a
  * failure such as `decision model unreachable` last). On the chip itself that
  * line is cut to the mode in force and its cause (`Permissions: asking you, for
- * now · no decision model set`); on a phone, to the mode in
- * force alone. The sheet it opens starts with the whole line, then the
+ * now · no decision model set`); on a phone, to the shield and one word for the
+ * mode in force (`Asking`), so the chat's title keeps its room. The sheet it opens starts with the whole line, then the
  * reading's sentence, the one step that fixes the cause (`Choose a decision
  * model`, `Turn decision models on`, `Check the decision model`: Settings >
  * Models and providers > Decision models) and `Change`, which opens Settings > Permissions; on a
@@ -30,8 +30,9 @@ export function ModeChip({ onOpenSettings }: { onOpenSettings: (section: string)
   // The desktop chip: the mode in force and its cause in two or three words ("no decision model set",
   // "decision model unreachable"); the choice and when it takes effect are the sheet's first line.
   const chip = differs ? `Permissions: ${[words.inForce, words.because ?? words.chosenShort].filter(Boolean).join(' · ')}` : full;
-  // A phone header has room for the mode in force only; the choice is in the sheet it opens.
-  const short = `Permissions: ${words.inForce ?? words.chosen}`;
+  // A phone header gives the chip its shield and one word for the mode in force, so the chat's
+  // title keeps its room; the whole line is the sheet's first line and the button's name.
+  const short = oneWord(words.inForce ?? words.chosen);
   // A reason that is not drawn on the chip (it states a choice) is still read out.
   const accessible = differs && words.because && words.failure !== true ? `${full}: ${words.because}` : full;
   return (
@@ -79,6 +80,19 @@ export function ModeSheetItems({ onOpenSettings, withLabel = false }: { onOpenSe
       {onOpenSettings && <MenuItem onSelect={() => onOpenSettings('permissions')}>Change</MenuItem>}
     </>
   );
+}
+
+/**
+ * The mode in force in one word, for the phone chip: "asking you, for now" and "Ask me"
+ * read "Asking", "Jev decides" "Jev", "Just vibes" "Vibes", "YOLO, for now" "YOLO";
+ * any other label its first word.
+ */
+function oneWord(mode: string): string {
+  const lower = mode.trim().toLowerCase();
+  if (lower.startsWith('ask')) return 'Asking';
+  if (lower.startsWith('just vibes')) return 'Vibes';
+  const first = mode.trim().split(/[\s,·]+/)[0] ?? mode;
+  return first ? `${first.charAt(0).toUpperCase()}${first.slice(1)}` : mode;
 }
 
 /**

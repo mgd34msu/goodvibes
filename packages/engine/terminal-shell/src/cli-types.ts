@@ -77,6 +77,8 @@ export interface GoodVibesCliFlags {
   readonly maxTurns?: string | undefined;
   readonly omitAccumulated?: boolean | undefined;
   readonly answerPermissions?: boolean | undefined;
+  /** `run --prompt-file <path>`: the prompt is that file's text; `-` reads it from standard input. */
+  readonly promptFile?: string | undefined;
 }
 
 export interface GoodVibesCliParseResult {

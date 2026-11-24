@@ -256,7 +256,8 @@ export function linePattern(action: ActionShape): string {
     .sort((a, b) => ('position' in a.typed ? a.typed.position : 0) - ('position' in b.typed ? b.typed.position : 0));
   for (const input of positions) {
     const name = `<${input.label.toLowerCase()}>`;
-    parts.push(input.required === true ? name : `[${name}]`);
+    // A secret left off the line is asked for on a hidden line, so the form without it comes first.
+    parts.push(input.required === true && input.kind !== 'secret' ? name : `[${name}]`);
   }
   const tail = action.inputs.find((input) => 'tail' in input.typed);
   const tailPart = tail
@@ -364,6 +365,24 @@ export function actionButton(action: ActionShape): string {
   // A bare object noun: keep words up to the next object start ("Install hooks", "Save memory").
   const stop = rest.findIndex((word) => OBJECT_START.test(word));
   return [...out, ...(stop < 0 ? rest : rest.slice(0, stop))].join(' ');
+}
+
+/**
+ * The control that submits a filled form: the action's button, with the
+ * amount when the action spends money ("Approve (at most 25.00)").
+ */
+export function actionSubmitLabel(action: ActionShape, values: ActionValues): string {
+  const button = actionButton(action);
+  if (effectiveRisk(action, values) !== 'spends-money') return button;
+  const money = action.inputs.find((input) => input.kind === 'money' && values[input.id]);
+  return money ? `${button} (${money.label.toLowerCase()} ${values[money.id]})` : button;
+}
+
+/** What submitting does, in the words the typed line's question uses: the sentence, then its risk. */
+export function actionConsequence(action: ActionShape, values: ActionValues): string {
+  const risk = effectiveRisk(action, values);
+  const sentence = actionSentence(action, values);
+  return risk === 'none' ? sentence : `${sentence} This ${riskWords(risk)}.`;
 }
 
 /**

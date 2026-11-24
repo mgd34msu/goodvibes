@@ -11,7 +11,8 @@
  *   - `nodeGoogleFilePort`      reads files (never writes: adoption reads
  *                               another tool's credentials and must not touch
  *                               them)
- *   - `createProcessCommandPort` spawns subprocesses, for the gcloud driver
+ *   - `createProcessCommandPort` spawns subprocesses, for the gcloud driver,
+ *                               and downloads its archive with progress
  *   - `startLoopbackListener`   binds the loopback port Google redirects to
  *   - `createFetchCalDavHttpPort` performs CalDAV HTTP
  *
@@ -20,7 +21,8 @@
  * it. A consumer asks for these by name, from here.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { createWriteStream, existsSync, readFileSync } from 'node:fs';
+import { once } from 'node:events';
 import type { GoogleFilePort } from './credential-adoption.js';
 import type { GoogleCommandPort } from './types.js';
 import { GCLOUD_DEFAULT_TIMEOUT_MS } from './gcloud.js';
@@ -79,6 +81,35 @@ export function createProcessCommandPort(): GoogleCommandPort {
           timedOut: false,
           spawnError: error instanceof Error ? error.message : String(error),
         };
+      }
+    },
+    // The SDK archive, streamed to its file so each piece that arrives can be said (curl holds its
+    // progress back when its output is a pipe). An HTTP error is a failure, never saved as the file.
+    async download(url, path, onProgress) {
+      try {
+        const response = await fetch(url, { redirect: 'follow' });
+        if (!response.ok || !response.body) return { ok: false, problem: `Downloading ${url} failed: HTTP ${response.status}.` };
+        const length = Number(response.headers.get('content-length'));
+        const total = Number.isFinite(length) && length > 0 ? length : undefined;
+        const out = createWriteStream(path);
+        let received = 0;
+        const reader = response.body.getReader();
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            received += value.byteLength;
+            if (!out.write(value)) await once(out, 'drain');
+            onProgress(received, total);
+          }
+        } finally {
+          reader.releaseLock();
+          out.end();
+          await once(out, 'close');
+        }
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, problem: `Downloading ${url} failed: ${error instanceof Error ? error.message : String(error)}` };
       }
     },
   };

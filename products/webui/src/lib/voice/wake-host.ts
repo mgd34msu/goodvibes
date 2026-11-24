@@ -50,18 +50,26 @@ import { micArbiter, type MicArbiter } from './mic-arbiter';
 import { playWakeChime } from './wake-chime';
 import { loadWakeModel, openWakeModelCache, WakeModelError } from './wake-models';
 import { loadWakeRuntime, type WakeBrowserBackend } from './wake-runtime';
-import { CONFIG_SCHEMA_ENTRIES } from '../generated/config-schema';
+let pinnedWakeModel: Promise<string> | null = null;
 
 /**
  * The model id the daemon actually serves to a tab. Read from this repo's
  * generated schema snapshot (the drift-checked copy of the platform's own row) rather
- * than spelled here, so it cannot fall out of step with the pinned model.
+ * than spelled here, so it cannot fall out of step with the pinned model. The snapshot
+ * is loaded when wake detection first starts, not with the page: with wake detection
+ * off (the default) it is never loaded.
  */
-export const PINNED_WAKE_MODEL_ID: string = (() => {
-  const row = CONFIG_SCHEMA_ENTRIES.find((entry) => entry.key === 'voice.wake.models');
-  const value = typeof row?.default === 'string' ? row.default.split(',')[0]?.trim() : '';
-  return value && value.length > 0 ? value : 'hey_goodvibes';
-})();
+export function pinnedWakeModelId(): Promise<string> {
+  pinnedWakeModel ??= import('../generated/config-schema').then(({ CONFIG_SCHEMA_ENTRIES }) => {
+    const row = CONFIG_SCHEMA_ENTRIES.find((entry) => entry.key === 'voice.wake.models');
+    const value = typeof row?.default === 'string' ? row.default.split(',')[0]?.trim() : '';
+    return value && value.length > 0 ? value : 'hey_goodvibes';
+  }, (error: unknown) => {
+    pinnedWakeModel = null;
+    throw error;
+  });
+  return pinnedWakeModel;
+}
 
 /** What this tab is doing about wake detection, for an indicator that must not lie. */
 export type WakeHostPhase =
@@ -486,12 +494,13 @@ export class WakeHost {
   }
 
   async #startListening(settings: WakeRuntimeSettings): Promise<void> {
-    if (!settings.modelIds.includes(PINNED_WAKE_MODEL_ID)) {
+    const pinned = await pinnedWakeModelId();
+    if (!settings.modelIds.includes(pinned)) {
       // Nothing this tab could score: no download, no device, no lock. Holding the
       // microphone would show "listening" for a detector that cannot fire, and
       // dictation opens its own stream when pressed.
       this.#releaseTabLock();
-      const detail = noPinnedModelDetail(settings.modelIds);
+      const detail = noPinnedModelDetail(settings.modelIds, pinned);
       this.#patch({
         ...IDLE_STATE,
         settings,
@@ -811,16 +820,17 @@ export function createBrowserModelSetLoader(deps: {
     }
 
     const limitations: string[] = [];
-    const unservable = settings.modelIds.filter((id) => id !== PINNED_WAKE_MODEL_ID);
+    const pinned = await pinnedWakeModelId();
+    const unservable = settings.modelIds.filter((id) => id !== pinned);
     if (unservable.length > 0) {
       limitations.push(
         `voice.wake.models names ${unservable.join(', ')}, which a browser tab cannot load: the daemon serves the `
-        + `pinned "${PINNED_WAKE_MODEL_ID}" classifier, and a custom model lives on the host's disk with no route to `
+        + `pinned "${pinned}" classifier, and a custom model lives on the host's disk with no route to `
         + 'fetch it here. Only the pinned model is being scored in this tab.',
       );
     }
     // The host starts a loader only when the pinned id is configured.
-    const models: WakeModelHandle[] = [{ id: PINNED_WAKE_MODEL_ID, session: classifier }];
+    const models: WakeModelHandle[] = [{ id: pinned, session: classifier }];
 
     return {
       embedding,
@@ -836,9 +846,9 @@ export function createBrowserModelSetLoader(deps: {
   };
 }
 
-function noPinnedModelDetail(modelIds: readonly string[]): string {
+function noPinnedModelDetail(modelIds: readonly string[], pinned: string): string {
   const named = modelIds.length === 0 ? 'is empty' : `names only ${modelIds.join(', ')}`;
-  return `voice.wake.models ${named}, and a browser tab can score only the pinned "${PINNED_WAKE_MODEL_ID}" `
+  return `voice.wake.models ${named}, and a browser tab can score only the pinned "${pinned}" `
     + 'classifier (a custom model lives on the host\'s disk with no route to fetch it here). This tab does not open '
     + 'the microphone for wake detection; dictation still works.';
 }

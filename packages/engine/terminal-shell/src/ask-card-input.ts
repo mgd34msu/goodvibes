@@ -6,10 +6,16 @@
  *   a        "Yes, and remember (choose what)": opens the remember choices
  *            (offered only when the ask can be remembered)
  *   n        no
+ *   w        say why: opens the reason field; from then on every key is text
+ *            until Enter (refuse with the reason) or Esc (back)
  *   d        details
  *   ←→ tab   choose a button; ⏎ presses it
- *   ↑↓       scroll; inside the remember choices, move (1-9 pick one)
- *   typing   starts "why not", the reason sent with the refusal
+ *   ↑↓       scroll; inside the remember choices, move
+ *   1-9      inside the remember choices, answer with that numbered choice;
+ *            on a multi-edit card, keep or leave out that numbered change
+ *
+ * Any other letter does nothing, and text that arrives in one burst (a paste)
+ * is never an answer.
  *
  * Enter presses the selected button, which opens on the yes, or on `No` for
  * what cannot be undone or weakens a protection (renderer/ask-card.ts askCardDefaultChoice), so
@@ -94,7 +100,9 @@ export function handleAskCardKey<T extends AskCardPending>(req: T, data: string)
       const next = (index + (data === KEY_UP ? -1 : 1) + tiers.length) % tiers.length;
       return keep({ ...req, submenuIndex: next });
     }
-    if (/^[1-9]$/.test(data) && Number(data) <= tiers.length) return keep({ ...req, submenuIndex: Number(data) - 1 });
+    // A numbered choice answers to its number, as Enter answers the highlighted one.
+    const numbered = /^[1-9]$/.test(data) ? tiers[Number(data) - 1] : undefined;
+    if (numbered) return answered(true, numbered.tier === 'session', undefined, { rememberTier: numbered.tier });
     if (isEnter(data)) {
       const tier = tiers[index];
       if (tier) return answered(true, tier.tier === 'session', undefined, { rememberTier: tier.tier });
@@ -149,6 +157,14 @@ export function handleAskCardKey<T extends AskCardPending>(req: T, data: string)
     if (key === 'y') return press(buttons.find((b) => b.id === 'apply-selected' || b.id === 'once')?.id) ?? keep(req);
     if (key === 'n') return answered(false);
     if (key === 'a' && remember.offered) return openRemember();
+    // The changes are numbered: a number keeps or leaves out that change.
+    if (/^[1-9]$/.test(data) && Number(data) <= req.hunkState.hunks.length) {
+      const at = Number(data) - 1;
+      const selected = new Set(req.hunkState.selected);
+      if (selected.has(at)) selected.delete(at);
+      else selected.add(at);
+      return keep({ ...req, hunkState: { ...req.hunkState, cursor: at, selected } });
+    }
     const { state, commit } = applyHunkKey(req.hunkState, data);
     if (commit === 'cancel') return answered(false);
     if (commit === null && state !== req.hunkState) return keep({ ...req, hunkState: state });
@@ -159,17 +175,16 @@ export function handleAskCardKey<T extends AskCardPending>(req: T, data: string)
   // Mouse, navigation and other escape sequences, and a bare Esc, are not answers.
   if (data.startsWith('\x1b')) return { handled: false, pending: req };
 
-  // Text that arrives as one burst (typed fast, or pasted) is a reason being typed, never a key.
-  if (data.length > 1 && isPrintable(data)) {
-    return presentation.typeToRefuse ? keep({ ...req, replyMode: 'deny-reason', replyBuffer: data }) : keep(req);
-  }
+  // Text that arrives as one burst (typed fast, or pasted) is never an answer.
+  if (data.length > 1) return keep(req);
   if (key === 'y') return answered(true);
   if (key === 'n') return answered(false);
   if (key === 'a' && remember.offered) return openRemember();
+  // Saying why has its own key; once its field is open, every key is text (above).
+  if (key === 'w' && presentation.typeToRefuse) return keep({ ...req, replyMode: 'deny-reason', replyBuffer: '' });
   // A choice with a key of its own ("m" for Choose another model).
   const keyed = buttons.find((b) => b.key === key && b.id === 'choose-model');
   if (keyed) return press(keyed.id) ?? keep(req);
-  // Any other printable key starts "why not", seeded with it.
-  if (isPrintable(data) && presentation.typeToRefuse) return keep({ ...req, replyMode: 'deny-reason', replyBuffer: data });
+  // Any other key does nothing.
   return keep(req);
 }

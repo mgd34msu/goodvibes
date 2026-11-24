@@ -1,32 +1,33 @@
 /**
- * The screens drawn from slash command descriptions, and the panel the
- * command palette opens one in. Each screen is a plain component, so a
- * settings section or a Work tab can also show it in place.
+ * The screens drawn from slash command descriptions (listed in
+ * command-screen-list.ts), and the panel the command palette opens one in.
+ * Each screen is a plain component, so a settings section or a Work tab can
+ * also show it in place.
  */
 import type { ComponentType } from 'react';
 import { Drawer } from '../../ui/Drawer';
 import { CommandScreenTitleShown } from './CommandScreen';
+import { COMMAND_SCREEN_LIST, type CommandScreenListing } from './command-screen-list';
 import { McpServers } from './McpServers';
 import { RepeatPurchases } from './RepeatPurchases';
 import { SchedulesPanel } from './SchedulesPanel';
 import { TriggersPanel } from './TriggersPanel';
 
-export interface CommandScreenEntry {
-  readonly id: string;
-  /** The palette row and the panel's name. */
-  readonly title: string;
-  /** The slash command it is drawn from (searchable in the palette as `/name`). */
-  readonly command: string;
-  readonly keywords: readonly string[];
+export interface CommandScreenEntry extends CommandScreenListing {
   readonly Component: ComponentType;
 }
 
-export const COMMAND_SCREENS: readonly CommandScreenEntry[] = [
-  { id: 'schedules', title: 'Schedules', command: 'schedule', keywords: ['schedule', 'routine', 'cron', 'every', 'remind', 'automation'], Component: SchedulesPanel },
-  { id: 'mcp-servers', title: 'MCP servers and tools', command: 'mcp', keywords: ['mcp', 'servers', 'tools', 'block', 'trust', 'role'], Component: McpServers },
-  { id: 'repeat-purchases', title: 'Repeat purchases', command: 'payments', keywords: ['payments', 'standing', 'repeat', 'purchase', 'buy', 'allowance'], Component: RepeatPurchases },
-  { id: 'triggers', title: 'Triggers', command: 'triggers', keywords: ['triggers', 'watch', 'watcher', 'recovery', 'grant', 'fires'], Component: TriggersPanel },
-];
+const SCREEN_COMPONENTS: Readonly<Record<string, ComponentType>> = {
+  'schedules': SchedulesPanel,
+  'mcp-servers': McpServers,
+  'repeat-purchases': RepeatPurchases,
+  'triggers': TriggersPanel,
+};
+
+export const COMMAND_SCREENS: readonly CommandScreenEntry[] = COMMAND_SCREEN_LIST.flatMap((entry) => {
+  const Component = SCREEN_COMPONENTS[entry.id];
+  return Component ? [{ ...entry, Component }] : [];
+});
 
 export function CommandScreenDrawer({ screen, onClose }: { readonly screen: string | null; readonly onClose: () => void }) {
   const entry = COMMAND_SCREENS.find((candidate) => candidate.id === screen);

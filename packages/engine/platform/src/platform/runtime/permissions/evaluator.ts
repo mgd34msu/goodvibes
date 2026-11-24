@@ -191,7 +191,7 @@ function dispatchPolicyRule(
 
   switch (rule.type) {
     case 'prefix': {
-      const result = evaluatePrefixRule(rule, toolName, args, subjects?.commands);
+      const result = evaluatePrefixRule(rule, toolName, args, subjects?.commands, projectRoot);
       matched = result.matched;
       step = result.step;
       break;

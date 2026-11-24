@@ -2,7 +2,7 @@ import type { ToolDefinition } from '../../types/tools.js';
 
 /**
  * JSON Schema for the find tool's input.
- * Supports three modes: files (glob), content (grep), symbols (regex-based extraction).
+ * Supports five modes: files (glob), content (grep), symbols, references and structural (AST patterns).
  */
 export const findSchema: ToolDefinition = {
   name: 'find',
@@ -10,8 +10,8 @@ export const findSchema: ToolDefinition = {
   // Sent in full on every model request (see ToolDefinition.core).
   core: true,
   description:
-    'Search the codebase using glob patterns, regex content search, or symbol extraction. ' +
-    'Supports multiple queries in one call. Modes: files (glob), content (grep), symbols (regex).',
+    'Search the codebase using glob patterns, regex content search, symbol extraction, references or AST patterns. ' +
+    'Supports multiple queries in one call. Modes: files (glob), content (grep), symbols (declarations), references (uses of a symbol), structural (AST patterns).',
   sideEffects: ['read_fs'],
   // Every mode searches under `path` (and reads `file` in references mode); globs match below it only.
   subjects: { paths: ['queries[].path', 'queries[].file'] },

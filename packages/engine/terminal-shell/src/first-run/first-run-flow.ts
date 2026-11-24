@@ -16,13 +16,14 @@ import type { ConfigManager, OAuthProviderConfig, SecretsManager, SubscriptionMa
 import { createOAuthLocalListener, getSubscriptionProviderConfig, readAuthorizationInput } from '@goodvibes/engine/platform/platform/config';
 import { resolveDefaultModelReadiness, type ModelDefinition, type ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import { localScanState } from '@goodvibes/engine/platform/platform/discovery';
+import { decisionModelReadiness, storeDecisionModelKey, type DecisionModelReadiness, type JudgmentSettingsSource } from '@goodvibes/engine/platform/platform/runtime/judgment-services';
 import { logger, openExternalUrl, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SurfaceLayer } from '../renderer/surface-kit.js';
-import { renderChooseStep, renderSignInStep, type SignInStepView } from '../renderer/first-run.js';
+import { renderChooseStep, renderDecideStep, renderSignInStep, type SignInStepView } from '../renderer/first-run.js';
 import { copyToClipboard } from '../clipboard.js';
-import { readFirstRunOffers, FIRST_SCREEN_PROVIDERS, LOCAL_OFFER_NAME, type DiscoveryView, type FirstRunOffers, type ProviderFact, type ProviderOffer, type ProviderRegistryView } from './offers.js';
+import { choosableProviderIds, readFirstRunOffers, readUsableProvider, FIRST_SCREEN_PROVIDERS, INTERNAL_PROVIDER_IDS, LOCAL_OFFER_NAME, type DiscoveryView, type FirstRunOffers, type ProviderFact, type ProviderOffer, type ProviderRegistryView, type UsableProvider } from './offers.js';
 import { setFirstRunScreen } from './splash-state.js';
 
 /** How often first run looks again for a model server on this computer while it has found none. */
@@ -51,6 +52,59 @@ export interface FirstRunDeps {
   readonly markDone: () => void;
   /** Whether first run already finished once (the check marker exists). */
   readonly isMarkedDone: () => boolean;
+  /**
+   * Who decides when GoodVibes would otherwise stop and ask: whether a decision
+   * model can be asked now, storing a pasted TypeSafe key, and choosing Ask me
+   * (firstRunDecisionModel). Absent: first run has no such step.
+   */
+  readonly decisionModel?: FirstRunDecisionModel | undefined;
+  /**
+   * "Another decision model…": the decision-models settings (Cloudflare and the
+   * other backends the judgment port supports). First run goes on once one is usable.
+   */
+  readonly openDecisionModelSettings?: (() => void) | undefined;
+}
+
+/** What first run's "Who decides" step reads and writes. */
+export interface FirstRunDecisionModel {
+  /**
+   * Whether "Who decides" is asked: the mode lets the decision model decide
+   * (Jev decides, Just vibes) and none can be asked now. A usable key, Ask me
+   * chosen already, or "No Decision Model" chosen in settings asks nothing.
+   */
+  readonly needsChoice: () => Promise<boolean>;
+  /** Whether a decision model is usable now; with `check`, one request to it. */
+  readonly readiness: (check?: { readonly signal: AbortSignal }) => Promise<DecisionModelReadiness>;
+  /** Store a pasted TypeSafe key and point the decision model at it. */
+  readonly storeKey: (pasted: string) => Promise<{ readonly ok: true } | { readonly ok: false; readonly sentence: string }>;
+  /** "Ask me": GoodVibes stops and asks you (permissions.mode ask-me). */
+  readonly askMe: () => void;
+  /**
+   * A decision model was picked here (a TypeSafe key, or one set in Settings):
+   * Jev decides is recorded as the person's own choice, not the shipped default,
+   * so it is in force at once whatever model answers.
+   */
+  readonly chooseJevDecides: () => void;
+}
+
+/** The "Who decides" step's reads and writes from a program's settings and secret store. */
+export function firstRunDecisionModel(
+  config: JudgmentSettingsSource['config'] & Pick<ConfigManager, 'setMany' | 'set' | 'get'>,
+  secrets: JudgmentSettingsSource['secrets'] & Pick<SecretsManager, 'set'>,
+): FirstRunDecisionModel {
+  const source: JudgmentSettingsSource = { config, secrets, env: process.env };
+  return {
+    needsChoice: async () => {
+      const mode = String(config.get('permissions.mode') ?? '');
+      if (mode !== 'jev-decides' && mode !== 'just-vibes') return false;
+      const readiness = await decisionModelReadiness(source);
+      return !readiness.usable && readiness.missing !== 'policy';
+    },
+    readiness: (check) => decisionModelReadiness(source, check),
+    storeKey: (pasted) => storeDecisionModelKey({ secrets, config }, pasted),
+    askMe: () => { config.set('permissions.mode', 'ask-me'); },
+    chooseJevDecides: () => { config.set('permissions.mode', 'jev-decides'); },
+  };
 }
 
 /** The model the session will use is ready now. */
@@ -74,7 +128,7 @@ function discoveryView(registry: ProviderRegistry): DiscoveryView {
  */
 export async function gatherProviderFacts(registry: ProviderRegistry): Promise<ProviderRegistryView> {
   const discovered = new Set(registry.listDiscoveredServers().map((server) => server.name));
-  const ids = registry.listProviders().map((provider) => provider.name).filter((id) => id !== 'decision-router');
+  const ids = registry.listProviders().map((provider) => provider.name).filter((id) => !INTERNAL_PROVIDER_IDS.has(id));
   const statuses = await registry.describeConfiguredProviders(ids);
   const free = new Set(registry.listModels().filter((model) => model.tier === 'free').map((model) => model.provider));
   const providers: ProviderFact[] = ids.map((id) => {
@@ -87,9 +141,10 @@ export async function gatherProviderFacts(registry: ProviderRegistry): Promise<P
       envVars: status?.envVars ?? [],
       hasFreeModel: free.has(id),
       discovered: discovered.has(id),
+      label: registry.providerDisplayName(id),
     };
   });
-  return { providers };
+  return { providers, pickerProviders: choosableProviderIds(registry) };
 }
 
 /** The model a provider answers with when chosen in first run: its declared default, else its first selectable model. */
@@ -135,7 +190,14 @@ type Step =
     pendingState?: string | undefined;
     close?: (() => void) | undefined;
   }
-  | { readonly kind: 'local'; selected: number; error?: string | undefined };
+  | { readonly kind: 'local'; selected: number; error?: string | undefined }
+  /** Who decides when GoodVibes would otherwise stop and ask: Jev (a key) or Ask me. */
+  | { readonly kind: 'decide'; selected: number; readonly model: SelectedModel; readonly signIn: 'signed in' | 'no sign-in needed'; error?: string | undefined }
+  /** Jev chosen: the TypeSafe key, checked with one request. */
+  | { readonly kind: 'jev-key'; readonly model: SelectedModel; readonly signIn: 'signed in' | 'no sign-in needed'; typed: string; busy: boolean; error?: string | undefined };
+
+/** The "Who decides" step's rows, in order (renderer/first-run.ts DECIDE_CHOICES). */
+const DECIDE_ROWS = ['jev', 'ask-me', 'other'] as const;
 
 /** The three steps as one kit modal. */
 export class FirstRunModal implements SurfaceModal {
@@ -151,8 +213,33 @@ export class FirstRunModal implements SurfaceModal {
   private spinner: ReturnType<typeof setInterval> | null = null;
   /** While "no model server on this computer" shows: look again (loopback only) every two seconds. */
   private lookAgain: ReturnType<typeof setInterval> | null = null;
+  /** The "Who decides" step comes after the model: no decision model can be asked yet (read once, locally). */
+  private deciderNeeded = false;
+  /** The model is already in use (chosen before the "Who decides" step). */
+  private modelSelected = false;
+  /** The "Who decides" step was answered (or there was none). */
+  private decided = false;
+  /** The decision-models settings were opened from "Who decides": first run goes on once one is usable. */
+  private settingsOpened = false;
+  /** A readiness read for that is in flight. */
+  private settingsChecking = false;
+  /** First run shows only "Who decides" (the model was ready, or taken without asking). */
+  private readonly decideOnly: boolean;
 
-  constructor(private readonly deps: FirstRunDeps, private readonly resumeProvider?: string | undefined) {}
+  /**
+   * `decideFor`: the session's model is ready already, so first run is only
+   * its "Who decides" step, for that model. `using`: that model was taken
+   * without asking, and this is the line that says so once first run is done.
+   */
+  constructor(private readonly deps: FirstRunDeps, private readonly resumeProvider?: string | undefined, decideFor?: SelectedModel,
+    private readonly using?: string | undefined) {
+    this.decideOnly = decideFor !== undefined;
+    if (decideFor) {
+      this.deciderNeeded = true;
+      this.modelSelected = true;
+      this.step = { kind: 'decide', selected: 0, model: decideFor, signIn: 'signed in' };
+    }
+  }
 
   /** Read the providers' facts (async, once), then open step 2 when a chosen provider waits to be signed in. */
   async load(): Promise<void> {
@@ -160,6 +247,10 @@ export class FirstRunModal implements SurfaceModal {
       this.facts = await gatherProviderFacts(this.deps.providerRegistry);
     } catch {
       this.facts = { providers: [] };
+    }
+    // A local read: when no decision model can be asked, the model is followed by "Who decides".
+    if (this.deps.decisionModel && this.step.kind !== 'decide') {
+      try { this.deciderNeeded = await this.deps.decisionModel.needsChoice(); } catch { this.deciderNeeded = true; }
     }
     if (this.resumeProvider) {
       const offer = this.offers()?.rows.find((row) => row.providerId === this.resumeProvider && row.route !== 'local');
@@ -176,19 +267,34 @@ export class FirstRunModal implements SurfaceModal {
     const late = discovery.servers.filter((server) => !known.has(server.name)).map((server): ProviderFact => ({
       id: server.name, routes: ['anonymous'], ready: server.models > 0, envVars: [], hasFreeModel: false, discovered: true,
     }));
-    return readFirstRunOffers({ providers: [...this.facts.providers, ...late] }, discovery, { isSet: (name) => typeof process.env[name] === 'string' && process.env[name] !== '' });
+    return readFirstRunOffers({ providers: [...this.facts.providers, ...late], pickerProviders: this.facts.pickerProviders }, discovery);
   }
 
   // -- finishing ---------------------------------------------------------
 
-  private finish(model: SelectedModel, signIn: 'signed in' | 'no sign-in needed'): void {
-    if (this.finished) return;
-    this.finished = true;
+  private selectModel(model: SelectedModel): void {
+    if (this.modelSelected) return;
+    this.modelSelected = true;
     const effort = this.deps.configManager.get('provider.reasoningEffort');
     // Quiet: a line in the conversation would retire the splash; "You're set" says it instead.
     this.deps.completeModelSelection?.({ model, effort: typeof effort === 'string' ? effort : '', quiet: true });
+  }
+
+  private finish(model: SelectedModel, signIn: 'signed in' | 'no sign-in needed'): void {
+    if (this.finished) return;
+    // No decision model can be asked yet: the model is in use, and "Who decides" comes next.
+    if (this.deciderNeeded && !this.decided) {
+      this.selectModel(model);
+      this.stopSpinner();
+      this.stopLookingAgain();
+      this.step = { kind: 'decide', selected: 0, model, signIn };
+      this.deps.renderRequest();
+      return;
+    }
+    this.finished = true;
+    this.selectModel(model);
     this.deps.markDone();
-    setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn });
+    setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn, steps: this.deciderNeeded ? 4 : 3, ...(this.using ? { using: this.using } : {}) });
     this.deps.redrawConversation?.();
     this.stopSpinner();
     this.stopLookingAgain();
@@ -235,12 +341,6 @@ export class FirstRunModal implements SurfaceModal {
       return;
     }
     this.step = { kind: 'api-key', offer, typed: '', busy: false };
-  }
-
-  private useFoundKey(): void {
-    const found = this.offers()?.foundKey;
-    if (!found) return;
-    void this.finishWithProvider(found.providerId, 'signed in');
   }
 
   // -- step 2: a key -----------------------------------------------------
@@ -457,8 +557,7 @@ export class FirstRunModal implements SurfaceModal {
       return;
     }
     if (step.kind === 'choose') {
-      if (token.type !== 'key' && !(token.type === 'text' && token.value === 'a')) return;
-      if (token.type === 'text') { this.useFoundKey(); return; }
+      if (token.type !== 'key') return;
       const count = (this.offers()?.rows.length ?? 0) + 1;
       const key = token.logicalName;
       if (key === 'up') this.selected = (this.selected - 1 + count) % count;
@@ -490,6 +589,22 @@ export class FirstRunModal implements SurfaceModal {
       else if (token.logicalName === 'enter') void this.finishBrowserWithCode(step);
       return;
     }
+    if (step.kind === 'decide') {
+      if (token.type !== 'key') return;
+      const key = token.logicalName;
+      if (key === 'up') step.selected = (step.selected - 1 + DECIDE_ROWS.length) % DECIDE_ROWS.length;
+      else if (key === 'down') step.selected = (step.selected + 1) % DECIDE_ROWS.length;
+      else if (key === 'enter') this.decide(step);
+      return;
+    }
+    if (step.kind === 'jev-key') {
+      if (step.busy) return;
+      if (token.type === 'text') { step.typed += token.value.replace(/[\r\n]/g, ''); step.error = undefined; return; }
+      if (token.type !== 'key') return;
+      if (token.logicalName === 'backspace') step.typed = step.typed.slice(0, -1);
+      else if (token.logicalName === 'enter') void this.saveDecisionKey(step);
+      return;
+    }
     // local
     const models = this.localModels();
     if (token.type !== 'key') return;
@@ -505,10 +620,65 @@ export class FirstRunModal implements SurfaceModal {
     }
   }
 
+  // -- who decides ---------------------------------------------------------
+
+  private decide(step: Extract<Step, { kind: 'decide' }>): void {
+    const row = DECIDE_ROWS[step.selected];
+    if (row === 'jev') {
+      this.step = { kind: 'jev-key', model: step.model, signIn: step.signIn, typed: '', busy: false };
+      return;
+    }
+    if (row === 'other') {
+      // The decision-models settings; first run goes on by itself once one is usable (render).
+      if (!this.deps.openDecisionModelSettings) { step.error = 'Settings cannot be opened here: choose a decision model later in /settings.'; return; }
+      step.error = undefined;
+      this.settingsOpened = true;
+      this.deps.openDecisionModelSettings();
+      return;
+    }
+    // Ask me: GoodVibes stops and asks; the status line then reads that mode alone.
+    this.deps.decisionModel?.askMe();
+    this.decided = true;
+    this.finish(step.model, step.signIn);
+  }
+
+  /** Store the pasted key, then one request checks it; a refusal says what failed and the key can be pasted again. */
+  private async saveDecisionKey(step: Extract<Step, { kind: 'jev-key' }>): Promise<void> {
+    const decision = this.deps.decisionModel;
+    if (!decision) return;
+    if (!step.typed.trim()) { step.error = 'Paste the key first.'; this.deps.renderRequest(); return; }
+    step.busy = true;
+    step.error = undefined;
+    this.deps.renderRequest();
+    try {
+      const stored = await decision.storeKey(step.typed);
+      if (!stored.ok) { step.error = stored.sentence; return; }
+      const checked = await decision.readiness({ signal: new AbortController().signal });
+      if (!checked.usable) { step.error = checked.sentence; step.typed = ''; return; }
+      decision.chooseJevDecides();
+      this.decided = true;
+      this.finish(step.model, step.signIn);
+    } catch (error) {
+      step.error = `The key could not be checked: ${summarizeError(error)}`;
+    } finally {
+      step.busy = false;
+      this.deps.renderRequest();
+    }
+  }
+
   /** Esc: step 2 goes back to step 1; on step 1 the modal closes (set up later). */
   escape(): boolean {
     const step = this.step;
     if (step.kind === 'choose') return false;
+    // The key goes back to "Who decides"; "Who decides" itself is left for later (Settings), first run done.
+    if (step.kind === 'jev-key') { this.step = { kind: 'decide', selected: 0, model: step.model, signIn: step.signIn }; return true; }
+    if (step.kind === 'decide') {
+      this.decided = true;
+      // finish() closes the modal through its host when it has one; without one the caller closes it.
+      const closesItself = this.host !== undefined;
+      this.finish(step.model, step.signIn);
+      return closesItself;
+    }
     if (step.kind === 'browser') step.close?.();
     this.stopSpinner();
     this.stopLookingAgain();
@@ -537,16 +707,35 @@ export class FirstRunModal implements SurfaceModal {
       const current = this.deps.providerRegistry.getCurrentModel();
       queueMicrotask(() => this.finish({ id: current.id, provider: current.provider, displayName: current.displayName, registryKey: current.registryKey }, 'signed in'));
     }
+    // A decision model was set in Settings from "Who decides": once it is usable, first run is done.
+    if (this.settingsOpened && !this.finished && !this.settingsChecking && this.deps.decisionModel && this.step.kind === 'decide') {
+      this.settingsChecking = true;
+      const step = this.step;
+      void this.deps.decisionModel.readiness().then((readiness) => {
+        this.settingsChecking = false;
+        if (!readiness.usable || this.finished || this.step !== step) return;
+        this.settingsOpened = false;
+        this.deps.decisionModel?.chooseJevDecides();
+        this.decided = true;
+        this.finish(step.model, step.signIn);
+      }, () => { this.settingsChecking = false; });
+    }
     const step = this.step;
+    const total = this.deciderNeeded ? 4 : 3;
     if (step.kind === 'choose') {
       const offers = this.offers();
       if (offers) this.selected = Math.min(this.selected, offers.rows.length);
-      return renderChooseStep(screenWidth, screenHeight, { offers, selected: this.selected });
+      return renderChooseStep(screenWidth, screenHeight, { offers, selected: this.selected, total });
     }
-    return renderSignInStep(screenWidth, screenHeight, this.signInView(step));
+    if (step.kind === 'decide' || step.kind === 'jev-key') {
+      return renderDecideStep(screenWidth, screenHeight, step.kind === 'decide'
+        ? { kind: 'decide', selected: step.selected, total, only: this.decideOnly, error: step.error }
+        : { kind: 'jev-key', typed: step.typed.length, busy: step.busy, error: step.error, total, only: this.decideOnly });
+    }
+    return renderSignInStep(screenWidth, screenHeight, this.signInView(step), total);
   }
 
-  private signInView(step: Exclude<Step, { kind: 'choose' }>): SignInStepView {
+  private signInView(step: Exclude<Step, { kind: 'choose' | 'decide' | 'jev-key' }>): SignInStepView {
     if (step.kind === 'api-key') {
       return { kind: 'api-key', name: step.offer.name, typed: step.typed.length, storedIn: storedIn(this.deps.configManager), busy: step.busy, error: step.error };
     }
@@ -572,6 +761,44 @@ export class FirstRunModal implements SurfaceModal {
 }
 
 /**
+ * First run with a usable provider already there (a key in the environment, a
+ * stored key or a sign-in): the first one in the order step 1 lists them is
+ * used with its own model, and the choice is said in one line under the
+ * splash, never asked. "Who decides" follows when it is still needed.
+ * 'opened' when that step opened, 'used' when first run is done, undefined
+ * when no provider is usable.
+ */
+async function useUsableProvider(deps: FirstRunDeps): Promise<'opened' | 'used' | undefined> {
+  let usable: UsableProvider | undefined;
+  try {
+    usable = readUsableProvider(await gatherProviderFacts(deps.providerRegistry), { isSet: (name) => typeof process.env[name] === 'string' && process.env[name] !== '' });
+  } catch (error) {
+    logger.warn('[first-run] the providers could not be read; first run asks', { error: summarizeError(error) });
+    return undefined;
+  }
+  if (!usable) return undefined;
+  const model = await providerModel(deps.providerRegistry, usable.providerId);
+  if (!model) return undefined;
+  const using = `Using ${usable.name} (${model.displayName || model.id}) from ${usable.from}; change it with the model control.`;
+  const effort = deps.configManager.get('provider.reasoningEffort');
+  deps.completeModelSelection?.({ model, effort: typeof effort === 'string' ? effort : '', quiet: true });
+  let needed = false;
+  if (deps.decisionModel && deps.pushSurfaceModal) {
+    try { needed = await deps.decisionModel.needsChoice(); } catch { needed = true; }
+  }
+  if (needed && deps.pushSurfaceModal) {
+    setFirstRunScreen({ kind: 'pending' });
+    deps.pushSurfaceModal(new FirstRunModal(deps, undefined, model, using));
+    return 'opened';
+  }
+  deps.markDone();
+  setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn: 'signed in', using });
+  deps.redrawConversation?.();
+  deps.renderRequest();
+  return 'used';
+}
+
+/**
  * Start first run when the session's model is not ready; otherwise record
  * nothing to show under the splash. Decides from what a request would
  * use, so it waits for the provider registry first: custom providers load in
@@ -582,22 +809,45 @@ export class FirstRunModal implements SurfaceModal {
 export async function startFirstRun(deps: FirstRunDeps): Promise<boolean> {
   await Promise.allSettled([deps.providerRegistry.ready(), deps.providerRegistry.credentialsResolved()]);
   if (sessionModelReady(deps)) {
-    // A ready model on a first launch: first run has nothing to ask; it is recorded as done.
+    // A first launch whose model is ready only as the product's default: the usable providers are
+    // taken in the order step 1 lists them, and the choice is said in one line, as below.
+    if (!deps.isMarkedDone() && !deps.configManager.isExplicitlySet('provider.model')) {
+      const used = await useUsableProvider(deps);
+      if (used !== undefined) return used === 'opened';
+    }
+    // A ready model on a first launch with no decision model to ask: first run is only "Who decides".
+    if (!deps.isMarkedDone() && deps.pushSurfaceModal && deps.decisionModel) {
+      let needed = false;
+      try { needed = await deps.decisionModel.needsChoice(); } catch { needed = true; }
+      if (needed) {
+        const current = deps.providerRegistry.getCurrentModel();
+        setFirstRunScreen({ kind: 'pending' });
+        deps.pushSurfaceModal(new FirstRunModal(deps, undefined, { id: current.id, provider: current.provider, displayName: current.displayName, registryKey: current.registryKey }));
+        return true;
+      }
+    }
+    // A ready model on a first launch, and a decision model that can be asked: nothing to ask; recorded as done.
     if (!deps.isMarkedDone()) deps.markDone();
     setFirstRunScreen(undefined);
     return false;
   }
-  if (!deps.pushSurfaceModal) {
-    setFirstRunScreen({ kind: 'not-ready' });
-    return false;
-  }
-  setFirstRunScreen({ kind: 'pending' });
   // A provider the person chose (provider.model set by them) that is not signed in: step 2 for it.
   const readiness = resolveDefaultModelReadiness(deps.providerRegistry, String(deps.configManager.get('provider.model') ?? '').trim());
   const chosen = deps.configManager.isExplicitlySet('provider.model') && readiness.kind === 'needs-key'
     && FIRST_SCREEN_PROVIDERS.some((entry) => entry.providerId === readiness.provider)
     ? readiness.provider
     : undefined;
+  // Otherwise a provider key in the environment, a stored key or a sign-in is a choice already made:
+  // it is used with its own model and nothing is asked about it; the card shows only when none is usable.
+  if (chosen === undefined) {
+    const used = await useUsableProvider(deps);
+    if (used !== undefined) return used === 'opened';
+  }
+  if (!deps.pushSurfaceModal) {
+    setFirstRunScreen({ kind: 'not-ready' });
+    return false;
+  }
+  setFirstRunScreen({ kind: 'pending' });
   const modal = new FirstRunModal(deps, chosen);
   deps.pushSurfaceModal(modal);
   if (localScanState() === 'off') deps.scanThisComputer?.();

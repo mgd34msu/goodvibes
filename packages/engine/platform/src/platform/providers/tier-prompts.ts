@@ -129,12 +129,13 @@ const FREE_SUPPLEMENT = `## Agent Guidance
 You are operating in a multi-agent system. Follow these rules carefully:
 
 **Tool calls, required format:**
-Every tool call must include ALL required parameters. Missing parameters cause
-silent failures. When in doubt, check the tool's schema before calling it.
+Every tool call must include ALL required parameters with the types the tool's
+schema gives. A call that does not match its schema is not run: its result
+names the field, what was sent and what is accepted, and you send it again.
 
-Example, correct agent spawn:
+Example, correct agent spawn (the role goes in \`template\`, never in \`mode\`):
 \`\`\`json
-{ "name": "agent", "input": { "task": "<task>", "mode": "engineer" } }
+{ "name": "agent", "input": { "mode": "spawn", "task": "<task>", "template": "engineer" } }
 \`\`\`
 
 **Multi-agent workflows:**
@@ -143,8 +144,8 @@ waiting for results, do not spawn one, wait, then spawn the next. Parallel
 spawns run concurrently and complete faster.
 
 **Structured output:**
-Your final message MUST end with the required JSON completion block. Omitting
-it causes the orchestrator to treat your run as failed.
+When your instructions ask for a JSON completion report, your final message
+MUST end with it: the run's claims and answer are read from it.
 
 **Plan adherence:**
 Complete the full plan. Do not stop after the first step and ask for
@@ -153,13 +154,14 @@ confirmation, there is no human watching. Make the best choice and continue.`;
 /** Upstream's person-facing guidance: tool discipline without unattended-agent rules. */
 const CONVERSATION_FREE_SUPPLEMENT = `## Tool guidance
 
-Every tool call must include ALL required parameters. Missing parameters cause
-silent failures. When in doubt, check the tool's schema before calling it.
+Every tool call must include ALL required parameters with the types the tool's
+schema gives. A call that does not match its schema is not run: its result
+names the field, what was sent and what is accepted, and you send it again.
 
 When work needs several independent agents, spawn all of them before waiting
 for any result: parallel spawns run concurrently and finish sooner.`;
 
 const STANDARD_SUPPLEMENT = `## Reminders
 - Include all required parameters in every tool call.
-- When spawning agents, use the correct \`mode\` parameter.
+- An agent is started with \`"mode": "spawn"\`; its role goes in \`template\`.
 - Complete your full plan before reporting results.`;

@@ -12,7 +12,9 @@
  * its form a step at a time ("Add a server · step 1 of 2"), the blanks of one
  * step together, a suggested value marked as suggested, and under it the
  * line the form will run ("This will run: /mcp add weather -- npx ..."),
- * updated on each key. Enter goes on (or opens the list of a blank chosen
+ * updated on each key. On the last step the Enter key is named for what it
+ * does ("⏎ Send") and what submitting does is said above that line; the
+ * submitted form is the request. Enter goes on (or opens the list of a blank chosen
  * from a live list), tab moves between blanks, left and right change a
  * choice, Esc goes back one step.
  */
@@ -20,11 +22,11 @@ import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '../surface-modal-host.js';
 import type { SelectionItem } from '../selection-modal.js';
 import { tokenizeSlashCommand } from '../slash-command-parser.js';
-import { beginModal, finishModal, MODAL_MARK_INSET, scrollCountText, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
+import { beginModal, finishModal, MODAL_MARK_INSET, scrollCountText, standardModalWidth, wrapLines, type KitHint, type SurfaceLayer } from '../renderer/surface-kit.js';
 import { drawList, type KitRow } from '../renderer/surface-kit-list.js';
 import { activeTokens } from '../renderer/theme.js';
 import { listByName } from './lists.js';
-import { fixedChoices, impliedValue, isShown, listChoices, renderTypedLine, riskWords, withoutSecrets } from './typed-line.js';
+import { actionConsequence, actionSubmitLabel, fixedChoices, impliedValue, isShown, listChoices, renderTypedLine, riskWords, withoutSecrets } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, FirstScreenGroup, InputDescription } from './types.js';
 
 export type PanelResult =
@@ -252,6 +254,16 @@ export class GuidedPanel implements SurfaceModal {
     if (this.picking) return;
     if (this.mode !== 'form') {
       const rows = this.rows();
+      // The command's one-key choice on the selected row ("s skip for now").
+      const rowKey = this.rowKeyLabel();
+      if (rowKey && token.type === 'text' && token.value === this.command.rowKey!.key) {
+        const action = rows[this.selected]?.action;
+        if (action) {
+          (this.command.rowKey!.press as (id: string, ctx: CommandActionContext) => void)(action.id, this.ctx);
+          this.readRowValues(rows);
+        }
+        return;
+      }
       if (token.type !== 'key') return;
       const key = token.logicalName ?? '';
       if (key === 'up') this.selected = (this.selected - 1 + rows.length) % Math.max(1, rows.length);
@@ -306,9 +318,19 @@ export class GuidedPanel implements SurfaceModal {
     });
   }
 
+  /** The selected row's one-key choice, as the hint names it; undefined when it has none. */
+  private rowKeyLabel(): string | undefined {
+    const rowKey = this.command.rowKey;
+    const action = this.rows()[this.selected]?.action;
+    if (!rowKey || !action) return undefined;
+    return (rowKey.label as (id: string, ctx: CommandActionContext) => string | undefined)(action.id, this.ctx);
+  }
+
   private renderMenu(screenWidth: number, screenHeight: number): SurfaceLayer {
     const rows = this.rows();
-    const f = this.frame(screenWidth, screenHeight, rows.length, [['↑↓', 'move'], ['⏎', 'choose']], this.group ? this.group.label : this.command.summary);
+    const rowKey = this.rowKeyLabel();
+    const hints: KitHint[] = [['↑↓', 'move'], ['⏎', 'choose'], ...(rowKey ? [[this.command.rowKey!.key, rowKey] as KitHint] : [])];
+    const f = this.frame(screenWidth, screenHeight, rows.length, hints, this.group ? this.group.label : this.command.summary);
     // The kit list: the product's selection bar, starting at the title's column.
     const kitRows: KitRow[] = rows.map((row, index) => {
       const value = row.action ? (this.rowValues.get(row.action.id) ?? (row.action.risk !== 'none' ? riskWords(row.action.risk) : '')) : '';
@@ -327,7 +349,11 @@ export class GuidedPanel implements SurfaceModal {
     const fields = this.stepFields();
     const values = this.values();
     const line = renderTypedLine(this.command, action.id, withoutSecrets(action, values));
-    const f = this.frame(screenWidth, screenHeight, fields.length * 2 + 6, [['⏎', this.stepIndex < steps.length - 1 ? 'next' : 'done'], ['tab', 'field'], ['esc', 'back']]);
+    const lastStep = this.stepIndex >= steps.length - 1;
+    // On the last step Enter submits: its key says what it does, and what submitting does is said above the line.
+    const consequence = lastStep ? wrapLines(actionConsequence(action, values), Math.max(20, standardModalWidth(screenWidth) - 12)) : [];
+    const f = this.frame(screenWidth, screenHeight, fields.length * 2 + 6 + (consequence.length > 0 ? consequence.length + 1 : 0),
+      [['⏎', lastStep ? actionSubmitLabel(action, values) : 'next'], ['tab', 'field'], ['esc', 'back']]);
     // Text starts at the title's column; the form scrolls so the blank being answered is always shown.
     const l = f.l + 1;
     const width = f.r - l + 1;
@@ -344,7 +370,7 @@ export class GuidedPanel implements SurfaceModal {
     const heightOf = (index: number, first: number): number =>
       inline(fields[index]!) ? 3 : index === first || inline(fields[index - 1]!) ? 2 : 1;
     // Rows left for blanks: the run line and its gap (and a note) stay at the bottom.
-    const room = f.bottom - y - 2 - (this.note ? 2 : 0);
+    const room = f.bottom - y - 2 - (this.note ? 2 : 0) - (consequence.length > 0 ? consequence.length + 1 : 0);
     let first = 0;
     const span = (from: number, to: number): number => { let total = 0; for (let k = from; k <= to; k++) total += heightOf(k, from); return total; };
     // One row is kept for the "more below" mark whenever a blank follows the window.
@@ -400,7 +426,13 @@ export class GuidedPanel implements SurfaceModal {
     }
     if (last < fields.length - 1) { y += 1; f.canvas.put(l + 3, y, `↓ ${fields.length - 1 - last} more below (tab)`, { fg: t.textFaint }); }
     if (this.note) { y += 1; f.canvas.put(l + 3, y, this.note, { fg: t.warning }); }
-    const runY = Math.min(f.bottom, y + 2);
+    let consequenceY = y + 2;
+    for (const row of consequence) {
+      if (consequenceY >= f.bottom - 1) break;
+      f.canvas.put(l + 3, consequenceY, row, { fg: t.text });
+      consequenceY += 1;
+    }
+    const runY = Math.min(f.bottom, consequence.length > 0 ? consequenceY + 1 : y + 2);
     const lead = '   This will run: ';
     f.canvas.put(l, runY, lead, { fg: t.textMuted });
     f.canvas.put(l + lead.length, runY, line.length > width - lead.length ? `${line.slice(0, width - lead.length - 1)}…` : line, { fg: t.text });

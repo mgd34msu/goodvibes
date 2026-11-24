@@ -237,7 +237,7 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
       }
 
       // Copy export path to clipboard if requested.
-      const copied = doCopy ? copyToClipboard(outputPath) : false;
+      const copied = doCopy ? copyToClipboard(outputPath) : 'failed';
 
       // Open the exported HTML in the default browser if requested.
       let openResult = '';
@@ -254,7 +254,7 @@ export async function shareConversation(ctx: CommandContext, input: ShareInput):
       }
       if (shareLink) hints.push(`Share link: ${shareLink}`);
       if (uploadReceipt) hints.push(`Upload receipt: ${uploadReceipt}`);
-      if (doCopy) hints.push(copied ? '(path copied to clipboard)' : '(could not copy the path)');
+      if (doCopy) hints.push(copied === 'copied' ? '(path copied)' : copied === 'sent' ? '(path sent to your terminal\'s clipboard)' : '(could not copy the path)');
       if (doOpen && format === 'html') hints.push(openResult === 'browser open requested' ? '(opened in browser)' : `(not opened: ${openResult})`);
       if (doOpen && format !== 'html') hints.push('(not opened: only an html file opens in the browser)');
 

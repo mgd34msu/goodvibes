@@ -52,6 +52,24 @@
   margin: 0 auto;
 }
 
+/* A message far from the screen keeps its row as its plain text, at the height it was
+   drawn (views/chat/transcript-window.ts): the browser's find and a selection still
+   reach its words, and the row holds its place. It is drawn as the message again as
+   it nears the screen; in the moment of a fast scroll the words show quietly. */
+.chat-row--text {
+  overflow: hidden;
+  contain: strict;
+  content-visibility: auto;
+}
+
+.chat-row__text {
+  margin: 0;
+  color: var(--text-3);
+  font: var(--weight-regular) var(--text-md) / var(--leading-prose) var(--font-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .jump-to-bottom {
   position: absolute;
   bottom: 12px;

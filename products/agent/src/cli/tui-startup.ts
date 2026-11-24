@@ -5,7 +5,7 @@ import type { InputHandler } from '../input/handler.ts';
 // they pull in feature-enablement's eager metadata lookups before boot begins.
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
 import { writeOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
-import { FirstRunModal, installSplashAdditions, setSplashImportCommand, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
+import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, setSplashImportCommand, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/lan-scan-consent.ts';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
@@ -14,12 +14,6 @@ import { checkRecoveryFile, readLastSessionPointer, type SessionSurface } from '
 import { resolveResumableSession, surfaceResumeRelaunchNotice } from './resume-relaunch-notice.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
-
-export type InteractiveTerminalCheckInput = {
-  readonly binary: string;
-  readonly stdinIsTTY: boolean | undefined;
-  readonly stdoutIsTTY: boolean | undefined;
-};
 
 type NodeLikeError = Error & {
   readonly code?: string;
@@ -131,20 +125,6 @@ export function formatFatalStartupErrorForUser(error: unknown, options: FatalSta
   return [message || `${options.binary} failed during startup.`, 'Set GOODVIBES_AGENT_DEBUG=1 to print a stack trace.'].join('\n');
 }
 
-export function getInteractiveTerminalLaunchError(input: InteractiveTerminalCheckInput): string | null {
-  const stdinReady = input.stdinIsTTY === true;
-  const stdoutReady = input.stdoutIsTTY === true;
-  if (stdinReady && stdoutReady) return null;
-
-  const missing = [stdinReady ? null : 'stdin', stdoutReady ? null : 'stdout'].filter((entry): entry is string => entry !== null);
-  const missingLabel = missing.length === 1 ? `${missing[0]} is` : `${missing.join(' and ')} are`;
-
-  return [
-    `${input.binary} requires an interactive terminal for the TUI (${missingLabel} not a TTY).`,
-    `Run it from a terminal, or use non-interactive commands such as '${input.binary} --help', '${input.binary} status --json', or '${input.binary} run --print "<prompt>"'.`,
-  ].join('\n');
-}
-
 export function applyInitialTuiCliState(options: {
   readonly cli: GoodVibesCliParseResult;
   readonly input: InputHandler;
@@ -235,9 +215,26 @@ export function applyInitialTuiCliState(options: {
  */
 async function offerTerminalSettingsImport(commandContext: CommandContext): Promise<void> {
   try {
-    const { agentWorkspaceTuiSettingsImportHasChanges, planAgentWorkspaceTuiSettingsImport } = await import('../input/agent-workspace-settings.ts');
-    const plan = planAgentWorkspaceTuiSettingsImport(commandContext);
-    if (plan !== null && agentWorkspaceTuiSettingsImportHasChanges(plan)) setSplashImportCommand('/setup import-settings');
+    const settings = await import('../input/agent-workspace-settings.ts');
+    const plan = settings.planAgentWorkspaceTuiSettingsImport(commandContext);
+    if (plan === null || !settings.agentWorkspaceTuiSettingsImportHasChanges(plan)) return;
+    // A one-key choice where it is offered: Enter on the empty composer shows what would
+    // change (the workspace's import row asks the same), and the answer imports exactly that plan.
+    setSplashImportCommand('/setup import-settings', () => {
+      void (async () => {
+        const confirm = commandContext.confirm;
+        if (!confirm) { commandContext.print('Nothing was imported: this surface cannot ask before importing. /setup import-settings does it.'); return; }
+        const go = await confirm({
+          title: 'Import GoodVibes settings', body: settings.describeAgentWorkspaceTuiSettingsImportPlan(plan),
+          confirmLabel: 'Import them', cancelLabel: 'Leave as is', tone: 'primary',
+        });
+        if (!go) { commandContext.print('The terminal app\'s settings were left as they are; /setup import-settings brings them over later.'); return; }
+        const outcome = await settings.applyAgentWorkspaceTuiSettingsImport(commandContext, plan);
+        commandContext.print(outcome.status);
+      })().catch((error: unknown) => {
+        commandContext.print(`The terminal app's settings were not imported: ${summarizeError(error)}`);
+      });
+    });
   } catch (error) {
     logger.warn('The terminal app settings could not be read for the first-launch import line', { error: summarizeError(error) });
   }
@@ -265,5 +262,9 @@ function firstRunDeps(
     redrawConversation: redraw,
     markDone: () => { writeOnboardingCheckMarker(shellPaths, { source: 'command' }); },
     isMarkedDone: () => markedDone,
+    // "Who decides" after the model, when no decision model can be asked yet.
+    decisionModel: firstRunDecisionModel(commandContext.platform.configManager, requireSecretsManager(commandContext)),
+    // "Another decision model…": Settings, on the decision model.
+    openDecisionModelSettings: () => { commandContext.openSettingsModal?.('judgment.model'); },
   };
 }

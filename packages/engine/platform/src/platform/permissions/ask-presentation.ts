@@ -96,7 +96,7 @@ export interface AskPresentation {
   readonly remember:
     | { readonly offered: true; readonly tiers: readonly RememberTierView[] }
     | { readonly offered: false; readonly why: string };
-  /** The card takes a typed reason to refuse ("or type why not"). */
+  /** The card takes a typed reason to refuse (its "w say why" key). */
   readonly typeToRefuse: boolean;
   /** A purchase window's deadline: a veto window "goes ahead" at `at`; an approval window "waits for you" until it. */
   readonly countdown?: { readonly verb: string; readonly at: number } | undefined;

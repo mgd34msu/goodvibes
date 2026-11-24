@@ -41,6 +41,16 @@ export function renderDetailedCommandHelp(
   ].join('\n');
 }
 
+/**
+ * The one usage line a usage error shows: the command's first form and where
+ * its full help is. With no command (or one without a help page), the
+ * program's own form and its `--help`.
+ */
+export function renderUsageLine(normalized: string | undefined, help: TerminalCommandHelp | undefined, binary: string): string {
+  if (normalized === undefined || !help) return `Usage: ${binary} [options] [prompt]   (${binary} --help lists every command and option)`;
+  return `Usage: ${binary} ${help.usage[0] ?? normalized}   (${binary} ${normalized} --help shows every form and option)`;
+}
+
 export const COMMON_COMMAND_HELP = {
   providers: {
     usage: ['providers [list]', 'providers current', 'providers inspect <provider>', 'providers use <provider> [modelRegistryKey]'],
@@ -57,13 +67,14 @@ export const COMMON_COMMAND_HELP = {
       'secrets list',
       'secrets providers',
       'secrets test goodvibes://secrets/<source>/...',
-      'secrets set <KEY> <value> [--user|--project] [--secure|--plaintext]',
-      'secrets set <KEY> --stdin   (read the value from standard input; use it for a value that starts with --)',
+      'secrets set <KEY> [--user|--project] [--secure|--plaintext]   (asks for the value without showing it; reads it from standard input when piped)',
+      'secrets set <KEY> <value> [--user|--project] [--secure|--plaintext]   (the value stays in your shell history)',
       'secrets link <KEY> <ref> [--user|--project] [--secure|--plaintext]',
       'secrets delete <KEY> [--user|--project] [--secure|--plaintext]',
     ],
     summary: 'Manage GoodVibes secret records and secret references. Secret refs never embed secret values. --plaintext stores the value unencrypted.',
     examples: [
+      'secrets set OPENAI_API_KEY --user',
       'secrets providers',
       'secrets test goodvibes://secrets/env/OPENAI_API_KEY',
       'secrets link OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY',

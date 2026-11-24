@@ -11,7 +11,7 @@ These work in the Agent exactly as described under the named heading of the term
 | Topic | Heading in the terminal-app part |
 | --- | --- |
 | Option parsing, `--`, typo refusal, run-only flags | "Rules of the command-line parser" |
-| `-m`, `--provider`, `-C`, `-c`, `--enable`, `--disable`, `-p`, `--print`, `-o`, `--json`, `--just-vibes`, `--yolo`, `--no-alt-screen`, `-r`, `-s`, `--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`, `-h`, `-v` | "Global options" |
+| `-m`, `--provider`, `-C`, `-c`, `--enable`, `--disable`, `-p`, `--print`, `-o`, `--json`, `--just-vibes`, `--yolo`, `--no-alt-screen`, `-r`, `-s`, `--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`, `--prompt-file`, `-h`, `-v` | "Global options" |
 | `models`, `providers`, `subscription`, `secrets`, `sessions`, `pair`/`qrcode`, `completion`, `help`, `version`, `plugin bundles` | "Command-line commands" (the matching command) |
 | Composer markers `!`, `!#`, `# `, `@model:`, `!@<path>`, paste folding, what input history keeps of a fold | "What the composer does with typed text" |
 | Screen layout, session chips, opened agents and processes | "Screen layout" and "Views" |
@@ -197,13 +197,13 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 
 | Action | Default key | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C` | Copy selected text. |
+| `copy-selection` | `Ctrl+Shift+C`, `F5` | Copy selected text. |
 | `clear-cancel` | `Ctrl+C` | Clear the composer, cancel generation, twice to exit. |
 | `screen-clear` | `Ctrl+L` | Repaint. |
 | `command-palette` | `Ctrl+P` | Open help: every command and keyboard shortcut in one searchable list (the same as `?` and `/help`). |
 | `workspace-picker` | `Ctrl+G` | Open the Agent workspace. |
 | `workspace-close` | `Ctrl+X` | Close the Agent workspace. |
-| `workspace-close-all` | `Ctrl+Shift+X` | Close the Agent workspace. |
+| `workspace-close-all` | `Ctrl+Shift+X`, `Ctrl+\` | Close the Agent workspace. |
 | `workspace-tab-next` | `Ctrl+]` | Next workspace category. |
 | `workspace-tab-prev` | `Ctrl+[` | Previous workspace category. |
 | `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for the owner, what is scheduled, the background services. |
@@ -217,17 +217,19 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 | `next-error-line-end` | `Ctrl+E` | End of line, or the next error on an empty composer. |
 | `kill-line` | `Ctrl+K` | Kill to the end of the line. |
 | `clear-prompt` | `Ctrl+U` | Clear the composer. |
-| `undo`, `redo` | `Ctrl+Z`, `Ctrl+Shift+Z` | Undo or redo a composer edit. |
+| `undo`, `redo` | `Ctrl+Z`; `Ctrl+Shift+Z`, `Ctrl+^` | Undo or redo a composer edit. |
 | `paste` | `Ctrl+V` | Paste. |
 | `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move onto the work tree. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode, as in the terminal app. |
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
-| `failure-other-model` | `Alt+O` | On the newest failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I` | On the newest failed turn: show what the provider said. |
-| `failure-retry` | `Alt+R` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
-| `failure-sign-in` | `Alt+S` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
-| `next-session` | `Alt+N` | While the session chips show: the next session (agent or process). |
-| `previous-session` | `Alt+P` | While the session chips show: the previous session. |
+| `failure-other-model` | `Alt+O`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Alt+I`, `F3` | On the newest failed turn: show what the provider said. |
+| `failure-retry` | `Alt+R`, `F12` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
+| `failure-sign-in` | `Alt+S`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
+| `next-session` | `Alt+N`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
+| `previous-session` | `Alt+P`, `Ctrl+_` | While the session chips show: the previous session. |
+
+As in the terminal app, every Alt and Ctrl+Shift chord has a second default that macOS Terminal (no Alt by default) and terminals without the extended keyboard protocol still send.
 
 The Agent has no command palette key, no `Alt` word-movement or kill-ring keys, and no `Alt+C`, `Alt+A`, `Alt+M` or `Alt+V`.
 The old action names `panel-picker`, `panel-close`, `panel-close-all`, `panel-tab-next`, `panel-tab-prev` and `sidebar-toggle` are read as `workspace-picker`, `workspace-close`, `workspace-close-all`, `workspace-tab-next`, `workspace-tab-prev` and `open-agents`.
@@ -648,7 +650,7 @@ The workspace has these 26 categories, in this order, in eight groups; there are
 | ONBOARDING | set up | `onboarding-context` | Local Context | 16 | Personas, starter memories, skills, routines, notes and knowledge, and importing their files; VIBE.md. |
 | FINISH | set up | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
 
-On the Agent's first launch, when the terminal app on the same computer has settings the Agent would take, the lines under the splash say so once: "The terminal app on this computer has settings. `/setup import-settings` brings them over, showing what would change first." Later launches do not say it.
+On the Agent's first launch, when the terminal app on the same computer has settings the Agent would take, the lines under the splash say so once: "The terminal app on this computer has settings. `⏎` brings them over, showing what would change first (later: /setup import-settings)." Enter on the empty composer takes the offer: it opens the import, which shows what would change before anything is changed; typing a message instead leaves the offer, and `/setup import-settings` does the same later. Later launches do not say it.
 
 Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`) shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` shows all 26. A start whose model is not ready opens first run, not the workspace (see the install part of this file).
 `/agent <section>` opens a section (category) by its id; the guided form lists them by label.
@@ -741,10 +743,11 @@ Each of these runs one call of an Agent tool as the owner's own act (the same to
 `/channels send` sends one message through one delivery target and asks first:
 
 ```text
-/channels send [--channel <surface[:route][ | label]> | --route <route[ | label]> | --webhook <http(s)-url> | --link <name>] [--title <title>] <message>
+/channels send [--channel <surface[:route][ | label]> | --route <route[ | label]> | --webhook <http(s)-url>] [--link <link>] [--title <title>] <message>
 ```
 
-- Exactly one target is required: `--channel` (a channel surface such as `slack`, optionally with a route and a label), `--route` (a bound route), `--webhook` (an `http` or `https` address, asked for masked in the guided path and never shown) or `--link`. None, or more than one, is refused: `No delivery target was given, so nothing was sent. Give exactly one of channel, route, webhook or link.` or `2 delivery targets were given, so the recipient is unclear and nothing was sent.`
+- One recipient: `--channel` (a channel surface such as `slack`, optionally with a route and a label), `--route` (a bound route) or `--webhook` (an `http` or `https` address, asked for masked in the guided path and never shown). With none of them the message goes to the default target: the one ready channel whose default target is set. With no such channel it is refused (`No channel has a default target set, so there is nowhere to send this; nothing was sent.`), and with several it names them (`2 channels have a default target (slack, discord), so which one is meant is unclear; nothing was sent.`). More than one recipient is refused: `2 delivery targets were given, so the recipient is unclear and nothing was sent.`
+- `--link` is sent with the message, under it, to that recipient; it is not a second target.
 - The message is the words after the options; `--title` defaults to `GoodVibes Agent message`.
 - The message is checked for payment-card details (a message carrying them is refused before it reaches any provider), then delivered, and a receipt is stored:
 

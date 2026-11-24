@@ -56,7 +56,10 @@ function npmPackage(node: string): string | undefined {
 export function withSandboxRuntimes(plan: ExecSandboxPlan, workspace: string): ExecSandboxPlan {
   if (!plan.sandboxed) return plan;
   const root = resolve(workspace), runtimeRoot = dirname(SANDBOX_RUNTIME_BIN);
-  if (root === runtimeRoot || root.startsWith(`${runtimeRoot}${sep}`) || runtimeRoot.startsWith(`${root}${sep}`)) return plan;
+  // A workspace that holds the runtime folder (`/`, `/run`) would get its mount points created in it.
+  const covers = (parent: string, child: string): boolean =>
+    parent === child || child.startsWith(parent.endsWith(sep) ? parent : `${parent}${sep}`);
+  if (covers(root, runtimeRoot) || covers(runtimeRoot, root)) return plan;
   const bun = typeof Bun !== 'undefined'
     ? nativeExecutable(resolveProcessCapturedBunRuntimeExecutable()) : trustedExecutable('bun');
   const node = typeof Bun === 'undefined' ? nativeExecutable(process.execPath) : trustedExecutable('node');

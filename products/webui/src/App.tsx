@@ -1,5 +1,5 @@
 import { Plug, TriangleAlert } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useReducer, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useReducer, useState } from 'react';
 import AppShell from './components/shell/AppShell';
 import { ModeChip } from './components/shell/ModeChip';
 import { UpdateReload } from './components/shell/UpdateReload';
@@ -33,13 +33,8 @@ import { useSignOut } from './hooks/useSignOut';
 import { queryKeys } from './lib/queries';
 import { hostedSessionsFromListResult } from './lib/hosted-sessions';
 import { ChatView } from './views/ChatView';
-import { WorkView } from './views/work/WorkView';
-import { LibraryView } from './views/library/LibraryView';
-import { PersonalView } from './views/personal/PersonalView';
-import { PhoneNodeView } from './views/phone/PhoneNodeView';
 import { SignedOutGate } from './components/auth/SignedOutGate';
 import { DaemonUnreachableGate } from './components/auth/DaemonUnreachableGate';
-import { SettingsDialog } from './components/settings/dialog/SettingsDialog';
 import type { SettingsSectionId } from './components/settings/dialog/sections';
 import { shellCounts } from './lib/needs-you';
 import { useOpenAsks } from './hooks/useOpenAsks';
@@ -61,6 +56,18 @@ import {
   selectVisibleSessions,
 } from './lib/companion-sessions-state';
 import { formatError, isDaemonUnreachableError, isMethodUnavailableError, isServerFaultError, isSessionNotFoundError } from './lib/errors';
+
+// The chat is in the first script; every other view, and Settings, loads the first time it is opened.
+const WorkView = lazy(() => import('./views/work/WorkView').then((module) => ({ default: module.WorkView })));
+const LibraryView = lazy(() => import('./views/library/LibraryView').then((module) => ({ default: module.LibraryView })));
+const PersonalView = lazy(() => import('./views/personal/PersonalView').then((module) => ({ default: module.PersonalView })));
+const PhoneNodeView = lazy(() => import('./views/phone/PhoneNodeView').then((module) => ({ default: module.PhoneNodeView })));
+const SettingsDialog = lazy(() => import('./components/settings/dialog/SettingsDialog').then((module) => ({ default: module.SettingsDialog })));
+
+/** What a view shows while its script arrives (the first time it is opened). */
+function ViewLoading() {
+  return <div className="app-splash" role="status" aria-live="polite"><span>Loading…</span></div>;
+}
 
 /** Read the auth status two minutes before a session's reported end; false for a credential with no end. */
 function sessionEndRereadDelay(snapshot: unknown): number | false {
@@ -432,6 +439,9 @@ export default function App() {
     [setUrlState],
   );
   const closeSettings = useCallback(() => setUrlState({ settings: '' }), [setUrlState]);
+  // Settings' script loads the first time it opens and stays, so it closes and opens again at once.
+  const [settingsWanted, setSettingsWanted] = useState(Boolean(settingsSection));
+  if (settingsSection && !settingsWanted) setSettingsWanted(true);
   const changeSettingsSection = useCallback(
     (section: SettingsSectionId) => setUrlState({ settings: section }, { replace: true }),
     [setUrlState],
@@ -785,29 +795,37 @@ export default function App() {
           onRenameRequestHandled={() => setRenameChatId('')}
         />
       )}
-      {activeView === 'work' && (
-        <WorkView
-          tab={tab}
-          onTabChange={setTab}
-          subscriptionActive={fleetSubscriptionActive}
-          sessionSubscriptionActive={liveUpdates.status === 'live'}
-          streamPaused={realtimeError !== null}
-          onOpenSession={handleOpenSession}
-          focusKey={workFocusKey}
-        />
+      {activeView !== 'chat' && (
+        <Suspense fallback={<ViewLoading />}>
+          {activeView === 'work' && (
+            <WorkView
+              tab={tab}
+              onTabChange={setTab}
+              subscriptionActive={fleetSubscriptionActive}
+              sessionSubscriptionActive={liveUpdates.status === 'live'}
+              streamPaused={realtimeError !== null}
+              onOpenSession={handleOpenSession}
+              focusKey={workFocusKey}
+            />
+          )}
+          {activeView === 'library' && <LibraryView tab={tab} onTabChange={setTab} />}
+          {activeView === 'personal' && <PersonalView tab={tab} onTabChange={setTab} />}
+          {activeView === 'phone' && <PhoneNodeView />}
+        </Suspense>
       )}
-      {activeView === 'library' && <LibraryView tab={tab} onTabChange={setTab} />}
-      {activeView === 'personal' && <PersonalView tab={tab} onTabChange={setTab} />}
-      {activeView === 'phone' && <PhoneNodeView />}
     </ShellLayout>
-    <SettingsDialog
-      open={Boolean(settingsSection)}
-      section={settingsSection ?? ''}
-      onSectionChange={changeSettingsSection}
-      onClose={closeSettings}
-      onOpenView={openViewFromSettings}
-      realtimeError={realtimeError}
-    />
+    {settingsWanted && (
+      <Suspense fallback={null}>
+        <SettingsDialog
+          open={Boolean(settingsSection)}
+          section={settingsSection ?? ''}
+          onSectionChange={changeSettingsSection}
+          onClose={closeSettings}
+          onOpenView={openViewFromSettings}
+          realtimeError={realtimeError}
+        />
+      </Suspense>
+    )}
     </div>
     </AppShell>
   );

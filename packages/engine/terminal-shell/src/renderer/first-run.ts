@@ -11,8 +11,6 @@
  *     A model on this computer  found Ollama with 3 models
  *     Another provider…         38 more
  *
- *   Found in your environment: ANTHROPIC_API_KEY · press  a  to use it and skip this step
- *
  *    ↑↓  move    ⏎  choose    esc  set up later
  *
  * and step 2, "Sign in to <name>", in one of three forms (browser, key,
@@ -125,6 +123,8 @@ export interface ChooseStepView {
   readonly offers: FirstRunOffers | null;
   /** The focused row: 0..rows.length-1, or rows.length for "Another provider…". */
   readonly selected: number;
+  /** How many steps first run has: 4 when "Who decides" follows the model, else 3. */
+  readonly total?: number | undefined;
 }
 
 /** One provider row's cells: the name, then `how · extra` (extra on its own dim row when it does not fit). */
@@ -139,22 +139,13 @@ function offerRowLines(how: string, extra: FirstRunOffers['rows'][number]['extra
 }
 
 /** Rows step 1 takes inside the frame (the frame adds the title, the blanks and the hints). */
-function chooseLayout(view: ChooseStepView, inner: number): { readonly rows: number; readonly foundRows: StyledSegment[][] } {
+function chooseLayout(view: ChooseStepView, inner: number): { readonly rows: number } {
   const offers = view.offers;
-  if (!offers) return { rows: 3, foundRows: [] };
+  if (!offers) return { rows: 3 };
   const room = inner - 3 - NAME_COLUMN;
   const offerLines = offers.rows.reduce((sum, row) => sum + offerRowLines(row.how, row.extra, room).length, 0);
-  const foundRows = offers.foundKey
-    ? wrapSegments([
-      { text: 'Found in your environment:', tone: 'dim' },
-      { text: ` ${offers.foundKey.variable}`, tone: 'good' },
-      { text: ' · press', tone: 'dim' },
-      { text: ' ' },
-      { text: 'a', chip: true },
-      { text: ' to use it and skip this step', tone: 'dim' },
-    ], inner)
-    : [];
-  return { rows: 2 + offerLines + 1 + (foundRows.length > 0 ? 1 + foundRows.length : 0), foundRows };
+  // A usable key is used without this screen (first-run-flow.ts useUsableProvider): no line offers one here.
+  return { rows: 2 + offerLines + 1 };
 }
 
 export function renderChooseStep(screenW: number, screenH: number, view: ChooseStepView): SurfaceLayer {
@@ -163,7 +154,7 @@ export function renderChooseStep(screenW: number, screenH: number, view: ChooseS
   // Text starts under the title (the kit puts the title one column in).
   const inner = width - 8 - 1;
   const layout = chooseLayout(view, inner);
-  const f = frame(screenW, screenH, 'Welcome to GoodVibes', '1 of 3', layout.rows, [['↑↓', 'move'], ['⏎', 'choose'], ['esc', 'set up later']]);
+  const f = frame(screenW, screenH, 'Welcome to GoodVibes', `1 of ${view.total ?? 3}`, layout.rows, [['↑↓', 'move'], ['⏎', 'choose'], ['esc', 'set up later']]);
   const x0 = f.l + 1;
   let y = f.top;
   f.canvas.put(x0, y, 'Which model should answer you?', { fg: t.text });
@@ -194,14 +185,6 @@ export function renderChooseStep(screenW: number, screenH: number, view: ChooseS
   };
   offers.rows.forEach((row, index) => drawRow(index, row.name, offerRowLines(row.how, row.extra, room)));
   drawRow(offers.rows.length, 'Another provider…', [offers.more > 0 ? [{ text: `${offers.more} more`, tone: 'dim' }] : []]);
-  if (layout.foundRows.length > 0) {
-    y += 1;
-    for (const segments of layout.foundRows) {
-      if (y > f.bottom) break;
-      drawSegments(f.canvas, x0, y, segments);
-      y += 1;
-    }
-  }
   return finishModal(f);
 }
 
@@ -299,13 +282,13 @@ function signInBody(view: SignInStepView, inner: number): { readonly lines: Styl
   return { lines, hints: [['↑↓', 'move'], ['⏎', 'choose'], BACK_HINT] };
 }
 
-export function renderSignInStep(screenW: number, screenH: number, view: SignInStepView): SurfaceLayer {
+export function renderSignInStep(screenW: number, screenH: number, view: SignInStepView, total = 3): SurfaceLayer {
   const t = activeTokens();
   const width = firstRunWidth(screenW);
   const inner = width - 8 - 1;
   const body = signInBody(view, inner);
   const title = view.kind === 'local' ? view.name : `Sign in to ${view.name}`;
-  const f = frame(screenW, screenH, title, '2 of 3', body.lines.length, body.hints);
+  const f = frame(screenW, screenH, title, `2 of ${total}`, body.lines.length, body.hints);
   const x0 = f.l + 1;
   let y = f.top;
   const localStart = view.kind === 'local' && !view.none ? 2 : -1;
@@ -318,6 +301,68 @@ export function renderSignInStep(screenW: number, screenH: number, view: SignInS
       for (const segment of segments) x = f.canvas.put(x, y, shown(segment), { fg: t.selectedListItemText, bold: true });
     } else {
       drawSegments(f.canvas, listRow ? x0 + 3 : x0, y, segments);
+    }
+    y += 1;
+  });
+  return finishModal(f);
+}
+
+/** The "Who decides" step (after the model, when no decision model can be asked yet) and its key field. */
+export type DecideStepView =
+  | { readonly kind: 'decide'; readonly selected: number; readonly total: number; readonly only?: boolean | undefined; readonly error?: string | undefined }
+  | { readonly kind: 'jev-key'; readonly typed: number; readonly busy: boolean; readonly error?: string | undefined; readonly total: number; readonly only?: boolean | undefined };
+
+/** The rows of "Who decides", in the order first-run-flow.ts reads them (DECIDE_ROWS). */
+const DECIDE_CHOICES: readonly { readonly name: string; readonly how: string }[] = [
+  { name: 'Jev decides', how: 'TypeSafe\'s decision model, with your key' },
+  { name: 'Ask me', how: 'GoodVibes stops and asks you' },
+  { name: 'Another decision model…', how: 'Cloudflare and others, in Settings' },
+];
+
+export function renderDecideStep(screenW: number, screenH: number, view: DecideStepView): SurfaceLayer {
+  const t = activeTokens();
+  const width = firstRunWidth(screenW);
+  const inner = width - 8 - 1;
+  const lines: StyledSegment[][] = [];
+  const wrap = (segments: StyledSegment[]): void => { lines.push(...wrapSegments(segments, inner)); };
+  let hints: KitHint[];
+  let listStart = -1;
+  if (view.kind === 'decide') {
+    wrap([{ text: 'Who decides when GoodVibes would otherwise stop and ask you?' }]);
+    lines.push([]);
+    listStart = lines.length;
+    for (const choice of DECIDE_CHOICES) lines.push([{ text: choice.name.padEnd(NAME_COLUMN) }, { text: choice.how, tone: 'dim' }]);
+    lines.push([]);
+    wrap([{ text: 'Chosen once; change it any time in /settings (When GoodVibes asks).', tone: 'dim' }]);
+    if (view.error) { lines.push([]); lines.push(...wrapSegments([{ text: '✕', tone: 'bad' }, { text: ` ${view.error}` }], inner)); }
+    hints = [['↑↓', 'move'], ['⏎', 'choose'], ['esc', 'later']];
+  } else {
+    wrap([{ text: 'Paste your TypeSafe key.' }]);
+    lines.push([]);
+    // Masked whole: no character of the key is ever shown.
+    lines.push([{ text: '•'.repeat(Math.min(view.typed, Math.max(1, inner - 2))), tone: 'cyan' }, { text: '▏', tone: 'faint' }]);
+    lines.push([]);
+    wrap([{ text: view.busy ? 'Checking the key with one request…' : 'A key comes from your TypeSafe account at console.typesafe.ai. It is kept in the secret store and checked with one request.', tone: 'dim' }]);
+    if (view.error) { lines.push([]); lines.push(...wrapSegments([{ text: '✕', tone: 'bad' }, { text: ` ${view.error}` }], inner)); }
+    hints = [['⏎', 'save and check'], BACK_HINT];
+  }
+  // The only step first run shows (the model was taken without asking, or was ready): no step count.
+  const f = frame(screenW, screenH, view.kind === 'decide' ? 'Who decides' : 'Jev decides', view.only ? '' : `3 of ${view.total}`, lines.length, hints);
+  const x0 = f.l + 1;
+  let y = f.top;
+  lines.forEach((segments, index) => {
+    if (y > f.bottom) return;
+    const row = listStart >= 0 ? index - listStart : -1;
+    if (view.kind === 'decide' && row >= 0 && row < DECIDE_CHOICES.length) {
+      if (row === view.selected) {
+        f.canvas.grad(x0 + 2, y, f.r - x0 - 1, t.brand, t.brandEnd);
+        let x = x0 + 3;
+        for (const segment of segments) x = f.canvas.put(x, y, shown(segment), { fg: t.selectedListItemText, bold: true });
+      } else {
+        drawSegments(f.canvas, x0 + 3, y, segments);
+      }
+    } else {
+      drawSegments(f.canvas, x0, y, segments);
     }
     y += 1;
   });

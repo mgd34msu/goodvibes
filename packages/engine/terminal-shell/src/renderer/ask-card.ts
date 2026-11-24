@@ -13,7 +13,7 @@
  *
  *      Yes, once    Yes, and remember (choose what)    No
  *
- *      y  yes    a  remember    n  no    d  details    or type why not
+ *      y  yes    a  remember    n  no    w  say why    d  details
  *
  * One question in a sentence, what it will do (red only for what cannot be
  * undone, and only when the program has that fact), the choices with their
@@ -332,26 +332,27 @@ function bodyRows(presentation: AskPresentation, request: PermissionPromptReques
 // Keys
 // ---------------------------------------------------------------------------
 
-/** The key row, and the dim words after it ("or type why not"). */
+/** The key row, and any dim words after it. */
 function cardKeys(presentation: AskPresentation, request: PermissionPromptRequest, state: AskCardState): { hints: KitHint[]; tail?: string | undefined } {
   if (state.awaitingTab) return { hints: [['tab', 'answer this request (your draft stays)'], ['ctrl+c', 'refuse and stop the turn']] };
   if (isCommandPromptAsk(request)) {
     return { hints: [['⏎', 'send the answer'], ['esc', (state.replyBuffer ?? '').length > 0 ? 'clear' : 'decline'], ['ctrl+c', 'stop the turn']] };
   }
-  if (state.replyMode === 'deny-reason') return { hints: [['⏎', 'refuse with this reason'], ['esc', 'back'], ['ctrl+c', 'stop the turn']] };
-  if (state.submenuOpen) return { hints: [['↑↓', 'choose'], ['⏎', 'yes, and remember'], ['esc', 'back']] };
+  if (state.replyMode === 'deny-reason') return { hints: [['⏎', 'no, with this reason'], ['esc', 'back'], ['ctrl+c', 'stop the turn']] };
+  if (state.submenuOpen) return { hints: [['1-9', 'yes, and remember that one'], ['↑↓', 'choose'], ['⏎', 'yes, and remember'], ['esc', 'back']] };
   const offered = presentation.remember.offered;
   if (state.hunkState) {
-    return { hints: [['↑↓', 'change'], ['space', 'keep or leave out'], ['←→', 'choose'], ['⏎', 'press'], ['n', 'no'], ['d', state.detailsExpanded ? 'hide details' : 'details']] };
+    return { hints: [['↑↓', 'change'], ['space 1-9', 'keep or leave out'], ['←→', 'choose'], ['⏎', 'press'], ['n', 'no'], ['d', state.detailsExpanded ? 'hide details' : 'details']] };
   }
+  // The `d` details are what the call carries (arguments, paths); why it is asked is shown above.
   const hints: KitHint[] = [
     ['y', 'yes'],
     ...(offered ? [['a', 'remember'] as const] : []),
     ['n', 'no'],
+    ...(presentation.typeToRefuse ? [['w', 'say why'] as const] : []),
     ['d', state.detailsExpanded ? 'hide details' : 'details'],
   ];
-  // The `d` details are what the call carries (arguments, paths); why it is asked is shown above.
-  return { hints, ...(presentation.typeToRefuse ? { tail: 'or type why not' } : {}) };
+  return { hints };
 }
 
 /** Rows the keys take at `width`, the dim tail included. */
@@ -464,7 +465,9 @@ export function renderAskCard(
   let y = scrollBottom + 1;
   if (buttonRows > 0) {
     y++;
-    const chosen = askCardChoice(presentation, request, state);
+    // While a reason is typed Enter refuses with it, so `No` is the button shown pressed.
+    const refusing = reason.length > 0 ? buttons.findIndex((choice) => choice.id === 'no') : -1;
+    const chosen = refusing >= 0 ? refusing : askCardChoice(presentation, request, state);
     let bx = f.l + BODY_INDENT;
     buttons.forEach((choice, i) => {
       if (buttonRows > 1 && i > 0) { y++; bx = f.l + BODY_INDENT; }

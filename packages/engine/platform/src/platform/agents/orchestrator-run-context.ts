@@ -128,7 +128,7 @@ export interface AgentOrchestratorRunContext {
    * module constants remain the final fallback when no config source is supplied,
    * the config defaults equal those constants, so behaviour is unchanged by default.
    */
-  readonly configManager?: Pick<import('../config/manager.js').ConfigManager, 'get'> | undefined;
+  readonly configManager?: Pick<import('../config/manager.js').ConfigManager, 'get' | 'getHomeDirectory'> | undefined;
   readonly archetypeLoader?: { loadArchetype(template: string): { systemPrompt?: string | undefined } | null | undefined } | undefined;
   /**
    * Permission gate for this run's background/subagent tool calls (see

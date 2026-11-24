@@ -4,10 +4,10 @@ import type { ProviderRegistry } from '../providers/registry.js';
 import type { IntegrationRecord } from './store/domains/integrations.js';
 import { logger } from '../utils/logger.js';
 import {
+  instructionChainOptions,
   loadSystemPromptWithSources as _loadSystemPromptWithSources,
   type SystemPromptResult,
 } from '../utils/prompt-loader.js';
-import { isAbsolute, resolve } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
 
 export interface RuntimeModelSelectionState {
@@ -32,20 +32,7 @@ function requireOwnedPromptRoot(path: string | null, name: 'workingDirectory' | 
 export function loadRuntimeSystemPromptWithSources(configManager: ConfigManager): SystemPromptResult {
   const workingDirectory = requireOwnedPromptRoot(configManager.getWorkingDirectory(), 'workingDirectory');
   const homeDirectory = requireOwnedPromptRoot(configManager.getHomeDirectory(), 'homeDirectory');
-  const result = _loadSystemPromptWithSources(
-    {
-      workingDirectory,
-      homeDirectory,
-      getConfigPath: () => {
-        const configuredPath = configManager.get('provider.systemPromptFile') as string | undefined;
-        if (typeof configuredPath !== 'string' || !configuredPath.trim()) return undefined;
-        return isAbsolute(configuredPath)
-          ? resolve(configuredPath)
-          : resolve(workingDirectory, configuredPath);
-      },
-      argv: process.argv,
-    },
-  );
+  const result = _loadSystemPromptWithSources(instructionChainOptions(configManager, workingDirectory, homeDirectory));
   logger.debug('Loaded system prompt instruction sources', {
     sources: result.sources.map((s) => ({ kind: s.kind, path: s.path })),
   });

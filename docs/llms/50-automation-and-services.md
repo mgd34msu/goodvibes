@@ -60,6 +60,8 @@ A routine is a prompt that runs on a schedule. Each time it fires it produces a 
 /schedule pause weekly-report
 ```
 
+`/schedule list` shows each schedule with what it runs (its task, on the line under it) and its timing in words with the pattern it is kept as beside it: `every weekday at 09:00 (0 9 * * 1-5) [UTC]`, `on the 1st of each month at 07:30 (30 7 1 * *)`, `every hour at :15`, `every 30 minutes`; a pattern of any other shape is shown as written. `Read as:` uses the same words. The Agent lists the schedules of its connected host the same way.
+
 A schedule is named by its id, its name or the start of its id (one that names more than one is refused with the candidates). Options of `add` ("Anything else?" in the guided form; each blank keeps the usual setting):
 
 | Option | Meaning |
@@ -617,7 +619,7 @@ Prerequisites: 2-Step Verification on the Google account.
 
 ### Path B: OAuth
 
-Prerequisites: a Google Cloud account; the `gcloud` CLI (the flow checks `gcloud --version` and tells you how to install it into your home directory).
+Prerequisites: a Google Cloud account. The `gcloud` CLI is installed by the flow when it is not on this computer (`/google connect` is the request: nothing is asked first): the Google Cloud SDK archive (about 500 MB) is downloaded into your home folder, unpacked and its installer run, and each step is said as it happens: `Installing Google Cloud SDK, 511 MB, into ~/google-cloud-sdk: downloading`, `...: 25% downloaded` at each quarter, `...: unpacking`, `...: running its installer`. In the `/google` list the row says `installs Google Cloud SDK, about 500 MB` while gcloud is missing. What the flow found is said first, before its steps.
 
 1. `gcloud auth login` (you choose the account and click Allow).
 2. The flow selects or creates a Cloud project and enables `gmail.googleapis.com` and `calendar-json.googleapis.com`.

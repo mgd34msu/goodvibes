@@ -597,6 +597,14 @@
   font-weight: var(--weight-medium);
 }
 
+/* A row the platform words for the person (a malformed call sent back to the model): one wrapping sentence. */
+.tool-line__owner {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-2);
+  overflow-wrap: anywhere;
+}
+
 .tool-line__arg {
   flex: 1 1 0;
   min-width: 0;

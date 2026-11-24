@@ -260,7 +260,8 @@ export function createRegistryTool(toolRegistry: ToolRegistry, roots: RegistryTo
     description:
       'Discover and inspect skills, agents, and tools.'
       + ' Modes: search finds items by keyword; recommend lists items sorted by relevance;'
-      + ' dependencies reads a skill\'s dependency chain; content returns full markdown file.',
+      + ' dependencies reads a skill\'s dependency chain; preview returns metadata and preview text without the linked content;'
+      + ' content returns full markdown file.',
     parameters: toRecord(REGISTRY_TOOL_SCHEMA),
     sideEffects: ['read_fs'],
     subjects: { paths: ['path'] },

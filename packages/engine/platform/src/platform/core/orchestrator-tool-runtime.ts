@@ -3,11 +3,12 @@ import { withExternalOperationSource } from '../permissions/external-operation-s
 import type { ConversationManager } from './conversation.js';
 import { assertDecisionAvailable } from '../routing/decision-availability.js';
 import { isClassicOperation } from '../runtime/decision-policy.js';
+import { WorkspaceRestrictedError } from '../runtime/workspace-trust.js';
 import { decisionModelPolicyState } from '@goodvibes/engine/errors';
 import { currentExecutionMode, isYoloExecution, withExecutionMode } from '../gate/execution-context.js';
 import { randomUUID } from 'node:crypto';
 import { captureAutonomousChoices, type AutonomousToolSource } from '../permissions/autonomous.js';
-import { UnknownPreparedToolError } from '../tools/preparation-error.js';
+import { ToolInputError, UnknownPreparedToolError } from '../tools/preparation-error.js';
 import type { PreparedToolCall } from '../tools/registry.js';
 import { describeToolInputProjectionProblem, ToolInputProjectionError, type ProjectedToolCall } from '../tools/input-projection.js';
 import type { AutonomousChoiceProjection } from '../permissions/autonomous-input-projection.js';
@@ -471,6 +472,20 @@ async function executeToolCallsInMode(
       const recorded = { ...result, ...(resultPolicy.operation === 'no-decision-model' ? { decisionPolicy: resultPolicy } : {}) };
       settledResult = { ...recorded }; results.push(recorded);
     };
+    // A restricted workspace refused the call: nothing ran. The model is answered
+    // with that as the call's result and the turn goes on; a person reads one row.
+    const answerRestricted = (error: WorkspaceRestrictedError) => {
+      const result: ToolResult = {
+        callId: call.id, success: false, error: error.message, ownerLine: error.ownerLine,
+        decision: { state: 'refused', decidedBy: 'rule', reason: error.message, limit: 'workspace trust', standing: true,
+          next: ['Read, search and explain instead; ask the owner to trust this folder if a change is needed.'] },
+      };
+      if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
+        callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(result.ownerLine ?? error.message),
+        durationMs: 0, result: redactedToolResultSummary(result),
+      });
+      appendResult(result);
+    };
     // The provider could not read this call's arguments: answer it with that, never run it on empty ones.
     if (originalCall.argumentError !== undefined) {
       const result: ToolResult = { callId: call.id, success: false, error: originalCall.argumentError };
@@ -586,14 +601,17 @@ async function executeToolCallsInMode(
             port: preparation.port, assertCurrent: () => { assertTurnActive(); preparation.assertCurrent(); } });
           preparation.assertCurrent();
         } catch (error) {
-          // A hallucinated tool remains a failed call so the model can recover
-          // and repeated failures still reach the turn-loop circuit breaker.
-          // Authority, privacy, schema and judgment failures are not converted.
-          if (!(error instanceof UnknownPreparedToolError)) throw error;
+          // A hallucinated tool or arguments that do not match the tool's schema remain a
+          // failed call: the model is told what to fix and sends it again, and repeated
+          // failures still reach the turn loop's stop rules. Nothing ran.
+          // Authority, privacy and judgment failures are not converted.
+          if (error instanceof WorkspaceRestrictedError) { assertTurnActive(); answerRestricted(error); continue; }
+          if (!(error instanceof UnknownPreparedToolError) && !(error instanceof ToolInputError)) throw error;
           originalPreparation.assertCurrent();
-          const result: ToolResult = { callId: call.id, success: false, error: error.message };
+          const result: ToolResult = { callId: call.id, success: false, error: error.message,
+            ...(error instanceof ToolInputError ? { malformed: true, ownerLine: error.ownerLine } : {}) };
           if (deps.runtimeBus) emitToolFailed(deps.runtimeBus, deps.emitterContext(turnId), {
-            callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(error.message),
+            callId: call.id, turnId, tool: call.name, error: redactDiagnosticText(error instanceof ToolInputError ? error.ownerLine : error.message),
             durationMs: 0, result: redactedToolResultSummary(result),
           });
           appendResult(result);
@@ -649,12 +667,16 @@ async function executeToolCallsInMode(
       } catch (error) {
         // A requested call whose admission threw still gets its decision event, so no reader
         // (the gate latency figure, forensics, telemetry spans) is left with an open request.
+        const restricted = error instanceof WorkspaceRestrictedError ? error : undefined;
         if (deps.runtimeBus) {
           emitGateDecision(deps.runtimeBus, deps.emitterContext(turnId), {
             callId: call.id, tool: call.name, category: requestedCategory, approved: false,
-            source: 'admission_failed', summary: `Admission did not finish: ${summarizeError(error)}`,
+            source: restricted ? 'workspace_trust' : 'admission_failed',
+            summary: restricted ? restricted.message : `Admission did not finish: ${summarizeError(error)}`,
           });
         }
+        // A restricted workspace is a refusal the model can act on: it is answered, and the turn goes on.
+        if (restricted) { assertTurnActive(); answerRestricted(restricted); continue; }
         throw error;
       }
       if (deps.runtimeBus) {
@@ -804,6 +826,8 @@ async function executeToolCallsInMode(
             callId: call.id,
             success: false,
             error: message,
+            // Restricted while it waited to run: the person reads the plain row, the model the message.
+            ...(err instanceof WorkspaceRestrictedError ? { ownerLine: err.ownerLine } : {}),
           });
 
         if (deps.hookDispatcher && !turnSignal?.aborted) {

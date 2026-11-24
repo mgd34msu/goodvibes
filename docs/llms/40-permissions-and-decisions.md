@@ -250,13 +250,15 @@ In the terminal app and the Agent, an ask appears as the same card. Its title is
 | --- | --- |
 | `y` | Yes: `Yes, once` for a call that acts once, or the button that says what a lasting change does (below). |
 | `a` | `Yes, and remember (choose what)`: opens the remember choices (when the ask offers them); the web UI's ask card has the same button. Enter never remembers. |
-| Up, Down, `1` to `9`, Enter | In the remember choices: move, pick, and allow and remember with that choice. Esc goes back. |
+| Up, Down, Enter | In the remember choices: move, and allow and remember with the highlighted choice. Esc goes back. |
+| `1` to `9` | In the remember choices: allow and remember with that numbered choice at once. |
 | `n` | No. |
+| `w` | Say why (`w say why` on the card): opens `Why not:`; from then on every key is text until Enter refuses with that reason or Esc goes back. While it is open `No` is the highlighted button and the key row reads `⏎ no, with this reason`. |
 | `d` | Details: why you are asked, the tool, the folder, the sandbox, the decision, effects, review reasons, the checklist and the raw arguments. |
 | Left, Right, Tab | Choose a button. |
 | Enter | Press the chosen button. The card opens on the yes, or on `No` for what cannot be undone, for owner-only asks whose effect cannot be taken back (money spent, a payment step, a message sent as you, a delete nothing restores, an irreversible operator action), and for asks that weaken a protection (a security, judgment or payment setting loosened; access granted to a person, device, tool server or hook), so Enter never allows those and never remembers anything. The web UI's card makes the same button its main one, and a call `just-vibes` held for one of those reasons opens on `No` in `/questions` and the web UI. |
-| Any other typing | Starts `Why not:`; Enter refuses with that reason, Esc goes back. |
-| Space, `a`, Up, Down, PgUp, PgDn | In a multi-edit edit (`Apply selected`): keep or leave out a change, keep all, move, scroll. |
+| Any other letter | Nothing; a paste is never an answer. |
+| Space, `1` to `9`, `a`, Up, Down, PgUp, PgDn | In a multi-edit edit (`Apply selected`): keep or leave out the change under the cursor or the numbered change, keep all, move, scroll. |
 | Tab | When you were typing a draft, Tab answers the request and keeps your draft. |
 | Ctrl+C | No, and stop the turn. |
 
@@ -734,8 +736,9 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 | Level | Effect |
 | --- | --- |
 | `trusted` | All tools may run, subject to the permission mode and rules. |
-| `restricted` | Only reads run. Every write, command and delegation is refused, in every mode including `yolo`. |
-| undecided | Reads run. Calls settled without asking run. The first call that would ask you raises the trust question instead, titled with the folder (`Trust ~/projects/garden-planner?`), with "Trust this workspace" (it names the folder's own files that trusting lets run, `This folder has a hooks file (hooks.json) and tool servers (MCP: .goodvibes/mcp.json).`, or `This folder has no hooks file or tool servers (MCP) of its own.`, then "Trusting it lets them run and lets GoodVibes change files here. It approves nothing: each action still follows your setting for when GoodVibes asks.") and "Keep restricted (read-only)" ("GoodVibes can read this folder but cannot change files or run commands in it, and the folder's own hooks and MCP servers stay off, until you trust it."); both end "Change it later with /security trust-folder or /security restrict-folder." Choosing trust forwards the original ask to you. Dismissing the question (Esc) records nothing: that call is refused, the workspace stays undecided, and the next call that would ask raises the question again. |
+| `restricted` | Only reads run. Every write, command and delegation is refused, in every mode including `yolo`. The model is told so as that call's result (`This folder is restricted: no file can be changed and no command run until it is trusted.`) and the turn goes on; you read one row beside the call, `Not run: this folder is restricted (/security trust-folder trusts it).` |
+| undecided | Reads run, and calls are decided as in a trusted folder (an undoable edit inside the folder runs without asking); a call that would ask you raises the trust question instead. In the terminal app a folder is never left undecided once it is open. When it has no hooks file and no MCP servers of its own, trusting it would let nothing run that the permission mode does not already govern, so nothing is asked: it is recorded as trusted for having nothing of its own to run, in `~/.goodvibes/shared/workspace-trust-nothing-to-run.json` beside the workspace register (never as a row of the register, so an earlier release reads the folder as undecided), and you are told nothing. When it has them, the trust question is asked as the program opens, before any prompt is acted on (first run, when it is needed, follows it), titled with the folder (`Trust ~/projects/garden-planner?`), with the cursor on "Trust this workspace", which says what trusting lets run (`Trusting it lets the hooks in hooks.json run and the tool servers (MCP) in .goodvibes/mcp.json start, and lets GoodVibes change files and run commands here. It approves nothing: each action still follows your setting for when GoodVibes asks.`), and "Keep restricted (read-only)" ("GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it."); both end "Change it later with /security trust-folder or /security restrict-folder." Dismissing it (Esc) records nothing: the folder stays undecided, and the first call that would ask you raises the question again; choosing trust there forwards that ask to you. A folder trusted for having nothing of its own that later gains a hooks file or an MCP file is asked about then, naming the files, before any of them runs: when its hooks are about to fire or its servers to start, or as the program opens. Until you answer they stay off; "Trust this workspace" turns them on. A trust question that opens by itself while you type is kept apart from your typing as the approval card is: keys typed as it appears, or in the same burst, go to the composer, and while the composer holds a draft every key stays there until Tab moves to the question (its key row then reads `tab answer this question (your draft stays)`); the draft is left as it was. The Agent and the daemon read the same record and keep such files off until the folder is trusted (`/security trust-folder`). |
+| undecided, a headless run | `goodvibes run` and the daemon's runs (the web UI, channels, schedules) ask nothing on opening and behave as 3.4.8 did. Reads run; an undoable edit inside the folder runs without asking, as in a trusted folder; a command, delegation or other write is decided as the mode in force decides it (`jev-decides`: the decision model; `yolo`: it runs), and one that would ask you raises the trust question, refused when nobody can answer it (below). Only a folder you restricted refuses writes. |
 
 ```text
 /security folder                     show the level, whether it is decided, and the registration
@@ -748,7 +751,7 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 
 The permission mode `/security trust` and a saved trust bundle report is the mode in force for the conversation (in a hosted Agent session, the mode the host runs it under). When the mode chosen differs, both are shown with the reason: `permission mode: yolo (chosen ask-me: <reason>)`, and the bundle carries `permissionModeChosen` and `permissionModeReason` beside `permissionMode`.
 
-- Decisions are kept in `~/.goodvibes/shared/workspace-registrations.json`, one row per directory by its real path, shared by every product. A `trust.json` inside a project is not honoured; `/security folder` says so when it finds one.
+- Decisions are kept in `~/.goodvibes/shared/workspace-registrations.json`, one row per directory by its real path, shared by every product; a folder trusted for having nothing of its own to run is kept in `workspace-trust-nothing-to-run.json` beside it, and a row in the register replaces it. A `trust.json` inside a project is not honoured; `/security folder` says so when it finds one.
 - When a decision cannot be saved, it applies to this session only and the app says it will ask again next time.
 - With nobody to answer (a headless run without `--answer-permissions`), a call that needs the trust answer is refused: `Workspace trust for <dir> is undecided and the trust question was not answered here, so the workspace stays undecided.` Fix: run `/security trust-folder`, or answer the workspace-trust prompt of a run started with `--answer-permissions`.
 - An unreadable trust record is treated as restricted for autonomous work until a level is chosen.
@@ -832,8 +835,9 @@ A key in a project's store is part of the checkout, so it is used only after you
 goodvibes secrets list
 goodvibes secrets providers
 goodvibes secrets test goodvibes://secrets/env/OPENAI_API_KEY
-goodvibes secrets set OPENAI_API_KEY <your-api-key> --user
-printf '%s' '<your-api-key>' | goodvibes secrets set OPENAI_API_KEY --stdin --user
+goodvibes secrets set OPENAI_API_KEY --user            # asks for the value; nothing typed is shown
+printf '%s' "$OPENAI_API_KEY" | goodvibes secrets set OPENAI_API_KEY --user   # piped: read from standard input
+goodvibes secrets set OPENAI_API_KEY <your-api-key> --user   # also works; the value stays in shell history
 goodvibes secrets link OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY --user
 goodvibes secrets delete OPENAI_API_KEY --user
 ```
@@ -842,8 +846,9 @@ goodvibes secrets delete OPENAI_API_KEY --user
 
 - Without `--user`, `set` and `link` write to the project store. Use `--user` for your own store. The Agent files a credential the daemon reads (channel tokens, mail passwords and other daemon-owned keys) in the daemon store whatever scope you ask for, and says so.
 - `--plaintext` stores the value unencrypted; `--secure` (default) encrypts it.
-- `--stdin` reads the value from standard input without its trailing newline; use it for a value that starts with `--`.
-- The value is exactly one argument. Several value words are refused: `Not stored: 2 values were given for <KEY>.`
+- `set <KEY>` with no value asks `Value for <KEY> (typing is not shown):` at a terminal, echoing nothing, or reads standard input without its trailing newline when it is piped. The value then never reaches the command line, the shell history or the process list. Nothing entered is refused: `Not stored: no value was given for <KEY>.`; Ctrl+C stops with exit `130` and stores nothing.
+- `--stdin` reads the value from standard input even at a terminal; a value that starts with `--` is given this way or typed when asked.
+- A value on the command line is exactly one argument. Several value words are refused: `Not stored: 2 values were given for <KEY>.`
 - `delete` without a scope flag removes the key from every store that has it and lists where it was removed from. A key not stored exits non-zero: `No stored secret named <KEY>. Nothing was deleted.`
 - `test` exits `0` when the reference resolves and `1` when it does not. It prints `resolved <redacted>` or `missing`, never the value.
 - An unknown verb prints usage and exits non-zero.
@@ -920,7 +925,7 @@ In `goodvibes run` and `goodvibes-agent run`, a call that needs the owner is ref
 | "refused by the saved rule ..." | A remembered deny rule. | `/permissions rules`, then revoke it. |
 | "plan mode is on and <tool> would change something". | Plan mode. | `/plan off` or Shift+Tab. |
 | Writes refused in a new directory with "Workspace trust ... is undecided". | Trust question unanswered. | `/security trust-folder`. |
-| Writes refused: "Explicit restricted workspace forbids this operation". | Workspace set to restricted. | `/security trust-folder`. |
+| Writes refused: "Not run: this folder is restricted (/security trust-folder trusts it)." | Workspace set to restricted. | `/security trust-folder`. |
 | A request from Slack never runs in `yolo`. | A channel request always needs the owner's answer. | Answer it in the terminal app, the web UI or the conversation; or ask from the terminal. |
 | A request from email, a webhook or ntfy is refused. | Those surfaces cannot direct changes. | Ask from the terminal, Telegram or another owned surface. |
 | `just-vibes` finished without doing some steps. | They were held. | `/held`, `/held approve <id>`, then ask to carry on. |

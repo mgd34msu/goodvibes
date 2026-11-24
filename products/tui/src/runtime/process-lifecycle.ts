@@ -266,6 +266,8 @@ export function installProcessLifecycle(deps: ProcessLifecycleDeps): ProcessLife
   const terminalLifecycle = createTerminalLifecycle({
     write: (data) => { stdout.write(data); },
     noAltScreen,
+    // Off: the terminal keeps the mouse, so dragging selects text its own way.
+    mouseCapture: ctx.services.configManager.get('display.mouseCapture') !== false,
     guardedWrite: allowTerminalWrite,
     disposeOutputGuard: () => bestEffort('terminal output guard disposal', () => getTerminalOutputGuard().dispose()),
     setRawMode: (enabled) => bestEffort('terminal raw mode reset', () => stdin.setRawMode(enabled)),

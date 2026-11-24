@@ -2256,13 +2256,15 @@ cd ~/code/my-project
 goodvibes
 ```
 
-With a key for the default model's provider present, the first start asks nothing: the conversation opens directly, and the first-run marker is written.
+With a key for a provider present, the first start asks nothing about the model: the conversation opens with one line saying which provider and model it uses and where the key came from (below), and the first-run marker is written.
 
 ### First run: three steps, the same in the terminal app and the Agent
 
 `goodvibes` and `goodvibes-agent` run the same first run. It opens exactly when the model the session will use is not ready (its provider has no key or sign-in and is not keyless); a ready model opens the conversation directly and writes the first-run marker (`~/.goodvibes/tui/onboarding-checked.json`, the Agent's under `~/.goodvibes/agent/`). Leaving at any step and starting again picks up from the facts: a provider chosen in settings but not signed in opens step 2 for it; otherwise step 1.
 
-**Step 1, `Welcome to GoodVibes` (`1 of 3`): `Which model should answer you?`** One row per offer, then `Another provider…` with the count of the other registered providers (`38 more`):
+**A provider key already there is used; nothing is asked about the model.** When a provider is usable through a key in the environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, …), a key in the secret store or a sign-in, first run asks no "which model" question: it uses that provider with its own default model, and goes on to "Who decides" when that is still needed, otherwise straight to the conversation. This holds on a first launch whose model is ready only as the product's default (`provider.model` not set by you) too. With more than one usable, it takes the first in the order step 1 lists them (ChatGPT subscription, Anthropic, OpenRouter, then the others by name); a provider that needs no key and a model server on this computer are not taken this way. The choice is said in one line under the splash, never asked: `Using Anthropic (claude-sonnet-4-5) from ANTHROPIC_API_KEY; change it with the model control.` (`from your stored key`, `from your sign-in`). The steps below show only when nothing usable is found.
+
+**Step 1, `Welcome to GoodVibes` (`1 of 3`, `1 of 4` when "Who decides" follows): `Which model should answer you?`** One row per offer, then `Another provider…` with the count of the other providers the full provider picker lists (the providers that have a model, the internal decision router left out; the picker shows the same list):
 
 | Row | How | Shown with |
 | --- | --- | --- |
@@ -2271,7 +2273,7 @@ With a key for the default model's provider present, the first start asks nothin
 | `OpenRouter` | `paste an API key` | `has a free model` when its model list has a free model. |
 | `A model on this computer` | | `found <server> with <n> models` (green) once the scan of this computer found a model server (Ollama, LM Studio, llama.cpp and the like); `looking for models on this computer…` while it runs; `none found` after it found none. |
 
-The terminal app starts that scan of this computer (never the network) when first run opens; the Agent's start-up already scans this computer. When a key in the environment already makes a provider usable, a line under the rows says `Found in your environment: <VARIABLE> · press a to use it and skip this step`. Keys: Up and Down move, Enter chooses, `a` uses the found key (the provider's default model is chosen and step 2 is skipped), Esc is "set up later". Choosing `Another provider…` opens the full provider picker; choosing a ready model there finishes first run.
+The terminal app starts that scan of this computer (never the network) when first run opens; the Agent's start-up already scans this computer. Keys: Up and Down move, Enter chooses, Esc is "set up later". Choosing `Another provider…` opens the full provider picker; choosing a ready model there finishes first run.
 
 **Step 2 (`2 of 3`)** depends on the row:
 
@@ -2279,9 +2281,11 @@ The terminal app starts that scan of this computer (never the network) when firs
 - The browser: `GoodVibes opened your browser to sign in.`, then `If it didn't open, go to:` and the whole sign-in address, and `Waiting for you to finish in the browser…` while the sign-in page's answer is awaited. When the browser could not be opened, or the provider's sign-in ends on a code, `Paste the code the page shows:` takes the code (or the address the browser ended on). `c` copies the address, Enter continues, Esc or Shift+Tab goes back. A sign-in the provider refused says `<provider> refused the sign-in: <its error>. Press ⏎ to start again.`; one that came back but could not be finished (the code exchange or storing the sign-in failed) says `The sign-in came back but <provider> did not complete it: <reason>. Press ⏎ to start again.`; when the wait for the browser ended (for example it timed out) the line is `The sign-in could not wait for the browser: <reason>. Press ⏎ to start again.` After any of them the code the page shows can still be pasted, or Enter starts again.
 - A model on this computer: `Which model on this computer?` and the models found, each with its server, its size where the server reports one in the model list it already gives (Ollama's parameter size, LM Studio's `params_string`) and its context window; Enter chooses one. With none found, it says so and Enter looks again.
 
-**Step 3 is the conversation.** The splash (the logo, its lines, the hint and the version) is drawn exactly as on every start, at the same place; under it, on the first run only and only in the rows left free above the composer, GoodVibes adds:
+**Who decides (`3 of 4`), when the model is chosen and no decision model can be asked.** With the permission mode `jev-decides` or `just-vibes` (the default is `jev-decides`) and no usable decision model key (none in the environment, the secret store or a fallback target, and "No Decision Model" not chosen), one more step follows the model: `Who decides when GoodVibes would otherwise stop and ask you?` with `Jev decides` (`TypeSafe's decision model, with your key`), `Ask me` (`GoodVibes stops and asks you`) and `Another decision model…` (`Cloudflare and others, in Settings`), and `Chosen once; change it any time in /settings (When GoodVibes asks).` `Jev decides` opens `Paste your TypeSafe key.` with a masked field and `A key comes from your TypeSafe account at console.typesafe.ai. It is kept in the secret store and checked with one request.`; Enter stores it as `TYPESAFE_API_KEY` in the secret store (`judgment.keySource` `secret`) and sends the one request; a refusal shows the decision model's own sentence (for example `jev-latest: its endpoint could not be reached. ...`) and the key can be pasted again. `Ask me` sets `permissions.mode` to `ask-me`. `Another decision model…` opens Settings on the decision model (Cloudflare Workers AI, Laya and the other backends decisions can use, with their endpoint and credential); once one set there is usable, first run goes on by itself. A decision model picked here (the TypeSafe key accepted, or one set through `Another decision model…`) records `jev-decides` as your own choice in `permissions.mode`, so it is in force at once with that model, measured or not, and the status bar reads `Permissions: Jev decides`. Esc leaves it for later. Either way the status bar then reads the mode alone (`Permissions: Jev decides`, `Permissions: Ask me`). When a usable key is already present, nothing is asked and first run has three steps. When the session's model is ready on a first launch, or was taken from a key already there, but no decision model can be asked, first run is this one step, shown with no step count.
 
-1. `You're set.  Answering with <model> · signed in` (`no sign-in needed` for a model on this computer) and `3 of 3`.
+**Step 3 is the conversation (`4 of 4` after "Who decides").** The splash (the logo, its lines, the hint and the version) is drawn exactly as on every start, at the same place; under it, on the first run only and only in the rows left free above the composer, GoodVibes adds:
+
+1. `You're set.  Answering with <model> · signed in` (`no sign-in needed` for a model on this computer) and `3 of 3` (`4 of 4`).
 2. What GoodVibes asks before, for the permission mode in force (for example `GoodVibes asks before it runs commands or changes things outside this folder.`), that Shift+Tab changes when GoodVibes asks, and the command that opens the remaining setup, wrapped to the screen's width so it takes as few rows as its words need.
 
 The two parts follow each other with no blank row between them; rows left over become blank rows (first one under the splash, then one above the composer). At 120x36 both show in both programs. When the free rows are too few for both, the sentence is left out first, whole (the logo always keeps its place); on an 80x24 terminal the terminal app has no free rows under its splash, so nothing is added there. Notices are never drawn over these screens: they are counted on the status bar (`ctrl+n` opens them). Nothing of first run is written into the conversation.
@@ -2582,7 +2586,7 @@ How each option behaves:
 | `--provider <id>` | Uses this provider for this launch. |
 | `-C, --cd <dir>`, `--working-dir <dir>` | Sets the working directory for this launch. Sessions and project settings are read from that directory. |
 | `--daemon-home <dir>` | Uses this daemon home (default `~/.goodvibes/daemon`) for every command that reads the operator token or daemon settings. It wins over the `GOODVIBES_DAEMON_HOME` environment variable. |
-| `-c, --config <key=value>` | Overrides one setting for this launch only. It may be repeated. Nothing is saved. |
+| `-c, --config <key=value>` | Overrides one setting for this launch only. It may be repeated. Nothing is saved. A key that is not a setting, or a value it does not take, stops the launch (exit `2`) with a line naming the key and the nearest setting (`permissions.mod is not a setting; did you mean permissions.mode?`) or what it takes (`permissions.mode does not accept that value; it takes one of ask-me, jev-decides, just-vibes, yolo, plan.`); the value given is never repeated. |
 | `--enable <feature>`, `--disable <feature>` | Turns one feature flag on or off for this launch. The value is a feature id, not a setting key. An unknown id is refused and the error lists the known ids. |
 | `-p, --prompt <text>` | Runs one prompt without the interface (the same as `run`). |
 | `--print` | Selects non-interactive run mode (the same as `run`) when no command is given. |
@@ -2591,18 +2595,19 @@ How each option behaves:
 | `--yolo` | Sets the permission mode to `yolo` for this launch only: every action runs without safety denials; `Pre:tool:*` hooks and never-run rules still apply. Containment, secret storage and payment limits still apply. `--no-worries-just-vibes` is an unlisted spelling of the same option. It may come before or after the command word (`goodvibes --yolo run ...` or `goodvibes run --yolo ...`). |
 | `--no-alt-screen` | Keeps the interface in the normal scrollback instead of the alternate screen. |
 | `--port <port>`, `--hostname <host>` (`--host`) | Port and bind address for `web` and `surfaces enable`. The port must be 1 to 65535. |
-| `--open` | Opens a browser where the command supports it (`web`, `subscription login <provider> start`). |
+| `--open` | Opens a browser where the command supports it (`web`, `subscription login <provider> start`). Any other command ignores it. |
 | `-r, --resume [id\|latest]` | Opens a saved session. Without an id it opens the last session of this working directory. |
 | `-s, --session <id>` | `run` only: continue that saved session. Every other command refuses it. |
 | `--continue` | Opens the last session of this working directory. |
-| `--fork [id]` | Bare `--fork` resumes the last session of this working directory (the one `--continue` opens), then forks it. `--fork <id>` opens that session, then forks it. A session that cannot be resumed (no such id, or open in another running copy) is reported as `[Resume] Could not resume session <id>: <reason>` (`resume and fork` for `--fork`) and the app starts as a plain launch; nothing is forked. The same holds for `--resume` and `--continue`. `run` refuses `--fork`. |
+| `--fork [id]` | Bare `--fork` resumes the last session of this working directory (the one `--continue` opens), then forks it. `--fork <id>` opens that session, then forks it. A session that cannot be resumed (no such id, or open in another running copy) is reported as `[Resume] Could not resume session <id>: <reason>` (`resume and fork` for `--fork`) and the app starts as a plain launch; nothing is forked. The same holds for `--resume` and `--continue`. `run` refuses `--fork`; the other commands ignore it. |
 | `--timeout <duration>` | `run` only: cancel after this long. A bare number is seconds; `ms`, `s`, `m` and `h` suffixes are accepted. Exit code `124`. |
 | `--max-turns <n>` | `run` only: stop after `n` model answers that still ask for tools. Exit code `1`. |
 | `--omit-accumulated` | `run` with `stream-json` only: leave `accumulated` out of `STREAM_DELTA` frames. |
 | `--answer-permissions` | `run` with `stream-json` only: read owner answers to permission prompts from standard input. |
+| `--prompt-file <path>` | `run` only: read the prompt from a file; `-` reads all of standard input. |
 | `-y, --yes` | Confirms a command that would otherwise only preview (for example `plugin bundles install`, `support-bundle import`). |
 | `--non-interactive` | Disables every interactive prompt and implies `--yes`. |
-| `--strict` | `doctor` only: also fail on advisory findings. |
+| `--strict` | `doctor` only: also fail on advisory findings. Any other command ignores it. |
 | `-h, --help` | Prints help: first `Most used:` (start the app, `run "<prompt>"`, `pair`, `status`, `goodvibes-daemon update --check`; the Agent adds `setup`), then every command, the options and examples. `goodvibes help <command>` prints one command's help. |
 | `-v, --version` | Prints `goodvibes 3.4.8`. |
 
@@ -2614,11 +2619,11 @@ Only one of `--continue`, `--resume` and `--fork` may be given on one launch.
 - `--` ends option parsing. Every word after it is a positional argument: `goodvibes run -- --literal-text`. A command never reads one of its own options (`--yes`, `--apply`) from a word after `--`.
 - An unquoted word in a prompt that equals a command name or alias (`doctor`, `auth`, `task`) is read as that command. Quote the whole prompt.
 - After a command word, an option that command does not take is refused with exit code `2`, and the error lists the options it accepts.
-- A run-only flag (`--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`) on any other command is refused with exit code `2`:
+- A run-only flag (`--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`, `--prompt-file`) on any other command is refused with exit code `2`:
 
 ```text
 $ goodvibes status --timeout 5
---timeout, --max-turns, --omit-accumulated and --answer-permissions apply only to the run command.
+--timeout, --max-turns, --omit-accumulated, --answer-permissions and --prompt-file apply only to the run command.
 ```
 
 - A lone first word that is a command mistyped by one slip of the fingers is refused, with exit code `2`: five or more letters, and the command with two neighbouring letters swapped or one letter doubled:
@@ -2889,17 +2894,18 @@ A secret reference has the form `goodvibes://secrets/<source>/<path>` and never 
 | `goodvibes secrets list` | The storage policy, whether secure storage is available, and the stored key names with their scope. Never prints values. |
 | `goodvibes secrets providers` | The reference sources: `env`, `goodvibes`, `file`, `exec`, `1password`, `bitwarden`, `vaultwarden`, `bitwarden-secrets-manager`. |
 | `goodvibes secrets test <ref>` | Checks that a reference resolves, without printing the value. |
-| `goodvibes secrets set <KEY> <value> [--user\|--project] [--secure\|--plaintext]` | Stores a value. `--plaintext` stores it unencrypted. |
-| `goodvibes secrets set <KEY> --stdin` | Reads the value from standard input. Use it for a value that starts with `--`, and to keep the value out of shell history. |
+| `goodvibes secrets set <KEY> [--user\|--project] [--secure\|--plaintext]` | Stores a value without it ever being on the command line. At a terminal it asks `Value for <KEY> (typing is not shown):` and nothing typed is echoed; when standard input is piped it reads the value from there (one trailing newline is dropped). `--plaintext` stores it unencrypted. Ctrl+C stops without storing anything. |
+| `goodvibes secrets set <KEY> <value> [--user\|--project] [--secure\|--plaintext]` | Stores the value given as one argument. It stays in your shell history and is visible in the process list while the command runs, so prefer the form above. |
 | `goodvibes secrets link <KEY> <ref> [--user\|--project] [--secure\|--plaintext]` | Makes `<KEY>` resolve through the reference. |
 | `goodvibes secrets delete <KEY> [--user\|--project] [--secure\|--plaintext]` | Deletes a stored key. |
 
-Put flags after the positional words: the `secrets` helper reads the word after a flag as that flag's value.
+Flags may go before or after the key: `--user`, `--project`, `--secure`, `--plaintext` and `--stdin` take no value and never take the next word. `--stdin` reads the value (or a `link` ref) from standard input even when the input is a terminal.
 
 Worked example:
 
 ```text
-$ printf '%s' '<your-api-key>' | goodvibes secrets set OPENAI_API_KEY --stdin --user
+$ goodvibes secrets set OPENAI_API_KEY --user
+Value for OPENAI_API_KEY (typing is not shown):
 [secrets] Stored: OPENAI_API_KEY
 
 $ goodvibes secrets list
@@ -3164,7 +3170,7 @@ The screen has four regions, top to bottom.
 1. The header names the program, its version and the session, and in the terminal app, faint at the right, where its work runs: `daemon connected` (a daemon it reached) or `this computer`. While a helper agent or background process is open full screen, the header reads `main › <agent>` in the agent's color. While a failover is in force it also names the model answering, with `failover from <selected model>`.
 2. The transcript shows the conversation: owner prompts, model answers, tool calls with their results, notices in square brackets (`[Permissions]`, `[Context]`, `[Failover]`), and the work tree of helper agents and background processes started in the turn.
 3. The composer is the text box where the owner types. Its label shows what Enter will do (prompt, command, shell, note, memory pin).
-4. The status bar, the row under the composer. Left: first one word for what main is doing, never dropped: `working` while a turn runs, `waiting for you` (warning colour) while a question waits for your answer, nothing at rest. Then `Permissions:` and the mode in force. When it is the mode chosen, its name (`Permissions: Jev decides`, `Permissions: Ask me`, `Permissions: YOLO`); when it is not, what is in force first and the choice second, with when it takes effect: `Permissions: asking you, for now · Jev decides once a decision model is set` (no decision model set), `· Jev decides once decision models are on` (decision models switched off), `· Jev decides once you pick it yourself (not measured on this decision model)` (Jev decides is only the shipped default and was not measured on this decision model), `· Jev decides once the decision model answers again · decision model unreachable` (or `· decision model failing`), and `Permissions: YOLO, for now · <mode> once the old auto-approve setting is off`; then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. The right side is drawn faint, as background facts. A click on a segment opens its view: the mode opens `/permissions`, whose first row reads the mode in force and, chosen, says what it does, why it differs from your choice and the one setting that fixes that (`Choose a decision model`, `Turn decision models on`, or `Change when GoodVibes asks`), the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; the choice shortens and keeps its cause (`Jev decides once a decision model is set` to `Jev decides: no decision model set`, `Jev decides: not measured yet` while Jev decides is only the shipped default, `Jev decides: waits for the decision model` while it fails, followed by the failure; a click on the mode shows the rest); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure goes last. `Permissions:` with the mode in force (`asking you, for now`) and the choice always stay. At 120 columns with no decision model set, `Permissions: asking you, for now · Jev decides: no decision model set` shows with context, branch and model (with `1 notice` in place of the context when there is one); with Jev decides only the shipped default and not measured, `Permissions: asking you, for now · Jev decides: not measured yet` shows the same way; with the decision model unreachable, `Permissions: asking you, for now · Jev decides: waits for the decision model · decision model unreachable` shows with the model (`· unreachable` when there is a notice). At 80 columns: `Permissions: asking you, for now · Jev decides: no decision model set` and its key, or `Permissions: asking you, for now · Jev decides: waits for the decision model · unreachable`.
+4. The status bar, the row under the composer. Left: first one word for what main is doing, never dropped: `working` while a turn runs, `waiting for you` (warning colour) while a question waits for your answer, nothing at rest. Then `Permissions:` and the mode in force. When it is the mode chosen, its name (`Permissions: Jev decides`, `Permissions: Ask me`, `Permissions: YOLO`); when it is not, what is in force first and the choice second, with when it takes effect: `Permissions: asking you, for now · Jev decides once a decision model is set` (no decision model set), `· Jev decides once decision models are on` (decision models switched off), `· Jev decides once you pick it yourself (not measured on this decision model)` (Jev decides is only the shipped default and was not measured on this decision model), `· Jev decides once the decision model answers again · decision model unreachable` (or `· decision model failing`), and `Permissions: YOLO, for now · <mode> once the old auto-approve setting is off`; then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero; while the row has room, the newest unread notice's subject beside the count, `2 notices: Setting nosuch ignored (…)`, or the first words of its text when it has no title, which gives way after the branch), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. The right side is drawn faint, as background facts. A click on a segment opens its view: the mode opens `/permissions`, whose first row reads the mode in force and, chosen, says what it does, why it differs from your choice and the one setting that fixes that (`Choose a decision model`, `Turn decision models on`, or `Change when GoodVibes asks`), the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; the choice shortens and keeps its cause (`Jev decides once a decision model is set` to `Jev decides: no decision model set`, `Jev decides: not measured yet` while Jev decides is only the shipped default, `Jev decides: waits for the decision model` while it fails, followed by the failure; a click on the mode shows the rest); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure goes last. `Permissions:` with the mode in force (`asking you, for now`) and the choice always stay. At 120 columns with no decision model set, `Permissions: asking you, for now · Jev decides: no decision model set` shows with context, branch and model (with `1 notice` in place of the context when there is one); with Jev decides only the shipped default and not measured, `Permissions: asking you, for now · Jev decides: not measured yet` shows the same way; with the decision model unreachable, `Permissions: asking you, for now · Jev decides: waits for the decision model · decision model unreachable` shows with the model (`· unreachable` when there is a notice). At 80 columns: `Permissions: asking you, for now · Jev decides: no decision model set` and its key, or `Permissions: asking you, for now · Jev decides: waits for the decision model · unreachable`.
 
 While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Alt+N` and `Alt+P` (the rebindable `next-session` and `previous-session`) show the next and previous session, and the row ends with those keys. `Tab` and `Shift+Tab` never switch sessions.
 
@@ -3219,7 +3225,7 @@ The default table of the terminal app:
 
 | Action | Default key | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C` | Copy selected text to the clipboard. |
+| `copy-selection` | `Ctrl+Shift+C`, `F5` | Copy selected text to the clipboard. |
 | `clear-cancel` | `Ctrl+C` | Clear the composer; on an empty composer cancel generation; pressed twice within one second, exit. The footer shows `Press Ctrl+C again to exit`. |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P`, `Ctrl+K` | Open the command palette: every command, view and setting. |
@@ -3232,29 +3238,31 @@ The default table of the terminal app:
 | `delete-word` | `Ctrl+W` | Delete the word before the cursor (whitespace-delimited) into the kill ring. |
 | `line-start` | `Ctrl+A` | Move to the start of the line. |
 | `next-error-line-end` | `Ctrl+E` | Move to the end of the line; on an empty composer, jump to the next error in the transcript. |
-| `kill-line` | `Alt+K` | Kill from the cursor to the end of the line into the kill ring. |
-| `clear-prompt` | `Alt+U` | Clear the whole composer without using the kill ring. |
+| `kill-line` | `Alt+K`, `Ctrl+X` | Kill from the cursor to the end of the line into the kill ring. |
+| `clear-prompt` | `Alt+U`, `Ctrl+G` | Clear the whole composer without using the kill ring. |
 | `undo` | `Ctrl+Z` | Undo the last composer edit. |
-| `redo` | `Ctrl+Shift+Z` | Redo the last undone composer edit. |
+| `redo` | `Ctrl+Shift+Z`, `Ctrl+^` | Redo the last undone composer edit. |
 | `paste` | `Ctrl+V` | Paste from the clipboard; an image takes priority over text. |
-| `word-back` | `Alt+B` | Move to the start of the previous word. |
-| `word-forward` | `Alt+F` | Move to the end of the next word. |
+| `word-back` | `Alt+B`, `Ctrl+Left` | Move to the start of the previous word. |
+| `word-forward` | `Alt+F`, `Ctrl+Right` | Move to the end of the next word. |
 | `kill-to-start` | `Ctrl+U` | Kill from the cursor to the start of the line into the kill ring. |
-| `kill-word-forward` | `Alt+D` | Kill the next word into the kill ring. |
-| `yank` | `Ctrl+Shift+Y` | Paste the newest kill-ring entry. |
-| `yank-pop` | `Alt+Y` | Right after a yank, replace it with the previous kill-ring entry. |
-| `cancel-tool-call` | `Alt+C` | Cancel the running tool call; the turn continues. |
-| `toggle-keep-awake` | `Alt+A` | Turn the machine's keep-awake on or off (the "sleep disabled" chip). |
-| `toggle-memory-provenance` | `Alt+M` | List or hide the memories the last turn used. |
-| `voice-input` | `Alt+V` | First press starts recording; the second press stops it and adds the transcription to the composer, after any text already there. |
+| `kill-word-forward` | `Alt+D`, `Ctrl+Delete` | Kill the next word into the kill ring. |
+| `yank` | `Ctrl+Shift+Y`, `Ctrl+\` | Paste the newest kill-ring entry. |
+| `yank-pop` | `Alt+Y`, `Ctrl+]` | Right after a yank, replace it with the previous kill-ring entry. |
+| `cancel-tool-call` | `Alt+C`, `Ctrl+T` | Cancel the running tool call; the turn continues. |
+| `toggle-keep-awake` | `Alt+A`, `F6` | Turn the machine's keep-awake on or off (the "sleep disabled" chip). |
+| `toggle-memory-provenance` | `Alt+M`, `F7` | List or hide the memories the last turn used. |
+| `voice-input` | `Alt+V`, `F8` | First press starts recording; the second press stops it and adds the transcription to the composer, after any text already there. |
 | `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move the keyboard onto the transcript's work tree: arrows move and fold, `Enter` opens, `y` copies, `Esc` returns. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode (see below). |
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
-| `failure-other-model` | `Alt+O` | On the newest failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I` | On the newest failed turn: show what the provider said. |
-| `failure-sign-in` | `Alt+S` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
-| `next-session` | `Alt+N` | While the session chips show: the next session (agent or process). |
-| `previous-session` | `Alt+P` | While the session chips show: the previous session. |
+| `failure-other-model` | `Alt+O`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Alt+I`, `F3` | On the newest failed turn: show what the provider said. |
+| `failure-sign-in` | `Alt+S`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
+| `next-session` | `Alt+N`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
+| `previous-session` | `Alt+P`, `Ctrl+_` | While the session chips show: the previous session. |
+
+Every Alt and Ctrl+Shift chord has a second default: macOS Terminal sends no Alt unless "Use Option as Meta key" is on, and a terminal without the extended keyboard protocol sends `Ctrl+Shift+<letter>` as `Ctrl+<letter>`, so the second chord is one every terminal sends and tmux leaves alone (a function key, a free `Ctrl` chord, or `Ctrl` with an arrow or Delete). `F12` is the second chord of `Alt+R` (try again) and `F10` of `Alt+J` (open the fix session just started).
 
 `Alt+R` on the newest failed turn sends the failed prompt again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and `Alt+R` tries again. When the failed turn had already run tools, the tool results are kept and the turn continues from them, so their effects are not repeated. The keys are named on the failed turn's row (see "Turn errors"), not in the footer.
 
@@ -3562,10 +3570,10 @@ When a file was changed after that call (by you, another tool or another program
 
 ### Models, providers and sign-in
 
-`/model` is described once for both programs. Bare, it opens its actions with "See your model and the others you can use" first (`list`; a model or a script running it bare gets that report): `use <model>` ("Switch model"), `refresh` ("Read the list of models again"), and in the group "Choose backup models…" `backup <model>` and `drop-backup <model>`.
+`/model` is described once for both programs. Bare, it opens the full model picker (`choose`, "Choose a model"): the Recommended short list first where the catalog has one, each model with its price tier, and a tab for each job a model does (a model or a script running it bare gets the report "See your model and the others you can use", `list`). Its other actions are typed: `use <model>` ("Switch model"), `refresh` ("Read the list of models again"), `backup <model>` and `drop-backup <model>`.
 `/model use openai:gpt-5.4` switches the main chat model, saves it in `provider.model` and prints `Now using <model> (<provider>).` and, when the requested reasoning level does not exist on that model, the level used instead.
 When the provider is not signed in, the terminal app asks for its API key on a hidden line before the switch lands.
-An unknown id is refused with the provider registry's reason. `/model use` alone asks which model, from the models you can switch to.
+An unknown id is refused with the provider registry's reason. `/model use` alone opens the full model picker, as bare `/model` does.
 `/model refresh` asks every provider you have set up for its models again (past any list kept on disk), then refreshes the catalog, the benchmarks and the token limits, asks the daemon to read its own lists again (`models.refresh`; the lists the web app and every other program show), and prints one line per provider: how many models it has, or why its list could not be read (`could not be read, its server is not running`, `could not be read (<error>); 12 models from its last list`, `0 models: it answered with an empty list`); a provider that does not list its own models says it uses the built-in catalog. With a daemon running, a note follows: `The daemon read its lists again too (what the web UI and the other programs show): <n> providers answered` (and `; could not read <provider> (<error>)`). In the model picker, `Ctrl+R` runs `/model refresh`. A part that failed makes the refresh a refusal naming it, after the rest was printed.
 The model picker (its key, or a failed turn's `alt+o`) opens on Main chat, with the other things a model is chosen for behind one tab, `Other jobs (optional) ▸`: Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). `Tab` (or a click on that tab) moves to them; then each is listed, marked `(off)` when it is off, and a line under the tabs says what the chosen one does and, when none is chosen for it, that it uses the Main chat model. In the Agent the search index is not a tab, and that line says where it is set (`/settings open provider.embeddingProvider`). Under the search field a row names each filter key with what it is set to: `ctrl+t price: any  ctrl+k needs: any  ctrl+a all models  ctrl+b sort: off  ctrl+g by: provider` (`ctrl+a usable only` while it hides models you cannot use; on a narrow screen it takes two rows). Each model row shows its price tier beside its context (`free` in green, `paid`, `subscription`) when it is known, and the detail names it (`Price`) and how long ago the provider's model list was read (`List  list read 3 h ago`). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `not in the catalog`; its detail reads `Not described by the model catalog; usable as a text model, listed after the described ones.` An open picker shows a fresh list as soon as the providers' lists change (the daemon reads every provider's list when it starts); `ctrl+r` reads them again now; pinned and recent models still come first. After them, a `Recommended` group lists at most five models from connected providers, each with why, in catalog facts only: `newest <family>` (the latest release date in a family the catalog names), `largest context: <n> tokens`, `lowest price: $<in> in, $<out> out per 1M tokens`, compared among one provider's models; a provider the catalog gives none of these facts for has none, and a benchmark sort lists no group. The Agent's picker shows the same group.
 
@@ -3635,7 +3643,7 @@ An invalid value prints `Could not set <key>: <reason>`.
 `/settings-sync` works with settings sync bundles: `review` (what it alone gives a model or script), `export <file>`, `pull <file>` (marked `loosens a protection` on the first screen: changes that touch security are shown and asked about first, in one question; a model cannot run it), `conflicts`, `resolve <setting> local|synced`, `inspect <file>`, `show <setting>`, `failures` and `open` (the settings sync screen). The staged bundle, rollbacks and locks are `/managed`'s.
 `/managed` applies a managed settings bundle (settings an administrator sets for a machine): `review`, `staged`, `history`, `inspect <file>`, `stage <file>`, `export <profile> <file>`, `apply <file> [--key <setting>]...`, `apply-staged [--key <setting>]...`, `rollback <apply>`, `lock <setting> <who> <reason>` and `unlock <setting>` (the owner's only; it asks first). `apply` prints a rollback token; `/managed rollback <token>` restores the earlier values. `apply` and `apply-staged` are marked `loosens a protection` on the first screen and a model cannot run them; a bundle that changes a setting that touches security shows those changes and asks first, in one question, and what is applied is exactly what was shown: `apply <file>` stages the bundle it read once and applies that stage, `apply-staged` applies the stage it showed; a different stage put there since by another window or process is refused and nothing is applied. A locked key cannot be changed from Settings or `/settings` until `/managed unlock <setting>`.
 
-`/setup` is a guided command. Bare, it lists topics; each opens one form for that topic, and the form's `Save` writes only what changed on it, then checks it. Its first row, `See what is set up` (`/setup checklist`), reads `N of 4 set up` for the things most people set once (a model; when GoodVibes asks, chosen; the sandbox; whether conversations are saved), and each of those topics' rows says `✓ <what is set>`, what is missing, or `skipped for now`; chosen, it lists what is left with the line that sets each. The topics: `Choose a model` (`/setup model`), `Sign in or out of a provider` (`sign-in`), `Add a provider of your own` (`add-provider <name> <address>`), `Store a password or key` (`store-key`), under `Reach GoodVibes from elsewhere…` the topics `Keep everything on this computer` (`local-only`), `Open GoodVibes in a browser` (`browser`), `Use it from other devices` (`other-devices`), `Use a daemon on another computer` (`connect-daemon`), `Receive webhooks` (`webhooks`) and `Use Cloudflare` (`cloudflare`), then `Connect chat apps and services` (`chat-apps`), `Who can sign in here` (`who-signs-in`), `How GoodVibes works with you` (`how-it-works`), under `Features and switches…` the topics `Safety and sandboxing` (`safety`), `Memory and context` (`memory`), `Telemetry`, `Automation`, `Paired devices and voice` (`devices-voice`), `Provider behaviour` (`provider-behaviour`) and `Advanced switches` (`advanced`), then `History and privacy` (`history`, opens the setting), `Bring over settings from the terminal app`, `Pair the Agent with a GoodVibes host` (`pair`) and `Unpair the Agent from the GoodVibes host` (`unpair`) (each shown with `Agent only`; in the terminal app they say where to do them) and `Run first-run again` (`first-run`). The Agent lists the same topics. `connect-daemon` points this program at a daemon already running on another computer and opens nothing on this one: in the terminal app it holds the daemon-source choice (use the daemon on this computer, or connect to an existing one with its host, port and token, and `Connect to this daemon now`) and saving it writes only `daemon.connectedHost.url`; in the Agent it shows the connected-daemon address, whether the Agent may dial it, and `/setup pair`. A form that opens the computer to the network also asks for the account that signs in from other devices. Esc closes a form without saving.
+`/setup` is a guided command. Bare, it lists topics; each opens one form for that topic, and the form's `Save` writes only what changed on it, then checks it. Its first row, `See what is set up` (`/setup checklist`), reads `N of 4 set up` for the things most people set once (a model; when GoodVibes asks, chosen; the sandbox; whether conversations are saved), and each of those topics' rows says `✓ <what is set>`, what is missing, or `skipped for now`; chosen, it lists what is left with the line that sets each. On one of those topics' rows that is not done, `s` (`s skip for now` under the list) skips it for now: it leaves what the checklist counts as left; on a skipped row the same key (`s bring it back`) brings it back. Both programs keep the choice in `setup-skipped.json` in the program's folder. The topics: `Choose a model` (`/setup model`), `Sign in or out of a provider` (`sign-in`), `Add a provider of your own` (`add-provider <name> <address>`), `Store a password or key` (`store-key`), under `Reach GoodVibes from elsewhere…` the topics `Keep everything on this computer` (`local-only`), `Open GoodVibes in a browser` (`browser`), `Use it from other devices` (`other-devices`), `Use a daemon on another computer` (`connect-daemon`), `Receive webhooks` (`webhooks`) and `Use Cloudflare` (`cloudflare`), then `Connect chat apps and services` (`chat-apps`), `Who can sign in here` (`who-signs-in`), `How GoodVibes works with you` (`how-it-works`), under `Features and switches…` the topics `Safety and sandboxing` (`safety`), `Memory and context` (`memory`), `Telemetry`, `Automation`, `Paired devices and voice` (`devices-voice`), `Provider behaviour` (`provider-behaviour`) and `Advanced switches` (`advanced`), then `History and privacy` (`history`, opens the setting), `Bring over settings from the terminal app`, `Pair the Agent with a GoodVibes host` (`pair`) and `Unpair the Agent from the GoodVibes host` (`unpair`) (each shown with `Agent only`; in the terminal app they say where to do them) and `Run first-run again` (`first-run`). The Agent lists the same topics. `connect-daemon` points this program at a daemon already running on another computer and opens nothing on this one: in the terminal app it holds the daemon-source choice (use the daemon on this computer, or connect to an existing one with its host, port and token, and `Connect to this daemon now`) and saving it writes only `daemon.connectedHost.url`; in the Agent it shows the connected-daemon address, whether the Agent may dial it, and `/setup pair`. A form that opens the computer to the network also asks for the account that signs in from other devices. Esc closes a form without saving.
 `/startup` is the setup checks and transfers, a guided command of its own (bare, it lists them; without an interface it runs `review`): `/startup review`, `doctor`, `services`, `hooks`, `remote` and `sandbox` show what this setup has; `/startup support-bundle <dir> [--overwrite]` writes a support bundle directory (`Exported support bundle to ./bundle`), masking any literal credential, and `/startup support-bundle-inspect <dir>` reads one back; `/startup export <path> [--overwrite]` writes the setup review as JSON; `/startup transfer-export <path> [--overwrite]` writes a setup transfer bundle, `/startup transfer-inspect <path>` reads one, and `/startup transfer-import <path>` shows the plan (every changed setting and replaced file) and applies it on Yes, reporting `N setting(s) changed, M file(s) replaced`; `/startup link <view> [item]` prints a `goodvibes://` link and `/startup open-link <link>` opens one.
 A confirmation applies exactly what it showed. When `/startup transfer-import` or `/services trust <name>` finds its target changed between the question and Yes (the file rewritten, the entry edited), nothing is done and the question is asked again with `Changed since you looked:` and each change on top ; a model-run line is refused with `TARGET_CHANGED` and the same line as its next step. The `/services trust` question names what the entry sends and to which host.
 A confirmation whose text does not fit the screen scrolls (up, down, page up, page down) and says `↓ N more lines`; its confirming button stays disabled until the end has been shown. In a settings list, Enter and a two-press action act on the row drawn under the highlight: while a search is shown that is the search result, and a second press after the list refreshed onto another row asks again.
@@ -3881,7 +3889,7 @@ Compatible and gateway providers share one OpenAI- or Anthropic-compatible adapt
 1. Get the API key from the provider.
 2. Store it in one of three ways:
    - set the environment variable before launching: `export OPENAI_API_KEY='<your-api-key>'`;
-   - store it in the secret store: `printf '%s' '<your-api-key>' | goodvibes secrets set OPENAI_API_KEY --stdin --user`;
+   - store it in the secret store: `goodvibes secrets set OPENAI_API_KEY --user`, then paste the key when it asks (nothing is shown);
    - inside the app, select a model of that provider with `/model use` and type the key when the app asks for it.
 3. Select a model: `goodvibes models use openai:gpt-5.4` or `/model use openai:gpt-5.4`.
 4. Check it: `goodvibes providers inspect openai` shows the API-key route as configured and usable.
@@ -4613,7 +4621,7 @@ A tool the server adds later is allowed until it is blocked. To refuse every too
 
 ### `/mcp`
 
-`/mcp` alone opens a short list: "See your servers" (with how many are connected beside it), "Add a server…", "Choose what a server may do…" and "Check a server that isn't working…"; the last two open short lists of their actions. An action with blanks opens a form a step at a time ("Add a server · step 1 of 2": how it starts, the command or address, and its name, suggested from the command; step 2, what it may do): Enter goes on, tab moves between blanks, left and right change a choice, a blank chosen from a list (your servers, the tools a server offers right now, the tools you blocked) opens that list, Esc goes back a step. Under the form, "This will run:" shows the line it will run as you type. Then one sentence says what is about to happen, and after it runs the app prints what happened, how to undo it and "The command for this is: <line>". A typed line that leaves a blank out opens the same form with what it gave filled in; a complete line runs at once (asking first when the action is marked). From a model, or where no list can be shown, a line with a blank missing is refused with the blank's name and its current choices, and `/mcp` alone shows the servers. `/help mcp` lists every action with its sentence and its line; completion after `/mcp ` offers the actions, then the blank being typed (`/mcp block ` lists servers, `/mcp block github ` that server's tools), then options after `--`. The same actions, names and sentences are in both programs.
+`/mcp` alone opens a short list: "See your servers" (with how many are connected beside it), "Add a server…", "Choose what a server may do…" and "Check a server that isn't working…"; the last two open short lists of their actions. An action with blanks opens a form a step at a time ("Add a server · step 1 of 2": how it starts, the command or address, and its name, suggested from the command; step 2, what it may do): Enter goes on, tab moves between blanks, left and right change a choice, a blank chosen from a list (your servers, the tools a server offers right now, the tools you blocked) opens that list, Esc goes back a step. Under the form, "This will run:" shows the line it will run as you type. On the last step the sentence the typed line's question would show (what submitting does, with its risk: `"Build is green" is sent to the channel you named, or to the default target. This sends something outside this machine.`) stands above that line, and Enter is named for what it does (`⏎ Send`, `⏎ Approve (at most 25.00)` for one that spends money): the submitted form is the request, and an action that sends, spends or reads goes at once. A lasting change is then put in one sentence to confirm, and after it runs the app prints what happened, how to undo it and "The command for this is: <line>". A typed line that leaves a blank out opens the same form with what it gave filled in; a complete line runs at once (asking first when the action is marked). From a model, or where no list can be shown, a line with a blank missing is refused with the blank's name and its current choices, and `/mcp` alone shows the servers. `/help mcp` lists every action with its sentence and its line; completion after `/mcp ` offers the actions, then the blank being typed (`/mcp block ` lists servers, `/mcp block github ` that server's tools), then options after `--`. The same actions, names and sentences are in both programs.
 
 | Action | Line | Risk |
 | --- | --- | --- |
@@ -5123,6 +5131,7 @@ goodvibes run --session user-0008b454 "continue with the next step"
 | `--max-turns <n>` | Stop once the model has answered `n` times in this run's own loop and still asks for tools; exit `1`, `stopReason` `max_turns`. Helper agents and helper models do not count. Tools from that last answer are not run. A value that is not a whole number of at least 1 is refused with exit `2`: `--max-turns expects a positive whole number, not "0".` |
 | `--omit-accumulated` | With `stream-json`, leave `accumulated` out of `STREAM_DELTA` frames. |
 | `--answer-permissions` | With `stream-json`, answer owner prompts on standard input. Without it, a call that needs the owner is refused. With another format it is refused with exit `2`. |
+| `--prompt-file <path>` | Read the prompt from a file; a relative path is read from the working folder. `--prompt-file -` reads all of standard input: `cat task.md \| goodvibes run --prompt-file -`. A prompt also given as text (`Give the prompt once: as text or with --prompt-file, not both.`), a file that cannot be read (`--prompt-file could not read <path>: <reason>`), or `-` with `--answer-permissions` is refused with exit `2`. |
 | `--continue`, `--resume [id]`, `--session <id>` | Continue the last or the named session. A session that does not exist fails. |
 | `--intake-status`, `--intake-retry`, `--intake-resume`, `--intake-cancel` | Inspect, retry, resume or cancel the saved native input. They take no prompt; use one at a time. |
 
@@ -5152,6 +5161,9 @@ Every stream frame is one JSON object whose first two keys are `schemaVersion` (
 
 | `type` | Field | Type | Meaning |
 | --- | --- | --- | --- |
+| `SESSION` | `sessionId`, `model`, `provider` | string | The first frame of every run that reached a session, written before the first request (after a resume, the resumed session): the session and the model that answers. |
+| | `workingDirectory` | string | The working folder of the run. |
+| | `permissionMode` | string | The permission mode in force: `ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`. |
 | `STREAM_DELTA` | `content` | string | The new text of this chunk. |
 | | `accumulated` | string | The whole answer streamed so far in this model response. Left out with `--omit-accumulated`. |
 | `DRAFT_WITHDRAWN` | `reason` | string | The streamed answer was withdrawn (the turn moved to another model after it had begun). Discard the text received so far; the replacement streams from empty. |
@@ -5325,7 +5337,7 @@ A session another running copy has open is refused before anything is sent: exit
 | --- | --- |
 | `0` | Completed. |
 | `1` | Failed: model or provider error, empty response, delegated work failed, `--max-turns` reached, a turn refused before it started (`preflight_failed`, `context_overflow`), or the daemon was unavailable or refused the input. |
-| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with an `--intake-*` flag (`Recovery uses the original journal input; do not supply a replacement prompt.`). |
+| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with an `--intake-*` flag (`Recovery uses the original journal input; do not supply a replacement prompt.`). A usage error prints the error and the command's one usage line on stderr, not the whole help; with `--output json` or `stream-json` it is the run's final frame on stdout (`ok` `false`, `stopReason` `invalid-input`). Any other command asked for `--output json` answers a usage error with `{ "ok": false, "kind": "usage", "error": "...", "next": ["Usage: ..."] }`. |
 | `3` | Outcome unknown: the turn ended without a final event (`turn-unsettled`), or a native input may have taken effect on the daemon (run `goodvibes run --intake-status` before retrying). |
 | `124` | `--timeout` reached. |
 | `130` | Cancelled (Ctrl-C, SIGTERM, or the saved input was cancelled). |
@@ -5370,6 +5382,7 @@ Every key is listed under "Settings" in the reference part. The prefixes that ch
 | --- | --- | --- | --- | --- | --- |
 | `display.collapseThreshold` | number | `30` | number in [1, 1000] | each program | Tool output longer than this many lines is folded; open it to see the rest. |
 | `display.lineNumbers` | enum | `"off"` | `all`, `code`, `off` | each program | Shows line numbers in answers: on every line, in code blocks only, or not at all. |
+| `display.mouseCapture` | boolean | `true` |  | each program | On: the terminal programs take the mouse (click a row or a status segment, scroll with the wheel). Off: the terminal keeps the mouse, so you select and copy text the terminal's own way. Read when the program starts. |
 | `display.reduceMotion` | boolean | `false` |  | each program | Stops the terminal programs' moving parts: the working spinner shows a still mark and an elapsed time, and running rows stop spinning. Answers still arrive as they are written unless "Show answers as they are written" is off. |
 | `display.showReasoningSummary` | boolean | `false` |  | each program | Shows a short summary of the model's thinking above each answer, for models that give one. |
 | `display.showThinking` | boolean | `false` |  | each program | Shows what the model was reasoning about above each answer. |
@@ -5476,7 +5489,7 @@ These work in the Agent exactly as described under the named heading of the term
 | Topic | Heading in the terminal-app part |
 | --- | --- |
 | Option parsing, `--`, typo refusal, run-only flags | "Rules of the command-line parser" |
-| `-m`, `--provider`, `-C`, `-c`, `--enable`, `--disable`, `-p`, `--print`, `-o`, `--json`, `--just-vibes`, `--yolo`, `--no-alt-screen`, `-r`, `-s`, `--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`, `-h`, `-v` | "Global options" |
+| `-m`, `--provider`, `-C`, `-c`, `--enable`, `--disable`, `-p`, `--print`, `-o`, `--json`, `--just-vibes`, `--yolo`, `--no-alt-screen`, `-r`, `-s`, `--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions`, `--prompt-file`, `-h`, `-v` | "Global options" |
 | `models`, `providers`, `subscription`, `secrets`, `sessions`, `pair`/`qrcode`, `completion`, `help`, `version`, `plugin bundles` | "Command-line commands" (the matching command) |
 | Composer markers `!`, `!#`, `# `, `@model:`, `!@<path>`, paste folding, what input history keeps of a fold | "What the composer does with typed text" |
 | Screen layout, session chips, opened agents and processes | "Screen layout" and "Views" |
@@ -5662,13 +5675,13 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 
 | Action | Default key | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C` | Copy selected text. |
+| `copy-selection` | `Ctrl+Shift+C`, `F5` | Copy selected text. |
 | `clear-cancel` | `Ctrl+C` | Clear the composer, cancel generation, twice to exit. |
 | `screen-clear` | `Ctrl+L` | Repaint. |
 | `command-palette` | `Ctrl+P` | Open help: every command and keyboard shortcut in one searchable list (the same as `?` and `/help`). |
 | `workspace-picker` | `Ctrl+G` | Open the Agent workspace. |
 | `workspace-close` | `Ctrl+X` | Close the Agent workspace. |
-| `workspace-close-all` | `Ctrl+Shift+X` | Close the Agent workspace. |
+| `workspace-close-all` | `Ctrl+Shift+X`, `Ctrl+\` | Close the Agent workspace. |
 | `workspace-tab-next` | `Ctrl+]` | Next workspace category. |
 | `workspace-tab-prev` | `Ctrl+[` | Previous workspace category. |
 | `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for the owner, what is scheduled, the background services. |
@@ -5682,17 +5695,19 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 | `next-error-line-end` | `Ctrl+E` | End of line, or the next error on an empty composer. |
 | `kill-line` | `Ctrl+K` | Kill to the end of the line. |
 | `clear-prompt` | `Ctrl+U` | Clear the composer. |
-| `undo`, `redo` | `Ctrl+Z`, `Ctrl+Shift+Z` | Undo or redo a composer edit. |
+| `undo`, `redo` | `Ctrl+Z`; `Ctrl+Shift+Z`, `Ctrl+^` | Undo or redo a composer edit. |
 | `paste` | `Ctrl+V` | Paste. |
 | `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move onto the work tree. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode, as in the terminal app. |
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
-| `failure-other-model` | `Alt+O` | On the newest failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I` | On the newest failed turn: show what the provider said. |
-| `failure-retry` | `Alt+R` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
-| `failure-sign-in` | `Alt+S` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
-| `next-session` | `Alt+N` | While the session chips show: the next session (agent or process). |
-| `previous-session` | `Alt+P` | While the session chips show: the previous session. |
+| `failure-other-model` | `Alt+O`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Alt+I`, `F3` | On the newest failed turn: show what the provider said. |
+| `failure-retry` | `Alt+R`, `F12` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
+| `failure-sign-in` | `Alt+S`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
+| `next-session` | `Alt+N`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
+| `previous-session` | `Alt+P`, `Ctrl+_` | While the session chips show: the previous session. |
+
+As in the terminal app, every Alt and Ctrl+Shift chord has a second default that macOS Terminal (no Alt by default) and terminals without the extended keyboard protocol still send.
 
 The Agent has no command palette key, no `Alt` word-movement or kill-ring keys, and no `Alt+C`, `Alt+A`, `Alt+M` or `Alt+V`.
 The old action names `panel-picker`, `panel-close`, `panel-close-all`, `panel-tab-next`, `panel-tab-prev` and `sidebar-toggle` are read as `workspace-picker`, `workspace-close`, `workspace-close-all`, `workspace-tab-next`, `workspace-tab-prev` and `open-agents`.
@@ -6113,7 +6128,7 @@ The workspace has these 26 categories, in this order, in eight groups; there are
 | ONBOARDING | set up | `onboarding-context` | Local Context | 16 | Personas, starter memories, skills, routines, notes and knowledge, and importing their files; VIBE.md. |
 | FINISH | set up | `finish` | Finish | 1 | Apply & close: writes the onboarding completion marker, so later launches start in the conversation. |
 
-On the Agent's first launch, when the terminal app on the same computer has settings the Agent would take, the lines under the splash say so once: "The terminal app on this computer has settings. `/setup import-settings` brings them over, showing what would change first." Later launches do not say it.
+On the Agent's first launch, when the terminal app on the same computer has settings the Agent would take, the lines under the splash say so once: "The terminal app on this computer has settings. `⏎` brings them over, showing what would change first (later: /setup import-settings)." Enter on the empty composer takes the offer: it opens the import, which shows what would change before anything is changed; typing a message instead leaves the offer, and `/setup import-settings` does the same later. Later launches do not say it.
 
 Until setup is applied, the workspace opened for setup (`goodvibes-agent setup`) shows only the ONBOARDING group, and reveals its categories as setup reaches them; `/agent` shows all 26. A start whose model is not ready opens first run, not the workspace (see the install part of this file).
 `/agent <section>` opens a section (category) by its id; the guided form lists them by label.
@@ -6206,10 +6221,11 @@ Each of these runs one call of an Agent tool as the owner's own act (the same to
 `/channels send` sends one message through one delivery target and asks first:
 
 ```text
-/channels send [--channel <surface[:route][ | label]> | --route <route[ | label]> | --webhook <http(s)-url> | --link <name>] [--title <title>] <message>
+/channels send [--channel <surface[:route][ | label]> | --route <route[ | label]> | --webhook <http(s)-url>] [--link <link>] [--title <title>] <message>
 ```
 
-- Exactly one target is required: `--channel` (a channel surface such as `slack`, optionally with a route and a label), `--route` (a bound route), `--webhook` (an `http` or `https` address, asked for masked in the guided path and never shown) or `--link`. None, or more than one, is refused: `No delivery target was given, so nothing was sent. Give exactly one of channel, route, webhook or link.` or `2 delivery targets were given, so the recipient is unclear and nothing was sent.`
+- One recipient: `--channel` (a channel surface such as `slack`, optionally with a route and a label), `--route` (a bound route) or `--webhook` (an `http` or `https` address, asked for masked in the guided path and never shown). With none of them the message goes to the default target: the one ready channel whose default target is set. With no such channel it is refused (`No channel has a default target set, so there is nowhere to send this; nothing was sent.`), and with several it names them (`2 channels have a default target (slack, discord), so which one is meant is unclear; nothing was sent.`). More than one recipient is refused: `2 delivery targets were given, so the recipient is unclear and nothing was sent.`
+- `--link` is sent with the message, under it, to that recipient; it is not a second target.
 - The message is the words after the options; `--title` defaults to `GoodVibes Agent message`.
 - The message is checked for payment-card details (a message carrying them is refused before it reaches any provider), then delivered, and a receipt is stored:
 
@@ -6662,13 +6678,15 @@ In the terminal app and the Agent, an ask appears as the same card. Its title is
 | --- | --- |
 | `y` | Yes: `Yes, once` for a call that acts once, or the button that says what a lasting change does (below). |
 | `a` | `Yes, and remember (choose what)`: opens the remember choices (when the ask offers them); the web UI's ask card has the same button. Enter never remembers. |
-| Up, Down, `1` to `9`, Enter | In the remember choices: move, pick, and allow and remember with that choice. Esc goes back. |
+| Up, Down, Enter | In the remember choices: move, and allow and remember with the highlighted choice. Esc goes back. |
+| `1` to `9` | In the remember choices: allow and remember with that numbered choice at once. |
 | `n` | No. |
+| `w` | Say why (`w say why` on the card): opens `Why not:`; from then on every key is text until Enter refuses with that reason or Esc goes back. While it is open `No` is the highlighted button and the key row reads `⏎ no, with this reason`. |
 | `d` | Details: why you are asked, the tool, the folder, the sandbox, the decision, effects, review reasons, the checklist and the raw arguments. |
 | Left, Right, Tab | Choose a button. |
 | Enter | Press the chosen button. The card opens on the yes, or on `No` for what cannot be undone, for owner-only asks whose effect cannot be taken back (money spent, a payment step, a message sent as you, a delete nothing restores, an irreversible operator action), and for asks that weaken a protection (a security, judgment or payment setting loosened; access granted to a person, device, tool server or hook), so Enter never allows those and never remembers anything. The web UI's card makes the same button its main one, and a call `just-vibes` held for one of those reasons opens on `No` in `/questions` and the web UI. |
-| Any other typing | Starts `Why not:`; Enter refuses with that reason, Esc goes back. |
-| Space, `a`, Up, Down, PgUp, PgDn | In a multi-edit edit (`Apply selected`): keep or leave out a change, keep all, move, scroll. |
+| Any other letter | Nothing; a paste is never an answer. |
+| Space, `1` to `9`, `a`, Up, Down, PgUp, PgDn | In a multi-edit edit (`Apply selected`): keep or leave out the change under the cursor or the numbered change, keep all, move, scroll. |
 | Tab | When you were typing a draft, Tab answers the request and keeps your draft. |
 | Ctrl+C | No, and stop the turn. |
 
@@ -7156,8 +7174,9 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 | Level | Effect |
 | --- | --- |
 | `trusted` | All tools may run, subject to the permission mode and rules. |
-| `restricted` | Only reads run. Every write, command and delegation is refused, in every mode including `yolo`. |
-| undecided | Reads run. Calls settled without asking run. The first call that would ask you raises the trust question instead, titled with the folder (`Trust ~/projects/garden-planner?`), with "Trust this workspace" (it names the folder's own files that trusting lets run, `This folder has a hooks file (hooks.json) and tool servers (MCP: .goodvibes/mcp.json).`, or `This folder has no hooks file or tool servers (MCP) of its own.`, then "Trusting it lets them run and lets GoodVibes change files here. It approves nothing: each action still follows your setting for when GoodVibes asks.") and "Keep restricted (read-only)" ("GoodVibes can read this folder but cannot change files or run commands in it, and the folder's own hooks and MCP servers stay off, until you trust it."); both end "Change it later with /security trust-folder or /security restrict-folder." Choosing trust forwards the original ask to you. Dismissing the question (Esc) records nothing: that call is refused, the workspace stays undecided, and the next call that would ask raises the question again. |
+| `restricted` | Only reads run. Every write, command and delegation is refused, in every mode including `yolo`. The model is told so as that call's result (`This folder is restricted: no file can be changed and no command run until it is trusted.`) and the turn goes on; you read one row beside the call, `Not run: this folder is restricted (/security trust-folder trusts it).` |
+| undecided | Reads run, and calls are decided as in a trusted folder (an undoable edit inside the folder runs without asking); a call that would ask you raises the trust question instead. In the terminal app a folder is never left undecided once it is open. When it has no hooks file and no MCP servers of its own, trusting it would let nothing run that the permission mode does not already govern, so nothing is asked: it is recorded as trusted for having nothing of its own to run, in `~/.goodvibes/shared/workspace-trust-nothing-to-run.json` beside the workspace register (never as a row of the register, so an earlier release reads the folder as undecided), and you are told nothing. When it has them, the trust question is asked as the program opens, before any prompt is acted on (first run, when it is needed, follows it), titled with the folder (`Trust ~/projects/garden-planner?`), with the cursor on "Trust this workspace", which says what trusting lets run (`Trusting it lets the hooks in hooks.json run and the tool servers (MCP) in .goodvibes/mcp.json start, and lets GoodVibes change files and run commands here. It approves nothing: each action still follows your setting for when GoodVibes asks.`), and "Keep restricted (read-only)" ("GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it."); both end "Change it later with /security trust-folder or /security restrict-folder." Dismissing it (Esc) records nothing: the folder stays undecided, and the first call that would ask you raises the question again; choosing trust there forwards that ask to you. A folder trusted for having nothing of its own that later gains a hooks file or an MCP file is asked about then, naming the files, before any of them runs: when its hooks are about to fire or its servers to start, or as the program opens. Until you answer they stay off; "Trust this workspace" turns them on. A trust question that opens by itself while you type is kept apart from your typing as the approval card is: keys typed as it appears, or in the same burst, go to the composer, and while the composer holds a draft every key stays there until Tab moves to the question (its key row then reads `tab answer this question (your draft stays)`); the draft is left as it was. The Agent and the daemon read the same record and keep such files off until the folder is trusted (`/security trust-folder`). |
+| undecided, a headless run | `goodvibes run` and the daemon's runs (the web UI, channels, schedules) ask nothing on opening and behave as 3.4.8 did. Reads run; an undoable edit inside the folder runs without asking, as in a trusted folder; a command, delegation or other write is decided as the mode in force decides it (`jev-decides`: the decision model; `yolo`: it runs), and one that would ask you raises the trust question, refused when nobody can answer it (below). Only a folder you restricted refuses writes. |
 
 ```text
 /security folder                     show the level, whether it is decided, and the registration
@@ -7170,7 +7189,7 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 
 The permission mode `/security trust` and a saved trust bundle report is the mode in force for the conversation (in a hosted Agent session, the mode the host runs it under). When the mode chosen differs, both are shown with the reason: `permission mode: yolo (chosen ask-me: <reason>)`, and the bundle carries `permissionModeChosen` and `permissionModeReason` beside `permissionMode`.
 
-- Decisions are kept in `~/.goodvibes/shared/workspace-registrations.json`, one row per directory by its real path, shared by every product. A `trust.json` inside a project is not honoured; `/security folder` says so when it finds one.
+- Decisions are kept in `~/.goodvibes/shared/workspace-registrations.json`, one row per directory by its real path, shared by every product; a folder trusted for having nothing of its own to run is kept in `workspace-trust-nothing-to-run.json` beside it, and a row in the register replaces it. A `trust.json` inside a project is not honoured; `/security folder` says so when it finds one.
 - When a decision cannot be saved, it applies to this session only and the app says it will ask again next time.
 - With nobody to answer (a headless run without `--answer-permissions`), a call that needs the trust answer is refused: `Workspace trust for <dir> is undecided and the trust question was not answered here, so the workspace stays undecided.` Fix: run `/security trust-folder`, or answer the workspace-trust prompt of a run started with `--answer-permissions`.
 - An unreadable trust record is treated as restricted for autonomous work until a level is chosen.
@@ -7254,8 +7273,9 @@ A key in a project's store is part of the checkout, so it is used only after you
 goodvibes secrets list
 goodvibes secrets providers
 goodvibes secrets test goodvibes://secrets/env/OPENAI_API_KEY
-goodvibes secrets set OPENAI_API_KEY <your-api-key> --user
-printf '%s' '<your-api-key>' | goodvibes secrets set OPENAI_API_KEY --stdin --user
+goodvibes secrets set OPENAI_API_KEY --user            # asks for the value; nothing typed is shown
+printf '%s' "$OPENAI_API_KEY" | goodvibes secrets set OPENAI_API_KEY --user   # piped: read from standard input
+goodvibes secrets set OPENAI_API_KEY <your-api-key> --user   # also works; the value stays in shell history
 goodvibes secrets link OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY --user
 goodvibes secrets delete OPENAI_API_KEY --user
 ```
@@ -7264,8 +7284,9 @@ goodvibes secrets delete OPENAI_API_KEY --user
 
 - Without `--user`, `set` and `link` write to the project store. Use `--user` for your own store. The Agent files a credential the daemon reads (channel tokens, mail passwords and other daemon-owned keys) in the daemon store whatever scope you ask for, and says so.
 - `--plaintext` stores the value unencrypted; `--secure` (default) encrypts it.
-- `--stdin` reads the value from standard input without its trailing newline; use it for a value that starts with `--`.
-- The value is exactly one argument. Several value words are refused: `Not stored: 2 values were given for <KEY>.`
+- `set <KEY>` with no value asks `Value for <KEY> (typing is not shown):` at a terminal, echoing nothing, or reads standard input without its trailing newline when it is piped. The value then never reaches the command line, the shell history or the process list. Nothing entered is refused: `Not stored: no value was given for <KEY>.`; Ctrl+C stops with exit `130` and stores nothing.
+- `--stdin` reads the value from standard input even at a terminal; a value that starts with `--` is given this way or typed when asked.
+- A value on the command line is exactly one argument. Several value words are refused: `Not stored: 2 values were given for <KEY>.`
 - `delete` without a scope flag removes the key from every store that has it and lists where it was removed from. A key not stored exits non-zero: `No stored secret named <KEY>. Nothing was deleted.`
 - `test` exits `0` when the reference resolves and `1` when it does not. It prints `resolved <redacted>` or `missing`, never the value.
 - An unknown verb prints usage and exits non-zero.
@@ -7342,7 +7363,7 @@ In `goodvibes run` and `goodvibes-agent run`, a call that needs the owner is ref
 | "refused by the saved rule ..." | A remembered deny rule. | `/permissions rules`, then revoke it. |
 | "plan mode is on and <tool> would change something". | Plan mode. | `/plan off` or Shift+Tab. |
 | Writes refused in a new directory with "Workspace trust ... is undecided". | Trust question unanswered. | `/security trust-folder`. |
-| Writes refused: "Explicit restricted workspace forbids this operation". | Workspace set to restricted. | `/security trust-folder`. |
+| Writes refused: "Not run: this folder is restricted (/security trust-folder trusts it)." | Workspace set to restricted. | `/security trust-folder`. |
 | A request from Slack never runs in `yolo`. | A channel request always needs the owner's answer. | Answer it in the terminal app, the web UI or the conversation; or ask from the terminal. |
 | A request from email, a webhook or ntfy is refused. | Those surfaces cannot direct changes. | Ask from the terminal, Telegram or another owned surface. |
 | `just-vibes` finished without doing some steps. | They were held. | `/held`, `/held approve <id>`, then ask to carry on. |
@@ -7507,6 +7528,8 @@ A routine is a prompt that runs on a schedule. Each time it fires it produces a 
 /schedule add --at 2026-12-01T09:00 send the release reminder
 /schedule pause weekly-report
 ```
+
+`/schedule list` shows each schedule with what it runs (its task, on the line under it) and its timing in words with the pattern it is kept as beside it: `every weekday at 09:00 (0 9 * * 1-5) [UTC]`, `on the 1st of each month at 07:30 (30 7 1 * *)`, `every hour at :15`, `every 30 minutes`; a pattern of any other shape is shown as written. `Read as:` uses the same words. The Agent lists the schedules of its connected host the same way.
 
 A schedule is named by its id, its name or the start of its id (one that names more than one is refused with the candidates). Options of `add` ("Anything else?" in the guided form; each blank keeps the usual setting):
 
@@ -8065,7 +8088,7 @@ Prerequisites: 2-Step Verification on the Google account.
 
 ### Path B: OAuth
 
-Prerequisites: a Google Cloud account; the `gcloud` CLI (the flow checks `gcloud --version` and tells you how to install it into your home directory).
+Prerequisites: a Google Cloud account. The `gcloud` CLI is installed by the flow when it is not on this computer (`/google connect` is the request: nothing is asked first): the Google Cloud SDK archive (about 500 MB) is downloaded into your home folder, unpacked and its installer run, and each step is said as it happens: `Installing Google Cloud SDK, 511 MB, into ~/google-cloud-sdk: downloading`, `...: 25% downloaded` at each quarter, `...: unpacking`, `...: running its installer`. In the `/google` list the row says `installs Google Cloud SDK, about 500 MB` while gcloud is missing. What the flow found is said first, before its steps.
 
 1. `gcloud auth login` (you choose the account and click Allow).
 2. The flow selects or creates a Cloud project and enables `gmail.googleapis.com` and `calendar-json.googleapis.com`.
@@ -9402,7 +9425,7 @@ goodvibes-daemon --daemon-home /srv/gv/daemon cluster status
 | --- | --- |
 | `0` | The command did what it says. |
 | `1` | It ran and failed; the reason is printed. |
-| `2` | The command line was wrong: an unknown command, an unknown flag, a flag this command does not take, or a missing value. Exception: `cluster` exits `1` for its own usage errors (an unknown flag, `cluster <subcommand> --help`, an unknown subcommand), with code `usage` in `--json`. `webui` exits `2` for its usage errors and for `no bundle directory to serve`. |
+| `2` | The command line was wrong: an unknown command, an unknown flag, a flag this command does not take, or a missing value. It prints the error and the command's one usage line (`Usage: goodvibes-daemon status [--json] ...   (goodvibes-daemon status --help shows every form and option)`), not the whole help; with `--json`, one `{ok:false, code, error, fix}` document on stdout instead. Exception: `cluster` exits `1` for its own usage errors (an unknown flag, `cluster <subcommand> --help`, an unknown subcommand), with code `usage` in `--json`. `webui` exits `2` for its usage errors and for `no bundle directory to serve`. |
 | `3` | `service-status`: installed, but not running. `install-service`, `start-service`, `restart-service`: installed, but not running afterwards. |
 | `4` | `service-status`, `start-service`, `stop-service`, `restart-service`, `uninstall-service`: no service is installed. |
 | `5` | `install-service`, `refresh-service`, `uninstall-service`: a service definition that GoodVibes did not write is already at that path, so nothing was changed. |
@@ -10042,7 +10065,7 @@ Every setting the daemon knows appears in exactly one section; a namespace no se
 
 The web UI draws the actions of the slash commands the daemon runs from the same descriptions the terminal apps use (`packages/engine/contracts/artifacts/command-actions.json`), so a button, its blanks, its sentence and its done line say what the terminal says. The command palette (Ctrl+K or ⌘K) lists each such action that changes something by its label (`Schedule something to run`, `Block a tool`, `Allow a repeat purchase`); choosing one opens its sheet. A sheet shows the action's blanks as pick-lists, switches and fields (a blank that belongs to a choice shows only while that choice is made; a step of four or more usual settings is folded under `More settings`), the sentence of what will happen above the button, and `From a terminal:` with the typed line that does the same (a secret is left out of it). Its button says the action's verb (`Schedule it`, `Block`, `Stop blocking`, `Switch on`), and is red only for what cannot be undone. Pressing it sends the request as the owner's own (`x-goodvibes-explicit-user-request: true`), which purchase allowances and letting triggers run a command require. An action only a terminal app can do (one that belongs to that terminal's session) is shown greyed with the reason.
 
-Two sheets have the daemon read what was typed before anything is kept: "Schedule something to run" and "Change a schedule" call `automation.schedules.preview` (a time described in words, such as `every weekday at 9am`, is read once, by the decision model when one is set, else only the fixed forms: an ISO time, a cron pattern, `every 30m`, `in 2h`), and "Watch for something" calls `watchers.triggers.preview`. `Check` shows the reading (`Read as: 0 9 * * 1-5 [Europe/Vienna]. Next run: 2026-11-23 09:00 Europe/Vienna.`); the button then keeps exactly that, and changing a blank asks for `Check` again. A refusal ("Not kept: ...") is shown in the sheet, which stays open.
+Two sheets have the daemon read what was typed before anything is kept: "Schedule something to run" and "Change a schedule" call `automation.schedules.preview` (a time described in words, such as `every weekday at 9am`, is read once, by the decision model when one is set, else only the fixed forms: an ISO time, a cron pattern, `every 30m`, `in 2h`), and "Watch for something" calls `watchers.triggers.preview`. `Check` shows the reading (`Read as: every weekday at 09:00 (0 9 * * 1-5) [Europe/Vienna]. Next run: 2026-11-23 09:00 Europe/Vienna.`); the button then keeps exactly that, and changing a blank asks for `Check` again. A refusal ("Not kept: ...") is shown in the sheet, which stays open.
 
 Four screens are drawn from one command each. Each sits where it belongs (Schedules in Work, from the Scheduled group and New; MCP servers and tools under Settings > Permissions > Advanced; Repeat purchases under Settings > Models and providers > Usage, with payments; Triggers under Settings > General > Advanced), and the palette also opens each in a side panel (`Schedules`, `MCP servers and tools`, `Repeat purchases`, `Triggers`):
 
@@ -13192,6 +13215,11 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may set it.
 
+- `display.mouseCapture`: On: the terminal programs take the mouse (click a row or a status segment, scroll with the wheel). Off: the terminal keeps the mouse, so you select and copy text the terminal's own way. Read when the program starts.
+  - type `boolean`; default `true`.
+  - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
+  - A project file may set it.
+
 - `display.reduceMotion`: Stops the terminal programs' moving parts: the working spinner shows a still mark and an elapsed time, and running rows stop spinning. Answers still arrive as they are written unless "Show answers as they are written" is off.
   - type `boolean`; default `false`.
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
@@ -15860,7 +15888,8 @@ Options:
       --max-turns <n>            run: stop after n model answers that still ask for tools; exits 1
       --omit-accumulated         run: with stream-json, leave `accumulated` out of STREAM_DELTA
       --answer-permissions       run: with stream-json, read PERMISSION_ANSWER lines on stdin for owner prompts
-  -y, --yes                      Auto-confirm prompts (non-interactive)
+      --prompt-file <path>       run: read the prompt from a file; - reads it from standard input
+  -y, --yes                    Auto-confirm prompts (non-interactive)
       --non-interactive          Disable all interactive prompts (implies --yes)
       --strict                   doctor: also fail on advisory findings, for CI
   -h, --help                     Print help
@@ -16176,7 +16205,7 @@ Usage:
   goodvibes run [prompt] [--output text|json|stream-json]
   goodvibes exec [prompt]
   goodvibes run --intake-status|--intake-retry|--intake-resume|--intake-cancel
-  goodvibes run [prompt] [--timeout <duration>] [--max-turns <n>] [--omit-accumulated] [--answer-permissions]
+  goodvibes run [prompt | --prompt-file <path>|-] [--timeout <duration>] [--max-turns <n>] [--omit-accumulated] [--answer-permissions]
 
 Examples:
   goodvibes run "summarize the current project"
@@ -16197,12 +16226,13 @@ Usage:
   goodvibes secrets list
   goodvibes secrets providers
   goodvibes secrets test goodvibes://secrets/<source>/...
-  goodvibes secrets set <KEY> <value> [--user|--project] [--secure|--plaintext]
-  goodvibes secrets set <KEY> --stdin   (read the value from standard input; use it for a value that starts with --)
+  goodvibes secrets set <KEY> [--user|--project] [--secure|--plaintext]   (asks for the value without showing it; reads it from standard input when piped)
+  goodvibes secrets set <KEY> <value> [--user|--project] [--secure|--plaintext]   (the value stays in your shell history)
   goodvibes secrets link <KEY> <ref> [--user|--project] [--secure|--plaintext]
   goodvibes secrets delete <KEY> [--user|--project] [--secure|--plaintext]
 
 Examples:
+  goodvibes secrets set OPENAI_API_KEY --user
   goodvibes secrets providers
   goodvibes secrets test goodvibes://secrets/env/OPENAI_API_KEY
   goodvibes secrets link OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY
@@ -16496,7 +16526,8 @@ Options:
       --max-turns <n>            run: stop after n model answers that still ask for tools; exits 1
       --omit-accumulated         run: with stream-json, leave `accumulated` out of STREAM_DELTA
       --answer-permissions       run: with stream-json, read PERMISSION_ANSWER lines on stdin for owner prompts
-  -h, --help                     Print help
+      --prompt-file <path>       run: read the prompt from a file; - reads it from standard input
+  -h, --help                    Print help
   -v, --version                  Print version
 
 Examples:
@@ -17089,7 +17120,7 @@ Usage:
   goodvibes-agent run [prompt] [--output text|json|stream-json]
   goodvibes-agent exec [prompt]
   goodvibes-agent run --intake-status|--intake-retry|--intake-resume|--intake-cancel
-  goodvibes-agent run [prompt] [--timeout <duration>] [--max-turns <n>] [--omit-accumulated] [--answer-permissions]
+  goodvibes-agent run [prompt | --prompt-file <path>|-] [--timeout <duration>] [--max-turns <n>] [--omit-accumulated] [--answer-permissions]
 
 Examples:
   goodvibes-agent run "summarize the current project"
@@ -17123,12 +17154,13 @@ Usage:
   goodvibes-agent secrets list
   goodvibes-agent secrets providers
   goodvibes-agent secrets test goodvibes://secrets/<source>/...
-  goodvibes-agent secrets set <KEY> <value> [--user|--project] [--secure|--plaintext]
-  goodvibes-agent secrets set <KEY> --stdin   (read the value from standard input; use it for a value that starts with --)
+  goodvibes-agent secrets set <KEY> [--user|--project] [--secure|--plaintext]   (asks for the value without showing it; reads it from standard input when piped)
+  goodvibes-agent secrets set <KEY> <value> [--user|--project] [--secure|--plaintext]   (the value stays in your shell history)
   goodvibes-agent secrets link <KEY> <ref> [--user|--project] [--secure|--plaintext]
   goodvibes-agent secrets delete <KEY> [--user|--project] [--secure|--plaintext]
 
 Examples:
+  goodvibes-agent secrets set OPENAI_API_KEY --user
   goodvibes-agent secrets providers
   goodvibes-agent secrets test goodvibes://secrets/env/OPENAI_API_KEY
   goodvibes-agent secrets link OPENAI_API_KEY goodvibes://secrets/env/OPENAI_API_KEY
@@ -18107,7 +18139,7 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/auth repair` `<provider>   See how to fix a provider's sign-in`
   - `/auth review` `See your provider sign-ins`
   - `/auth show` `<provider>   See one provider's sign-in`
-- `/calendar` `/calendar upcoming [--days <how many days>] | get <event> | add [--title <title>] [--start <starts>] [--end <ends>] [--location <where>] [--notes <notes>] [--again] | change <event> [--title <title>] [--start <starts>] [--end <ends>] | delete <event> | status | all | import <file> | export [<file>] | accounts | connect <account> [--with <sign in with>] [--code <address or code>] | use-app <account> <client id> [--secret <client secret>] | disconnect <account> | subscriptions | subscribe <feed address> [--name <name>] [--every <read every>] [--allow-private-host] | refresh [<feed>] | unsubscribe <feed>`: See what is coming up, add, change and remove events, and the feeds and accounts your calendar reads.
+- `/calendar` `/calendar upcoming [--days <how many days>] | get <event> | add [--title <title>] [--start <starts>] [--end <ends>] [--location <where>] [--notes <notes>] [--again] | change <event> [--title <title>] [--start <starts>] [--end <ends>] | delete <event> | status | all | import <file> | export [<file>] | accounts | connect <account> [--with <sign in with>] [--code <address or code>] | use-app <account> <client id> [--secret <client secret>] | disconnect <account> | subscriptions | subscribe [<feed address>] [--name <name>] [--every <read every>] [--allow-private-host] | refresh [<feed>] | unsubscribe <feed>`: See what is coming up, add, change and remove events, and the feeds and accounts your calendar reads.
   - Category Channels and devices; depends on the subcommand (`upcoming`, `get`, `status`, `all`, `accounts`, `subscriptions` only read)
   - `/calendar accounts` `See your calendar accounts`
   - `/calendar add` `[--title <title>] [--start <starts>] [--end <ends>] [--location <where>] [--notes <notes>] [--again]   Add an event`
@@ -18121,7 +18153,7 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/calendar import` `<file>   Import events from a file`
   - `/calendar refresh` `[<feed>]   Read the feeds again now`
   - `/calendar status` `See whether the calendar is connected`
-  - `/calendar subscribe` `<feed address> [--name <name>] [--every <read every>] [--allow-private-host]   Subscribe to a calendar feed`
+  - `/calendar subscribe` `[<feed address>] [--name <name>] [--every <read every>] [--allow-private-host]   Subscribe to a calendar feed`
   - `/calendar subscriptions` `See the feeds you subscribe to`
   - `/calendar unsubscribe` `<feed>   Stop subscribing to a feed`
   - `/calendar upcoming` `[--days <how many days>]   See what is coming up`
@@ -18369,11 +18401,11 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/local-auth remove-first-run-file` `Remove the first-run sign-in file`
   - `/local-auth review` `See who may sign in`
   - `/local-auth sign-out` `<session>   Sign someone out`
-- `/mail` `/mail status | list [<how many>] | read <message> | draft <to> [--subject <subject>] <message...> | send <to> [--subject <subject>] [--again] <message...> | settings | set <setting> <value...> | password <password>`: Read your inbox, write a draft and send mail, from the mailbox set up under surfaces.email.
+- `/mail` `/mail status | list [<how many>] | read <message> | draft <to> [--subject <subject>] <message...> | send <to> [--subject <subject>] [--again] <message...> | settings | set <setting> <value...> | password [<password>]`: Read your inbox, write a draft and send mail, from the mailbox set up under surfaces.email.
   - Category Channels and devices; depends on the subcommand (`status`, `list`, `read`, `settings` only read)
   - `/mail draft` `<to> [--subject <subject>] <message...>   Save a draft`
   - `/mail list` `[<how many>]   See your inbox`
-  - `/mail password` `<password>   Store the mailbox password`
+  - `/mail password` `[<password>]   Store the mailbox password`
   - `/mail read` `<message>   Read a message`
   - `/mail send` `<to> [--subject <subject>] [--again] <message...>   Send a message`
   - `/mail set` `<setting> <value...>   Change a mailbox setting`
@@ -18463,9 +18495,10 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/memory show` `<record>   See one record`
   - `/memory snapshots` `See copies of memory`
   - `/memory sync-files` `[--dir <folder>]   Write memory as files`
-- `/model` `/model list | use <model> | refresh | backup <model> | drop-backup <backup model>`: Choose the model your conversations use and its backups, and read the list of models again.
+- `/model` `/model choose | list | use <model> | refresh | backup <model> | drop-backup <backup model>`: Choose the model your conversations use and its backups, and read the list of models again.
   - Category Sessions and history; depends on the subcommand (`list` only read)
   - `/model backup` `<model>   Add a backup model`
+  - `/model choose` `Choose a model`
   - `/model drop-backup` `<backup model>   Remove a backup model`
   - `/model list` `See your model and the others you can use`
   - `/model refresh` `Read the list of models again`
@@ -18487,9 +18520,9 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/notes to-skill` `<note> [--enable]   Make a skill from a note`
 - `/notifications`: Every notice and notification in full, newest first; Enter goes to its subject.
   - Category Channels and devices; depends on the subcommand.
-- `/notify` `/notify list [--show] | add <address> | remove <address> | clear | test | send <message...> | failed | resend <which> [--to-current]`: The webhook addresses (ntfy.sh format) notifications go to: add, remove, test, send, and resend the ones that failed.
+- `/notify` `/notify list [--show] | add [<address>] | remove <address> | clear | test | send <message...> | failed | resend <which> [--to-current]`: The webhook addresses (ntfy.sh format) notifications go to: add, remove, test, send, and resend the ones that failed.
   - Category Channels and devices; depends on the subcommand (`list`, `failed` only read)
-  - `/notify add` `<address>   Send notifications to an address`
+  - `/notify add` `[<address>]   Send notifications to an address`
   - `/notify clear` `Stop sending to every address`
   - `/notify failed` `See notifications that failed`
   - `/notify list` `[--show]   See where notifications go`
@@ -18568,13 +18601,13 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/principals list` `See who the daemon knows`
   - `/principals resolve` `<channel> <identity>   Find who a channel identity belongs to`
   - `/principals update` `<who> [--name <name>] [--kind <kind>] [--identities <identities>]   Change a person, bot or service`
-- `/provider` `/provider list | use <provider> [--model <model>] | sign-in <provider> [--no-browser] [--manual] | finish <provider> <code or address> | sign-out <provider> | show <provider> | open | add <name> <address> [--key <api key>] | remove <provider> | route <routing> | pin-route <model> | explain | fallback | export <file> [--replace] | inspect <file> | import <file>`: Where your models come from: switch provider, add your own, sign in with a subscription, and choose how requests are routed.
+- `/provider` `/provider list | use <provider> [--model <model>] | sign-in <provider> [--no-browser] [--manual] | finish <provider> [<code or address>] | sign-out <provider> | show <provider> | open | add <name> <address> [--key <api key>] | remove <provider> | route <routing> | pin-route <model> | explain | fallback | export <file> [--replace] | inspect <file> | import <file>`: Where your models come from: switch provider, add your own, sign in with a subscription, and choose how requests are routed.
   - Category Models and providers; depends on the subcommand (`list`, `show`, `open`, `explain`, `fallback`, `inspect` only read)
   - `/provider add` `<name> <address> [--key <api key>]   Add a provider of your own`
   - `/provider explain` `See why requests go where they go`
   - `/provider export` `<file> [--replace]   Save your sign-ins to a file`
   - `/provider fallback` `See where a failed request would go`
-  - `/provider finish` `<provider> <code or address>   Finish signing in with a code`
+  - `/provider finish` `<provider> [<code or address>]   Finish signing in with a code`
   - `/provider import` `<file>   Load sign-ins from a file`
   - `/provider inspect` `<file>   Check a sign-ins file`
   - `/provider list` `See your providers`
@@ -18672,18 +18705,18 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/schedule retry-run` `<run>   Run a failed run again`
   - `/schedule run` `<schedule>   Run a schedule now`
   - `/schedule stop-run` `<run>   Stop a run that is going`
-- `/secrets` `/secrets list | set <name> <value> [--scope <where to keep it>] [--storage <how to keep it>] | link <name> <reference> [--scope <where to keep it>] [--storage <how to keep it>] | get <secret> | test <reference> | providers | storage | trust <secret> | delete <secret> [--scope <from>] [--storage <kept as>] | use <name> <value>`: Keep passwords and keys where programs can read them, without showing them.
+- `/secrets` `/secrets list | set <name> [<value>] [--scope <where to keep it>] [--storage <how to keep it>] | link <name> <reference> [--scope <where to keep it>] [--storage <how to keep it>] | get <secret> | test <reference> | providers | storage | trust <secret> | delete <secret> [--scope <from>] [--storage <kept as>] | use <name> [<value>]`: Keep passwords and keys where programs can read them, without showing them.
   - Category Models and providers; depends on the subcommand (`list`, `get`, `test`, `providers`, `storage` only read)
   - `/secrets delete` `<secret> [--scope <from>] [--storage <kept as>]   Delete a secret`
   - `/secrets get` `<secret>   Check a secret is stored`
   - `/secrets link` `<name> <reference> [--scope <where to keep it>] [--storage <how to keep it>]   Point a secret at a password manager`
   - `/secrets list` `See your secrets`
   - `/secrets providers` `See where secrets can come from`
-  - `/secrets set` `<name> <value> [--scope <where to keep it>] [--storage <how to keep it>]   Store a secret`
+  - `/secrets set` `<name> [<value>] [--scope <where to keep it>] [--storage <how to keep it>]   Store a secret`
   - `/secrets storage` `See how secrets are kept`
   - `/secrets test` `<reference>   Test a secret reference`
   - `/secrets trust` `<secret>   Use a secret from this project's store`
-  - `/secrets use` `<name> <value>   Use a secret for this session only`
+  - `/secrets use` `<name> [<value>]   Use a secret for this session only`
 - `/security` `/security report | review | tokens | attack-paths | trust | folder | trust-folder | restrict-folder | save-trust <file> [--replace] | read-trust <file> | policy | load-policy <file> | simulate-policy | compare-policy | lint-policy | preflight | enforce-policy | restore-policy | sandbox | sandbox-advice | sandbox-profiles | sandbox-presets | sandbox-probe | contain-mcp | host-mcp | sandbox-sessions | start-sandbox <profile> [--host] [<name...>] | sandbox-session <sandbox session> | stop-sandbox <sandbox session> | run-in-sandbox <sandbox session> <command...> | save-sandbox <sandbox session> <file> [--replace] | read-sandbox <file> | security-screen | policy-screen | sandbox-screen`: See what protects this machine: tokens, trust, policies and the sandbox, and change them.
   - Category Settings and safety; depends on the subcommand (`report`, `review`, `tokens`, `attack-paths`, `trust`, `folder`, `read-trust`, `policy`, `simulate-policy`, `compare-policy`, `lint-policy`, `preflight`, `sandbox`, `sandbox-advice`, `sandbox-profiles`, `sandbox-presets`, `sandbox-probe`, `sandbox-sessions`, `sandbox-session`, `read-sandbox`, `security-screen`, `policy-screen`, `sandbox-screen` only read)
   - `/security attack-paths` `See risky routes through MCP servers`
@@ -19096,7 +19129,7 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - `/bundle import` `<file> [--include-security]   Load settings from a support bundle`
   - `/bundle inspect` `<file>   Check a support bundle`
   - `/bundle preview` `See what a support bundle would hold`
-- `/calendar` `/calendar upcoming [--days <how many days>] | get <event> | add [--title <title>] [--start <starts>] [--end <ends>] [--location <where>] [--notes <notes>] [--again] | change <event> [--title <title>] [--start <starts>] [--end <ends>] | delete <event> | status | all | import <file> | export [<file>] | accounts | connect <account> [--with <sign in with>] [--code <address or code>] | use-app <account> <client id> [--secret <client secret>] | disconnect <account> | subscriptions | subscribe <feed address> [--name <name>] [--every <read every>] [--allow-private-host] | refresh [<feed>] | unsubscribe <feed>`: See what is coming up, add, change and remove events, and the feeds and accounts your calendar reads.
+- `/calendar` `/calendar upcoming [--days <how many days>] | get <event> | add [--title <title>] [--start <starts>] [--end <ends>] [--location <where>] [--notes <notes>] [--again] | change <event> [--title <title>] [--start <starts>] [--end <ends>] | delete <event> | status | all | import <file> | export [<file>] | accounts | connect <account> [--with <sign in with>] [--code <address or code>] | use-app <account> <client id> [--secret <client secret>] | disconnect <account> | subscriptions | subscribe [<feed address>] [--name <name>] [--every <read every>] [--allow-private-host] | refresh [<feed>] | unsubscribe <feed>`: See what is coming up, add, change and remove events, and the feeds and accounts your calendar reads.
   - Depends on the subcommand (`upcoming`, `get`, `status`, `all`, `accounts`, `subscriptions` only read)
   - `/calendar accounts` `See your calendar accounts`
   - `/calendar add` `[--title <title>] [--start <starts>] [--end <ends>] [--location <where>] [--notes <notes>] [--again]   Add an event`
@@ -19110,7 +19143,7 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - `/calendar import` `<file>   Import events from a file`
   - `/calendar refresh` `[<feed>]   Read the feeds again now`
   - `/calendar status` `See whether the calendar is connected`
-  - `/calendar subscribe` `<feed address> [--name <name>] [--every <read every>] [--allow-private-host]   Subscribe to a calendar feed`
+  - `/calendar subscribe` `[<feed address>] [--name <name>] [--every <read every>] [--allow-private-host]   Subscribe to a calendar feed`
   - `/calendar subscriptions` `See the feeds you subscribe to`
   - `/calendar unsubscribe` `<feed>   Stop subscribing to a feed`
   - `/calendar upcoming` `[--days <how many days>]   See what is coming up`
@@ -19240,13 +19273,13 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - Depends on the subcommand (`show` only read)
   - `/effort set` `<level>   Choose how hard the model thinks`
   - `/effort show` `See how hard the model thinks`
-- `/google` `/google status | connect | reauthorize | forget | adopt [--replace] | setup [--path <route>] | runbook | client-file <client file> | client <client id> <client secret> | account <address> | calendar-address <private address> | waiting | approve [<send>] | drop <send>`: Connect Gmail and Google Calendar with one consent link, and approve a send the content check refused.
+- `/google` `/google status | connect | reauthorize | forget | adopt [--replace] | setup [--path <route>] | runbook | client-file <client file> | client <client id> [<client secret>] | account <address> | calendar-address [<private address>] | waiting | approve [<send>] | drop <send>`: Connect Gmail and Google Calendar with one consent link, and approve a send the content check refused.
   - Depends on the subcommand (`status`, `runbook`, `waiting` only read)
   - `/google account` `<address>   Set the Gmail address`
   - `/google adopt` `[--replace]   Take up Google credentials found on this machine`
   - `/google approve` `[<send>]   Send a refused send as shown`
-  - `/google calendar-address` `<private address>   Read the calendar by its private address`
-  - `/google client` `<client id> <client secret>   Use an OAuth client id and secret`
+  - `/google calendar-address` `[<private address>]   Read the calendar by its private address`
+  - `/google client` `<client id> [<client secret>]   Use an OAuth client id and secret`
   - `/google client-file` `<client file>   Use an OAuth client file you have`
   - `/google connect` `Connect Gmail and Calendar`
   - `/google drop` `<send>   Drop a refused send`
@@ -19329,11 +19362,11 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - `/knowledge schedules` `See when knowledge is tidied`
   - `/knowledge search` `[--limit <how many>] <words...>   Search your knowledge`
   - `/knowledge status` `See how your knowledge stands`
-- `/mail` `/mail status | list [<how many>] | read <message> | draft <to> [--subject <subject>] <message...> | send <to> [--subject <subject>] [--again] <message...> | settings | set <setting> <value...> | password <password>`: Read your inbox, write a draft and send mail, from the mailbox set up under surfaces.email.
+- `/mail` `/mail status | list [<how many>] | read <message> | draft <to> [--subject <subject>] <message...> | send <to> [--subject <subject>] [--again] <message...> | settings | set <setting> <value...> | password [<password>]`: Read your inbox, write a draft and send mail, from the mailbox set up under surfaces.email.
   - Depends on the subcommand (`status`, `list`, `read`, `settings` only read)
   - `/mail draft` `<to> [--subject <subject>] <message...>   Save a draft`
   - `/mail list` `[<how many>]   See your inbox`
-  - `/mail password` `<password>   Store the mailbox password`
+  - `/mail password` `[<password>]   Store the mailbox password`
   - `/mail read` `<message>   Read a message`
   - `/mail send` `<to> [--subject <subject>] [--again] <message...>   Send a message`
   - `/mail set` `<setting> <value...>   Change a mailbox setting`
@@ -19391,9 +19424,10 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - `/memory show` `<record>   See one record`
   - `/memory snapshots` `See copies of memory`
   - `/memory sync-files` `[--dir <folder>]   Write memory as files`
-- `/model` `/model list | use <model> | refresh | backup <model> | drop-backup <backup model>`: Choose the model your conversations use and its backups, and read the list of models again.
+- `/model` `/model choose | list | use <model> | refresh | backup <model> | drop-backup <backup model>`: Choose the model your conversations use and its backups, and read the list of models again.
   - Depends on the subcommand (`list` only read)
   - `/model backup` `<model>   Add a backup model`
+  - `/model choose` `Choose a model`
   - `/model drop-backup` `<backup model>   Remove a backup model`
   - `/model list` `See your model and the others you can use`
   - `/model refresh` `Read the list of models again`
@@ -19450,9 +19484,9 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - `/notes to-skill` `<note> [--enable]   Make a skill from a note`
 - `/notifications`: Every notice and notification in full, newest first; Enter goes to its subject.
   - Depends on the subcommand.
-- `/notify` `/notify list [--show] | add <address> | remove <address> | clear | test | send <message...> | failed | resend <which> [--to-current]`: The webhook addresses (ntfy.sh format) notifications go to: add, remove, test, send, and resend the ones that failed.
+- `/notify` `/notify list [--show] | add [<address>] | remove <address> | clear | test | send <message...> | failed | resend <which> [--to-current]`: The webhook addresses (ntfy.sh format) notifications go to: add, remove, test, send, and resend the ones that failed.
   - Depends on the subcommand (`list`, `failed` only read)
-  - `/notify add` `<address>   Send notifications to an address`
+  - `/notify add` `[<address>]   Send notifications to an address`
   - `/notify clear` `Stop sending to every address`
   - `/notify failed` `See notifications that failed`
   - `/notify list` `[--show]   See where notifications go`
@@ -19533,13 +19567,13 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - `/principals list` `See who the daemon knows`
   - `/principals resolve` `<channel> <identity>   Find who a channel identity belongs to`
   - `/principals update` `<who> [--name <name>] [--kind <kind>] [--identities <identities>]   Change a person, bot or service`
-- `/provider` `/provider list | use <provider> [--model <model>] | sign-in <provider> [--no-browser] [--manual] | finish <provider> <code or address> | sign-out <provider> | show <provider> | open | add <name> <address> [--key <api key>] | remove <provider> | route <routing> | pin-route <model> | explain | fallback | export <file> [--replace] | inspect <file> | import <file>`: Where your models come from: switch provider, add your own, sign in with a subscription, and choose how requests are routed.
+- `/provider` `/provider list | use <provider> [--model <model>] | sign-in <provider> [--no-browser] [--manual] | finish <provider> [<code or address>] | sign-out <provider> | show <provider> | open | add <name> <address> [--key <api key>] | remove <provider> | route <routing> | pin-route <model> | explain | fallback | export <file> [--replace] | inspect <file> | import <file>`: Where your models come from: switch provider, add your own, sign in with a subscription, and choose how requests are routed.
   - Depends on the subcommand (`list`, `show`, `open`, `explain`, `fallback`, `inspect` only read)
   - `/provider add` `<name> <address> [--key <api key>]   Add a provider of your own`
   - `/provider explain` `See why requests go where they go`
   - `/provider export` `<file> [--replace]   Save your sign-ins to a file`
   - `/provider fallback` `See where a failed request would go`
-  - `/provider finish` `<provider> <code or address>   Finish signing in with a code`
+  - `/provider finish` `<provider> [<code or address>]   Finish signing in with a code`
   - `/provider import` `<file>   Load sign-ins from a file`
   - `/provider inspect` `<file>   Check a sign-ins file`
   - `/provider list` `See your providers`
@@ -19605,18 +19639,18 @@ Every slash command typed in Agent's prompt, in alphabetical order, read the sam
   - `/schedule retry-run` `<run>   Run a failed run again`
   - `/schedule run` `<schedule>   Run a schedule now`
   - `/schedule stop-run` `<run>   Stop a run that is going`
-- `/secrets` `/secrets list | set <name> <value> [--scope <where to keep it>] [--storage <how to keep it>] | link <name> <reference> [--scope <where to keep it>] [--storage <how to keep it>] | get <secret> | test <reference> | providers | storage | trust <secret> | delete <secret> [--scope <from>] [--storage <kept as>] | use <name> <value>`: Keep passwords and keys where programs can read them, without showing them.
+- `/secrets` `/secrets list | set <name> [<value>] [--scope <where to keep it>] [--storage <how to keep it>] | link <name> <reference> [--scope <where to keep it>] [--storage <how to keep it>] | get <secret> | test <reference> | providers | storage | trust <secret> | delete <secret> [--scope <from>] [--storage <kept as>] | use <name> [<value>]`: Keep passwords and keys where programs can read them, without showing them.
   - Depends on the subcommand (`list`, `get`, `test`, `providers`, `storage` only read)
   - `/secrets delete` `<secret> [--scope <from>] [--storage <kept as>]   Delete a secret`
   - `/secrets get` `<secret>   Check a secret is stored`
   - `/secrets link` `<name> <reference> [--scope <where to keep it>] [--storage <how to keep it>]   Point a secret at a password manager`
   - `/secrets list` `See your secrets`
   - `/secrets providers` `See where secrets can come from`
-  - `/secrets set` `<name> <value> [--scope <where to keep it>] [--storage <how to keep it>]   Store a secret`
+  - `/secrets set` `<name> [<value>] [--scope <where to keep it>] [--storage <how to keep it>]   Store a secret`
   - `/secrets storage` `See how secrets are kept`
   - `/secrets test` `<reference>   Test a secret reference`
   - `/secrets trust` `<secret>   Use a secret from this project's store`
-  - `/secrets use` `<name> <value>   Use a secret for this session only`
+  - `/secrets use` `<name> [<value>]   Use a secret for this session only`
 - `/security` `/security report | review | tokens | attack-paths | trust | folder | trust-folder | restrict-folder | save-trust <file> [--replace] | read-trust <file> | policy | load-policy <file> | simulate-policy | compare-policy | lint-policy | preflight | enforce-policy | restore-policy | sandbox | sandbox-advice | sandbox-profiles | sandbox-presets | sandbox-probe | contain-mcp | host-mcp | sandbox-sessions | start-sandbox <profile> [--host] [<name...>] | sandbox-session <sandbox session> | stop-sandbox <sandbox session> | run-in-sandbox <sandbox session> <command...> | save-sandbox <sandbox session> <file> [--replace] | read-sandbox <file> | security-screen | policy-screen | sandbox-screen`: See what protects this machine: tokens, trust, policies and the sandbox, and change them.
   - Depends on the subcommand (`report`, `review`, `tokens`, `attack-paths`, `trust`, `folder`, `read-trust`, `policy`, `simulate-policy`, `compare-policy`, `lint-policy`, `preflight`, `sandbox`, `sandbox-advice`, `sandbox-profiles`, `sandbox-presets`, `sandbox-probe`, `sandbox-sessions`, `sandbox-session`, `read-sandbox`, `security-screen`, `policy-screen`, `sandbox-screen` only read)
   - `/security attack-paths` `See risky routes through MCP servers`
@@ -20155,7 +20189,7 @@ Inputs:
 
 ### `find`
 
-Search the codebase using glob patterns, regex content search, or symbol extraction. Supports multiple queries in one call. Modes: files (glob), content (grep), symbols (regex).
+Search the codebase using glob patterns, regex content search, symbol extraction, references or AST patterns. Supports multiple queries in one call. Modes: files (glob), content (grep), symbols (declarations), references (uses of a symbol), structural (AST patterns).
 
 Permission category `read`; side effects: `read_fs`.
 
@@ -20246,7 +20280,7 @@ Inputs:
 
 ### `inspect`
 
-Inspect and analyze a project or file. Modes: project (structure), api (routes), api_spec (generate OpenAPI 3.0 spec), api_validate (compare spec to code), api_sync (detect frontend/backend drift), database (schema), components (React), layout (CSS/Tailwind), accessibility (a11y issues), scaffold (module skeleton generator).
+Inspect and analyze a project or file. Modes: project (structure), api (routes), api_spec (generate OpenAPI 3.0 spec), api_validate (compare spec to code), api_sync (detect frontend/backend drift), database (schema), components (React), layout (CSS/Tailwind), accessibility (a11y issues), scaffold (module skeleton generator), component_state, render_triggers, hooks (React state, re-renders, hook dependencies), overflow, sizing, stacking, responsive, tailwind (CSS layout problems), events, client_boundary, error_boundary (event handlers, client/server and error boundaries).
 
 Permission category `read`; side effects: `read_fs`.
 
@@ -20272,7 +20306,7 @@ Permission category `delegate`; side effects: `state`, `network`.
 
 Inputs:
 
-- `mode` (one of `"call"`, `"servers"`, `"tools"`, `"schema"`, `"security"`, `"auth"`, `"approve-quarantine"`, `"set-trust"`, `"set-role"`, required): call runs a tool on a connected server (qualifiedName and input); tools lists the callable names; schema shows one tool's arguments.
+- `mode` (one of `"call"`, `"servers"`, `"tools"`, `"schema"`, `"security"`, `"auth"`, `"approve-quarantine"`, `"set-trust"`, `"set-role"`, required): call runs a tool on a connected server (qualifiedName and input); servers lists the servers; tools lists the callable names; schema shows one tool's arguments; security shows each server's trust, role, quarantine state and recent security decisions; auth shows the same with, in full view, the paths and hosts each server may reach; approve-quarantine, set-trust and set-role change one server (serverName).
 - `view` (one of `"descriptor"`, `"preview"`, `"full"`, optional): How much of each server servers and security return: descriptor (a summary, the default), preview, or full (the whole record).
 - `qualifiedName` (string, optional): mcp:<server>:<tool>, as mode:"tools" lists it.
 - `input` (object, optional): Arguments for mode:"call", shaped by the tool's own schema (read it with mode:"schema").
@@ -20357,7 +20391,7 @@ Inputs:
 
 ### `registry`
 
-Discover and inspect skills, agents, and tools. Modes: search finds items by keyword; recommend lists items sorted by relevance; dependencies reads a skill's dependency chain; content returns full markdown file.
+Discover and inspect skills, agents, and tools. Modes: search finds items by keyword; recommend lists items sorted by relevance; dependencies reads a skill's dependency chain; preview returns metadata and preview text without the linked content; content returns full markdown file.
 
 Permission category `read`; side effects: `read_fs`.
 
@@ -20419,7 +20453,7 @@ Inputs:
 
 ### `state`
 
-Access and manipulate session state. Modes: get/set/list/clear operate on KVState; budget reports this session's measured token usage and turns, context its context window (last request size, window size, compaction), both with the files this product has read or written in this workspace; telemetry reports this tool's call counts and how many of them failed or were refused; hooks lists registered hooks and, with the same approval running their command would need, changes them (enable/disable/add/remove); mode reads or sets how much the terminal app prints: quiet, balanced or operator (get/set/list). Discovery: use mode=list to see existing KV keys, mode=hooks hookAction=list to see registered hooks, mode=mode modeAction=get to see the current print level. mode=analytics analyticsAction=summary shows the tool calls this process ran (name, status, duration, result size).
+Access and manipulate session state. Modes: get/set/list/clear operate on KVState; budget reports this session's measured token usage and turns, context its context window (last request size, window size, compaction), both with the files this product has read or written in this workspace; telemetry reports this tool's call counts and how many of them failed or were refused; hooks lists registered hooks and, with the same approval running their command would need, changes them (enable/disable/add/remove); mode reads or sets how much the terminal app prints: quiet, balanced or operator (get/set/list); analytics reads the tool calls this process ran (query/summary/export/dashboard). Discovery: use mode=list to see existing KV keys, mode=hooks hookAction=list to see registered hooks, mode=mode modeAction=get to see the current print level. mode=analytics analyticsAction=summary shows the tool calls this process ran (name, status, duration, result size).
 
 Permission category `read`; side effects: `state`.
 
@@ -21306,7 +21340,7 @@ Permission category `read`.
 
 Inputs:
 
-- `action` (one of `"status"`, `"channel"`, `"setup"`, `"triage"`, `"deliveries"`, optional): Read channel status, setup, triage, or receipts.
+- `action` (one of `"status"`, `"channel"`, `"setup"`, `"triage"`, `"deliveries"`, optional): status: every channel; channel: one channel (channelId); setup, triage; deliveries: delivery receipts.
 - `channelId` (string, optional): Channel id to inspect.
 - `id` (string, optional): Alias for channelId.
 - `target` (string, optional): Channel lookup target.
@@ -21942,13 +21976,15 @@ and never branch on a code without knowing which program produced it.
 | --- | --- | --- | --- | --- |
 | `0` | Completed, or admitted work was recorded. | The contract passed, or the command did what it says. `reply` follows the contract it answered, so its code is the contract's; `reply --no-follow` exits `0` once the reply is read. | The command did what it says. | Installed, and the daemon and web UI run as asked (`Done.`). |
 | `1` | Failed: model or provider error, empty response, `--max-turns` reached, a turn refused before it started (a failed preflight check, or a conversation too large for the model's context window), or the host unavailable, blocked or refused the input. | Failed, was refused, or was cancelled. | It ran and failed; the reason is printed, or with `--json` one `{ok:false, code, error, fix}` document is printed on stdout. | Failed or refused with an `INSTALL_E<n>` code; the previous programs were put back when any had been replaced. |
-| `2` | Invalid input: bad usage, a missing prompt, or a prompt given with a recovery flag. | Waiting on the owner with no terminal to ask on: answer with `goodvibes-contract reply <id> "<text>"`. | The command line was wrong: unknown command or flag, a flag this command does not take, a missing value. With `--json`, a `{ok:false, code, error, fix}` document (`code` `PARSE_ERROR` or `COMMAND_REFUSED`) on stdout instead of the help page. | not used |
+| `2` | Invalid input: bad usage, a missing prompt, or a prompt given with a recovery flag. Bad usage prints the error and the command's one usage line; with `--output json` or `stream-json`, the run's final frame (`stopReason` `invalid-input`) on stdout instead. | Waiting on the owner with no terminal to ask on: answer with `goodvibes-contract reply <id> "<text>"`. | The command line was wrong: unknown command or flag, a flag this command does not take, a missing value. It prints the error and the command's one usage line; with `--json`, a `{ok:false, code, error, fix}` document (`code` `PARSE_ERROR` or `COMMAND_REFUSED`) on stdout instead. | not used |
 | `3` | Outcome unknown (`turn-unsettled`): the turn ended without a final event. For admitted native input, the input may have taken effect: run `run --intake-status` before retrying. | not used | Service commands: installed but not running (`service-status`; `install-service`, `start-service` and `restart-service` when the service is not running afterwards). | Installed, but another copy earlier on `PATH` still answers a command name. |
 | `4` | not used | not used | Service commands: not installed. | Installed, but the daemon or the web UI is not running as asked (a service not set up or not running, a failed restart, an unconfigured web UI, an unsaved `--no-service`); `Installed, with the problems above.` |
 | `5` | not used | not used | `install-service`, `refresh-service`, `uninstall-service`: the definition at the service's path was not written by GoodVibes; nothing was changed. | not used |
 | `64` | not used | Usage error. | not used | not used |
 | `124` | `--timeout` reached; the run was cancelled. | not used | not used | not used |
 | `130` | Cancelled: Ctrl-C, SIGTERM, or the saved input was cancelled. | Stopped following (Ctrl-C): nothing is cancelled; `goodvibes-contract resume` continues the contracts and `goodvibes-contract cancel <id>` cancels one. | not used | Interrupted (Ctrl-C); `143` and `129` for SIGTERM and a hang-up. The previous programs were put back when any had been replaced. |
+
+`goodvibes` and `goodvibes-agent` started for their full-screen view without a terminal (standard input or output a pipe or a file, as in `goodvibes config get provider.model </dev/null`) exit `2` with one line: `goodvibes needs an interactive terminal (stdin is not a terminal); to run a prompt without one: goodvibes run "config get provider.model"`.
 
 The same number, different meaning:
 
@@ -22259,6 +22295,8 @@ Every environment variable the programs and the installer read. "Read by" names 
 | `SLACK_CLIENT_SECRET` | goodvibes-daemon | The Slack app's OAuth client secret for finishing the Slack install, when the request gives none. |
 | `SLACK_SIGNING_SECRET` | every program | A credential, read before a stored secret of the same name. The daemon verifies inbound Slack requests with it. |
 | `SLACK_WEBHOOK_URL` | every program | A credential, read before a stored secret of the same name. The daemon posts to this Slack webhook; anyone holding the URL can post as the app. |
+| `SSH_CONNECTION` | terminal apps | Present in an SSH session: copying skips the system clipboard programs (they would fill the remote machine's clipboard) and goes to the terminal's clipboard (OSC 52). |
+| `SSH_TTY` | terminal apps | Present in an SSH session; read with `SSH_CONNECTION`, with the same effect on copying. |
 | `STEPFUN_API_KEY` | every program | A sign-in value (key, token, profile or project) the `stepfun` provider reads; read before a secret of the same name in the secret store. |
 | `SUDO_PASSWORD` | goodvibes-agent | Only checked for presence: Agent's setup report says whether it is set. GoodVibes never sends it anywhere. |
 | `TAVILY_API_KEY` | every program | The Tavily key for web search; read before a `tavily` service entry. |
@@ -23160,7 +23198,7 @@ These actions can be rebound in `~/.goodvibes/tui/keybindings.json`: a JSON obje
 
 | Action | Default keys | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C` | Copy selected text to clipboard. |
+| `copy-selection` | `Ctrl+Shift+C`, `f5` | Copy selected text to clipboard. |
 | `clear-cancel` | `Ctrl+C` | Clear input / cancel generation / exit (double) |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P`, `Ctrl+K` | Open the command palette (search & run any command) |
@@ -23173,29 +23211,29 @@ These actions can be rebound in `~/.goodvibes/tui/keybindings.json`: a JSON obje
 | `delete-word` | `Ctrl+W` | Delete word backward. |
 | `line-start` | `Ctrl+A` | Move to start of line. |
 | `next-error-line-end` | `Ctrl+E` | Navigate to next error / move to line end. |
-| `kill-line` | `Alt+K` | Kill to end of line. |
-| `clear-prompt` | `Alt+U` | Clear the entire prompt. |
+| `kill-line` | `Alt+K`, `Ctrl+X` | Kill to end of line. |
+| `clear-prompt` | `Alt+U`, `Ctrl+G` | Clear the entire prompt. |
 | `undo` | `Ctrl+Z` | Undo last prompt edit. |
-| `redo` | `Ctrl+Shift+Z` | Redo last undone edit. |
+| `redo` | `Ctrl+Shift+Z`, `Ctrl+^` | Redo last undone edit. |
 | `paste` | `Ctrl+V` | Paste from clipboard (image priority) |
-| `word-back` | `Alt+B` | Move cursor to start of previous word. |
-| `word-forward` | `Alt+F` | Move cursor to end of next word. |
+| `word-back` | `Alt+B`, `Ctrl+left` | Move cursor to start of previous word. |
+| `word-forward` | `Alt+F`, `Ctrl+right` | Move cursor to end of next word. |
 | `kill-to-start` | `Ctrl+U` | Kill from cursor to start of line into kill ring. |
-| `kill-word-forward` | `Alt+D` | Kill word forward into kill ring. |
-| `yank` | `Ctrl+Shift+Y` | Yank (paste) from kill ring. |
-| `yank-pop` | `Alt+Y` | Rotate kill ring and yank next entry. |
-| `cancel-tool-call` | `Alt+C` | Cancel the running tool call (the turn continues) |
-| `toggle-keep-awake` | `Alt+A` | Toggle keep-awake (the "sleep disabled" chip) |
-| `toggle-memory-provenance` | `Alt+M` | List/hide the memories a turn used (provenance chip drill-in) |
-| `voice-input` | `Alt+V` | Voice input: press to start recording, press again to stop and transcribe into the composer. |
+| `kill-word-forward` | `Alt+D`, `Ctrl+delete` | Kill word forward into kill ring. |
+| `yank` | `Ctrl+Shift+Y`, `Ctrl+\` | Yank (paste) from kill ring. |
+| `yank-pop` | `Alt+Y`, `Ctrl+]` | Rotate kill ring and yank next entry. |
+| `cancel-tool-call` | `Alt+C`, `Ctrl+T` | Cancel the running tool call (the turn continues) |
+| `toggle-keep-awake` | `Alt+A`, `f6` | Toggle keep-awake (the "sleep disabled" chip) |
+| `toggle-memory-provenance` | `Alt+M`, `f7` | List/hide the memories a turn used (provenance chip drill-in) |
+| `voice-input` | `Alt+V`, `f8` | Voice input: press to start recording, press again to stop and transcribe into the composer. |
 | `focus-work-tree` | `Alt+up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
 | `cycle-permission-mode` | `Shift+tab` | Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings) |
 | `open-notifications` | `Ctrl+N` | Open the notices (the status bar counts the unread ones) |
-| `failure-other-model` | `Alt+O` | After a failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I` | After a failed turn: show what the provider said. |
-| `failure-sign-in` | `Alt+S` | After a provider refused its key: open the provider sign-ins. |
-| `next-session` | `Alt+N` | Show the next session (agent or process) in the session row above the conversation. |
-| `previous-session` | `Alt+P` | Show the previous session (agent or process) in the session row above the conversation. |
+| `failure-other-model` | `Alt+O`, `f9` | After a failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Alt+I`, `f3` | After a failed turn: show what the provider said. |
+| `failure-sign-in` | `Alt+S`, `f4` | After a provider refused its key: open the provider sign-ins. |
+| `next-session` | `Alt+N`, `Ctrl+Q` | Show the next session (agent or process) in the session row above the conversation. |
+| `previous-session` | `Alt+P`, `Ctrl+_` | Show the previous session (agent or process) in the session row above the conversation. |
 
 ## Key bindings: Agent
 
@@ -23205,13 +23243,13 @@ These actions can be rebound in `~/.goodvibes/agent/keybindings.json`: a JSON ob
 
 | Action | Default keys | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C` | Copy selected text to clipboard. |
+| `copy-selection` | `Ctrl+Shift+C`, `f5` | Copy selected text to clipboard. |
 | `clear-cancel` | `Ctrl+C` | Clear input / cancel generation / exit (double) |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P` | Open help: every command and keyboard shortcut in one searchable list. |
 | `workspace-picker` | `Ctrl+G` | Open the Agent operator workspace. |
 | `workspace-close` | `Ctrl+X` | Close the Agent workspace. |
-| `workspace-close-all` | `Ctrl+Shift+X` | Close the Agent workspace. |
+| `workspace-close-all` | `Ctrl+Shift+X`, `Ctrl+\` | Close the Agent workspace. |
 | `workspace-tab-next` | `Ctrl+]` | Cycle Agent workspace category forward. |
 | `workspace-tab-prev` | `Ctrl+[` | Cycle Agent workspace category backward. |
 | `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled. |
@@ -23226,17 +23264,17 @@ These actions can be rebound in `~/.goodvibes/agent/keybindings.json`: a JSON ob
 | `kill-line` | `Ctrl+K` | Kill to end of line. |
 | `clear-prompt` | `Ctrl+U` | Clear the prompt. |
 | `undo` | `Ctrl+Z` | Undo last prompt edit. |
-| `redo` | `Ctrl+Shift+Z` | Redo last undone edit. |
+| `redo` | `Ctrl+Shift+Z`, `Ctrl+^` | Redo last undone edit. |
 | `paste` | `Ctrl+V` | Paste from clipboard (image priority) |
 | `focus-work-tree` | `Alt+up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
 | `cycle-permission-mode` | `Shift+tab` | Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings) |
 | `open-notifications` | `Ctrl+N` | Open the notices (the status bar counts the unread ones) |
-| `failure-other-model` | `Alt+O` | After a failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I` | After a failed turn: show what the provider said. |
-| `failure-retry` | `Alt+R` | After a failed turn: send the prompt again. |
-| `failure-sign-in` | `Alt+S` | After a provider refused its key: open the provider sign-ins. |
-| `next-session` | `Alt+N` | Show the next session (agent or process) in the session row above the conversation. |
-| `previous-session` | `Alt+P` | Show the previous session (agent or process) in the session row above the conversation. |
+| `failure-other-model` | `Alt+O`, `f9` | After a failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Alt+I`, `f3` | After a failed turn: show what the provider said. |
+| `failure-retry` | `Alt+R`, `f12` | After a failed turn: send the prompt again. |
+| `failure-sign-in` | `Alt+S`, `f4` | After a provider refused its key: open the provider sign-ins. |
+| `next-session` | `Alt+N`, `Ctrl+Q` | Show the next session (agent or process) in the session row above the conversation. |
+| `previous-session` | `Alt+P`, `Ctrl+_` | Show the previous session (agent or process) in the session row above the conversation. |
 
 ## Hooks
 
@@ -23256,15 +23294,15 @@ A hook fires on an event path `Phase:Category:Specific`; a pattern may use `*` f
 | `Pre:git:*` | Intercept a git commit, push, pull, merge, checkout, stash or worktree change that GoodVibes itself makes (its own git service), before it runs. A git command the model runs through the exec tool raises Pre:tool:exec instead. | blocking | yes | no | no | fail_open |
 | `Post:git:*` | Observe a successful git commit, push, pull, merge, checkout, stash or worktree change. | non_blocking | no | no | no | log_only |
 | `Fail:git:*` | Observe a failed git operation. | non_blocking | no | no | no | log_only |
-| `Pre:llm:chat` | Intercept outbound LLM chat requests. | blocking | yes | no | yes | fail_open |
-| `Post:llm:chat` | Observe successful LLM responses. | non_blocking | no | no | yes | log_only |
-| `Fail:llm:chat` | Observe failed LLM requests. | non_blocking | no | no | yes | log_only |
+| `Pre:llm:chat` | Intercept a request of the main conversation before it goes to the model: deny it (`decision: "deny"`, the turn stops with the reason), or add a note the model reads with that request (`additionalContext`). | blocking | yes | no | yes | fail_open |
+| `Post:llm:chat` | Observe successful LLM responses. Runs beside the turn; nothing waits for it, so it adds no note. | non_blocking | no | no | no | log_only |
+| `Fail:llm:chat` | Observe failed LLM requests. Runs beside the turn; nothing waits for it, so it adds no note. | non_blocking | no | no | no | log_only |
 | `Pre:mcp:call` | Intercept an MCP tool call before invocation. | blocking | yes | no | no | fail_open |
-| `Post:mcp:call` | Observe a successful MCP tool call. | non_blocking | no | no | yes | log_only |
-| `Fail:mcp:call` | Observe a failed MCP tool call. | non_blocking | no | no | yes | log_only |
-| `Pre:compact:*` | Intercept compaction before it mutates runtime context. | blocking | yes | no | yes | fail_open |
-| `Post:compact:*` | Observe successful compaction. | non_blocking | no | no | yes | log_only |
-| `Fail:compact:*` | Observe compaction failures. | non_blocking | no | no | yes | log_only |
+| `Post:mcp:call` | Observe a successful MCP tool call. Runs beside the turn; nothing waits for it, so it adds no note. | non_blocking | no | no | no | log_only |
+| `Fail:mcp:call` | Observe a failed MCP tool call. Runs beside the turn; nothing waits for it, so it adds no note. | non_blocking | no | no | no | log_only |
+| `Pre:compact:*` | Intercept compaction before it mutates runtime context: deny it (`decision: "deny"`). The summary is built by GoodVibes, so a hook adds no note to it. | blocking | yes | no | no | fail_open |
+| `Post:compact:*` | Observe successful compaction. Runs beside the turn; nothing waits for it, so it adds no note. | non_blocking | no | no | no | log_only |
+| `Fail:compact:*` | Observe compaction failures. Runs beside the turn; nothing waits for it, so it adds no note. | non_blocking | no | no | no | log_only |
 | `Lifecycle:session:*` | Observe session lifecycle changes. | background | no | no | no | log_only |
 | `Lifecycle:agent:*` | Observe agent lifecycle changes. | background | no | no | no | log_only |
 | `Lifecycle:contract:*` | Observe contract lifecycle changes: created, planned, checked, nudged, escalated, passed, failed, cancelled. | background | no | no | no | log_only |
@@ -23413,7 +23451,7 @@ A method with no HTTP route is called with `POST /api/control-plane/methods/{met
 | `automation.schedules.delete` | `DELETE /api/automation/schedules/{scheduleId}` | admin | `write:automation` | write (cannot be undone, dangerous) | safe to repeat | Delete a schedule record. |
 | `automation.schedules.list` | `GET /api/automation/schedules` | authenticated | `read:automation-content` | read | safe to repeat | Return schedule records. |
 | `automation.schedules.pause` | `POST /api/automation/schedules/{scheduleId}/pause` | admin | `write:automation` | write | safe to repeat | Stop a schedule from running until it is resumed; it is kept. The same as /schedule pause <schedule>. |
-| `automation.schedules.preview` | invoke only | authenticated | `read:automation-content` | read | safe to repeat | Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: 0 9 * * 1-5 [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank. |
+| `automation.schedules.preview` | invoke only | authenticated | `read:automation-content` | read | safe to repeat | Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: every weekday at 09:00 (0 9 * * 1-5) [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank. |
 | `automation.schedules.resume` | `POST /api/automation/schedules/{scheduleId}/resume` | admin | `write:automation` | write | safe to repeat | Let a paused schedule run again at its next time, until you change it. The same as /schedule resume <schedule>. |
 | `automation.schedules.run` | `POST /api/automation/schedules/{scheduleId}/run` | admin | `write:automation` | outward | safe with the header `Idempotency-Key` | Trigger a schedule immediately. |
 

@@ -41,6 +41,7 @@ function historyResult(result: ToolResult): CompanionChatHistoryToolResult {
     ...(result.output !== undefined ? { output: result.output } : {}),
     ...(result.error !== undefined ? { error: result.error } : {}),
     ...(result.cancelled === true ? { cancelled: true } : {}),
+    ...(result.ownerLine !== undefined ? { ownerLine: result.ownerLine } : {}),
   };
 }
 

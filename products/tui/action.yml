@@ -14,11 +14,11 @@ inputs:
     required: false
     default: ''
   command:
-    description: 'A goodvibes subcommand to run instead of a prompt (e.g. "doctor", "status"). Ignored when prompt is set.'
+    description: 'A goodvibes subcommand to run instead of a prompt (e.g. "doctor", "status", "doctor explain"), split into words as a shell would: quote a word that holds spaces with single or double quotes. Nothing is expanded (no variables, globs or backslash escapes). Ignored when prompt is set.'
     required: false
     default: ''
   args:
-    description: 'Extra arguments appended after the command.'
+    description: 'Extra arguments appended after the command or prompt, split into words as a shell would: quote an argument that holds spaces with single or double quotes. Nothing is expanded (no variables, globs or backslash escapes).'
     required: false
     default: ''
   output:
@@ -115,24 +115,51 @@ runs:
         set -eu
         goodvibes --version
         RESULT_FILE="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/goodvibes-result-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-1}-$$.out"
+        # command and args are split into words as a shell splits them: spaces, tabs and
+        # new lines separate words; single or double quotes keep a phrase (spaces included)
+        # in one word. Nothing is expanded: no variables, globs or backslash escapes.
+        # prompt, output, timeout and max-turns are each passed as one argument.
+        GV_ARGV=()
+        add_words() {
+          local text="$1" word="" quote="" in_word=0 char i
+          for (( i = 0; i < ${#text}; i++ )); do
+            char="${text:i:1}"
+            if [ -n "$quote" ]; then
+              if [ "$char" = "$quote" ]; then quote=""; else word+="$char"; fi
+            elif [ "$char" = "'" ] || [ "$char" = '"' ]; then
+              quote="$char"; in_word=1
+            elif [[ "$char" =~ [[:space:]] ]]; then
+              if [ "$in_word" = 1 ]; then GV_ARGV+=("$word"); word=""; in_word=0; fi
+            else
+              word+="$char"; in_word=1
+            fi
+          done
+          if [ -n "$quote" ]; then
+            echo "The action's input has a $quote quote that is never closed: $text" >&2
+            exit 2
+          fi
+          if [ "$in_word" = 1 ]; then GV_ARGV+=("$word"); fi
+        }
         if [ -n "$GV_PROMPT" ]; then
-          set -- --non-interactive --output "$GV_OUTPUT" run
-          if [ -n "$GV_TIMEOUT" ]; then set -- "$@" --timeout "$GV_TIMEOUT"; fi
-          if [ -n "$GV_MAX_TURNS" ]; then set -- "$@" --max-turns "$GV_MAX_TURNS"; fi
-          set -- "$@" "$GV_PROMPT"
+          GV_ARGV=(--non-interactive --output "$GV_OUTPUT" run)
+          if [ -n "$GV_TIMEOUT" ]; then GV_ARGV+=(--timeout "$GV_TIMEOUT"); fi
+          if [ -n "$GV_MAX_TURNS" ]; then GV_ARGV+=(--max-turns "$GV_MAX_TURNS"); fi
+          GV_ARGV+=("$GV_PROMPT")
           echo "Running non-interactive prompt (timeout: ${GV_TIMEOUT:-none}, max turns: ${GV_MAX_TURNS:-none})"
         elif [ -n "$GV_COMMAND" ]; then
-          # shellcheck disable=SC2086
-          set -- --non-interactive $GV_COMMAND
-          echo "Running: goodvibes $GV_COMMAND $GV_ARGS"
+          GV_ARGV=(--non-interactive)
+          add_words "$GV_COMMAND"
         else
           echo "No prompt or command provided; install + version only."
           exit 0
         fi
+        add_words "$GV_ARGS"
+        if [ -z "$GV_PROMPT" ]; then
+          printf 'Running: goodvibes'; printf ' %q' "${GV_ARGV[@]}"; printf '\n'
+        fi
         # The result also goes to the step log; the exit code is the run's own.
         set +e
-        # shellcheck disable=SC2086
-        goodvibes "$@" $GV_ARGS | tee "$RESULT_FILE"
+        goodvibes "${GV_ARGV[@]}" | tee "$RESULT_FILE"
         EXIT_CODE="${PIPESTATUS[0]}"
         set -e
         STOP_REASON=""

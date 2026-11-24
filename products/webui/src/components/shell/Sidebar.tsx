@@ -29,6 +29,7 @@ import {
 import { useEffect, useMemo, useRef, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { ViewId } from '../../lib/router';
 import { whenLabel } from '../../lib/when-label';
+import { formatShortcut, NEW_CHAT_KEYS } from '../../lib/shortcut-keys';
 import { Tooltip } from '../ui/Tooltip';
 import { IconButton } from '../ui/IconButton';
 import { Menu, MenuItem } from '../ui/Menu';
@@ -154,7 +155,7 @@ export function SidebarContent({
         {compact ? (
           <IconButton
             label="Expand sidebar"
-            shortcut="Ctrl B"
+            shortcut={formatShortcut('mod+b')}
             tooltipPlacement="right"
             className="shell-brand__rail-button"
             icon={<Spark size={18} />}
@@ -181,7 +182,7 @@ export function SidebarContent({
                 />
                 <IconButton
                   label={shell.peek ? 'Close sidebar' : 'Collapse sidebar'}
-                  shortcut="Ctrl B"
+                  shortcut={formatShortcut('mod+b')}
                   icon={shell.peek ? <PanelLeftOpen /> : <PanelLeftClose />}
                   onClick={shell.peek ? () => shell.setPeek(false) : shell.toggleSidebar}
                 />
@@ -196,6 +197,7 @@ export function SidebarContent({
           icon={<Plus aria-hidden="true" />}
           label="New chat"
           compact={compact}
+          shortcut={formatShortcut(NEW_CHAT_KEYS)}
           current={view === 'chat' && draftChat}
           onClick={onNewChat}
         />
@@ -203,8 +205,8 @@ export function SidebarContent({
           icon={<Search aria-hidden="true" />}
           label="Search"
           compact={compact}
-          shortcut="Ctrl K"
-          trailing={compact ? undefined : <span className="gv-kbd">Ctrl K</span>}
+          shortcut={formatShortcut('mod+k')}
+          trailing={compact ? undefined : <span className="gv-kbd">{formatShortcut('mod+k')}</span>}
           onClick={onSearch}
         />
         {DESTINATIONS.map((destination) => {

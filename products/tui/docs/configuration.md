@@ -66,6 +66,7 @@ for it to read when it starts.
 | `display.showThinking` | `false` | Show model thinking traces |
 | `display.showTokenSpeed` | `false` | Show tokens/sec in status bar |
 | `display.reduceMotion` | `false` | Reduce motion: the working spinner is one still mark with no colour sweep, and running rows in the conversation stop spinning (their times still count). Answers still appear as they are written; turn `display.stream` off to have each one appear whole |
+| `display.mouseCapture` | `true` | Use the mouse in the terminal programs: on, clicks and the wheel reach the program; off, the terminal keeps the mouse, so you select and copy text the terminal's own way. Read when the program starts |
 | `provider.model` | `openrouter:openrouter/free` | Active model ID, provider-qualified as `<provider>:<model>` |
 | `provider.reasoningEffort` | `medium` | Reasoning depth for supported models |
 | `provider.systemPromptFile` | `` | Path to a custom system prompt file |

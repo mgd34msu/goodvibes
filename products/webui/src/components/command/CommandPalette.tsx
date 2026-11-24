@@ -14,6 +14,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from 'react-dom';
 import { classicCommandIndices } from '@goodvibes/engine/platform/browser/decision-policy';
 import { type CommandDef, getCommands, subscribeCommands } from '../../lib/commands';
+import { formatShortcut } from '../../lib/shortcut-keys';
 import {
   buildPaletteSections,
   PALETTE_SECTION_LABELS,
@@ -35,23 +36,6 @@ const SECTION_ICONS: Record<PaletteSection, ReactNode> = {
   actions: <Zap aria-hidden="true" />,
   settings: <Settings aria-hidden="true" />,
 };
-
-/** "mod+shift+n" → "Ctrl Shift N"; "g c" → "G then C". */
-export function formatShortcut(shortcut: string): string {
-  const isMac = typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform ?? '');
-  if (shortcut.includes(' ') && !shortcut.includes('+')) {
-    return shortcut.split(' ').map((part) => part.toUpperCase()).join(' then ');
-  }
-  return shortcut
-    .split('+')
-    .map((part) => {
-      if (part === 'mod') return isMac ? '⌘' : 'Ctrl';
-      if (part === 'shift') return 'Shift';
-      if (part === 'alt') return isMac ? '⌥' : 'Alt';
-      return part.length === 1 ? part.toUpperCase() : part;
-    })
-    .join(' ');
-}
 
 export function CommandPalette({ open, onClose, initialQuery = '' }: CommandPaletteProps) {
   const [query, setQuery] = useState('');

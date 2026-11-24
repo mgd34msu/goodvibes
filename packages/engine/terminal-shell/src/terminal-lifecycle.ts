@@ -68,13 +68,15 @@ export interface TerminalSequenceSet {
 
 /**
  * The bytes written to enter terminal mode: alt screen (unless disabled),
- * clear + home (no 3J), cursor hidden, then the input modes.
+ * clear + home (no 3J), cursor hidden, then the input modes. With `mouse`
+ * false (`display.mouseCapture` off) the mouse is left to the terminal, so
+ * dragging selects text the terminal's own way.
  */
-export function buildEnterSequence(noAltScreen: boolean, escapes: TerminalSequenceSet = TERMINAL_ESCAPES): string {
+export function buildEnterSequence(noAltScreen: boolean, escapes: TerminalSequenceSet = TERMINAL_ESCAPES, mouse = true): string {
   return (noAltScreen ? '' : escapes.ALT_SCREEN_ENTER)
     + escapes.CLEAR_VIEWPORT_HOME
     + escapes.CURSOR_HIDE
-    + escapes.MOUSE_ENABLE
+    + (mouse ? escapes.MOUSE_ENABLE : '')
     + escapes.KEYBOARD_EXT_ENABLE
     + escapes.PASTE_ENABLE
     + escapes.FOCUS_ENABLE;
@@ -110,6 +112,8 @@ export interface TerminalLifecycleDeps {
    * the primary viewport (without 3J) instead of leaving the alt screen.
    */
   readonly noAltScreen: boolean;
+  /** Whether the program takes the mouse (`display.mouseCapture`, read at start); true when absent. */
+  readonly mouseCapture?: boolean | undefined;
   /**
    * Wrap the restore write so it is not suppressed by an output guard. When a
    * front-end installs a stdout guard, restore must still reach the real
@@ -175,7 +179,7 @@ export function createTerminalLifecycle(deps: TerminalLifecycleDeps): TerminalLi
   let terminalRestored = false;
   const enterTerminal = (): void => {
     if (terminalActive || terminalRestored) return;
-    guardedWrite(() => deps.write(buildEnterSequence(deps.noAltScreen, escapes)));
+    guardedWrite(() => deps.write(buildEnterSequence(deps.noAltScreen, escapes, deps.mouseCapture !== false)));
     terminalActive = true;
   };
 

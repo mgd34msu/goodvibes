@@ -11,7 +11,11 @@ web app you can use from your phone.
 You bring the model: Anthropic, OpenAI (API key or ChatGPT subscription),
 Google Gemini, OpenRouter, GitHub Copilot, AWS Bedrock and many others, or a
 model server on your own machine such as Ollama or LM Studio. Your settings,
-sessions and keys stay on your machine.
+sessions and keys are stored on your machine. What you ask and what the tools
+do is sent to the models you choose, and, when a decision model is set, each
+decision request goes to it (the hosted Jev by default) with what
+[What one decision request sends](docs/decision-model-policy.md#what-one-decision-request-sends)
+lists.
 
 What you will notice:
 
@@ -59,7 +63,8 @@ and the web app's address.
   memory in `~/.goodvibes`.
 
 All options, and what happens when an install fails: [installation guide](docs/installation.md).
-To build from a source checkout instead, run `./scripts/install-from-checkout.sh`.
+To build from a source checkout instead, run `./scripts/install-from-checkout.sh`
+(Linux with glibc only; on macOS use the install command above).
 
 ## First run
 
@@ -256,6 +261,9 @@ By topic:
 - [Purchases](packages/engine/docs/payments.md)
 - [Release notes for 3.4.8](docs/releases/3.4.8.md)
 - [Building on the platform](packages/engine/README.md) and [the Jev decision layer](packages/judgment/README.md)
+- For a language model or an agent operating GoodVibes: [docs/llms.txt](docs/llms.txt), a short index of
+  the parts of [docs/llms-full.txt](docs/llms-full.txt) (everything in one file, with every setting,
+  command, tool and API method), and the [command reference](products/tui/docs/commands-reference.md)
 - [Security policy](SECURITY.md)
 
 ## License

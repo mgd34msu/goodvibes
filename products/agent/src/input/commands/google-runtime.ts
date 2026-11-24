@@ -34,7 +34,8 @@ import { defineCommand, defineList, type ActionDescription, type ListRow } from 
 import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { renderGoogleSetupReport } from '@goodvibes/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes/engine/platform/platform/google';
-import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes/engine/platform/platform/google';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, detectGcloud } from '@goodvibes/engine/platform/platform/google';
+import { createProcessCommandPort } from '@goodvibes/engine/platform/platform/google/node';
 import { buildGoodVibesSecretRef } from '../../config/secret-config.ts';
 import {
   adoptGoogleCredentials,
@@ -278,8 +279,14 @@ export function createGoogleCommand(fetcher?: FeedFetcher) {
     }),
     {
       id: 'connect', label: 'Connect Gmail and Calendar', word: 'connect', inputs: [],
-      sentence: 'Works out the shortest route and connects mail and calendar, asking you at most to approve one consent link; the credential is kept until you change it.',
-      done: '', touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'forget', operator: AGENT_ONLY, example: {},
+      sentence: 'Works out the shortest route and connects mail and calendar: when the Google Cloud SDK is not on this computer it is installed into your home folder (about 500 MB), saying how far it has got; at most you are asked to approve one consent link; the credential is kept until you change it.',
+      // The request is the consent: no question first. Its one question is Google's own consent link,
+      // so it asks itself; what it does beyond the credential is said on its row.
+      done: '', touches: 'credential', lasts: 'kept', risk: 'none', asksItself: true, undoneBy: 'forget', operator: AGENT_ONLY, example: {},
+      rowValue: async (ctx) => {
+        const found = await detectGcloud(createProcessCommandPort(), requireShellPaths(ctx).homeDirectory);
+        return found.ok ? '' : 'installs Google Cloud SDK, about 500 MB';
+      },
       run: (_values, ctx) => guarded(async () => settled(ctx, (await connectGoogle(ctx, progressPort(ctx), consentAnnouncer(ctx))).text)),
     },
     {
@@ -296,8 +303,7 @@ export function createGoogleCommand(fetcher?: FeedFetcher) {
       run: (_values, ctx) => guarded(async () => {
         // Read, show, ask, apply: the yes removes only the values the question named.
         const items = ['refresh-token', 'client-secret', 'app-password', 'calendar-address'] as const;
-        const question = await forgetGoogleCredentials(ctx, items, false);
-        const body = question.split('\n').filter((line) => !line.startsWith('Confirm with:')).join('\n');
+        const body = await forgetGoogleCredentials(ctx, items, false);
         if (!ctx.confirm) throw commandRefusal('Google credentials are removed only where you can see them and be asked; nothing was removed.');
         if (!(await ctx.confirm({ title: 'Remove these Google credentials?', body: `${body}\n\nThis cannot be undone.`, confirmLabel: 'Remove', cancelLabel: 'Back', tone: 'danger' }))) {
           throw commandRefusal('Not removed; nothing was changed.', undefined, 'CANCELLED');

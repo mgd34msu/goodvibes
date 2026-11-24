@@ -243,10 +243,14 @@ import type { HeadlessRunFlags } from './native-headless-options.js';
  */
 export function headlessRunFlagErrors(flags: HeadlessRunFlags, command: string, outputFormat?: string): string[] {
   if (Object.keys(flags).length === 0) return [];
-  if (command !== 'run') return ['--timeout, --max-turns, --omit-accumulated and --answer-permissions apply only to the run command.'];
+  if (command !== 'run') return ['--timeout, --max-turns, --omit-accumulated, --answer-permissions and --prompt-file apply only to the run command.'];
   if (flags.answerPermissions && outputFormat !== 'stream-json') {
     return ['--answer-permissions needs --output stream-json: the prompt frame carries the callId the answer must name.'];
   }
+  if (flags.answerPermissions && flags.promptFile === '-') {
+    return ['--prompt-file - and --answer-permissions both read standard input: put the prompt in a file, or give it as text.'];
+  }
+  if (flags.promptFile !== undefined && flags.promptFile.trim() === '') return ['--prompt-file expects a path, or - for standard input.'];
   return [];
 }
 

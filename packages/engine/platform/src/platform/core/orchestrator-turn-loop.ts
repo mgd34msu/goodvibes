@@ -87,6 +87,7 @@ import {
   type TurnCodeIndexSource,
 } from '../agents/turn-knowledge-injection.js';
 import type { HostKey } from './host-instructions.js';
+import { environmentBlock, sessionEnvironment } from './environment-block.js';
 import { describeAwaitingHandoffs, type CrossSessionTaskRegistry } from '../sessions/orchestration/registry.js';
 import type { OrchestratorUsageTotals } from './orchestrator-usage.js';
 
@@ -413,6 +414,9 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
   }
   if (awaitingHandoffs) hostInstructions.set('handoffs', awaitingHandoffs);
   else hostInstructions.clear('handoffs');
+  // Folder, system, today's date and the repository: after the history, so the cached prefix holds across days.
+  const environmentDirectory = context.configManager.getWorkingDirectory?.() ?? process.cwd();
+  hostInstructions.set('environment', environmentBlock(await sessionEnvironment(context.conversation, environmentDirectory), new Date()));
   // A draft's revision request rides every request until a draft is accepted, after the history, never in the system prompt.
   const requestRevision = (text: string) => hostInstructions.set('correction', text);
   if (resumedRepair) requestRevision(resumedRepair);
@@ -630,6 +634,8 @@ export async function executeOrchestratorTurnLoop(context: OrchestratorTurnLoopC
           stopReason: 'hook_denied',
         }));
       }
+      // The hook's note reaches the model with this request, in the host channel after the history.
+      if (preResult.additionalContext) hostInstructions.set('correction', `[Pre:llm:chat hook] ${preResult.additionalContext}`, { once: true, append: true });
     }
 
     // Per-turn passive knowledge injection for the main interactive session,

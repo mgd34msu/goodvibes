@@ -1,10 +1,13 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { NativeHeadlessMode } from './native-headless-options.js';
 import type { NativeHeadlessResult } from './native-headless.js';
 export interface HeadlessCommandRuntime {
   readonly cli: {
     readonly flags: { readonly prompt?: string | undefined; readonly outputFormat: string;
-      readonly continueLast?: boolean | undefined; readonly resume?: string | undefined; readonly session?: string | undefined };
+      readonly continueLast?: boolean | undefined; readonly resume?: string | undefined; readonly session?: string | undefined;
+      readonly promptFile?: string | undefined };
     readonly commandArgs: readonly string[];
     readonly positionals: readonly string[];
   };
@@ -22,13 +25,16 @@ export async function runHeadlessCommand(
   },
 ): Promise<number> {
   const { cli } = runtime;
-  const prompt = cli.flags.prompt ?? (cli.positionals.length ? cli.positionals.join(' ') : undefined);
+  const typed = cli.flags.prompt ?? (cli.positionals.length ? cli.positionals.join(' ') : undefined);
+  const read = cli.flags.promptFile === undefined ? { prompt: typed } : readPromptFile(cli.flags.promptFile, typed, runtime.workingDirectory);
   const controller = new AbortController();
   const interrupt = () => controller.abort();
   process.on('SIGINT', interrupt);
   process.on('SIGTERM', interrupt);
   try {
-    const result = await policy.run(prompt, mode, controller.signal);
+    const result = 'error' in read
+      ? { exitCode: 2, response: '', error: read.error, stopReason: 'invalid-input' }
+      : await policy.run(read.prompt, mode, controller.signal);
     const lines: string[] = [];
     policy.write(result, cli.flags.outputFormat, (line) => lines.push(line));
     await new Promise<void>((resolve, reject) => {
@@ -38,6 +44,19 @@ export async function runHeadlessCommand(
   } finally {
     process.removeListener('SIGINT', interrupt);
     process.removeListener('SIGTERM', interrupt);
+  }
+}
+
+/**
+ * The prompt `--prompt-file` names: the file's text (a relative path is read from the
+ * working folder), or all of standard input for `-`. A prompt also given as text is refused.
+ */
+function readPromptFile(path: string, typed: string | undefined, workingDirectory: string): { readonly prompt: string } | { readonly error: string } {
+  if (typed !== undefined) return { error: 'Give the prompt once: as text or with --prompt-file, not both.' };
+  try {
+    return { prompt: readFileSync(path === '-' ? 0 : resolve(workingDirectory, path), 'utf8') };
+  } catch (error) {
+    return { error: `--prompt-file could not read ${path === '-' ? 'standard input' : path}: ${error instanceof Error ? error.message : String(error)}` };
   }
 }
 

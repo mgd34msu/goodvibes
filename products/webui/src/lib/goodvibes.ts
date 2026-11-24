@@ -8,6 +8,7 @@ import type { BrowserKnowledgeMethodId } from '@goodvibes/engine/platform/browse
 import { WEBUI_METHOD_ROUTES } from '@goodvibes/engine/contracts/generated/webui-facade';
 import { getClientLifetime, heldBearerSync, invalidateClientLifetime, isClientLifetimeCurrent, readSignedInIdentity, tokenStore } from './client-lifetime';
 import { clearHeldInputs } from './held-input';
+import { clearChatDrafts } from './chat-drafts';
 import { randomUuid } from './uuid';
 export { hasSignInSync, tokenStore } from './client-lifetime';
 import { isRuntimeEventDomain } from '@goodvibes/engine/contracts';
@@ -2455,6 +2456,7 @@ export function signOut(): Promise<SignOutOutcome> {
   invalidateClientLifetime();
   // What was typed and not yet accepted belongs to this sign-in: it does not outlive it.
   clearHeldInputs();
+  clearChatDrafts();
   return inCredentialOrder(async () => {
     const bearer = await tokenStore.getToken();
     await tokenStore.clearToken();

@@ -9,7 +9,9 @@ export const MCP_TOOL_SCHEMA: ToolDefinition = {
       mode: {
         type: 'string',
         enum: ['call', 'servers', 'tools', 'schema', 'security', 'auth', 'approve-quarantine', 'set-trust', 'set-role'],
-        description: 'call runs a tool on a connected server (qualifiedName and input); tools lists the callable names; schema shows one tool\'s arguments.',
+        description: 'call runs a tool on a connected server (qualifiedName and input); servers lists the servers; tools lists the callable names; schema shows one tool\'s arguments;'
+          + ' security shows each server\'s trust, role, quarantine state and recent security decisions; auth shows the same with, in full view, the paths and hosts each server may reach;'
+          + ' approve-quarantine, set-trust and set-role change one server (serverName).',
       },
       view: {
         type: 'string',

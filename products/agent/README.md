@@ -219,7 +219,7 @@ The Agent consumes `@goodvibes/engine` and `@goodvibes/daemon` through `workspac
 
 ## Stability
 
-GoodVibes ships as one suite version. Changes are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.2](../../docs/releases/3.3.2.md).
+GoodVibes ships as one suite version. Changes are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/), one file per release.
 
 ## License
 

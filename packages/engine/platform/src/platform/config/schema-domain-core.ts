@@ -16,6 +16,7 @@ export const coreConfigDefaults = {
     showTokenSpeed: false,
     showToolPreview: false,
     reduceMotion: false,
+    mouseCapture: true,
   },
   provider: {
     decisionRouter: DEFAULT_DECISION_ROUTER_SETTINGS,
@@ -252,6 +253,13 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     appliesWhen: 'now',
     type: 'boolean',
     description: 'Stops the terminal programs\' moving parts: the working spinner shows a still mark and an elapsed time, and running rows stop spinning. Answers still arrive as they are written unless "Show answers as they are written" is off',
+  },
+  {
+    key: 'display.mouseCapture',
+    label: 'Use the mouse in the terminal programs',
+    appliesWhen: 'restart',
+    type: 'boolean',
+    description: 'On: the terminal programs take the mouse (click a row or a status segment, scroll with the wheel). Off: the terminal keeps the mouse, so you select and copy text the terminal\'s own way. Read when the program starts',
   },
   {
     key: 'provider.decisionRouter',

@@ -40,8 +40,8 @@ export interface DevicesModalDeps {
   readonly revokeShared?: () => Promise<{ readonly ok: boolean; readonly message: string }>;
   /** Injectable clock so last-seen formatting is deterministic in tests. */
   readonly now?: () => number;
-  /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
-  readonly copyToClipboard?: (text: string) => boolean | void;
+  /** Copies the text: `copied` when a clipboard program confirmed it, `sent` when it went to the terminal as OSC 52. */
+  readonly copyToClipboard?: (text: string) => 'copied' | 'sent' | 'failed';
   /** The daemon's LIST_CHANGED `paired-devices` notices while the screen is open; returns the unsubscribe. */
   readonly watchPairedDevices?: (onChange: () => void) => () => void;
 }
@@ -180,9 +180,11 @@ class DevicesModalSurface implements ConfigModalSurface {
     if (id === 'copyMinted') {
       if (!this.minted || !this.deps.copyToClipboard) return;
       const written = this.deps.copyToClipboard(this.minted.token);
-      ctx.setStatus(written === false
-        ? `Could not write to the terminal clipboard; press ${actionKeyText('v')} to reveal the token instead.`
-        : `Sent the token to the terminal clipboard, if your terminal supports it (OSC 52); press ${actionKeyText('v')} to reveal it if the paste is empty.`);
+      ctx.setStatus(written === 'failed'
+        ? `Could not copy the token; press ${actionKeyText('v')} to reveal it instead.`
+        : written === 'copied'
+          ? 'Copied the token.'
+          : `Sent the token to your terminal's clipboard, if your terminal supports it (OSC 52); press ${actionKeyText('v')} to reveal it if the paste is empty.`);
       return;
     }
 

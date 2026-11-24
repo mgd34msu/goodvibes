@@ -13,6 +13,7 @@ export {
 export type { CardEntryTransport } from './entry-policy.js';
 export { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../config/payment-config-keys.js';
 export { minorUnitExponent } from './money-parsing.js';
+export { formatMinorUnits, readPurchaseNoticeRow, type PurchaseNoticeRow } from './message.js';
 export { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance } from './window-view.js';
 export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentUnreadableOperation, PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance, PaymentHostStopView } from './window-view.js';
 

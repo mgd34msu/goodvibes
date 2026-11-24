@@ -3,7 +3,7 @@ import { startupNoticeWriter } from '@goodvibes/engine/terminal-shell/cli-entryp
 import {
   parseNativeShellCli,
   shellMetadataResult,
-  requireValidCliOverrides,
+  writeCliUsageRefusal,
   applyCliModelSelection,
   resolveShellRoots,
   type ShellEntrypointRoots,
@@ -27,7 +27,7 @@ import {
 } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
 import { parseGoodVibesCli } from '@goodvibes/engine/terminal-shell/cli-parser';
 import { renderCompletion } from './completion.ts';
-import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion } from './help.ts';
+import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesUsageLine, renderGoodVibesVersion } from './help.ts';
 import { ensureGoodvibesGitignore } from './ensure-goodvibes-gitignore.ts';
 import { parseDeepLink } from '../input/commands/deep-link.ts';
 import { registerSelfAcpCommand } from '../self-acp-command.ts';
@@ -55,11 +55,17 @@ export async function prepareShellCliRuntime(
   const { native, cli } = parseNativeShellCli(argv, binary, parseGoodVibesCli);
   const errors = [...cli.errors, ...headlessRunFlagErrors(native.run ?? {}, cli.command, cli.flags.outputFormat)];
 
-  if (errors.length > 0) {
-    console.error(errors.join('\n'));
-    console.error('');
-    console.error(renderGoodVibesHelp(binary));
+  // A usage error is the error and, for a wrong command line, the command's one usage line; JSON when asked for.
+  const refuseUsage = async (lines: readonly string[], usageLine?: string): Promise<never> => {
+    await writeCliUsageRefusal(cli, lines, usageLine, {
+      stdout: (text) => console.log(text),
+      stderr: (text) => console.error(text),
+      loadRunResultWriter: async () => (await import('./native-headless.ts')).writeNativeHeadlessResult,
+    });
     process.exit(2);
+  };
+  if (errors.length > 0) {
+    await refuseUsage(errors, renderGoodVibesUsageLine(cli, binary));
   }
 
   if (cli.warnings.length > 0) {
@@ -117,13 +123,14 @@ export async function prepareShellCliRuntime(
   });
   new GlobalNetworkTransportInstaller().install(configManager);
 
+  // Override errors end the run before runtime construction, headless effects or command dispatch.
   const overrideErrors = applyRuntimeConfigOverrides(configManager, cli.flags.configOverrides);
-  requireValidCliOverrides(overrideErrors, console.error, process.exit);
+  if (overrideErrors.length > 0) await refuseUsage(overrideErrors);
   const featureOverrideErrors = applyRuntimeFeatureFlagOverrides(configManager, {
     enableFeatures: cli.flags.enableFeatures,
     disableFeatures: cli.flags.disableFeatures,
   });
-  requireValidCliOverrides(featureOverrideErrors, console.error, process.exit);
+  if (featureOverrideErrors.length > 0) await refuseUsage(featureOverrideErrors);
 
   applyCliModelSelection(cli.flags, {
     current: () => configManager.get('provider.model'),
@@ -135,7 +142,7 @@ export async function prepareShellCliRuntime(
     },
   });
   const endpointOverrideErrors = applyRuntimeCommandEndpointFlagOverrides(configManager, cli.command, cli.flags);
-  requireValidCliOverrides(endpointOverrideErrors, console.error, process.exit);
+  if (endpointOverrideErrors.length > 0) await refuseUsage(endpointOverrideErrors);
 
   if (cli.command === 'open' && (cli.commandArgs.length !== 1 || !parseDeepLink(cli.commandArgs[0]!))) {
     console.error(`goodvibes open takes one link: goodvibes://open/<view>[?target=<id>[:<kind>]]${cli.commandArgs[0] ? ` ("${cli.commandArgs[0]}" is not one)` : ''}.`);

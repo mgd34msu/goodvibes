@@ -435,7 +435,7 @@ function agentLaneRows(ctx: BuildContext, info: AgentLaneInfo, scope: string, de
         outcome?: ToolMessage['outcome'] | undefined;
     }>();
     info.messages.forEach((m, i) => { if (m.role === 'tool' && m.callId)
-        results.set(m.callId, { content: m.content, index: i, outcome: m.outcome }); });
+        results.set(m.callId, { content: m.ownerLine ?? m.content, index: i, outcome: m.outcome }); });
     const items: Pending[] = [];
     info.messages.forEach((m, messageIndex) => {
         if (m.role !== 'assistant')
@@ -577,7 +577,8 @@ export function buildTurnModel(input: BuildTurnInput): TurnModel {
         members.push(abs);
         const m = at(abs);
         if (m.role === 'tool' && m.callId)
-            results.set(m.callId, { content: m.content, index: abs, outcome: m.outcome });
+            // A person reads the owner line where the result has one (a malformed call sent back to the model).
+            results.set(m.callId, { content: m.ownerLine ?? m.content, index: abs, outcome: m.outcome });
     }
     // The answer: the last assistant message, when it has prose and no calls.
     let answerIndex = -1;
@@ -845,7 +846,7 @@ export function orphanResultBead(message: ToolMessage, index: number, collapse: 
     // A result stored without its call and without a tool name is named from
     // its own shape when that is unambiguous, otherwise "result", never "tool".
     const call: ToolCall = { id: message.callId, name: message.toolName ?? inferResultToolName(message.content), arguments: {} };
-    const { bead } = makeBead(ctx, SPINE, 'o', call, index, 0, { content: message.content, index, outcome: message.outcome }, false);
+    const { bead } = makeBead(ctx, SPINE, 'o', call, index, 0, { content: message.ownerLine ?? message.content, index, outcome: message.outcome }, false);
     return bead;
 }
 /** Visibility only; status still comes from execution evidence, and a call's name from its tool's display words. */

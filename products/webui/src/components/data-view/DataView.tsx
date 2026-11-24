@@ -14,6 +14,7 @@
 import { ArrowLeft, X } from 'lucide-react';
 import { createContext, useContext, useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useRightPanel } from '../shell/ShellContext';
+import { useBackCloses } from '../../hooks/useBackCloses';
 import { Button } from '../ui/Button';
 import { Drawer } from '../ui/Drawer';
 import { IconButton } from '../ui/IconButton';
@@ -97,6 +98,8 @@ export function ListDetail({
   const peek = mode === 'peek';
   // The peek Drawer registers the right panel itself.
   useRightPanel(open && !phone && !peek);
+  // The browser's Back closes the open detail first; the next Back leaves the view.
+  useBackCloses(open, onCloseDetail);
 
   // Escape closes the detail from anywhere on the page, unless an overlay (a
   // dialog, menu, popover, drawer) is open or a field has the keyboard: those

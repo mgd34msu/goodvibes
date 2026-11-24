@@ -5,6 +5,7 @@ import { DEFAULT_CONFIG_SNAPSHOT, coerceSchemaValue } from './manager-bootstrap.
 import { readDotPath } from './shared-config-tier.js';
 import { deleteRawDotPath, stripFrozenDefaults, writeRawDotPath } from './settings-io.js';
 import type { ConfigKeyTier } from './manager-key-source.js';
+import { nearestKnownSettingName } from './settings-unknown-forms.js';
 
 /** Dot-segment ancestry, never an arbitrary string prefix. */
 export function withinConfigPath(key: string, path: string): boolean {
@@ -44,10 +45,37 @@ function freezeCaptured(value: unknown): unknown {
   return value;
 }
 
+/** At most this many names of a section are listed for a key that is not a setting. */
+const LISTED_SECTION_NAMES = 12;
+
+/**
+ * Why `key` is not a setting, with the nearest setting's name when one is
+ * close, else the names its section has. Names only: never a value.
+ */
+function unknownSettingMessage(key: string): string {
+  const nearest = nearestKnownSettingName(key, CONFIG_SCHEMA.map(setting => setting.key));
+  if (nearest !== undefined) return `${key} is not a setting; did you mean ${nearest}?`;
+  const cut = key.lastIndexOf('.');
+  const section = cut < 0 ? '' : key.slice(0, cut);
+  const names = section ? CONFIG_SCHEMA.filter(setting => setting.key.startsWith(`${section}.`)).map(setting => setting.key).sort() : [];
+  if (names.length === 0) return `${key} is not a setting. Settings are named <section>.<name>, such as permissions.mode.`;
+  const more = names.length > LISTED_SECTION_NAMES ? ` and ${names.length - LISTED_SECTION_NAMES} more` : '';
+  return `${key} is not a setting; ${section} has ${names.slice(0, LISTED_SECTION_NAMES).join(', ')}${more}.`;
+}
+
+/** What a setting accepts, said without its current or offered value. */
+function acceptedValues(schema: (typeof CONFIG_SCHEMA)[number]): string {
+  if (schema.type === 'enum') return `one of ${(schema.enumValues ?? []).join(', ')}`;
+  if (schema.type === 'boolean') return 'true or false';
+  if (schema.type === 'number') return 'a number';
+  if (schema.type === 'object') return 'a JSON object';
+  return 'text';
+}
+
 /** One strict admission path for constructor aliases and frontend helpers. */
 export function captureRuntimeValue<K extends ConfigKey>(key: K, value: unknown): ConfigValue<K> {
   const schema = CONFIG_SCHEMA.find(setting => setting.key === key);
-  if (!schema) throw new ConfigError('Unknown config key: runtime configuration requires a builtin schema key.');
+  if (!schema) throw new ConfigError(unknownSettingMessage(key));
   // The current structured schema leaves are atomic. Do not silently introduce
   // overlapping runtime authority if the schema grows a descendant later.
   if (CONFIG_SCHEMA.some(setting => setting.key !== key &&
@@ -64,8 +92,8 @@ export function captureRuntimeValue<K extends ConfigKey>(key: K, value: unknown)
     if (!validType || (schema.validate && !schema.validate(owned))) throw new Error('invalid');
     return capture(owned) as ConfigValue<K>;
   } catch {
-    // No raw values, borrowed validator errors, URLs, or argv in diagnostics.
-    throw new ConfigError(`Invalid runtime value for ${key}.`);
+    // The key and what it accepts; no raw values, borrowed validator errors or URLs in diagnostics.
+    throw new ConfigError(`${key} does not accept that value; it takes ${schema.validationHint ?? acceptedValues(schema)}.`);
   }
 }
 

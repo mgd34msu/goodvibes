@@ -1,4 +1,5 @@
 import { createModelPickerCommandOpeners } from '@goodvibes/engine/terminal-shell/model-picker-open';
+import { choosableProviderIds } from '@goodvibes/engine/terminal-shell/first-run';
 import { shortcutGroups } from '../renderer/shortcut-groups.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { openCommandPaletteOn, type PaletteShortcut } from '@goodvibes/engine/terminal-shell/command-palette';
@@ -132,7 +133,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render,
     ...(options.onProvidersChanged ? { onModelsChanged: options.onProvidersChanged } : {}),
     listModels: pickerModels,
-    listProviders: () => [...new Set(providerRegistry.listModels().map((model) => model.provider))],
+    // The same list first run counts: providers with a model, the internal router left out.
+    listProviders: () => choosableProviderIds(providerRegistry),
     currentModelId: () => {
       const first = getConfiguredProviderIds().length === 0 ? pickerModels()[0] : undefined;
       return first ? (first.registryKey ?? first.id) : getCurrentModelForPickerTarget();

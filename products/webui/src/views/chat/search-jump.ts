@@ -44,7 +44,7 @@ export function resolveScrollTarget(payload: { sessionId: string; messageId: str
 /**
  * True once `target`'s message is present among the loaded, ACTIVE
  * (non-superseded) messages for the currently active session, i.e. it is
- * safe to look the message up in the DOM and scroll to it.
+ * safe to ask the transcript to jump to it.
  */
 export function isScrollTargetReady(
   target: ScrollTarget | null,
@@ -54,24 +54,6 @@ export function isScrollTargetReady(
   if (!target) return false;
   if (target.sessionId !== activeSessionId) return false;
   return lineageNodes.some((node) => bestId(node.message) === target.messageId);
-}
-
-/**
- * Find the rendered message element for `messageId` anywhere under `container`.
- * The articles sit inside the column wrapper, not directly under the scroll
- * container, so this searches descendants.
- */
-export function findMessageElement(
-  container: Element | null | undefined,
-  messageId: string,
-): HTMLElement | undefined {
-  if (!container) return undefined;
-  // Compare the attribute rather than building a selector from the id, so any
-  // id characters are safe.
-  for (const element of container.querySelectorAll<HTMLElement>('[data-message-id]')) {
-    if (element.getAttribute('data-message-id') === messageId) return element;
-  }
-  return undefined;
 }
 
 /**

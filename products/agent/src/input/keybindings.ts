@@ -71,7 +71,9 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'command-palette':       [{ key: 'p', ctrl: true }],
   'workspace-picker':      [{ key: 'g', ctrl: true }],
   'workspace-close':       [{ key: 'x', ctrl: true }],
-  'workspace-close-all':   [{ key: 'x', ctrl: true, shift: true }],
+  // Every Alt and Ctrl+Shift chord here has a second one a terminal without Alt
+  // (macOS Terminal) or without the extended keyboard protocol still sends (keybinding-catalog.ts).
+  'workspace-close-all':   [{ key: 'x', ctrl: true, shift: true }, { key: '\\', ctrl: true }],
   'workspace-tab-next':    [{ key: ']', ctrl: true }],
   'workspace-tab-prev':    [{ key: '[', ctrl: true }],
   'open-agents':           [{ key: 'o', ctrl: true }],
@@ -83,11 +85,11 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   // Ctrl+N: the notices the status bar counts.
   'open-notifications':    [{ key: 'n', ctrl: true }],
   // Alt+O and Alt+I: the failed turn's "use another model" and "details"; chords that can never be typed text.
-  'failure-other-model':   [{ key: 'o', alt: true }],
-  'failure-details':       [{ key: 'i', alt: true }],
+  'failure-other-model':   [{ key: 'o', alt: true }, { key: 'f9' }],
+  'failure-details':       [{ key: 'i', alt: true }, { key: 'f3' }],
   // Alt+R and Alt+S: the failed turn's "try again" and "sign in again".
-  'failure-retry':         [{ key: 'r', alt: true }],
-  'failure-sign-in':       [{ key: 's', alt: true }],
+  'failure-retry':         [{ key: 'r', alt: true }, { key: 'f12' }],
+  'failure-sign-in':       [{ key: 's', alt: true }, { key: 'f4' }],
 });
 
 const KEY_ACTION_ALIASES: Readonly<Record<string, KeyAction>> = {

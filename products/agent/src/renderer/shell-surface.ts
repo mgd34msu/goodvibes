@@ -82,6 +82,8 @@ export interface ShellFooterBuildOptions {
   readonly modeFlash?: boolean;
   /** Notices not yet seen in the notifications view: `2 notices`; none at zero. */
   readonly unreadNotices?: number;
+  /** The newest unread notice's title: shown beside the count while the row has room. */
+  readonly newestNotice?: string;
   /** The key that opens the notifications, as bound ("ctrl+n"). */
   readonly noticesKey?: string;
   /** The model's context window; null when it is unknown (the meter says "unknown"). */

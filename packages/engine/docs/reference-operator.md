@@ -27081,7 +27081,7 @@ Stop a schedule from running until it is resumed; it is kept. The same as /sched
 
 #### `automation.schedules.preview`
 
-Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: 0 9 * * 1-5 [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank.
+Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: every weekday at 09:00 (0 9 * * 1-5) [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller's time zone, used when tz is blank.
 
 - Title: `Preview a Schedule`
 - Source: `builtin`

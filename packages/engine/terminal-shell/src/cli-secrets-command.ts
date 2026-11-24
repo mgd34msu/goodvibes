@@ -7,6 +7,7 @@ import {
   type SecretScope,
 } from '@goodvibes/engine/platform/platform/config';
 import { cliCommandDone, cliCommandRefusal, formatJsonOrText, yesNo, type CliCommandOutput } from './cli-output.js';
+import { askSecretOnStdin } from './cli-hidden-input.js';
 const SECRET_WRITE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext', '--stdin']);
 const SECRET_DELETE_FLAGS: ReadonlySet<string> = new Set(['--user', '--project', '--secure', '--plaintext']);
 
@@ -36,7 +37,19 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
   readonly readStdin?: (() => Promise<string>) | undefined;
 }) {
   const usage = (runtime: Runtime): string =>
-    `Usage: ${policy.binary(runtime)} secrets [list|providers|test <ref>|set <KEY> <value>|link <KEY> <ref>|delete <KEY>]`;
+    `Usage: ${policy.binary(runtime)} secrets [list|providers|test <ref>|set <KEY> [<value>]|link <KEY> <ref>|delete <KEY>]`;
+
+  /**
+   * The value of `set <KEY>` given without one: asked for at the terminal
+   * without echo, or read from standard input when something is piped in.
+   * Either way it never reaches the command line, the shell history or the
+   * process list.
+   */
+  async function readValueOffCommandLine(key: string): Promise<string> {
+    if (policy.readStdin) return policy.readStdin();
+    if (process.stdin.isTTY === true) return askSecretOnStdin(`Value for ${key} (typing is not shown): `, true);
+    return readProcessStdin();
+  }
 
   async function runSecrets(runtime: Runtime): Promise<CliSecretsResult> {
     const refused = (kind: string, text: string): CliSecretsResult => cliCommandRefusal(runtime.cli, kind, text);
@@ -72,19 +85,26 @@ export function createCliSecretsCommand<Runtime extends CliSecretRuntime>(policy
     }
     if (sub === 'set' || sub === 'link') {
       const flags = new Set(rest.filter((arg) => arg.startsWith('--')));
-      const setUsage = `Usage: ${policy.binary(runtime)} secrets ${sub} <KEY> <value> [--user|--project] [--secure|--plaintext] (or <KEY> --stdin to read the value from standard input)`;
+      const binary = policy.binary(runtime);
+      const setUsage = sub === 'set'
+        ? `Usage: ${binary} secrets set <KEY> [--user|--project] [--secure|--plaintext]: the value is asked for without being shown, or read from standard input when piped (${binary} secrets set <KEY> <value> also works, and leaves the value in your shell history)`
+        : `Usage: ${binary} secrets link <KEY> <ref> [--user|--project] [--secure|--plaintext] (or <KEY> --stdin to read the ref from standard input)`;
+      const offCommandLine = sub === 'set' ? 'leave it off to be asked for it' : 'read it with --stdin';
       const unknownFlags = [...flags].filter((flag) => !SECRET_WRITE_FLAGS.has(flag));
       if (unknownFlags.length > 0) {
-        return refused('unknown_option', `Not stored: unknown option ${unknownFlags.join(', ')}. A value that starts with -- or contains spaces must be quoted as one argument, or read with --stdin. ${setUsage}`);
+        return refused('unknown_option', `Not stored: unknown option ${unknownFlags.join(', ')}. A value that starts with -- or contains spaces must be quoted as one argument, or ${offCommandLine}. ${setUsage}`);
       }
       const positionals = rest.filter((arg) => !arg.startsWith('--'));
       const [key, ...valueParts] = positionals;
+      if (!key) return usageError(setUsage);
       // The value is exactly one argument: joining several would store a different secret than the one typed.
       if (valueParts.length > 1) {
-        return refused('too_many_values', `Not stored: ${valueParts.length} values were given for ${key}. Quote the value as one argument, or read it with --stdin. ${setUsage}`);
+        return refused('too_many_values', `Not stored: ${valueParts.length} values were given for ${key}. Quote the value as one argument, or ${offCommandLine}. ${setUsage}`);
       }
-      const value = flags.has('--stdin') ? (valueParts.length === 0 ? await (policy.readStdin ?? readProcessStdin)() : '') : (valueParts[0] ?? '');
-      if (!key || !value) return usageError(setUsage);
+      const value = flags.has('--stdin')
+        ? (valueParts.length === 0 ? await (policy.readStdin ?? readProcessStdin)() : '')
+        : valueParts[0] ?? (sub === 'set' ? await readValueOffCommandLine(key) : '');
+      if (!value) return usageError(sub === 'set' && valueParts.length === 0 ? `Not stored: no value was given for ${key}. ${setUsage}` : setUsage);
       if (sub === 'link' && !isValidSecretReference(value)) {
         return usageError('Invalid secret reference. Use goodvibes://secrets/<source>/...');
       }

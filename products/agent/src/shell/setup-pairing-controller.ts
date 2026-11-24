@@ -24,7 +24,7 @@ export class SetupPairingController extends TerminalHostPairingController<Pairin
             status: 'paired-unverified',
             host,
             message:
-              'This Agent kept its new key for this host, but checking it was interrupted. Run /setup status to check it; pairing again is not needed and would not make a second key.',
+              'This Agent kept its new key for this host, but checking it was interrupted. Run goodvibes-agent setup status in a shell to check it; pairing again is not needed and would not make a second key.',
           }),
         unknownRecovery: (host) =>
           formatSetupPairing({

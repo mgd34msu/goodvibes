@@ -1,6 +1,6 @@
 # CLI flags
 
-Most flags below are global (available regardless of the subcommand in use). `--continue`, `--resume` and `--fork` are evaluated at TUI startup. `run` restores the transcript for `--continue`, `--resume` and `--session` and fails with "No saved conversation is available to resume" when there is none; other commands ignore `--continue` and `--resume`, refuse `--session`, and `run` refuses `--fork`. A few flags are specific to one command; those are listed separately in [Command-specific flags](#command-specific-flags).
+Most flags below are global (available regardless of the subcommand in use). `--continue`, `--resume` and `--fork` are evaluated at TUI startup. `run` restores the transcript for `--continue`, `--resume` and `--session` and fails with "No saved conversation is available to resume" when there is none; other commands ignore `--continue` and `--resume`, refuse `--session`, and `run` refuses `--fork`. `--fork` is used only by the app itself, `--strict` only by `doctor` and `--open` only by `web` and `subscription`; other commands accept and ignore them, and an unknown-option error does not list them for those commands. A few flags are specific to one command; those are listed separately in [Command-specific flags](#command-specific-flags).
 
 ## Session lifecycle
 
@@ -201,6 +201,8 @@ Apply a settings override at startup. May be repeated.
 goodvibes --config log.level=debug --config feature.x=true
 ```
 
+A key that is not a setting, or a value the setting does not take, stops the launch with exit `2` and one line that names the key: the nearest setting (`permissions.mod is not a setting; did you mean permissions.mode?`), or what the setting takes (`permissions.mode does not accept that value; it takes one of ask-me, jev-decides, just-vibes, yolo, plan.`). The value you gave is never repeated.
+
 ### `--enable <feature>`, `--disable <feature>`
 
 Enable or disable a named feature at startup. The value is a feature id (for example `output-schema-fingerprint`), not a settings key; an unknown id is refused and the error lists the known ids. A capability with no off switch (the `surfaces.*` features, `fetch-sanitization`) is refused with a message saying so. May be repeated.
@@ -221,7 +223,7 @@ Parser limits to know about:
 
 - A flag that takes a value refuses a value that begins with `-`. Use the long form with an equals sign: `--prompt='- item'`.
 - Unquoted words in a prompt that equal a command name or alias (`doctor`, `auth`, `task`) are read as that command. Quote the whole prompt.
-- The `secrets` and `cluster` helpers read the word after any `--flag` as its value, so put flags after the positional arguments.
+- In the `secrets` helper (and the daemon's `cluster`) a flag that takes no value (`--user`, `--plaintext`, `--stdin`; `--json`, `--yes`) never takes the next word, so it may go before or after the positional arguments.
 - After any command word an option the command does not take (`run --max-turn 3`, `run --timout=5m`, `secrets set K v --plaintxt`) is refused with exit `2` instead of being ignored, and the error lists the options that command accepts. Commands with options of their own (`secrets`, `auth`, `pair` and the like) declare them in the one command table and receive them unchanged.
 - A lone first word of five or more letters that is a command with two neighbouring letters swapped or one letter doubled (`goodvibes stauts`, `goodvibes modles`) is refused as a mistyped command, exit code `2`, and the error names the command. To start with that word as the first prompt, put `--` before it: `goodvibes -- stauts`. Any other lone word (`goodvibes hello`, `goodvibes fix`, `goodvibes frobnicate`) starts the app with it as the first prompt; when it is one or two letters from a command a warning names that command.
 
@@ -280,6 +282,10 @@ Stop once the model has answered `n` times in this run's own turn loop and still
 ### `--answer-permissions` (`run` only)
 
 With `--output stream-json`, a script answers the owner prompts the run raises. Each one is written as a `PERMISSION_PROMPT` frame; answer with a line on stdin, `{"type":"PERMISSION_ANSWER","callId":"<callId>","approved":true}` (optional `remember`, and `note` for a refusal). Every answer line is acknowledged with a `PERMISSION_ANSWERED` frame, or a `PERMISSION_ANSWER_REJECTED` frame naming the reason and the call ids still waiting. A call that is never answered is refused when stdin ends, the run is cancelled or the run finishes. Without the flag, a call that needs the owner is refused. Using it with another output format is a usage error (exit `2`).
+
+### `--prompt-file <path>` (`run` only)
+
+Read the prompt from a file instead of the command line; a relative path is read from the working folder. `--prompt-file -` reads the whole of standard input, so `cat task.md | goodvibes run --prompt-file -` works. Giving a prompt as text as well, a file that cannot be read, or `--prompt-file -` together with `--answer-permissions` (both read standard input) is a usage error (exit `2`).
 
 ### `--omit-accumulated` (`run` only)
 
@@ -353,7 +359,7 @@ All programs in one table: [Exit codes](../../../docs/exit-codes.md).
 | --- | --- |
 | `0` | Completed. |
 | `1` | Failed: model or provider error, empty response, delegated work failed, `--max-turns` reached, or the native host is unavailable or refused the input. Nothing further is pending. |
-| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with a recovery flag. |
+| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with a recovery flag. A usage error prints the error and the command's one usage line on stderr (`Usage: goodvibes run [prompt] [--output text\|json\|stream-json]   (goodvibes run --help shows every form and option)`), not the whole help; with `--output json` or `stream-json` it is the run's final frame on stdout instead (`ok` `false`, `stopReason` `invalid-input`, `error` the message). |
 | `3` | Outcome unknown: a native input may have taken effect on the host. Inspect with `run --intake-status` before retrying. |
 | `124` | `--timeout` reached; the run was cancelled. |
 | `130` | Cancelled (Ctrl-C, SIGTERM, or the saved input was cancelled). |
@@ -387,6 +393,7 @@ Every `stream-json` line carries `schemaVersion` and `type`. Consumers should ig
 
 | `type` | Fields | When |
 | --- | --- | --- |
+| `SESSION` | `sessionId`, `model`, `provider`, `workingDirectory`, `permissionMode` | The first frame of every run that reached a session, before the first request: the session, the model that will answer, the working folder and the permission mode in force. |
 | `STREAM_DELTA` | `content`, `accumulated` (omitted with `--omit-accumulated`) | Each chunk of model output. |
 | `DRAFT_WITHDRAWN` | `reason` | The answer streamed so far was withdrawn (the turn moved to another model after it had begun). Drop that text; the replacement streams from empty. |
 | `TOOL_EXECUTING` | `turnId`, `callId`, `tool` | A tool call starts. |

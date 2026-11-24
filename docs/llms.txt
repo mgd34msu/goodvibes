@@ -1,0 +1,19 @@
+# GoodVibes
+
+> How to install, configure and operate GoodVibes, written for a language model that operates it for a person. Each part below is one file in `llms/`; `llms-full.txt` is all of them in order, with every `<!-- generated: ... -->` line of a part replaced by the complete list the code holds (settings, commands, slash commands, tools, operator API methods, events, errors, environment variables).
+
+## Parts
+
+- [GoodVibes: overview, terms, architecture and where everything is stored](llms/00-overview.md)
+- [Installing, running as a service, updating and removing GoodVibes](llms/10-install.md): This part covers everything from an empty machine to a working GoodVibes: the two installers and every option they take, what each one puts on disk, the daemon's background service on Linux and macOS, WSL2, updates, pinning and rolling back a release, uninstalling, every installer refusal with its fix, the `doctor` health checks, and the first-run setup screens of the terminal app and the Agent, one screen at a time.
+- [The terminal app (`goodvibes`)](llms/20-terminal-app.md): This part describes the terminal app, `goodvibes`, from launch to every command it offers.
+- [The Agent (`goodvibes-agent`)](llms/30-agent.md): The Agent is the GoodVibes personal assistant: chat, research, mail and calendar, reminders, notes, memory, personas, skills, routines and documents in one terminal workspace.
+- [Permissions, decisions and safety](llms/40-permissions-and-decisions.md): This part explains who decides whether a tool call runs, what always comes to the owner, how answers are remembered and reversed, how the decision model is set up, and the safety layers that stay in force in every mode: workspace trust, the exec sandbox and the secret store.
+- [Automation and services](llms/50-automation-and-services.md): This part covers work that runs without a conversation (scheduled routines, supervised triggers, watchers, check-ins), notifications, and the services the platform connects to: mail, calendar, Google, chat channels, voice, the browser, purchases, CI watch, occasions and plans.
+- [The daemon, the web UI and networking](llms/60-daemon-and-network.md): This part covers `goodvibes-daemon`: what it runs, every command it takes, the files and ports it uses, how other devices reach it (the local network, TLS, Tailscale, the relay, remote nodes), the web UI it serves, how devices and terminals are paired with it, how several daemons form a cluster, the sessions it hosts, and its logs, retention and telemetry.
+- [The operator HTTP API](llms/70-api.md): Every GoodVibes client (the terminal app, Agent, the web UI, `goodvibes-daemon` itself, scripts and other programs) drives the daemon through one API: the operator API on the daemon's control plane.
+- [Reference](llms/90-reference.md): This appendix holds every complete list GoodVibes keeps in its code.
+
+## Everything in one file
+
+- [GoodVibes, complete](llms-full.txt): every part above in one file, with the generated lists filled in (2986698 bytes).

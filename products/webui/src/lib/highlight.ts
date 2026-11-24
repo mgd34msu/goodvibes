@@ -85,6 +85,12 @@ export function normalizeLanguage(language: string): string {
 const REGISTERED_LANGUAGES = hljs.listLanguages();
 /** Above this size an untagged block is shown plain: detection tries every grammar, so its cost grows with the text. */
 const AUTO_DETECT_MAX_CHARS = 20_000;
+/**
+ * The least relevance a detected grammar needs before an untagged block is coloured and labelled with it.
+ * Below it detection is a guess (a directory tree scores 1 to 2 as css or dockerfile, a sentence 3 as sql;
+ * short real code scores 5 and up), so the block is shown plain with no language label.
+ */
+const AUTO_DETECT_MIN_RELEVANCE = 5;
 
 /**
  * Highlight `code` for the given `language`.
@@ -109,7 +115,7 @@ export function highlightCode(
   }
   if (options.autoDetect !== false && code.trim() && code.length <= AUTO_DETECT_MAX_CHARS) {
     const detected = hljs.highlightAuto(code, REGISTERED_LANGUAGES);
-    if (detected.language && detected.language !== 'plaintext' && detected.relevance > 0) return { language: detected.language, html: detected.value };
+    if (detected.language && detected.language !== 'plaintext' && detected.relevance >= AUTO_DETECT_MIN_RELEVANCE) return { language: detected.language, html: detected.value };
   }
   return { language: normalizedLanguage, html: escapeHtml(code) };
 }

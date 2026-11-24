@@ -1,8 +1,8 @@
-import { parseNativeShellCli, shellMetadataResult } from '@goodvibes/engine/terminal-shell/cli-entrypoint';
+import { cliUsageRefusalResult, parseNativeShellCli, shellMetadataResult } from '@goodvibes/engine/terminal-shell/cli-entrypoint';
 import { parseWithCatalog } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import { GOODVIBES_CLI_CATALOG } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
 import { renderCompletion } from './completion.ts';
-import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion } from './help.ts';
+import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesUsageLine, renderGoodVibesVersion } from './help.ts';
 
 export type MetadataCliResult = { readonly stdout?: string; readonly stderr?: string; readonly exitCode: number };
 
@@ -12,7 +12,8 @@ export function metadataCliResult(argv: readonly string[], binary = 'goodvibes')
   // --help); the shared parser would refuse them.
   if (argv[0] === 'host' || argv[0] === 'acp') return null;
   const { cli } = parseNativeShellCli(argv, binary, (args, name) => parseWithCatalog(args, GOODVIBES_CLI_CATALOG, name));
-  if (cli.errors.length > 0) return { stderr: `${cli.errors.join('\n')}\n\n${renderGoodVibesHelp(binary)}`, exitCode: 2 };
+  // A `run` asking for JSON gets its refusal as the run's final frame, from the CLI entry.
+  if (cli.errors.length > 0) return cliUsageRefusalResult(cli, cli.errors, renderGoodVibesUsageLine(cli, binary)) ?? null;
   return shellMetadataResult(cli, binary, {
     help: renderGoodVibesHelp,
     commandHelp: renderGoodVibesCommandHelp,

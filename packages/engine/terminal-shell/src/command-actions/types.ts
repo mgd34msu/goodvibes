@@ -141,6 +141,12 @@ export interface ActionDescription<Ctx> {
    * result has its own way to choose them (the settings screen's topics and search).
    */
   readonly blanksTypedOnly?: true | undefined;
+  /**
+   * Typed with its blanks left empty where a screen can be shown, this action
+   * of the same command runs instead, a screen that chooses them (`/model use`
+   * alone opens the model picker).
+   */
+  readonly blankOpens?: string | undefined;
 }
 
 export interface CommandDescription<Ctx> {
@@ -172,6 +178,16 @@ export interface CommandDescription<Ctx> {
    * action is on it or inside one of its groups. Absent: every action is a row.
    */
   readonly firstScreenRows?: readonly (string | FirstScreenGroup)[] | undefined;
+  /**
+   * A one-key choice on the bare command's list, for the selected row: what
+   * the key is called there (undefined: that row has none), and what pressing
+   * it does. `/setup`'s "s skip for now" on a checklist topic is one.
+   */
+  readonly rowKey?: {
+    readonly key: string;
+    readonly label: (actionId: string, ctx: Ctx) => string | undefined;
+    readonly press: (actionId: string, ctx: Ctx) => void;
+  } | undefined;
   readonly actions: readonly ActionDescription<Ctx>[];
 }
 

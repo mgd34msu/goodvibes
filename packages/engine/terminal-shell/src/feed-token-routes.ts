@@ -18,6 +18,7 @@ import { commandHistoryLine } from './command-registry.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import { splitSlashCommand } from './slash-command-parser.js';
 import { commandFailureMessage } from './command-mode-route.js';
+import { takeSplashEnterAction } from './first-run/splash-state.js';
 import type { NativeConversationInput } from './native/native-conversation-input.js';
 export interface FeedCommandContext {
   readonly print: (message: string) => void;
@@ -336,6 +337,13 @@ export function createFeedTokenRoutes<
       }
       const originalInput = captureNativeConversationInput(prompt, undefined, undefined, state.pasteRegistry);
       const text = prompt.trim();
+      // The offer under the splash (bring over the terminal app's settings) is taken with Enter.
+      const splashAction = !text && !commandMode ? takeSplashEnterAction() : undefined;
+      if (splashAction) {
+        splashAction();
+        state.requestRender();
+        return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
+      }
       if (!text && !commandMode) {
         // Target the block the user is actually reading, not the conversation's
         // oldest block (a fixed lineIndex 0 would always resolve there).

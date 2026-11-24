@@ -101,11 +101,16 @@ Additional built-in integrations resolve from the same env/secrets path. The clo
 | Comfy media | `COMFY_API_KEY` (optional, for cloud ComfyUI) |
 | Runway media | `RUNWAYML_API_SECRET` or `RUNWAY_API_KEY` |
 
-Alternatively, store keys encrypted using the `/secrets` command:
+Alternatively, store keys encrypted using the `/secrets` command, which asks
+for the value on a hidden line:
 
 ```sh
-/secrets set OPENAI_API_KEY sk-...
+/secrets set OPENAI_API_KEY
 ```
+
+From a shell, `goodvibes secrets set OPENAI_API_KEY --user` does the same: it
+asks for the value without showing it, or reads it from standard input when
+piped, so the key never lands in your shell history.
 
 For self-hosted or external secret managers, link a GoodVibes key to a
 provider-backed secret reference:

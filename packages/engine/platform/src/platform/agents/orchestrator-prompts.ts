@@ -12,13 +12,16 @@ import type { PreparedKnowledgePromptPacket } from '../knowledge/packet.js';
 import type { KnowledgeService } from '../knowledge/service.js';
 import { KnowledgeEvidenceRelevanceHeldError } from '../knowledge/semantic/evidence-ranking/reader.js';
 import { decisionOrClassic, isClassicOperation } from '../runtime/decision-policy.js';
-import { findNearestAgentsFile } from '../utils/prompt-loader.js';
+import { instructionChainOptions, loadSystemPromptWithSources } from '../utils/prompt-loader.js';
+import { homedir } from 'node:os';
 import { presetForMode } from '../gate/presets.js';
 import { knowledgeQueryText } from './turn-knowledge-injection.js';
 import { builtinAgentTemplate } from './builtin-templates.js';
 
 type PromptContextDeps = {
   readonly workingDirectory: string;
+  /** The owner's settings: the home folder and provider.systemPromptFile of the instruction chain. */
+  readonly configManager?: { get(key: 'provider.systemPromptFile'): unknown; getHomeDirectory(): string | null } | undefined;
   readonly projectFramework?: ProjectFrameworkObservation | undefined;
   readonly knowledgeService?: Pick<KnowledgeService, 'preparePromptPacket'> | undefined;
   readonly preparedKnowledgePrompt?: PreparedKnowledgePromptPacket | undefined;
@@ -159,24 +162,21 @@ function buildProjectContext(workingDirectory: string, observation?: ProjectFram
 }
 
 /**
- * The project's instruction files, in the foreground loader's order
- * (utils/prompt-loader.ts): the nearest AGENTS.md first, then the project's
- * own GOODVIBES.md, which keeps precedence by coming later.
+ * The instruction files the main loop reads, read by the same loader
+ * (utils/prompt-loader.ts) for the folder this agent works in: SYSTEM.md and
+ * GOODVIBES.md in the home folder, the nearest AGENTS.md, the project's
+ * .goodvibes/GOODVIBES.md and provider.systemPromptFile, with their includes.
  */
-function loadConventions(workingDirectory: string): string | null {
-  const read = (path: string | null): string | null => {
-    if (path === null || !existsSync(path)) return null;
-    try {
-      const content = readFileSync(path, 'utf-8').trim();
-      return content.length > 0 ? content : null;
-    } catch {
-      return null;
-    }
-  };
-  const agents = read(findNearestAgentsFile(workingDirectory));
-  const project = read(join(workingDirectory, '.goodvibes', 'GOODVIBES.md')) ?? read(join(workingDirectory, 'GOODVIBES.md'));
-  const content = [agents, project].filter((part): part is string => part !== null);
-  return content.length > 0 ? `## Conventions\n${content.join('\n\n')}` : null;
+function loadConventions(deps: PromptContextDeps): string | null {
+  const settings = deps.configManager ?? { get: () => undefined };
+  const home = deps.configManager?.getHomeDirectory() ?? homedir();
+  try {
+    const prompt = loadSystemPromptWithSources(instructionChainOptions(settings, deps.workingDirectory, home)).prompt.trim();
+    return prompt.length > 0 ? `## Conventions\n${prompt}` : null;
+  } catch (error) {
+    logger.debug('Helper instruction files could not be read', { workingDirectory: deps.workingDirectory, error: error instanceof Error ? error.message : String(error) });
+    return null;
+  }
 }
 
 const AUTONOMOUS_OPENING = 'You are an autonomous agent in GoodVibes. Complete your task fully. No human is monitoring you, never ask questions, never wait for guidance. If something is ambiguous, make the best choice and continue.';
@@ -409,7 +409,7 @@ ${conversational ? `${CONVERSATIONAL_OUTPUT_SECTION}\n\n${CONVERSATIONAL_DIAGNOS
 
   // --- Layer 4: Conventions ---
   if (!skipLayers?.has('conventions')) {
-    const conventions = deps ? loadConventions(deps.workingDirectory) : null;
+    const conventions = deps ? loadConventions(deps) : null;
     if (conventions) {
       parts.push(conventions);
     }

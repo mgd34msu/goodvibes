@@ -125,6 +125,7 @@ export async function executeCompanionToolCalls(
       toolName: call.name,
       result: toolResult.output ?? toolResult.error ?? null,
       isError: !toolResult.success,
+      ...(toolResult.ownerLine !== undefined ? { ownerLine: toolResult.ownerLine } : {}),
     });
   }
 

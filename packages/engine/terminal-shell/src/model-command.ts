@@ -29,6 +29,8 @@ export interface ModelCommandContext extends CommandActionContext {
   readonly session: { readonly runtime: { model: string; provider: string; reasoningEffort: string } };
   readonly provider: { readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'listProviders'> };
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'set'> };
+  /** The full model picker (Recommended, price tier, a tab per job), where this surface has one. */
+  readonly openModelPicker?: ((onClosed?: (chosen: boolean) => void) => void) | undefined;
 }
 
 /** How one app reaches its models, and what it does before a switch lands. */
@@ -233,8 +235,19 @@ export const MODEL_COMMAND: CommandDescription<ModelCommandContext> = {
   summary: 'Choose the model your conversations use and its backups, and read the list of models again',
   group: 'Models',
   report: 'see-models',
-  firstScreenRows: ['see-models', 'use', 'refresh', { label: 'Choose backup models…', actions: ['add-backup', 'remove-backup'] }],
+  // Bare `/model` opens the full picker; its other actions are typed lines.
+  bareOpens: 'choose',
+  firstScreenRows: ['choose', 'see-models', 'use', 'refresh', { label: 'Choose backup models…', actions: ['add-backup', 'remove-backup'] }],
   actions: [
+    doAction<ModelCommandContext>({
+      id: 'choose', label: 'Choose a model', word: 'choose',
+      sentence: 'Opens the model picker: the Recommended short list first, each model with its price tier, and a tab for each job a model does.',
+      operator: { terminalOnly: 'The model picker is this terminal program\'s screen; the web UI has its own model menu.' },
+      async run(_values, ctx) {
+        if (!ctx.openModelPicker) throw commandRefusal('The model picker is not available here.', '/model use <model> switches by name; /model list shows them.');
+        ctx.openModelPicker();
+      },
+    }),
     readAction<ModelCommandContext>({
       id: 'see-models', label: 'See your model and the others you can use', word: 'list',
       sentence: 'Shows the model in use, its backup models, and every model you can switch to, by provider.',
@@ -262,6 +275,8 @@ export const MODEL_COMMAND: CommandDescription<ModelCommandContext> = {
       touches: 'this-machine', lasts: 'kept', risk: 'none',
       operator: { method: 'models.current.set', fields: { registryKey: 'model' } },
       example: { model: 'openai:gpt-5' },
+      // `/model use` with no model named opens the full picker, as bare `/model` does.
+      blankOpens: 'choose',
       async run(values, ctx) {
         const text = await switchTo(ctx, values.model!);
         ctx.renderRequest?.();

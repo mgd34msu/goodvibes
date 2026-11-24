@@ -5,6 +5,9 @@ import { AGENT_WORKSPACE_ONBOARDING_DETAIL_CATEGORIES } from './agent-workspace-
 import { THEME_MODE_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { GATE_PRESETS } from '@goodvibes/engine/platform/platform/gate/presets';
 
+/** The Work area's one name: its tab and the Home row that opens it say the same words. */
+const WORK_AREA_LABEL = 'Work & Approvals';
+
 /** The "When GoodVibes asks" row: each mode in one line of what it does, from the presets' own short lines. */
 const MODE_ROW_DETAIL = (['ask-me', 'jev-decides', 'just-vibes', 'yolo', 'plan'] as const)
   .map((name) => `${GATE_PRESETS[name].label}: ${GATE_PRESETS[name].short}.`)
@@ -27,7 +30,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'assistant-automation-lane', label: 'Schedules & automation', detail: 'Reminders, routines, and scheduled work.', targetCategoryId: 'automation', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-messaging-lane', label: 'Messaging & notifications', detail: 'Connect Slack, Discord, Telegram, and more; send messages and notifications.', targetCategoryId: 'onboarding-channels', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-memory-lane', label: 'Memory & personality', detail: 'What the assistant remembers and how it behaves.', targetCategoryId: 'memory', kind: 'workspace', safety: 'safe' },
-      { id: 'assistant-work-lane', label: 'Approvals & running work', detail: 'Pending approvals, background processes, and host tasks.', targetCategoryId: 'work', kind: 'workspace', safety: 'read-only' },
+      { id: 'assistant-work-lane', label: WORK_AREA_LABEL, detail: 'Pending approvals, background processes, and host tasks.', targetCategoryId: 'work', kind: 'workspace', safety: 'read-only' },
       actRow('mode-preset', 'verbosity set'),
     ],
   },
@@ -509,7 +512,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
   {
     id: 'work',
     group: 'DAY-TO-DAY',
-    label: 'Work & Approvals',
+    label: WORK_AREA_LABEL,
     summary: 'What is running, what waits for your answer, and your to-do list.',
     detail: 'Use this workspace to inspect active operator state and approval posture.',
     actions: [

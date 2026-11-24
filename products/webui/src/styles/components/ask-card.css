@@ -184,6 +184,33 @@
   text-decoration: underline;
 }
 
+/* A choice's key (Y, A, N, 1..8): shown while the card has focus, when its keys answer. */
+.ask-card__key {
+  display: none;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: var(--radius-xs);
+  font: var(--weight-medium) var(--text-xs) / 16px var(--font-mono);
+  text-align: center;
+  opacity: 0.8;
+}
+
+.ask-card:focus-within .ask-card__key {
+  display: inline-block;
+}
+
+@media (pointer: coarse) {
+  .ask-card:focus-within .ask-card__key {
+    display: none;
+  }
+}
+
+.ask-card:focus-visible {
+  outline-offset: 2px;
+}
+
 .ask-card__link:focus-visible {
   outline: none;
   box-shadow: var(--focus-ring);

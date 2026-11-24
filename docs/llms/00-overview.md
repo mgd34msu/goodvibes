@@ -1,6 +1,6 @@
 # GoodVibes: overview, terms, architecture and where everything is stored
 
-This file describes GoodVibes release 3.4.8 completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
+This file describes GoodVibes release {{release}} completely. It is written for a language model that operates GoodVibes for a person. Everything a person or an automated client can reach is described here: installing, every program and command, every setting, every slash command, every model tool, every environment variable, every file GoodVibes writes, the operator API and every error. Nothing outside this file is needed.
 
 How to read this file:
 

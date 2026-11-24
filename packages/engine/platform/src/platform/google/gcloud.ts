@@ -81,6 +81,34 @@ export interface InstallOptions {
   readonly homeDirectory: string;
   /** The machine to pick the archive for. Defaults to this process's platform and architecture. */
   readonly platform?: { readonly os: string; readonly arch: string };
+  /**
+   * Said while the install runs: "Installing Google Cloud SDK, 511 MB, into
+   * ~/google-cloud-sdk: downloading", the download at each quarter, then
+   * unpacking and its installer.
+   */
+  readonly onProgress?: (message: string) => void;
+}
+
+/** The archive's size in bytes from a HEAD of its address (the last Content-Length of the redirects), or undefined. */
+async function archiveSizeBytes(port: GoogleCommandPort, url: string): Promise<number | undefined> {
+  const head = await port.run('curl', ['-fsSIL', url]);
+  if (head.spawnError || head.timedOut || head.code !== 0) return undefined;
+  const lengths = [...head.stdout.matchAll(/^content-length:\s*(\d+)/gim)].map((match) => Number(match[1]));
+  const bytes = lengths[lengths.length - 1];
+  return bytes !== undefined && bytes > 0 ? bytes : undefined;
+}
+
+/** Says the download at each quarter it passes, from the bytes received against the archive's size. */
+function downloadProgress(say: (message: string) => void, lead: string, knownSize: number | undefined): (received: number, total: number | undefined) => void {
+  let said = 0;
+  return (received, total) => {
+    const size = total ?? knownSize;
+    if (size === undefined || size <= 0) return;
+    const quarter = Math.floor(Math.min(100, (received / size) * 100) / 25) * 25;
+    if (quarter <= said) return;
+    said = quarter;
+    say(`${lead}: ${quarter}% downloaded`);
+  };
 }
 export interface InstallAlreadyInstalled {
   readonly ok: true;
@@ -126,10 +154,21 @@ export async function installGcloud(port: GoogleCommandPort, options: InstallOpt
   // to Google's own host is the integrity check on it.
   const downloadUrl = `https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/${archive}`;
   const tarballPath = `${homeDirectory}/${archive}`;
+  const say = options.onProgress;
+  // What is being installed, how big, and where, said before the download starts and at each step.
+  const sizeBytes = say ? await archiveSizeBytes(port, downloadUrl) : undefined;
+  const lead = `Installing Google Cloud SDK${sizeBytes !== undefined ? `, ${Math.round(sizeBytes / 1_000_000)} MB` : ''}`;
   try {
-    // -f: an HTTP error must fail the download, not be saved as the "archive".
-    const download = await port.run('curl', ['-fsSL', '-o', tarballPath, downloadUrl], { timeoutMs: 300_000 });
-    const downloadProblem = commandProblem(download, 'Downloading the Google Cloud CLI archive');
+    say?.(`${lead}, into ~/google-cloud-sdk: downloading`);
+    // With progress asked for and a port that streams, each quarter of the download is said;
+    // otherwise curl, where -f makes an HTTP error fail the download rather than be saved as the "archive".
+    let downloadProblem: string | null;
+    if (say && port.download) {
+      const streamed = await port.download(downloadUrl, tarballPath, downloadProgress(say, lead, sizeBytes));
+      downloadProblem = streamed.ok ? null : streamed.problem;
+    } else {
+      downloadProblem = commandProblem(await port.run('curl', ['-fsSL', '-o', tarballPath, downloadUrl], { timeoutMs: 300_000 }), 'Downloading the Google Cloud CLI archive');
+    }
     if (downloadProblem) {
       return {
         ok: false,
@@ -138,6 +177,7 @@ export async function installGcloud(port: GoogleCommandPort, options: InstallOpt
       };
     }
 
+    say?.(`${lead}: unpacking`);
     const extract = await port.run('tar', ['-xzf', tarballPath, '-C', homeDirectory], { timeoutMs: 300_000 });
     const extractProblem = commandProblem(extract, 'Extracting the Google Cloud CLI archive');
     if (extractProblem) {
@@ -153,6 +193,7 @@ export async function installGcloud(port: GoogleCommandPort, options: InstallOpt
   }
 
   const installScript = `${homeDirectory}/google-cloud-sdk/install.sh`;
+  say?.(`${lead}: running its installer`);
   const install = await port.run(installScript, ['--quiet'], { timeoutMs: 300_000 });
   const installProblem = commandProblem(install, 'Running the Google Cloud CLI installer');
   if (installProblem) {

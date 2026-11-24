@@ -81,6 +81,7 @@ export interface GoodVibesConfig {
     showTokenSpeed: boolean;    // default: false
     showToolPreview: boolean;   // default: false
     reduceMotion: boolean;      // default: false
+    mouseCapture: boolean;      // default: true
   };
   provider: {
     decisionRouter?: DecisionRouterSettings;

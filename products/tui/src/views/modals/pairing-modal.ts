@@ -112,8 +112,8 @@ export interface PairingModalDeps {
    *  paired-device cap); either way the modal renders an honest degraded state. */
   readonly getConnectionInfo: (request?: PairingConnectionRequest) => PairingModalConnectionInfo | PairingModalUnreachable | null;
   readonly controlPlaneReadModel?: PairingModalReadModel<PairingModalControlPlaneSnapshot>;
-  /** Writes the terminal clipboard escape; true when it was written (the terminal never confirms it). */
-  readonly copyToClipboard?: (text: string) => boolean | void;
+  /** Copies the text: `copied` when a clipboard program confirmed it, `sent` when it went to the terminal as OSC 52. */
+  readonly copyToClipboard?: (text: string) => 'copied' | 'sent' | 'failed';
   /**
    * Probe tailscale (tailscale.get) on each open. Absent dep, a null result, or
    * `available:false` all keep the tailscale affordance QUIET, never a nag.
@@ -393,9 +393,11 @@ class PairingModalSurface implements ConfigModalSurface {
     if (id === 'copyLink') {
       if (!this.deps.copyToClipboard || !info) { ctx.setStatus(`No pairing link to copy; press ${actionKeyText('v')} to reveal it instead.`); return; }
       const written = this.deps.copyToClipboard(info.deepLink);
-      ctx.setStatus(written === false
-        ? `Could not write to the terminal clipboard; press ${actionKeyText('v')} to reveal the link instead.`
-        : `Sent the pairing link to the terminal clipboard, if your terminal supports it (OSC 52); press ${actionKeyText('v')} to reveal it if the paste is empty.`);
+      ctx.setStatus(written === 'failed'
+        ? `Could not copy the link; press ${actionKeyText('v')} to reveal it instead.`
+        : written === 'copied'
+          ? 'Copied the pairing link.'
+          : `Sent the pairing link to your terminal's clipboard, if your terminal supports it (OSC 52); press ${actionKeyText('v')} to reveal it if the paste is empty.`);
       return;
     }
     if (id === 'newToken') {

@@ -127,6 +127,7 @@ function readConversationMessageSnapshot(value: unknown): ConversationMessageSna
       ...(outcome !== undefined ? { outcome } : {}),
       // Passed through for the platform fold to validate, like usage.
       ...(hasOwn(value, 'hostEvidence') && value.hostEvidence !== undefined ? { hostEvidence: value.hostEvidence as ToolHostEvidence } : {}),
+      ...(typeof value.ownerLine === 'string' ? { ownerLine: value.ownerLine } : {}),
     };
   }
   return null;

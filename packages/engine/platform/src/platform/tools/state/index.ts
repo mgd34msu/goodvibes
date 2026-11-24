@@ -163,7 +163,8 @@ export function createStateTool(
       + (memory ? ' memory reads, writes, lists and deletes project memories by key; a memory is the record prompts retrieve, so what get shows is what the model is given;' : '')
       + ' telemetry reports this tool\'s call counts and how many of them failed or were refused;'
       + (hookDispatcher ? ' hooks lists registered hooks and, with the same approval running their command would need, changes them (enable/disable/add/remove);' : '')
-      + ' mode reads or sets how much the terminal app prints: quiet, balanced or operator (get/set/list).'
+      + ' mode reads or sets how much the terminal app prints: quiet, balanced or operator (get/set/list);'
+      + (telemetryDB ? ' analytics reads the tool calls this process ran (query/summary/export/dashboard).' : '')
       + ' Discovery: use mode=list to see existing KV keys,'
       + (hookDispatcher ? ' mode=hooks hookAction=list to see registered hooks,' : '')
       + ' mode=mode modeAction=get to see the current print level.'

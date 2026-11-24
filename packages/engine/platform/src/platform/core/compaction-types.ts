@@ -58,7 +58,7 @@ export interface CompactionConfig {
   totalCeiling: number;
 }
 
-/** Default compaction configuration. */
+/** Default compaction configuration, the budgets for a model with a 128,000-token window. */
 export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   recentConversationBudget: 3000,
   toolResultsBudget: 1500,
@@ -67,6 +67,29 @@ export const DEFAULT_COMPACTION_CONFIG: CompactionConfig = {
   resolvedProblemsBudget: 300,
   totalCeiling: 6500,
 };
+
+/** The window the default budgets are sized for. */
+const REFERENCE_CONTEXT_WINDOW = 128_000;
+
+/**
+ * The budgets for a model's context window: the defaults scaled in proportion
+ * to the window (a 32,000-token window keeps a quarter as much, a 1,000,000-token
+ * window about eight times), within a quarter and eight times the defaults. An
+ * unknown window (0) keeps the defaults.
+ */
+export function compactionConfigForWindow(contextWindow: number): CompactionConfig {
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) return DEFAULT_COMPACTION_CONFIG;
+  const factor = Math.min(8, Math.max(0.25, contextWindow / REFERENCE_CONTEXT_WINDOW));
+  const scaled = (budget: number) => Math.round(budget * factor);
+  return {
+    recentConversationBudget: scaled(DEFAULT_COMPACTION_CONFIG.recentConversationBudget),
+    toolResultsBudget: scaled(DEFAULT_COMPACTION_CONFIG.toolResultsBudget),
+    agentActivityBudget: scaled(DEFAULT_COMPACTION_CONFIG.agentActivityBudget),
+    olderAgentSummaryBudget: scaled(DEFAULT_COMPACTION_CONFIG.olderAgentSummaryBudget),
+    resolvedProblemsBudget: scaled(DEFAULT_COMPACTION_CONFIG.resolvedProblemsBudget),
+    totalCeiling: scaled(DEFAULT_COMPACTION_CONFIG.totalCeiling),
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Session memory (re-exported for consumers of this module)

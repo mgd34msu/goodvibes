@@ -254,6 +254,10 @@ export function ModelPicker(props: ModelPickerProps) {
       const connected = providers.filter((provider) => provider.connected);
       const others = providers.filter((provider) => !provider.connected);
       if (connected.length > 0) out.push({ id: 'h:connected', kind: 'header', label: 'Connected' });
+      else {
+        out.push({ id: 'none-set-up', kind: 'note', label: 'No model is set up yet. Choose a provider to connect it in Settings.' });
+        if (others.length === 0) out.push({ id: 'settings:models', kind: 'item', label: 'Open Models and providers', hint: 'Settings', onActivate: () => { close(false); props.onOpenSettings(); } });
+      }
       for (const provider of connected) {
         // A failed read: the daemon's whole sentence ("Could not reach <provider> at <address>: <reason>.
         // Showing the list read <when>."), here only; an old list in a few words.
@@ -380,8 +384,11 @@ export function ModelPicker(props: ModelPickerProps) {
   const stepWord = query ? 'All providers' : step.kind === 'provider' ? 'Step 1 of 3: provider' : step.kind === 'model' ? 'Step 2 of 3: model' : 'Step 3 of 3: effort';
 
   const capped = current.requestedEffort !== '' && current.requestedEffort !== current.effort;
-  const modelLabel = pending ? 'Switching…' : currentModel?.label ?? (allModels.length ? 'Choose a model' : 'No models');
-  const effortLabel = currentModel?.providerId === 'decision-router' ? 'by category'
+  // With no provider connected, the daemon's default model name is not a model that can answer: the button says what to do.
+  const noneConnected = !providers.some((provider) => provider.connected);
+  const modelLabel = pending ? 'Switching…' : noneConnected ? 'Connect a model' : currentModel?.label ?? 'Choose a model';
+  const effortLabel = noneConnected ? ''
+    : currentModel?.providerId === 'decision-router' ? 'by category'
     : !currentModel || currentModel.efforts.length === 0 ? ''
     : capped ? `${effortWord(current.effort)} (requested ${effortWord(current.requestedEffort)})`
       : current.effort ? effortWord(current.effort) : '';

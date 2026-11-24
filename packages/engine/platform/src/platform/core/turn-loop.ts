@@ -62,6 +62,8 @@ const REPEAT_REVIEW_THRESHOLD = 3;
 const REPEAT_REFUSE_THRESHOLD = 5;
 /** Calls kept for the repeat rules. */
 const REPEAT_HISTORY_WINDOW = 20;
+/** The same call failing the tool's schema this many times in a row ends the turn. */
+const MALFORMED_REPEAT_STOP = 3;
 
 /** Where the turn's visible output goes, as it happens. */
 export interface TurnSink {
@@ -338,6 +340,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
   const breaker = new ConsecutiveErrorBreaker();
   const history: TurnCallObservation[] = [];
   const repeatReading = { pending: false };
+  const malformedStreak = { signature: '', count: 0 };
   // Calls refused this turn, by signature: an identical call is not sent again (see blockRefusedRepeats).
   const refusedCalls = new Map<string, RefusedCall>();
   const toldBlocked = new Set<string>();
@@ -495,7 +498,7 @@ export async function runTurn(ctx: TurnContext, policy: TurnPolicy): Promise<Tur
       if (ctx.signal.aborted) return outcome('cancelled', '');
       recordRefusals(refusedCalls, calls, results);
 
-      const stop = applyStopRules(ctx, turnSignal, sink, breaker, history, repeatReading, calls, results);
+      const stop = applyStopRules(ctx, turnSignal, sink, breaker, history, repeatReading, malformedStreak, calls, results);
       if (stop) {
         const closing = await closingReply();
         if (closing === undefined) return outcome('cancelled', '');
@@ -581,7 +584,8 @@ function blockRefusedRepeats(ctx: TurnContext, sink: TurnSink, refused: Readonly
  * Nothing here waits: a reading of repeated calls runs beside the next request.
  */
 function applyStopRules(ctx: TurnContext, turnSignal: AbortSignal, sink: TurnSink, breaker: ConsecutiveErrorBreaker, history: TurnCallObservation[],
-  repeatReading: { pending: boolean }, calls: readonly ToolCall[], results: readonly ToolResult[]): { readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } | undefined {
+  repeatReading: { pending: boolean }, malformed: { signature: string; count: number },
+  calls: readonly ToolCall[], results: readonly ToolResult[]): { readonly note: string; readonly stop: NonNullable<TurnOutcome['stop']> } | undefined {
   const tell = (text: string): void => ctx.hostInstructions?.set('breaker', text, { once: true, append: true });
   const finalReply = 'You have one final reply. Tools are no longer available and any tool call in it will not run. ';
 
@@ -590,6 +594,20 @@ function applyStopRules(ctx: TurnContext, turnSignal: AbortSignal, sink: TurnSin
     history.push({ signature: callSignature(call), requested: call, executed: { name: call.name, arguments: JSON.stringify(call.arguments) }, result: callOutcome(byId.get(call.id)) });
   }
   while (history.length > REPEAT_HISTORY_WINDOW) history.shift();
+
+  // The same malformed call sent again and again: the model is not reading what it was told to fix.
+  for (const call of calls) {
+    const signature = callSignature(call);
+    if (byId.get(call.id)?.malformed !== true) { malformed.signature = ''; malformed.count = 0; continue; }
+    malformed.count = malformed.signature === signature ? malformed.count + 1 : 1;
+    malformed.signature = signature;
+    if (malformed.count >= MALFORMED_REPEAT_STOP) {
+      tell(`[Repeated call] Your call to ${call.name} was malformed ${malformed.count} times in a row with the same arguments, so this turn is stopping. `
+        + finalReply + 'Report what you were trying to do and what remains undone.');
+      sink.notice?.(`Stopped: the model sent the same malformed call to ${call.name} ${malformed.count} times in a row.`, 'error');
+      return { note: `the model sent the same malformed call to ${call.name} ${malformed.count} times in a row`, stop: { rule: 'repeated-call', toolName: call.name, count: malformed.count } };
+    }
+  }
 
   if (results.length > 0 && results.every((result) => result.success === false)) {
     const state = breaker.recordAllFailed();

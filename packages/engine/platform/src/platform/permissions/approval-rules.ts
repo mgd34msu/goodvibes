@@ -342,7 +342,7 @@ export function matchDurableRules(
     let matched = false;
     switch (rule.type) {
       case 'prefix':
-        matched = evaluatePrefixRule(rule, toolName, args).matched;
+        matched = evaluatePrefixRule(rule, toolName, args, undefined, options.projectRoot).matched;
         break;
       case 'arg-shape':
         matched = evaluateArgShapeRule(rule, toolName, args).matched;
@@ -432,7 +432,7 @@ async function matchRuleList(
     let matched = false;
     switch (rule.type) {
       case 'prefix':
-        matched = evaluatePrefixRule(rule, toolName, args, subjects?.commands).matched;
+        matched = evaluatePrefixRule(rule, toolName, args, subjects?.commands, options.projectRoot).matched;
         break;
       case 'arg-shape':
         matched = (await evaluateArgShapeRuleAsync(rule, toolName, args, { signal: options.signal, assertCurrent: current })).matched;

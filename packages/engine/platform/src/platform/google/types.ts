@@ -211,6 +211,16 @@ export interface GoogleCommandPort {
     args: readonly string[],
     options?: { readonly timeoutMs?: number; readonly env?: Readonly<Record<string, string>> },
   ): Promise<GoogleCommandResult>;
+  /**
+   * Download `url` to `path`, saying the bytes received as each piece arrives
+   * (`total` from the response's length, when it has one). Absent: the
+   * download runs as a `curl` command, with no progress to say.
+   */
+  download?(
+    url: string,
+    path: string,
+    onProgress: (received: number, total: number | undefined) => void,
+  ): Promise<{ readonly ok: true } | { readonly ok: false; readonly problem: string }>;
 }
 
 /**

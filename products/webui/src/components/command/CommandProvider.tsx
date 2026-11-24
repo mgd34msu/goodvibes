@@ -21,17 +21,20 @@
  * "Go to Providers", 'account' for the old "Go to Admin").
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import '../../styles/components/command.css';
 import { registerCommand, setPaletteOpener, unregisterCommand, type CommandDef } from '../../lib/commands';
 import type { ViewId } from '../../lib/router';
-import { SETTINGS_SECTIONS } from '../settings/dialog/sections';
+import { useCommandCatalog } from '../../lib/command-catalog';
 import { useHotkeys } from '../../hooks/useHotkeys';
+import { NEW_CHAT_KEYS } from '../../lib/shortcut-keys';
 import { CommandPalette } from './CommandPalette';
 import { ShortcutCheatsheet } from './ShortcutCheatsheet';
-import { ActionSheet } from './ActionSheet';
-import { COMMAND_ACTIONS } from '../../lib/generated/command-actions';
-import { COMMAND_SCREENS, CommandScreenDrawer } from './screens/CommandScreens';
+import { COMMAND_SCREEN_LIST } from './screens/command-screen-list';
+
+// An action's sheet and a command's screen load when one is opened.
+const ActionSheet = lazy(() => import('./ActionSheet').then((module) => ({ default: module.ActionSheet })));
+const CommandScreenDrawer = lazy(() => import('./screens/CommandScreens').then((module) => ({ default: module.CommandScreenDrawer })));
 
 export type { ViewId };
 
@@ -66,6 +69,8 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
   const [sheet, setSheet] = useState<{ readonly command: string; readonly action: string } | null>(null);
   /** The screen drawn from a command's description (schedules, MCP servers ...) open in a panel. */
   const [screen, setScreen] = useState<string | null>(null);
+  // The slash commands' actions and the settings sections: loaded the first time the palette opens.
+  const catalog = useCommandCatalog(paletteOpen);
 
   const openPalette = useCallback(() => { setPaletteQuery(''); setPaletteOpen(true); }, []);
   const closePalette = useCallback(() => { setPaletteOpen(false); setPaletteQuery(''); }, []);
@@ -140,9 +145,9 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
         title: 'New Chat',
         group: 'chat',
         keywords: ['new', 'create', 'session'],
-        shortcut: 'mod+shift+n',
+        // A sequence (lib/shortcut-keys.ts): the browsers keep the Ctrl+Shift letters for themselves.
+        shortcut: NEW_CHAT_KEYS,
         run: () => onNavigate?.('chat', { newChat: true }),
-        allowInInput: true,
       },
       {
         id: 'system.palette',
@@ -167,7 +172,8 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       },
     ];
     // Every slash-command action the daemon can run is one palette entry; it opens the action's sheet.
-    for (const command of COMMAND_ACTIONS.commands) {
+    // They come with the command catalog, loaded when the palette first opens (or anything else asks for it).
+    for (const command of catalog?.actions.commands ?? []) {
       for (const action of command.actions) {
         if (!('method' in action.operator) || action.touches === 'reads') continue;
         defs.push({
@@ -180,7 +186,7 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       }
     }
     // Each screen drawn from a command's description (its rows carry the command's actions) opens in a panel.
-    for (const entry of COMMAND_SCREENS) {
+    for (const entry of COMMAND_SCREEN_LIST) {
       defs.push({
         id: `screen.${entry.id}`,
         title: entry.title,
@@ -191,7 +197,7 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
     }
     // Every other settings section is one command in the palette's Settings group
     // ("Models and providers" is nav.providers above).
-    for (const section of SETTINGS_SECTIONS) {
+    for (const section of catalog?.settingsSections ?? []) {
       if (section.id === 'models') continue;
       defs.push({
         id: `settings.${section.id}`,
@@ -203,9 +209,11 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       });
     }
     return defs;
-  }, [onNavigate, onOpenSettings, openPalette, openCheatsheet]);
+  }, [onNavigate, onOpenSettings, openPalette, openCheatsheet, catalog]);
 
-  useEffect(() => {
+  // Registered before any passive effect of the same render runs, so a slash command that
+  // waited for the catalog (ChatView) finds its palette command when it runs.
+  useLayoutEffect(() => {
     for (const { hotkey: _hotkey, allowInInput: _allowInInput, ...command } of definitions) registerCommand(command);
     return () => {
       for (const { id } of definitions) unregisterCommand(id);
@@ -229,8 +237,10 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
       {children}
       <CommandPalette open={paletteOpen} onClose={closePalette} initialQuery={paletteQuery} />
       <ShortcutCheatsheet open={cheatsheetOpen} onClose={closeCheatsheet} />
-      <CommandScreenDrawer screen={screen} onClose={() => setScreen(null)} />
-      {sheet ? <ActionSheet key={`${sheet.command}.${sheet.action}`} open command={sheet.command} action={sheet.action} onClose={() => setSheet(null)} /> : null}
+      <Suspense fallback={null}>
+        {screen ? <CommandScreenDrawer screen={screen} onClose={() => setScreen(null)} /> : null}
+        {sheet ? <ActionSheet key={`${sheet.command}.${sheet.action}`} open command={sheet.command} action={sheet.action} onClose={() => setSheet(null)} /> : null}
+      </Suspense>
     </>
   );
 }

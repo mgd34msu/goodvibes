@@ -18,6 +18,13 @@ function isAltChord(data: string, letter: string): boolean {
   return data === `\x1b${letter}` || data === `\x1b[${letter.charCodeAt(0)};3u`;
 }
 
+/**
+ * The second chord of each, for a terminal that sends no Alt (macOS Terminal
+ * by default): a function key every terminal sends (F12 retry, F10 the fix session).
+ */
+const F10 = '\x1b[21~';
+const F12 = '\x1b[24~';
+
 export const RETRY_CHORD_LABEL = 'Alt+R';
 export const FIX_SESSION_CHORD_LABEL = 'Alt+J';
 
@@ -35,7 +42,7 @@ export function createShellActionOffers(): ShellActionOffers {
 
 /** The footer line while a fix session is on offer; null when none is. The retry is on the failed turn's row. */
 export function actionHint(offers: ShellActionOffers): string | null {
-  return offers.fixSessionId ? `${FIX_SESSION_CHORD_LABEL} open fix session` : null;
+  return offers.fixSessionId ? `${FIX_SESSION_CHORD_LABEL} or F10 open fix session` : null;
 }
 
 /** Offer the retry whenever a user-visible error surfaces and a retry is actually possible. */
@@ -74,13 +81,13 @@ export function handleShellActionChord(data: string, offers: ShellActionOffers, 
     deps.retry();
     deps.render();
   });
-  if (offers.retry && isAltChord(data, 'r')) {
+  if (offers.retry && (isAltChord(data, 'r') || data === F12)) {
     offers.retry = null;
     deps.retry();
     deps.render();
     return true;
   }
-  if (offers.fixSessionId && isAltChord(data, 'j')) {
+  if (offers.fixSessionId && (isAltChord(data, 'j') || data === F10)) {
     const sessionId = offers.fixSessionId;
     offers.fixSessionId = null;
     deps.openSession(sessionId);

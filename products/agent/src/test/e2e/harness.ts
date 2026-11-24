@@ -17,6 +17,7 @@ import type { ConfigKey, ConfigValue } from '../../config/index.ts';
 import { seedProviderMetadataCacheFixture, seedProviderModelListCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
 import { startScriptedDecisionServer, type ScriptedDecisionServer } from '@goodvibes/judgment/testing';
 import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
+import { HOST_MESSAGE_HEADER } from '@goodvibes/engine/platform/platform/core';
 import { TerminalFrame } from './terminal-frame.ts';
 import { COMPOSER_ECHO } from '../helpers/owner-workspace-startup.ts';
 import { WORKSPACE_REGISTRATION_QUESTION } from '../../shell/workspace-registration-question.ts';
@@ -155,10 +156,12 @@ export function messageText(message: ChatMessage): string {
   return '';
 }
 
-/** The last user message of a request. */
+/** The last message the person sent: the last user message that is not the host channel's trailing message. */
 export function lastUserText(request: ModelRequest): string {
   for (let i = request.messages.length - 1; i >= 0; i -= 1) {
-    if (request.messages[i]!.role === 'user') return messageText(request.messages[i]!);
+    if (request.messages[i]!.role !== 'user') continue;
+    const text = messageText(request.messages[i]!);
+    if (!text.startsWith(HOST_MESSAGE_HEADER)) return text;
   }
   return '';
 }
@@ -403,7 +406,7 @@ export function launchAgent(e2eHome: E2EHome, options: { cols?: number; rows?: n
   const exited = child.exited.then((code) => { throw new Error(`E2E: the binary exited (${code}) before the screen showed what was awaited`); });
   void exited.catch(() => {});
   const readStderr = (): string => (existsSync(stderrPath) ? readFileSync(stderrPath, 'utf8') : '');
-  const keys: Record<string, string> = { Enter: '\r', Up: '\x1b[A', Down: '\x1b[B', Escape: '\x1b', 'C-u': '\x15', 'C-c': '\x03' };
+  const keys: Record<string, string> = { Enter: '\r', Tab: '\t', Up: '\x1b[A', Down: '\x1b[B', Escape: '\x1b', 'C-u': '\x15', 'C-c': '\x03' };
   const session: AgentSession = {
     screen: () => frame.text(),
     rawOutput: () => output,
@@ -458,6 +461,9 @@ export async function answerWorkspaceQuestion(session: AgentSession, answer: 'de
     const text = screenText(s);
     return text.includes(WORKSPACE_QUESTION) && text.includes('Not here');
   });
+  // The question opened by itself, so a key right after it appears is taken as typing for the
+  // composer; Tab is the key that moves to the question, and the keys after it answer it.
+  session.key('Tab');
   if (answer === 'register') session.key('Up');
   session.key('Enter');
   await session.waitForScreen('the question answered', (s) => !screenText(s).includes(WORKSPACE_QUESTION) && inputAreaVisible(s));

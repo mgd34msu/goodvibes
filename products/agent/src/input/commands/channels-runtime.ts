@@ -157,9 +157,26 @@ function formatChannelSetupGuide(guide: AgentWorkspaceChannelSetupGuide): string
 }
 
 
-async function sendChannelMessage(ctx: CommandContext, values: ChannelSendValues): Promise<string> {
+/**
+ * A send that names no recipient goes to the default target: the one ready
+ * channel that has its default target set (the channel's own setting names
+ * where on it a message lands), with any link sent along. With none, or
+ * several, it is said which.
+ */
+function withDefaultTarget(ctx: CommandContext, values: ChannelSendValues): ChannelSendValues {
+  if (values.channel || values.route || values.webhook) return values;
+  const defaults = buildAgentWorkspaceChannels(ctx).filter((channel) => channel.ready && channel.configuredDefaultTargetKeys.length > 0);
+  if (defaults.length === 1) return { ...values, channel: defaults[0]!.id };
+  if (defaults.length === 0) {
+    throw commandRefusal('No channel has a default target set, so there is nowhere to send this; nothing was sent.', '/channels readiness shows each channel and the setting its default target needs; or name one with --channel.');
+  }
+  throw commandRefusal(`${defaults.length} channels have a default target (${defaults.map((channel) => channel.id).join(', ')}), so which one is meant is unclear; nothing was sent.`, 'Name one with --channel.');
+}
+
+async function sendChannelMessage(ctx: CommandContext, given: ChannelSendValues): Promise<string> {
   const router = ctx.platform.channelDeliveryRouter;
   if (!router) throw commandRefusal('Channel delivery is not available in this Agent runtime.');
+  const values = withDefaultTarget(ctx, given);
   const input = { ...values, ...(values.webhook ? { webhook: Secret.of(values.webhook, '/channels send webhook') } : {}) };
   try {
     buildAgentChannelDeliveryPreview(input);

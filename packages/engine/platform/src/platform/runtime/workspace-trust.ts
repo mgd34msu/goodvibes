@@ -8,11 +8,18 @@ import { assertPermissionActive, awaitPermission } from '../permissions/cancella
  * callback adapter below retains its historical explicit interactive contract.
  *
  * The first time GoodVibes opens a workspace (a cwd / project root it has no
- * prior decision for), that workspace is "undecided": only read-category
- * tools run; the first write, execute, or delegate tool request raises the
- * trust question AT THAT MOMENT, the exact point it has a real consequence,
- * instead of silently failing or being decided by a side effect of the
- * product's own droppings. This is NOT a parallel permission checker, the
+ * prior decision for), that workspace is "undecided". An interactive terminal
+ * program settles it as it opens there, before any prompt is acted on: a folder
+ * with no hooks file or MCP servers of its own is trusted without a question
+ * (kept in its own file beside the register, NOTHING_TO_RUN_FILE, never as a
+ * register row, so an older release reads it undecided), one that has them is
+ * asked about. Such a folder that gains them later is asked about when they are
+ * about to run (repositoryFilesHeld). Only an explicit restriction stops the
+ * classifier allowing a write by itself (gate/classify.ts); an undecided
+ * workspace is decided as before, and at the final ask layer it raises the
+ * trust question (when it was dismissed on opening, or for a run with no
+ * screen). A restricted one is refused: dispatch answers the call with
+ * WorkspaceRestrictedError's words and the turn goes on. This is NOT a parallel permission checker, the
  * decision is consulted by the real permission machinery at its final ask
  * layer (the requestPermission callback wired in bootstrap-core.ts), so it
  * composes with, and cannot drift from, the existing PermissionManager layer
@@ -37,6 +44,7 @@ import {
 import { normalizeWorkspaceRoot, pathCovers } from '../workspace/registration/resolution.js';
 import { logger } from '../utils/logger.js';
 import { fileIdentity } from '../security/read-source.js';
+import { readJsonFileOrQuarantine, writeJsonFileAtomic } from '../utils/atomic-json-store.js';
 import { summarizeError } from '../utils/error-display.js';
 import type { PermissionCategory } from '../permissions/index.js';
 import type { PermissionRequestHandler } from '../permissions/index.js';
@@ -130,6 +138,24 @@ export function trustGatedAsk(
 export type WorkspaceTrustLevel = 'trusted' | 'restricted';
 
 /**
+ * A call refused because the workspace is restricted (or its saved decision
+ * cannot be read and so counts as restricted). Nothing ran. Tool dispatch
+ * answers it as that call's result (the message is for the model) and the turn
+ * goes on; `ownerLine` is the one row a person reads, beside the call's own label.
+ */
+export class WorkspaceRestrictedError extends Error {
+  readonly ownerLine: string;
+  constructor(message: string, ownerLine: string) {
+    super(message);
+    this.name = 'WorkspaceRestrictedError';
+    this.ownerLine = ownerLine;
+  }
+}
+
+/** What the model reads when a restricted folder refuses its call. */
+const RESTRICTED_FOR_MODEL = 'This folder is restricted: no file can be changed and no command run until it is trusted.';
+
+/**
  * What a repository brings with it (its hooks file, its MCP server files)
  * waits on the owner's trust of the workspace: until he trusts it, nothing in
  * those files is loaded or started. An undecided workspace is not trusted.
@@ -145,11 +171,75 @@ export interface RepositoryTrust {
   load(): Promise<void>;
   isTrusted(): boolean;
   /**
+   * True when the trust covers the repository's own files. A folder trusted
+   * only because it had nothing of its own to run when it was opened is
+   * trusted, but a hooks file or MCP file it gains later still waits on the
+   * owner. Absent: the same as isTrusted.
+   */
+  coversRepositoryFiles?(): boolean;
+  /**
+   * Called when a repository file was held back; where a person can be asked
+   * and the folder was trusted only for having nothing of its own, the trust
+   * question is raised then, naming the files found.
+   */
+  repositoryFilesHeld?(): void;
+  /**
    * Called each time the workspace's trust level changes: the owner decided in
    * this process, or a read of the register found another process's decision.
    * Returns the unsubscribe.
    */
   onLevelChanged(listener: (level: WorkspaceTrustLevel) => void): () => void;
+}
+
+/** The trust kept for a folder that had no hooks file or MCP servers of its own when it was opened. */
+export const NOTHING_OF_ITS_OWN_TO_RUN = 'nothing of its own to run';
+
+/**
+ * Folders trusted for having nothing of their own to run are kept in a file of
+ * their own beside the workspace register, never as a row of the register: a
+ * release that does not know this file (3.4.8) reads such a folder as it always
+ * did, undecided. One row per folder by its real path.
+ */
+const NOTHING_TO_RUN_FILE = 'workspace-trust-nothing-to-run.json';
+
+interface NothingToRunRecord {
+  readonly version: 1;
+  readonly roots: readonly { readonly root: string; readonly decidedAt: string }[];
+}
+
+function nothingToRunPath(registerPath: string): string {
+  return join(dirname(registerPath), NOTHING_TO_RUN_FILE);
+}
+
+/** The folders recorded as trusted for having nothing of their own; an unreadable file is set aside and reads as none. */
+function readNothingToRun(path: string): NothingToRunRecord {
+  return readJsonFileOrQuarantine<NothingToRunRecord>(path, {
+    label: 'workspace/trust-nothing-to-run',
+    recovery: 'The folders it listed read as undecided again; the terminal app settles each one again when it next opens there.',
+    validate: (parsed) => {
+      const rows = (parsed as { roots?: unknown } | null)?.roots;
+      if (!Array.isArray(rows)) throw new Error('the file has no list of folders');
+      const roots = rows.flatMap((row: unknown) => {
+        const entry = row as { root?: unknown; decidedAt?: unknown } | null;
+        return typeof entry?.root === 'string' && entry.root !== ''
+          ? [{ root: normalizeWorkspaceRoot(entry.root), decidedAt: typeof entry.decidedAt === 'string' ? entry.decidedAt : '' }] : [];
+      });
+      return { version: 1, roots };
+    },
+  }) ?? { version: 1, roots: [] };
+}
+
+/** Add or remove one folder in that file, written whole (atomically, owner-only). */
+function writeNothingToRun(path: string, root: string, present: boolean): void {
+  const current = readNothingToRun(path);
+  const others = current.roots.filter((row) => row.root !== root);
+  if (!present && others.length === current.roots.length) return;
+  const roots = present ? [...others, { root, decidedAt: new Date().toISOString() }] : others;
+  writeJsonFileAtomic(path, { version: 1, roots } satisfies NothingToRunRecord, { mode: 0o600 });
+}
+
+function coversRepositoryFiles(trust: Pick<RepositoryTrust, 'isTrusted' | 'coversRepositoryFiles'>): boolean {
+  return trust.coversRepositoryFiles ? trust.coversRepositoryFiles() : trust.isTrusted();
 }
 
 /** The check a loader of repository files (the hooks file, project MCP files) holds them back with. */
@@ -166,7 +256,11 @@ export interface RepositoryFileGate {
 export function repositoryFileGate(trust: RepositoryTrust, homeDirectory: string): RepositoryFileGate {
   return {
     load: () => trust.load(),
-    holds: (path) => heldForRepositoryTrust(trust, path, homeDirectory),
+    holds: (path) => {
+      const held = heldForRepositoryTrust(trust, path, homeDirectory);
+      if (held) trust.repositoryFilesHeld?.();
+      return held;
+    },
     onLevelChanged: (listener) => trust.onLevelChanged(listener),
   };
 }
@@ -180,21 +274,24 @@ export const REPOSITORY_TRUST_NEXT_STEP = 'Run /security trust-folder to turn th
  * its files name. Null when nothing waits (a trusted workspace reads no file).
  */
 export async function repositoryTrustNotice(input: {
-  readonly trust: Pick<RepositoryTrust, 'isTrusted' | 'load' | 'workspaceRoot'>;
+  readonly trust: Pick<RepositoryTrust, 'isTrusted' | 'coversRepositoryFiles' | 'load' | 'workspaceRoot'>;
   /** The hooks file the workbench holds back, or null. */
   readonly hooksFileWaiting: string | null;
   /** The MCP servers the registry holds back. */
   readonly heldMcpServers: () => Promise<readonly string[]>;
 }): Promise<string | null> {
   await input.trust.load();
-  if (input.trust.isTrusted()) return null;
+  if (coversRepositoryFiles(input.trust)) return null;
   const servers = await input.heldMcpServers();
   const waiting = [
     ...(input.hooksFileWaiting !== null ? [`its hooks file (${input.hooksFileWaiting}) is not loaded`] : []),
     ...(servers.length > 0 ? [`its MCP ${servers.length === 1 ? 'server' : 'servers'} ${servers.join(', ')} ${servers.length === 1 ? 'is' : 'are'} not started`] : []),
   ];
   if (waiting.length === 0) return null;
-  return `[Startup] Hooks and MCP servers from this repository wait on workspace trust: you have not trusted ${input.trust.workspaceRoot}, so ${waiting.join(' and ')}. ${REPOSITORY_TRUST_NEXT_STEP}`;
+  const why = input.trust.isTrusted()
+    ? `${input.trust.workspaceRoot} was trusted when it had nothing of its own to run`
+    : `you have not trusted ${input.trust.workspaceRoot}`;
+  return `[Startup] Hooks and MCP servers from this repository wait on workspace trust: ${why}, so ${waiting.join(' and ')}. ${REPOSITORY_TRUST_NEXT_STEP}`;
 }
 
 /**
@@ -202,8 +299,8 @@ export async function repositoryTrustNotice(input: {
  * brought, so it waits on the owner's trust. A workspace that is the owner's
  * home directory holds no repository: files there are his own.
  */
-export function heldForRepositoryTrust(trust: Pick<RepositoryTrust, 'workspaceRoot' | 'isTrusted'>, path: string, homeDirectory: string): boolean {
-  if (trust.isTrusted()) return false;
+export function heldForRepositoryTrust(trust: Pick<RepositoryTrust, 'workspaceRoot' | 'isTrusted' | 'coversRepositoryFiles'>, path: string, homeDirectory: string): boolean {
+  if (coversRepositoryFiles(trust)) return false;
   const root = trust.workspaceRoot;
   if (root === canonicalWorkspaceRoot(homeDirectory)) return false;
   // Where the path is written and where it leads: a link in the checkout does not make its file the owner's.
@@ -301,7 +398,10 @@ export function readPersistedWorkspaceTrust(
   }
   const root = canonicalWorkspaceRoot(paths.workingDirectory);
   const row = read.state === 'ok' ? read.trust.find((entry) => entry.root === root) : undefined;
-  return row ? { level: row.level, legacyIgnored: false } : { level: 'undecided', legacyIgnored: legacyIgnored() };
+  if (row) return { level: row.level, legacyIgnored: false };
+  // Trusted for having nothing of its own to run (its own file, beside the register).
+  if (readNothingToRun(nothingToRunPath(registerPath)).roots.some((entry) => entry.root === root)) return { level: 'trusted', legacyIgnored: false };
+  return { level: 'undecided', legacyIgnored: legacyIgnored() };
 }
 
 export interface WorkspaceTrustManagerOptions {
@@ -335,11 +435,19 @@ export class WorkspaceTrustManager {
   /** True when this process's last answer could not be saved: the register's lack of a row does not withdraw it. */
   private unsavedLevel = false;
   private question: WorkspaceTrustQuestion | null = null;
+  /** Trusted only because it had nothing of its own to run when opened (NOTHING_OF_ITS_OWN_TO_RUN). */
+  private trustedForNothing = false;
+  /** Asks the trust question where a person can answer it, for files the folder gained; null where nobody can. */
+  private filesAsker: (() => Promise<WorkspaceTrustLevel>) | null = null;
+  /** The question about gained files was dismissed this session: it is not raised again until the next start. */
+  private filesQuestionDismissed = false;
   private readonly levelListeners = new Set<(level: WorkspaceTrustLevel) => void>();
   /** The directory judged, as its real path: the key of the decision. */
   readonly workspaceRoot: string;
   private readonly legacyFile: string;
   private readonly registerPath: string;
+  /** Where folders trusted for having nothing of their own are kept (NOTHING_TO_RUN_FILE). */
+  private readonly nothingToRunPath: string;
   private readonly store: WorkspaceRegistrationStore;
 
   constructor(options: WorkspaceTrustManagerOptions) {
@@ -347,6 +455,7 @@ export class WorkspaceTrustManager {
     this.workspaceRoot = canonicalWorkspaceRoot(shellPaths.workingDirectory);
     this.legacyFile = shellPaths.resolveProjectPath(options.surfaceRoot, LEGACY_TRUST_FILE);
     this.registerPath = sharedWorkspaceRegisterPath(shellPaths);
+    this.nothingToRunPath = nothingToRunPath(this.registerPath);
     const daemonStateDir = shellPaths.resolveUserPath();
     this.store = options.store ?? openWorkspaceRegistrationStore({
       path: this.registerPath,
@@ -367,17 +476,21 @@ export class WorkspaceTrustManager {
    */
   async load(): Promise<void> {
     if (this.loaded) {
-      if (fileIdentity(this.registerPath) === this.registerIdentity) return;
+      if (this.recordIdentity() === this.registerIdentity) return;
       this.loaded = false;
     }
     const revision = this.revision;
     const levelBefore = this.getLevel();
-    const identity = fileIdentity(this.registerPath);
+    const coveredBefore = this.coversRepositoryFiles();
+    const identity = this.recordIdentity();
     let fault: string | null = null;
     const persisted = await this.store.trustDecision(this.workspaceRoot).catch((error: unknown) => {
       fault = `the workspace register ${this.registerPath} could not be read (${summarizeError(error)})`;
       return null;
     });
+    // With no row in the register: trusted for having nothing of its own to run, when its own file says so.
+    const forNothing = persisted === null && fault === null
+      && readNothingToRun(this.nothingToRunPath).roots.some((row) => row.root === this.workspaceRoot);
     if (this.loaded || this.revision !== revision) return;
     // Every completed read states its own outcome: a readable register clears
     // an earlier fault, an unreadable one sets it.
@@ -392,6 +505,11 @@ export class WorkspaceTrustManager {
     if (persisted) {
       // A decision on disk (another process's, a restriction included) takes effect.
       this.level = persisted.level;
+      this.trustedForNothing = false;
+      this.unsavedLevel = false;
+    } else if (forNothing) {
+      this.level = 'trusted';
+      this.trustedForNothing = true;
       this.unsavedLevel = false;
     } else if (this.unsavedLevel) {
       // This process's answer never reached the register, so its absence there
@@ -399,13 +517,19 @@ export class WorkspaceTrustManager {
     } else if (fault === null && this.level !== null && !this.legacyIgnored) {
       // The decision was removed from the register by another process: undecided again.
       this.level = null;
+      this.trustedForNothing = false;
     } else if (fault === null && existsSync(this.legacyFile)) {
       this.legacyIgnored = true;
       logger.info('workspace trust: a trust decision stored inside the workspace is not honored; the owner is asked once more', { file: this.legacyFile });
     }
     this.loaded = true;
     this.revision++;
-    if (this.getLevel() !== levelBefore) this.notifyLevelChanged();
+    if (this.getLevel() !== levelBefore || this.coversRepositoryFiles() !== coveredBefore) this.notifyLevelChanged();
+  }
+
+  /** The identity of both records this decision is read from: the register and the nothing-to-run file. */
+  private recordIdentity(): string {
+    return `${fileIdentity(this.registerPath)}|${fileIdentity(this.nothingToRunPath)}`;
   }
 
   private notifyLevelChanged(): void {
@@ -458,9 +582,13 @@ export class WorkspaceTrustManager {
       assertPermissionActive(signal);
       if (this.pendingDecisions > 0) throw new Error('Workspace trust decision is pending');
       if (this.loadFault !== null && !this.isDecided() && !this.isCategoryAllowed(category)) {
-        throw new Error(`Workspace trust record is unreadable (${this.loadFault}), so this workspace is treated as restricted for autonomous work. Choose a trust level to replace it.`);
+        throw new WorkspaceRestrictedError(
+          `${RESTRICTED_FOR_MODEL} (Its saved trust decision cannot be read: ${this.loadFault}. The owner chooses a trust level to replace it.)`,
+          'Not run: this folder\'s trust record cannot be read, so it counts as restricted (/security trust-folder).');
       }
-      if (this.isDecided() && !this.isCategoryAllowed(category)) throw new Error('Explicit restricted workspace forbids this operation');
+      if (this.isDecided() && !this.isCategoryAllowed(category)) {
+        throw new WorkspaceRestrictedError(RESTRICTED_FOR_MODEL, 'Not run: this folder is restricted (/security trust-folder trusts it).');
+      }
     };
     assertCurrent();
     return assertCurrent;
@@ -484,6 +612,37 @@ export class WorkspaceTrustManager {
     return this.level === 'trusted';
   }
 
+  /** True only for an explicit restriction; a workspace with no decision is not restricted by it. */
+  isRestricted(): boolean {
+    return this.level === 'restricted';
+  }
+
+  /** Trusted, and not only for having had nothing of its own to run: its own hooks and MCP files may load. */
+  coversRepositoryFiles(): boolean {
+    return this.level === 'trusted' && !this.trustedForNothing;
+  }
+
+  /** Trusted only because it had no hooks file or MCP servers of its own when it was opened. */
+  trustedForNothingToRun(): boolean {
+    return this.level === 'trusted' && this.trustedForNothing;
+  }
+
+  /**
+   * Where a person can answer: the question raised when a folder trusted only
+   * for having nothing of its own turns out to have a hooks file or MCP file
+   * (seen when its hooks are about to fire or its servers about to start).
+   */
+  askWhenRepositoryFilesAppear(asker: () => Promise<WorkspaceTrustLevel>): void {
+    this.filesAsker = asker;
+  }
+
+  /** A repository file was held back: ask once, before any of it runs, when the folder was trusted only for having nothing. */
+  repositoryFilesHeld(): void {
+    if (!this.trustedForNothingToRun() || this.filesAsker === null || this.filesQuestionDismissed || this.question !== null) return;
+    const question = this.trustQuestion(this.filesAsker);
+    question.answer.catch(() => { this.filesQuestionDismissed = true; });
+  }
+
   /**
    * Called each time this workspace's trust level changes (RepositoryTrust):
    * the owner decided in this process, or {@link load} found another process's
@@ -499,24 +658,37 @@ export class WorkspaceTrustManager {
    * save to the user's register only spares asking again next time, so a save
    * that fails is reported (`saved: false`) rather than withdrawing the answer.
    */
-  async setLevel(level: WorkspaceTrustLevel): Promise<{ readonly saved: boolean; readonly fault?: string | undefined }> {
+  async setLevel(level: WorkspaceTrustLevel, reason?: typeof NOTHING_OF_ITS_OWN_TO_RUN): Promise<{ readonly saved: boolean; readonly fault?: string | undefined }> {
     ++this.decisionRevision;
     this.revision++;
-    const changed = level !== this.getLevel();
+    const forNothing = level === 'trusted' && reason === NOTHING_OF_ITS_OWN_TO_RUN;
+    // Trusting a folder that was trusted only for having nothing of its own changes what it covers: its files.
+    const changed = level !== this.getLevel() || forNothing !== this.trustedForNothing;
     this.level = level;
+    this.trustedForNothing = forNothing;
     this.loaded = true;
     this.legacyIgnored = false;
     this.pendingDecisions++;
     try {
-      await this.store.setTrust(this.workspaceRoot, level);
+      if (forNothing) {
+        // Kept in its own file and never as a register row, so a release that does not read
+        // that file sees the folder undecided, as it always would have.
+        writeNothingToRun(this.nothingToRunPath, this.workspaceRoot, true);
+      } else {
+        await this.store.setTrust(this.workspaceRoot, level);
+        // The owner's own answer replaces a trust kept for having nothing to run (the register row wins on read either way).
+        try { writeNothingToRun(this.nothingToRunPath, this.workspaceRoot, false); }
+        catch (error) { logger.warn('workspace trust: the nothing-to-run record was not cleared; the saved answer still decides', { file: this.nothingToRunPath, error: summarizeError(error) }); }
+      }
       this.unsavedLevel = false;
       this.loadFault = null;
       // This process's own write: the decision in memory is the one on disk.
-      this.registerIdentity = fileIdentity(this.registerPath);
+      this.registerIdentity = this.recordIdentity();
       return { saved: true };
     } catch (error) {
       this.unsavedLevel = true;
-      return { saved: false, fault: `the workspace register ${this.registerPath} could not be written (${summarizeError(error)})` };
+      const file = forNothing ? this.nothingToRunPath : this.registerPath;
+      return { saved: false, fault: `the workspace trust record ${file} could not be written (${summarizeError(error)})` };
     } finally {
       this.pendingDecisions--;
       // The decision is in effect for this process either way: what waited on

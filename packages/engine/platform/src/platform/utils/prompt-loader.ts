@@ -256,3 +256,25 @@ export function loadSystemPrompt(
 ): string {
   return loadSystemPromptWithSources(options).prompt;
 }
+
+/**
+ * The one set of instruction-file options: the main loop's and every helper
+ * agent's, for the folder each works in. `provider.systemPromptFile` is read
+ * when the chain is loaded; a relative path is taken from that folder.
+ */
+export function instructionChainOptions(
+  settings: { get(key: 'provider.systemPromptFile'): unknown },
+  workingDirectory: string,
+  homeDirectory: string,
+): LoadSystemPromptOptions {
+  return {
+    workingDirectory,
+    homeDirectory,
+    getConfigPath: () => {
+      const configuredPath = settings.get('provider.systemPromptFile');
+      if (typeof configuredPath !== 'string' || !configuredPath.trim()) return undefined;
+      return isAbsolute(configuredPath) ? resolve(configuredPath) : resolve(workingDirectory, configuredPath);
+    },
+    argv: process.argv,
+  };
+}

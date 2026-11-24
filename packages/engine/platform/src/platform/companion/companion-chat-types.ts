@@ -145,6 +145,8 @@ export interface CompanionChatHistoryToolResult {
   readonly output?: string | undefined;
   readonly error?: string | undefined;
   readonly cancelled?: boolean | undefined;
+  /** The person's one row for this result (a malformed call); never sent to the model. */
+  readonly ownerLine?: string | undefined;
 }
 
 /** One entry a reply added to the model-facing history. */
@@ -380,6 +382,8 @@ export interface CompanionChatTurnToolResultEvent {
   readonly toolName: string;
   readonly result: unknown;
   readonly isError: boolean;
+  /** The person's one row for this result where it differs from what the model read (a malformed call, ToolResult.ownerLine). */
+  readonly ownerLine?: string | undefined;
 }
 
 export interface CompanionChatTurnCompletedEvent {

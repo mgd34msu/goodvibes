@@ -17,7 +17,7 @@ export function createBlockContentActions(policy: {
     onCopied: () => void,
   ): void {
     if (!selection.hasSelection()) return;
-    if (copyToClipboard(selection.getSelectedText(getHistory()))) onCopied();
+    if (copyToClipboard(selection.getSelectedText(getHistory())) !== 'failed') onCopied();
     requestRender();
     setTimeout(() => requestRender(), 2005);
   }
@@ -35,14 +35,16 @@ export function createBlockContentActions(policy: {
       requestRender();
       return;
     }
-    const sent = copyToClipboard(nearest.rawContent);
+    const outcome = copyToClipboard(nearest.rawContent);
+    const sent = outcome !== 'failed';
     if (sent) onCopied();
     // An explicit action on this block permanently exempts it from the
     // search-close auto-re-collapse (see TerminalConversationManager.noteUserTouch),
     // copying content the user just had search reveal is a deliberate choice
     // to keep it visible, not an accident of typing a query.
     policy.noteTouch(conversationManager, nearest.collapseKey);
-    if (sent) conversationManager.log(`[Copied ${describeBlockForReceipt(nearest)}]`, { fg: activeTokens().success });
+    if (outcome === 'copied') conversationManager.log(`[Copied ${describeBlockForReceipt(nearest)}]`, { fg: activeTokens().success });
+    else if (sent) conversationManager.log(`[Sent ${describeBlockForReceipt(nearest)} to your terminal's clipboard]`, { fg: activeTokens().success });
     else conversationManager.log('[Copy failed: nothing was sent to the terminal clipboard]', { fg: activeTokens().error });
     requestRender();
     setTimeout(() => requestRender(), 2005);

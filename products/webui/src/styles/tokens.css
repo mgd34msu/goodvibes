@@ -297,17 +297,16 @@
   --header-h-phone:          52px;
   --account-h:               44px;
   --nav-item-h:              32px;
-  --row-h:                   36px;
-  --row-h-compact:           28px;
   --reading-width:           720px;
-  --focus-ring: 0 0 0 3px var(--accent-soft);
+  /* A focus indicator drawn as a shadow: solid accent, 3:1 or more against every surface. */
+  --focus-ring: 0 0 0 2px var(--accent);
 }
 
 /* ─────────────────────────────────────────
-   COMPACT DENSITY
+   COMPACT DENSITY: the spacing scale tightens here; rows, lists and the
+   transcript tighten in styles/density.css.
 ───────────────────────────────────────── */
 :root[data-density="compact"] {
-  --row-h:    28px;
   --space-4:  12px;
   --space-6:  18px;
   --space-8:  24px;

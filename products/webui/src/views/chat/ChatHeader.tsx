@@ -10,6 +10,7 @@ import { Pencil, RefreshCw, Search } from 'lucide-react';
 import type { KeyboardEvent } from 'react';
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
+import { formatShortcut } from '../../lib/shortcut-keys';
 
 export interface ChatTitleProps {
   activeSessionId: string;
@@ -67,7 +68,7 @@ export function ChatFindButton({ open, onToggle }: { open: boolean; onToggle: ()
   return (
     <IconButton
       label={open ? 'Close find' : 'Find in chats'}
-      shortcut="Ctrl F"
+      shortcut={formatShortcut('mod+f')}
       icon={<Search />}
       aria-pressed={open}
       onClick={onToggle}

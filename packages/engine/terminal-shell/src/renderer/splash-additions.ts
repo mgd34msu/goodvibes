@@ -5,7 +5,7 @@
  * last row and never take part in that centring, so they cannot move it.
  *
  *   a  You're set.  Answering with rt-1 · signed in       3 of 3
- *   b  The terminal app on this computer has settings.  /setup import-settings  brings them over, ...
+ *   b  The terminal app on this computer has settings.  ⏎  brings them over, ... (later: /setup import-settings)
  *   c  GoodVibes asks before ...  shift+tab  changes when GoodVibes asks. ...
  *
  * All are drawn only on first run (b only when the app was given an import
@@ -55,7 +55,11 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
 
   const blocks: Block[] = [];
   const firstRun = view.firstRun;
-  if (firstRun?.kind === 'set') {
+  if (firstRun?.kind === 'set' && firstRun.using) {
+    // Taken without asking: the one line that says which provider and model, and from where; no step count.
+    const rows = wrapSegments([{ text: firstRun.using }], sentenceWidth);
+    blocks.push({ kind: 'a', rows: rows.map((segments) => ({ segments })) });
+  } else if (firstRun?.kind === 'set') {
     const rows = wrapSegments([
       { text: 'You\'re set.', bold: true },
       { text: '  Answering with', tone: 'dim' },
@@ -63,7 +67,8 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
       { text: ' · ', tone: 'dim' },
       { text: firstRun.signIn, tone: 'good' },
     ], blockWidth - 8);
-    blocks.push({ kind: 'a', rows: rows.map((segments, k) => ({ segments, ...(k === 0 ? { right: '3 of 3' } : {}) })) });
+    const steps = firstRun.steps ?? 3;
+    blocks.push({ kind: 'a', rows: rows.map((segments, k) => ({ segments, ...(k === 0 ? { right: `${steps} of ${steps}` } : {}) })) });
   } else if (firstRun?.kind === 'not-ready') {
     const rows = wrapSegments([
       { text: 'Not set up yet.', bold: true },
@@ -72,7 +77,13 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
     blocks.push({ kind: 'a', rows: rows.map((segments) => ({ segments })) });
   }
   if (view.importCommand && firstRun?.kind !== 'pending') {
-    const rows = wrapSegments([
+    // One key where it is offered: Enter on the empty composer; the command is named for later.
+    const rows = wrapSegments(view.importOnEnter ? [
+      { text: 'The terminal app on this computer has settings.', tone: 'dim' },
+      { text: ' ' },
+      { text: '⏎', chip: true },
+      { text: ` brings them over, showing what would change first (later: ${view.importCommand}).`, tone: 'dim' },
+    ] : [
       { text: 'The terminal app on this computer has settings.', tone: 'dim' },
       { text: ' ' },
       { text: view.importCommand, chip: true },

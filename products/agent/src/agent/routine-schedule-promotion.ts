@@ -1,5 +1,6 @@
 import { resolveConnectedHost, type ConnectedHostConnection, type ConnectedHostSource, type ConnectedHostUnavailable } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
+import type { AutomationScheduleDefinition } from '@goodvibes/engine/platform/platform/automation';
 import { createConnectedSchedule } from './connected-schedule.ts';
 import { formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
 import { evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
@@ -135,6 +136,10 @@ export interface RoutineScheduleLiveRecord {
   readonly scheduleKind?: RoutineScheduleKind;
   readonly scheduleValue?: string;
   readonly timezone?: string;
+  /** The schedule as the host keeps it, for showing it in words. */
+  readonly definition?: AutomationScheduleDefinition;
+  /** What the schedule runs: the task the host keeps with it. */
+  readonly prompt?: string;
   readonly nextRunAt?: number;
   readonly lastRunAt?: number;
   readonly runCount?: number;

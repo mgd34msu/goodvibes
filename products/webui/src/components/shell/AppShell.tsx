@@ -44,7 +44,15 @@ import { PeekProvider } from '../peek/PeekPanel';
 import { ShellProvider } from './ShellContext';
 import { useAnnouncer } from '../../hooks/useAnnouncer';
 import { registerCommand, unregisterCommand } from '../../lib/commands';
+import { useHotkeys } from '../../hooks/useHotkeys';
 import type { ViewId } from '../../lib/router';
+
+/**
+ * The theme toggle's keys, shown in the palette and the shortcut list and bound
+ * here: a two-key sequence, since every browser keeps Ctrl+Shift+T (reopen a
+ * closed tab) for itself.
+ */
+const TOGGLE_THEME_KEYS = 'g t';
 
 // ─── Props ─────────────────────────────────────────────────────────────────
 
@@ -91,7 +99,7 @@ function InnerShell({ children, onNavigate, onOpenSettings }: InnerShellProps) {
       title: 'Toggle Theme',
       group: 'system',
       keywords: ['theme', 'dark', 'light', 'color'],
-      shortcut: 'mod+shift+t',
+      shortcut: TOGGLE_THEME_KEYS,
       run: toggleTheme,
     });
     registerCommand({
@@ -108,6 +116,8 @@ function InnerShell({ children, onNavigate, onOpenSettings }: InnerShellProps) {
     };
     // Re-register if theme/density callbacks change identity.
   }, [toggleTheme, density, setDensity]);
+
+  useHotkeys([{ combo: TOGGLE_THEME_KEYS, handler: () => toggleTheme() }]);
 
   return (
     <ErrorBoundary>

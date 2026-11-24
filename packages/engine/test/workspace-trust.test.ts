@@ -22,7 +22,7 @@ import { createPermissionConfigReader, PermissionManager } from '../platform/src
 import { PolicyRuntimeState } from '../platform/src/platform/runtime/permissions/policy-runtime.ts';
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 import { createShellPathService } from '../platform/src/platform/runtime/shell-paths.ts';
-import { trustGatedAsk, WorkspaceTrustManager, type WorkspaceTrustLevel } from '../platform/src/platform/runtime/workspace-trust.ts';
+import { trustGatedAsk, WorkspaceRestrictedError, WorkspaceTrustManager, type WorkspaceTrustLevel } from '../platform/src/platform/runtime/workspace-trust.ts';
 import { forgetGateReadings, gateReadingsPort } from './_helpers/gate-readings.ts';
 import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 
@@ -68,7 +68,7 @@ test('a shipped trust.json is not honoured; answered restricted, writes and comm
 
     // Refused is a decision that does not approve, or the constraint's refusal of a restricted workspace.
     const runs = (tool: string, args: Record<string, unknown>) => manager.checkDetailed(tool, args).then((result) => result.approved,
-      (error: unknown) => { if (error instanceof Error && error.message.includes('restricted workspace forbids')) return false; throw error; });
+      (error: unknown) => { if (error instanceof WorkspaceRestrictedError) return false; throw error; });
     const write = { files: [{ path: join(project, 'src.ts'), content: 'export {};\n' }] };
     const command = { commands: [{ cmd: 'npm install left-pad --save' }] };
     // Undecided, decision models off: the first write raises the one trust question; answered restricted, it does not run.

@@ -1,6 +1,6 @@
 import { readJsonStore, updateJsonStore, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import type { OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
-import { formatEveryInterval } from '@goodvibes/engine/platform/platform/automation';
+import { formatEveryInterval, type AutomationScheduleDefinition } from '@goodvibes/engine/platform/platform/automation';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { createConnectedHost, isHostFailure } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import type { ShellPathService } from '@/runtime/index.ts';
@@ -477,12 +477,37 @@ function readLiveScheduleDefinition(value: unknown): {
   return {};
 }
 
+/** The host's schedule as it keeps it, for showing it in words; undefined when it does not read as one. */
+function readLiveScheduleDefinitionWhole(value: unknown): AutomationScheduleDefinition | undefined {
+  if (!isRecord(value)) return undefined;
+  if (value.kind === 'cron') {
+    const expression = readString(value, 'expression');
+    if (!expression) return undefined;
+    const timezone = readString(value, 'timezone');
+    const staggerMs = readNumber(value, 'staggerMs');
+    return { kind: 'cron', expression, ...(timezone ? { timezone } : {}), ...(staggerMs !== undefined ? { staggerMs } : {}) };
+  }
+  if (value.kind === 'every') {
+    const intervalMs = readNumber(value, 'intervalMs');
+    return intervalMs === undefined ? undefined : { kind: 'every', intervalMs };
+  }
+  if (value.kind === 'at') {
+    const at = readNumber(value, 'at');
+    return at === undefined ? undefined : { kind: 'at', at };
+  }
+  return undefined;
+}
+
 function readLiveScheduleRecord(value: unknown): RoutineScheduleLiveRecord | null {
   if (!isRecord(value)) return null;
   const id = readString(value, 'id')?.trim();
   const name = readString(value, 'name')?.trim();
   if (!id || !name) return null;
   const schedule = readLiveScheduleDefinition(value.schedule);
+  const definition = readLiveScheduleDefinitionWhole(value.schedule);
+  // What it runs: the job's execution prompt, else its description (as the terminal app reads a job).
+  const execution: Record<string, unknown> = isRecord(value.execution) ? value.execution : {};
+  const prompt = (readString(execution, 'prompt') ?? readString(value, 'description'))?.trim();
   return {
     id,
     name,
@@ -491,6 +516,8 @@ function readLiveScheduleRecord(value: unknown): RoutineScheduleLiveRecord | nul
     scheduleKind: schedule.kind,
     scheduleValue: schedule.value,
     timezone: schedule.timezone,
+    ...(definition ? { definition } : {}),
+    ...(prompt ? { prompt } : {}),
     nextRunAt: readNumber(value, 'nextRunAt'),
     lastRunAt: readNumber(value, 'lastRunAt'),
     runCount: readNumber(value, 'runCount'),

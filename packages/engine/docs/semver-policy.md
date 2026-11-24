@@ -60,10 +60,8 @@ The following are explicitly out of scope and may change at any time without a m
 
 ## Removal process
 
-For pre-1.0 releases, the project may remove or rename public exports when the
-owner accepts the breaking change and `CHANGELOG.md` documents it. For 1.0 and
-later releases, removals require a major bump and a replacement path when one
-exists.
+Removing or renaming a public export requires a major bump, a `CHANGELOG.md`
+entry naming it, and a replacement path when one exists.
 
 When a replacement exists, document the replacement in the changelog and the
 affected feature doc.

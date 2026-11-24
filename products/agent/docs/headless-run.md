@@ -17,19 +17,20 @@ goodvibes-agent exec --output stream-json --omit-accumulated --timeout 10m "chec
 | `--max-turns <n>` | Stop once the model has answered `n` times in this run's own turn loop and still asks for tools; exit `1` with `stopReason` `max_turns`. Agents the run delegates to, and helper models, answer on their own and do not count against `n` (their cost still appears in `usage`). Tools from that last response are not run. |
 | `--omit-accumulated` | With `stream-json`, leave `accumulated` (the whole response so far) out of `STREAM_DELTA` frames. |
 | `--answer-permissions` | With `--output stream-json`, a script answers the owner prompts the run raises (see below). Without it a call that needs the owner is refused. |
+| `--prompt-file <path>` | Read the prompt from a file (a relative path is read from the working folder); `--prompt-file -` reads all of standard input (`cat task.md \| goodvibes-agent run --prompt-file -`). A prompt also given as text, an unreadable file, or `-` together with `--answer-permissions` (both read standard input) is a usage error, exit `2`. |
 | `--intake-status` | Read-only: print the server state of the saved input; exit `0` when the host has a record of it. |
 | `--intake-retry` | Request admission again for the same saved input. |
 | `--intake-resume` | Explicit recovery of an input the host reports as processing. |
 | `--intake-cancel` | Cancel the saved input, or the work admitted from it, on the host. |
 | `--continue`, `--resume [id]`, `--session <id>` | Continue the last session, or the named one, instead of a new one; fails when there is none. A crash snapshot newer than its saved copy is restored first (see below). |
 
-The `--intake-*` flags take no value and no prompt (recovery reuses the exact saved input); use one at a time. `--timeout`, `--max-turns`, `--omit-accumulated` and `--answer-permissions` apply only to `run`. Status messages that would name a workspace slash command (`/work intake`) name these flags instead.
+The `--intake-*` flags take no value and no prompt (recovery reuses the exact saved input); use one at a time. `--timeout`, `--max-turns`, `--omit-accumulated`, `--answer-permissions` and `--prompt-file` apply only to `run`. Status messages that would name a workspace slash command (`/work intake`) name these flags instead.
 
 Parser limits to know about:
 
 - A flag that takes a value refuses a value that begins with `-`. Use the long form with an equals sign: `--prompt='- item'`.
 - Unquoted words in a prompt that equal a command name or alias (`doctor`, `auth`, `task`) are read as that command. Quote the whole prompt.
-- The `secrets` and `cluster` helpers read the word after any `--flag` as its value, so put flags after the positional arguments.
+- In the `secrets` helper (and the daemon's `cluster`) a flag that takes no value (`--user`, `--plaintext`, `--stdin`; `--json`, `--yes`) never takes the next word, so it may go before or after the positional arguments.
 - After any command word an option the command does not take (`run --max-turn 3`, `run --timout=5m`, `secrets set K v --plaintxt`) is refused with exit `2` instead of being ignored, and the error lists the options that command accepts. Commands with options of their own (`secrets`, `auth`, `pair` and the like) declare them in the one command table and receive them unchanged.
 - A lone first word of five or more letters that is a command with two neighbouring letters swapped or one letter doubled (`goodvibes-agent stauts`, `goodvibes-agent modles`) is refused as a mistyped command, exit code `2`, and the error names the command. To start with that word as the first prompt, put `--` before it: `goodvibes-agent -- stauts`. Any other lone word (`goodvibes-agent hello`, `goodvibes-agent fix`) starts the Agent with it as the first prompt; when it is one or two letters from a command a warning names that command.
 
@@ -75,6 +76,7 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 
 | `type` | Fields |
 | --- | --- |
+| `SESSION` | `sessionId`, `model`, `provider`, `workingDirectory`, `permissionMode`: the first frame of a run that reached a session, before the first request |
 | `STREAM_DELTA` | `content`, `accumulated` (unless `--omit-accumulated`) |
 | `DRAFT_WITHDRAWN` | `reason`: the answer streamed so far was withdrawn (the turn moved to another model after it had begun); drop that text, the replacement streams from empty |
 | `TOOL_EXECUTING`, `TOOL_SUCCEEDED`, `TOOL_FAILED`, `TOOL_CANCELLED` | `turnId`, `callId`, `tool`; plus `durationMs`, `error` or `reason` |
@@ -115,7 +117,7 @@ One table for all programs, including where the same number means something else
 | --- | --- |
 | `0` | Completed, or admitted work was recorded with its execution state. |
 | `1` | Failed: model or provider error, empty response, `--max-turns` reached, or the host is unavailable, blocked or refused the input. |
-| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with a recovery flag. |
+| `2` | Invalid input: a usage error, a missing prompt, or a prompt given with a recovery flag. A usage error prints the error and the command's one usage line on stderr, not the whole help; with `--output json` or `stream-json` it is the run's final frame on stdout instead (`ok` `false`, `stopReason` `invalid-input`, `error` the message). A `-c key=value` the settings refuse names the key and the nearest setting, or what the setting takes. |
 | `3` | Outcome unknown: the input may have taken effect on the host. Run `goodvibes-agent run --intake-status` before retrying. |
 | `124` | `--timeout` reached; the run was cancelled. |
 | `130` | Cancelled (Ctrl-C, SIGTERM, or the saved input was cancelled). |

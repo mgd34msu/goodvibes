@@ -8,6 +8,8 @@
 @import './styles/generated/presentation-tokens.css';
 /* Glass and scrim: the one floating material and the one modal backdrop. */
 @import './styles/materials.css';
+/* Compact density: tighter rows and spacing in every list and the transcript. */
+@import './styles/density.css';
 
 /*
  * Global rules only: element defaults, focus, the view frame, the inline
@@ -85,11 +87,12 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Focus is always visible: a 2px accent outline with a 3px soft halo, never removed. */
+/* Focus is always visible: a 2px accent outline, never removed. The accent reaches
+   at least 3:1 against every surface in every theme (dark, light, neon). A control
+   that draws its focus inside its own box uses --focus-ring, the same 2px accent. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
-  box-shadow: var(--focus-ring);
 }
 
 /* === View frame (ShellLayout) === */

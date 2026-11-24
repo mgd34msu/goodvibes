@@ -98,7 +98,7 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
   // --no-worries-just-vibes is kept as an unlisted spelling of --yolo.
   { tokens: ['--yolo', '--no-worries-just-vibes'], unlistedTokens: ['--no-worries-just-vibes'], field: 'permissionMode', kind: 'const', constValue: 'yolo', exclusive: true, summary: 'Run every action without safety denials for this launch (permissions.mode yolo).' },
   { tokens: ['--no-alt-screen'], field: 'noAltScreen', kind: 'boolean', summary: 'Do not use the terminal alt screen.' },
-  { tokens: ['--open'], field: 'open', kind: 'boolean', summary: 'Open a browser window for the web surface.' },
+  { tokens: ['--open'], field: 'open', kind: 'boolean', summary: 'Open a browser window for the web surface.', commands: ['web', 'subscription'] },
   { tokens: ['--continue'], field: 'continueLast', kind: 'boolean', summary: 'Resume the last conversation.' },
   {
     tokens: ['--fork'],
@@ -107,6 +107,8 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
     bareValue: true,
     valueName: 'id',
     summary: 'Fork a conversation. With no id, forks the current one.',
+    // Listed for the interactive app, which forks; `run` refuses it (postProcess).
+    commands: ['tui'],
   },
   { tokens: ['--yes', '-y'], field: 'yes', kind: 'boolean', summary: 'Answer confirmation prompts with yes.' },
   {
@@ -120,6 +122,7 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
     field: 'strict',
     kind: 'boolean',
     summary: "doctor: advisory findings also fail (exit 1), for CI. Ignored by every other command.",
+    commands: ['doctor'],
   },
   { tokens: ['--intake-status'], field: 'intakeMode', kind: 'const', constValue: 'status', exclusive: true, summary: 'run: print the host\'s state of the saved native input instead of sending a new one; exits 0 when the host has a record of it.' },
   { tokens: ['--intake-retry'], field: 'intakeMode', kind: 'const', constValue: 'retry', exclusive: true, summary: 'run: request admission again for the same saved input.' },
@@ -129,6 +132,7 @@ const GLOBAL_FLAGS: readonly CommandFlagSpec<GoodVibesCliFlagField>[] = [
   { tokens: ['--max-turns'], field: 'maxTurns', kind: 'string', valueName: 'n', summary: 'run: stop once the model has answered this many times and still asks for tools; exits 1.' },
   { tokens: ['--omit-accumulated'], field: 'omitAccumulated', kind: 'boolean', summary: 'run: with stream-json, leave `accumulated` out of STREAM_DELTA frames.' },
   { tokens: ['--answer-permissions'], field: 'answerPermissions', kind: 'boolean', summary: 'run: with stream-json, read PERMISSION_ANSWER lines on stdin for the owner prompts the run raises.' },
+  { tokens: ['--prompt-file'], field: 'promptFile', kind: 'string', valueName: 'path', summary: 'run: read the prompt from this file; - reads it from standard input.' },
   { tokens: ['--provider'], field: 'provider', kind: 'string', valueName: 'id', summary: 'Run with this provider.' },
   {
     tokens: ['--model', '-m'],
@@ -343,7 +347,7 @@ function postProcess(
   }
 
   // `--session` is read only by `run`; the interactive shell never attaches to it,
-  // and `run` never forks, so refuse each where it would be silently ignored.
+  // so refuse it where it would be silently ignored. `run` never forks.
   if (command !== 'run' && flags.session !== undefined) {
     errors.push('--session is only supported with run; use --resume to reopen a session in the interactive shell.');
   }

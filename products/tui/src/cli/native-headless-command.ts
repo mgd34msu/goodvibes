@@ -14,7 +14,7 @@ import { resolveNativeHostCredential } from '../runtime/client/native-host-crede
 import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
 import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { announceHeadlessRecovery, refusedHeadlessRun } from '@goodvibes/engine/terminal-shell/headless-command';
+import { announceHeadlessRecovery, announceHeadlessSession, refusedHeadlessRun } from '@goodvibes/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 
 export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, mode: NativeHeadlessMode = 'submit', limits: HeadlessRunFlags = {}): Promise<number> {
@@ -81,6 +81,7 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
             if (refused) return refused;
             throw error;
           }
+          announceHeadlessSession(ctx, workingDirectory, cli.flags.outputFormat);
           const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
           sessionReady = true;
           const result = await executeHeadlessTurn(ctx, input, signal, cli.flags.outputFormat, limits);

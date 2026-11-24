@@ -1,7 +1,7 @@
 import {
   parseNativeShellCli,
   shellMetadataResult,
-  requireValidCliOverrides,
+  writeCliUsageRefusal,
   applyCliModelSelection,
   resolveShellRoots,
   type ShellEntrypointOwnership,
@@ -27,7 +27,7 @@ import {
 } from './config-overrides.ts';
 import { parseGoodVibesCli } from './parser.ts';
 import { renderCompletion } from './completion.ts';
-import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesVersion } from './help.ts';
+import { renderGoodVibesCommandHelp, renderGoodVibesHelp, renderGoodVibesUsageLine, renderGoodVibesVersion } from './help.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { writeExitingStdoutLine, writeFatalLine } from '../utils/fatal-boot-write.ts';
 import { AgentProfileUsageError, resolveAgentRuntimeProfileHome, resolveSelectedAgentRuntimeProfileHome } from '../agent/runtime-profile.ts';
@@ -73,11 +73,17 @@ export async function prepareShellCliRuntime(
   const { native, cli } = parseNativeShellCli(argv, binary, parseGoodVibesCli);
   const errors = [...cli.errors, ...headlessRunFlagErrors(native.run ?? {}, cli.command, cli.flags.outputFormat)];
 
-  if (errors.length > 0) {
-    writeFatalLine(errors.join('\n'));
-    writeFatalLine('');
-    writeFatalLine(renderGoodVibesHelp(binary));
+  // A usage error is the error and, for a wrong command line, the command's one usage line; JSON when asked for.
+  const refuseUsage = async (lines: readonly string[], usageLine?: string): Promise<never> => {
+    await writeCliUsageRefusal(cli, lines, usageLine, {
+      stdout: writeExitingStdoutLine,
+      stderr: writeFatalLine,
+      loadRunResultWriter: async () => (await import('./native-headless.ts')).writeNativeHeadlessResult,
+    });
     process.exit(2);
+  };
+  if (errors.length > 0) {
+    await refuseUsage(errors, renderGoodVibesUsageLine(cli, binary));
   }
 
   for (const warning of cli.warnings) console.warn(`[${binary}] warning: ${warning}`);
@@ -117,16 +123,17 @@ export async function prepareShellCliRuntime(
   new GlobalNetworkTransportInstaller().install(configManager);
 
   const envRuntimeUrl = readEnvRuntimeUrl();
+  // Override errors end the run before runtime construction, headless effects or command dispatch.
   const envRuntimeUrlErrors = envRuntimeUrl ? applyRuntimeUrlOverride(configManager, envRuntimeUrl.value, envRuntimeUrl.source) : [];
-  requireValidCliOverrides(envRuntimeUrlErrors, writeFatalLine, process.exit);
+  if (envRuntimeUrlErrors.length > 0) await refuseUsage(envRuntimeUrlErrors);
 
   const overrideErrors = applyRuntimeConfigOverrides(configManager, cli.flags.configOverrides);
-  requireValidCliOverrides(overrideErrors, writeFatalLine, process.exit);
+  if (overrideErrors.length > 0) await refuseUsage(overrideErrors);
   const featureOverrideErrors = applyRuntimeFeatureOverrides(configManager, {
     enableFeatures: cli.flags.enableFeatures,
     disableFeatures: cli.flags.disableFeatures,
   });
-  requireValidCliOverrides(featureOverrideErrors, writeFatalLine, process.exit);
+  if (featureOverrideErrors.length > 0) await refuseUsage(featureOverrideErrors);
 
   applyCliModelSelection(cli.flags, {
     current: () => configManager.get('provider.model'),
@@ -139,13 +146,10 @@ export async function prepareShellCliRuntime(
   });
   if (cli.flags.runtimeUrl !== undefined) {
     const runtimeUrlErrors = applyRuntimeUrlOverride(configManager, cli.flags.runtimeUrl);
-    if (runtimeUrlErrors.length > 0) {
-      writeFatalLine(runtimeUrlErrors.join('\n'));
-      process.exit(2);
-    }
+    if (runtimeUrlErrors.length > 0) await refuseUsage(runtimeUrlErrors);
   }
   const endpointOverrideErrors = applyRuntimeCommandEndpointFlagOverrides(configManager, cli.command, cli.flags);
-  requireValidCliOverrides(endpointOverrideErrors, writeFatalLine, process.exit);
+  if (endpointOverrideErrors.length > 0) await refuseUsage(endpointOverrideErrors);
 
   const commandRuntime = { cli, configManager, workingDirectory: bootstrapWorkingDir, homeDirectory: bootstrapHomeDirectory };
   if (cli.command === 'run') {

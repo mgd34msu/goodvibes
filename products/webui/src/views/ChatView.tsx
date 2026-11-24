@@ -35,15 +35,18 @@ import { ChatSearch } from './chat/ChatSearch';
 import { QueuedMessagesPanel } from './chat/QueuedMessagesPanel';
 import { ChatAsksChip, ElsewhereAsksBanner, InlineAsks } from './chat/InlineAsk';
 import { useChatSend, type NewChatRoute } from './chat/useChatSend';
-import { parseSlashCommand, SLASH_COMMANDS } from './chat/slash-commands';
+import { isSlashAttempt, parseSlashCommand, slashCommandsOf } from './chat/slash-commands';
+import { loadCommandCatalog, useCommandCatalog } from '../lib/command-catalog';
 import { openPaletteWith, runCommand } from '../lib/commands';
 import { motionReduced } from '../lib/ui-preferences';
 import { holdReload } from '../lib/reload-guard';
+import { draftFilesInMemory, NEW_CHAT_DRAFT, readDraftText, restoreDraftFiles, writeDraftFiles, writeDraftText } from '../lib/chat-drafts';
 import { useToast } from '../lib/toast';
 import { useWakeTranscriptSink } from '../lib/voice/useWake';
 import { useChatStream } from './chat/useChatStream';
 import { createLiveReplyStore } from './chat/live-reply-store';
 import { useStableCallback } from '../hooks/useStableCallback';
+import { openOverlayCount } from '../components/ui/overlay';
 import '../styles/components/chat-view.css';
 import {
   deriveChatTitle,
@@ -62,7 +65,7 @@ import {
   type TurnState,
 } from './chat/message-utils';
 import { buildLineage } from './chat/lineage';
-import { resolveScrollTarget, isScrollTargetReady, isScrollTargetStale, findMessageElement } from './chat/search-jump';
+import { resolveScrollTarget, isScrollTargetReady, isScrollTargetStale } from './chat/search-jump';
 import type { ChatViewProps, ChatMessage } from './chat/types';
 
 export type { ChatViewProps };
@@ -115,12 +118,34 @@ export function ChatView({
   // and sessions the operator renamed by hand (never overwrite a manual title).
   const autoTitledSessionsRef = useRef<Set<string>>(new Set());
   const manuallyTitledSessionsRef = useRef<Set<string>>(new Set());
-  const [draft, setDraft] = useState('');
+  // The unsent draft belongs to its chat (lib/chat-drafts.ts): kept across a view change and a
+  // reload, never shown in another chat. `draftOwner` is the chat the draft in state belongs to;
+  // when the open chat changes, that chat's own draft is read in before anything is drawn or kept.
+  const draftKey = activeSessionId || NEW_CHAT_DRAFT;
+  const [draftOwner, setDraftOwner] = useState(draftKey);
+  const [draft, setDraft] = useState(() => readDraftText(draftKey));
   // A /command the composer does not run, held instead of sent (cleared when the draft changes).
   const [heldCommand, setHeldCommand] = useState<{ word: string; known: boolean; steer: boolean } | null>(null);
-  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [attachedFiles, setAttachedFiles] = useState<File[]>(() => draftFilesInMemory(draftKey));
   // Said under the attached files when more were added than a message takes.
   const [attachNote, setAttachNote] = useState<string>();
+  if (draftOwner !== draftKey) {
+    setDraftOwner(draftKey);
+    setDraft(readDraftText(draftKey));
+    setAttachedFiles(draftFilesInMemory(draftKey));
+    setAttachNote(undefined);
+    setHeldCommand(null);
+  }
+  useEffect(() => { writeDraftText(draftOwner, draft); }, [draftOwner, draft]);
+  useEffect(() => { writeDraftFiles(draftOwner, attachedFiles); }, [draftOwner, attachedFiles]);
+  // Files attached before a reload come back from the browser's store, unless files were attached since.
+  useEffect(() => {
+    let current = true;
+    void restoreDraftFiles(draftOwner).then((files) => {
+      if (current && files.length > 0) setAttachedFiles((now) => (now.length === 0 ? files : now));
+    });
+    return () => { current = false; };
+  }, [draftOwner]);
   // The streamed reply lives in a store, not in this view's state: a token
   // re-renders only the live bubble. This view re-renders when it gains or loses text.
   const [liveReply] = useState(createLiveReplyStore);
@@ -526,12 +551,13 @@ export function ChatView({
   // Every file attached to or made in this chat, newest first, for the header's Files list.
   const chatFiles = useMemo(() => sessionFiles(renderedMessageItems), [renderedMessageItems]);
   const { openSessionFiles } = useSessionFilesPanel();
+  // Jump-to-message: the transcript mounts the message if it is far from the screen, scrolls to it,
+  // then says so (onJumped), and the message flashes.
+  const [jumpRequest, setJumpRequest] = useState<{ messageId: string; seq: number } | null>(null);
   const jumpToMessage = useCallback((messageId: string) => {
-    const element = findMessageElement(scrollRef.current, messageId);
-    if (!element) return;
-    element.scrollIntoView({ block: 'center', behavior: motionReduced() ? 'auto' : 'smooth' });
-    setHighlightedMessageId(messageId);
+    setJumpRequest((current) => ({ messageId, seq: (current?.seq ?? 0) + 1 }));
   }, []);
+  const onJumped = useCallback((messageId: string) => setHighlightedMessageId(messageId), []);
   // A message still waiting behind the running reply is shown once, in the queue
   // above the composer where it can be edited or dropped; it joins the transcript,
   // after the reply it waited for, when it is sent.
@@ -558,22 +584,20 @@ export function ChatView({
   }, [liveReply, showJumpToBottom]);
 
   // Search jump-to-message: once the target session is active AND its messages
-  // have loaded, locate the message in the DOM and scroll to it. Session switch
-  // (onActiveSessionChange) and the messages fetch it triggers are both async,
-  // the target message may not exist in lineageNodes/the DOM yet on the render
-  // right after selecting a search result, so this effect just no-ops until a
-  // later render (driven by lineageNodes changing as messages arrive) finds it.
-  // The readiness/lookup rules live in search-jump.ts (framework-free, unit
-  // tested there), this effect is just the async-retry wiring around them.
+  // have loaded, the transcript is asked to jump to it (it mounts the message
+  // first when it is far from the screen). Session switch (onActiveSessionChange)
+  // and the messages fetch it triggers are both async, the target message may not
+  // be in lineageNodes yet on the render right after selecting a search result,
+  // so this effect just no-ops until a later render (driven by lineageNodes
+  // changing as messages arrive) finds it. The readiness rules live in
+  // search-jump.ts; this effect is the async wiring around them.
   useEffect(() => {
     if (!isScrollTargetReady(pendingScrollTarget, activeSessionId, lineageNodes) || !pendingScrollTarget) return;
     const target = pendingScrollTarget;
-    const element = findMessageElement(scrollRef.current, target.messageId);
-    if (!element) return;
-    element.scrollIntoView({ block: 'center', behavior: motionReduced() ? 'auto' : 'smooth' });
-    setHighlightedMessageId(target.messageId);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hands a loaded target to the transcript's jump
     setPendingScrollTarget(null);
-  }, [pendingScrollTarget, activeSessionId, lineageNodes]);
+    jumpToMessage(target.messageId);
+  }, [pendingScrollTarget, activeSessionId, lineageNodes, jumpToMessage]);
 
   const messagesSettled = messages.isSuccess && !messages.isFetching;
   useEffect(() => {
@@ -681,6 +705,22 @@ export function ChatView({
     wakeHandlerRef.current(text, options.autoSubmit);
   }, []));
 
+  // The composer's slash commands: `/new` until the command catalog is loaded, which a `/` typed asks for.
+  const commandsCatalog = useCommandCatalog(draft.trimStart().startsWith('/'));
+  const slashCommands = useMemo(() => slashCommandsOf(commandsCatalog?.actions ?? null), [commandsCatalog]);
+  const [slashSendWaiting, setSlashSendWaiting] = useState<{ text: string; files: File[]; options: { steer?: boolean; localMessageId?: string; asText?: boolean } } | null>(null);
+  const [slashCatalogFailed, setSlashCatalogFailed] = useState(false);
+  useEffect(() => {
+    if (!slashSendWaiting || (!commandsCatalog && !slashCatalogFailed)) return;
+    const waiting = slashSendWaiting;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- the send that waited for the commands goes now
+    setSlashSendWaiting(null);
+    setSlashCatalogFailed(false);
+    sendTextNow(waiting.text, waiting.files, waiting.options);
+    // sendTextNow is this render's; the send runs once, when the commands arrive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [slashSendWaiting, commandsCatalog, slashCatalogFailed]);
+
   function submitDraft() {
     retryAfterModelRef.current = '';
     sendText(draft, attachedFiles);
@@ -694,7 +734,20 @@ export function ChatView({
   function sendText(text: string, files: File[] = [], options: { steer?: boolean; localMessageId?: string; asText?: boolean } = {}) {
     const body = text.trim();
     if (send.isPending || (!body && !files.length)) return;
-    const slash = options.asText ? { kind: 'text' as const } : parseSlashCommand(body);
+    // A slash command is read against the loaded commands: before they are here, it is read once they
+    // are (and the palette has registered them), from the effect below; a failed load reads it against `/new`.
+    if (!options.asText && !commandsCatalog && isSlashAttempt(body)) {
+      setSlashSendWaiting({ text, files, options });
+      void loadCommandCatalog().catch(() => setSlashCatalogFailed(true));
+      return;
+    }
+    sendTextNow(text, files, options);
+  }
+
+  function sendTextNow(text: string, files: File[], options: { steer?: boolean; localMessageId?: string; asText?: boolean }) {
+    const body = text.trim();
+    if (send.isPending || (!body && !files.length)) return;
+    const slash = options.asText ? { kind: 'text' as const } : parseSlashCommand(body, slashCommands);
     if (slash.kind === 'command' && !files.length) {
       const run = slash.command.run;
       // A palette entry that is not registered (no palette mounted) is held like any command this composer cannot run.
@@ -888,6 +941,20 @@ export function ChatView({
   // An update reload waits while a reply streams or a message is being sent (lib/reload-guard).
   const replyInFlight = isStreaming || send.isPending || isActiveTurnState(turnState);
   useEffect(() => (replyInFlight ? holdReload() : undefined), [replyInFlight]);
+  // Escape stops the reply while one streams (the Stop button shows the key). A key something
+  // else used first (a menu, the find bar, an edit being cancelled) or one pressed with an
+  // overlay open is left to that.
+  useEffect(() => {
+    if (!isStreaming) return undefined;
+    function onKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return;
+      if (openOverlayCount() > 0 || document.querySelector('[data-gv-layer]')) return;
+      event.preventDefault();
+      stop();
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, [isStreaming, stop]);
   // The calendar and mail starters show only when that account answers a one-item
   // read (the same reads Settings shows the account status from, sharing their cache).
   // Read each time the new-chat screen is shown and when the window regains focus while it
@@ -989,6 +1056,10 @@ export function ChatView({
         onReviewAll={onReviewAsks}
       />
       <MessageList
+        // One transcript per chat: another chat starts its own window at its end.
+        key={activeSessionId || NEW_CHAT_DRAFT}
+        jumpRequest={jumpRequest}
+        onJumped={onJumped}
         nodes={transcriptNodes}
         lead={greetingBlock}
         liveReply={liveReply}
@@ -1048,7 +1119,8 @@ export function ChatView({
             current: { registryKey: currentRegistryKey, effort: currentEffort, requestedEffort },
             isDefault: isDefaultRoute,
             pending: selectRoute.isPending,
-            disabled: providerOptions.length === 0 || isStreaming || send.isPending,
+            // With no model set up it still opens: its "Not connected" rows are where connecting starts.
+            disabled: isStreaming || send.isPending,
             onPick: (registryKey, effort) => selectRoute.mutate({ registryKey, effort }),
             onMakeDefault: () => makeDefault.mutate(),
             makeDefaultPending: makeDefault.isPending,
@@ -1057,7 +1129,7 @@ export function ChatView({
           }}
           composerRef={composerRef}
           fileInputRef={fileInputRef}
-          slashCommands={SLASH_COMMANDS}
+          slashCommands={slashCommands}
           onDraftChange={(value) => { setDraft(value); setHeldCommand(null); }}
           onComposerKeyDown={handleComposerKeyDown}
           onSubmit={submit}

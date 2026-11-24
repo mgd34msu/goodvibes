@@ -27,7 +27,10 @@ export class InspectTool implements Tool {
       + ' api_spec (generate OpenAPI 3.0 spec), api_validate (compare spec to code),'
       + ' api_sync (detect frontend/backend drift),'
       + ' database (schema), components (React), layout (CSS/Tailwind),'
-      + ' accessibility (a11y issues), scaffold (module skeleton generator).',
+      + ' accessibility (a11y issues), scaffold (module skeleton generator),'
+      + ' component_state, render_triggers, hooks (React state, re-renders, hook dependencies),'
+      + ' overflow, sizing, stacking, responsive, tailwind (CSS layout problems),'
+      + ' events, client_boundary, error_boundary (event handlers, client/server and error boundaries).',
     parameters: INSPECT_TOOL_SCHEMA,
     sideEffects: ['read_fs'],
     // The three file arguments resolve under projectRoot; scaffold's files go through the write tool's own admission.

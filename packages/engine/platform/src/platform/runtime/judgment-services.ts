@@ -22,6 +22,8 @@ import {
 } from '@goodvibes/judgment';
 import type { JudgmentKeySource } from '../config/schema-types-judgment.js';
 import type { SecretsManager } from '../config/secrets.js';
+import type { ConfigManager } from '../config/manager.js';
+import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 import { captureJudgmentFallbackSettings } from '../config/judgment-fallback-settings.js';
 import { decisionModelSet, decisionModelSettings } from '../config/decision-model-set.js';
 import { requestedDecisionEndpoint, requestedDecisionModel } from '../config/decision-model-request.js';
@@ -30,6 +32,7 @@ import { noteCarriedForwardChange } from '../state/carried-forward.js';
 import { logger } from '../utils/logger.js';
 import { maskJudgmentStateCredentials } from '../gate/judgment-input.js';
 import { withWebuiAnswerBoundary, type WebuiAnswerBoundaryOptions } from '../judgment-browser/batteries/webui-answers.js';
+import { decisionModelReadinessCheck } from './batteries/decision-model-readiness.js';
 import type { DisposalRegistry } from './disposal.js';
 
 /** The secret-store and environment name of the judgment API key. */
@@ -236,6 +239,119 @@ export function createSettingsJudgmentPort(source: JudgmentSettingsSource): Judg
       }
     },
   };
+}
+
+/**
+ * Whether a decision model can be asked now, and when not, the one thing missing.
+ * `missing` says which: `policy` (judgment.policy is No Decision Model), `key`
+ * (the key the settings name is not there: `keySource`/`keyName` say where it
+ * was looked for), `store` (the secret store could not be read), or `rejected`
+ * (only with a check: the decision model answered the one request with an error).
+ * `sentence` is the line a person reads.
+ */
+export type DecisionModelReadiness =
+  | { readonly usable: true; readonly endpoint: string; readonly model: string; readonly checked: boolean }
+  | {
+    readonly usable: false; readonly endpoint: string; readonly model: string;
+    readonly missing: 'policy' | 'key' | 'store' | 'rejected';
+    readonly keySource: JudgmentKeySource; readonly keyName: string;
+    readonly sentence: string;
+  };
+
+/**
+ * Says whether a decision model is usable now, from the live settings: the
+ * policy, then the primary target's key where `judgment.keySource` says it is
+ * (an environment variable, the secret store, or none needed), then, when that
+ * key is missing, any fallback target whose key is there. Reads only local
+ * state; with `check` it also sends one request to the resolved model and
+ * reports its refusal (a wrong key, an unknown model, an unreachable server).
+ */
+export async function decisionModelReadiness(
+  source: JudgmentSettingsSource,
+  check?: { readonly signal: AbortSignal },
+): Promise<DecisionModelReadiness> {
+  const endpoint = requestedDecisionEndpoint(source.config.get('judgment.endpoint'), source.env);
+  const model = settingsModel(source);
+  const keySource = (source.config.get('judgment.keySource') ?? 'env') as JudgmentKeySource;
+  const keyName = text(source.config.get('judgment.keyName')) || JUDGMENT_KEY_NAME;
+  const missing = (kind: 'policy' | 'key' | 'store' | 'rejected', sentence: string): DecisionModelReadiness =>
+    ({ usable: false, endpoint, model, missing: kind, keySource, keyName, sentence });
+  if (source.config.get('judgment.policy') === 'No Decision Model') {
+    return missing('policy', 'No decision model is used: "When the decision model is missing or fails" (judgment.policy) is set to No Decision Model.');
+  }
+  const present = async (where: JudgmentKeySource, name: string): Promise<boolean> => {
+    if (where === 'none') return true;
+    if (where === 'env') return text(source.env[name]) !== '';
+    const stored = await source.secrets.get(name);
+    return stored !== null && !stored.empty && text(stored.reveal('dispatch')) !== '';
+  };
+  let primary: boolean;
+  try { primary = await present(keySource, keyName); }
+  catch (error) {
+    return missing('store', `The secret store could not be read for ${keyName}: ${error instanceof Error ? error.message : String(error)}.`);
+  }
+  if (!primary) {
+    let fallback = false;
+    try {
+      for (const target of captureJudgmentFallbackSettings(source.config.get('judgment.fallbacks'))) {
+        if (await present(target.keySource, target.keyName)) { fallback = true; break; }
+      }
+    } catch { fallback = false; }
+    if (!fallback) {
+      return missing('key', keySource === 'secret'
+        ? `No decision model key: the secret store has no ${keyName}.`
+        : `No decision model key: the environment variable ${keyName} is not set.`);
+    }
+  }
+  if (check === undefined) return { usable: true, endpoint, model, checked: false };
+  try {
+    const port = createSystemOnePort(await judgmentConfigFromSettings(source, check.signal));
+    await decisionModelReadinessCheck.run(port, 'Confirm that the decision model is reachable and answering.', { signal: check.signal });
+    return { usable: true, endpoint, model, checked: true };
+  } catch (error) {
+    check.signal.throwIfAborted();
+    const failure = describeDecisionModelFailure(model, error);
+    return missing('rejected', failure !== undefined ? `${failure.model}: ${failure.what}${/[.!?]$/.test(failure.what) ? '' : '.'} ${failure.nextStep}`
+      : `The decision model at ${endpoint} did not answer: ${error instanceof Error ? error.message : String(error)}.`);
+  }
+}
+
+/** What {@link storeDecisionModelKey} writes through: the secret store and the settings. */
+export interface DecisionModelKeyTarget {
+  readonly secrets: Pick<SecretsManager, 'set'>;
+  readonly config: Pick<ConfigManager, 'setMany'>;
+}
+
+/**
+ * Stores a pasted TypeSafe key in the secret store as TYPESAFE_API_KEY and
+ * points the decision model at it (`judgment.keySource` secret,
+ * `judgment.keyName` TYPESAFE_API_KEY) in one settings write. Resolves once
+ * both are durable, including the daemon's answer when it owns the settings;
+ * a refusal is returned with the sentence a person reads. The key is never
+ * echoed.
+ */
+export async function storeDecisionModelKey(
+  target: DecisionModelKeyTarget,
+  pasted: string,
+): Promise<{ readonly ok: true } | { readonly ok: false; readonly sentence: string }> {
+  const key = pasted.trim();
+  if (key === '') return { ok: false, sentence: 'No key was entered.' };
+  if (/\s/.test(key)) return { ok: false, sentence: 'A TypeSafe key is one word with no spaces; paste only the key.' };
+  try { await target.secrets.set(JUDGMENT_KEY_NAME, key); }
+  catch (error) {
+    return { ok: false, sentence: `The key could not be stored in the secret store: ${error instanceof Error ? error.message : String(error)}.` };
+  }
+  const result = target.config.setMany([
+    { key: 'judgment.keySource', value: 'secret' },
+    { key: 'judgment.keyName', value: JUDGMENT_KEY_NAME },
+  ], localOwnerActor());
+  if (!result.ok) return { ok: false, sentence: `The key was stored, but the decision model was not pointed at it: ${result.refusal.reason}` };
+  const refused = result.pending === undefined ? [] : await result.pending.settle();
+  if (refused.length > 0) {
+    const first = refused[0]!;
+    return { ok: false, sentence: `The key was stored, but the daemon refused ${first.key}: ${first.error instanceof Error ? first.error.message : String(first.error)}` };
+  }
+  return { ok: true };
 }
 
 /** Ports whose composition has been disposed; never reinstalled. */

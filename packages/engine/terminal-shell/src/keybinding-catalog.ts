@@ -18,8 +18,15 @@ export const COMMON_ACTION_DESCRIPTIONS = {
   'next-session':          'Show the next session (agent or process) in the session row above the conversation',
   'previous-session':      'Show the previous session (agent or process) in the session row above the conversation',
 };
+/**
+ * An Alt or Ctrl+Shift chord also has a second default that every terminal
+ * sends and that readline habits, tmux and macOS Terminal leave alone (a
+ * function key, a plain Ctrl chord on a free letter or symbol, or Ctrl with
+ * an arrow or Delete): macOS Terminal sends no Alt by default, and a terminal
+ * without the extended keyboard protocol sends Ctrl+Shift+letter as Ctrl+letter.
+ */
 const COMMON_DEFAULT_KEYBINDINGS = {
-  'copy-selection':        [{ key: 'c', ctrl: true, shift: true }],
+  'copy-selection':        [{ key: 'c', ctrl: true, shift: true }, { key: 'f5' }],
   'clear-cancel':          [{ key: 'c', ctrl: true }],
   'screen-clear':          [{ key: 'l', ctrl: true }],
   'history-search':        [{ key: 'r', ctrl: true }],
@@ -30,13 +37,13 @@ const COMMON_DEFAULT_KEYBINDINGS = {
   'delete-word':           [{ key: 'w', ctrl: true }],
   'next-error-line-end':   [{ key: 'e', ctrl: true }],
   'undo':                  [{ key: 'z', ctrl: true }],
-  'redo':                  [{ key: 'z', ctrl: true, shift: true }],
+  'redo':                  [{ key: 'z', ctrl: true, shift: true }, { key: '^', ctrl: true }],
   'paste':                 [{ key: 'v', ctrl: true }],
   'focus-work-tree':       [{ key: 'up', alt: true }, { key: 'up', ctrl: true }],
   // Session switching has its own chords, so Tab stays completion/fold and
   // Shift+Tab stays the permission mode in every state.
-  'next-session':          [{ key: 'n', alt: true }],
-  'previous-session':      [{ key: 'p', alt: true }],
+  'next-session':          [{ key: 'n', alt: true }, { key: 'q', ctrl: true }],
+  'previous-session':      [{ key: 'p', alt: true }, { key: '_', ctrl: true }],
 } satisfies Record<string, KeyCombo[]>;
 type CommonKeyAction = keyof typeof COMMON_DEFAULT_KEYBINDINGS;
 function isCommonAction(action: string): action is CommonKeyAction {

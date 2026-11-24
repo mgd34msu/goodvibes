@@ -1,0 +1,129 @@
+/*
+ * Compact density (Settings > General > Density, or "Toggle Density" in the
+ * palette): tighter rows and spacing in every list and in the transcript.
+ *
+ * Every rule here is scoped to :root[data-density="compact"], which outranks
+ * a component's own single-class rule whatever order the stylesheets load in
+ * (a view's styles arrive with the view). Row heights shrink only for a fine
+ * pointer: on a touch screen a row stays a 44px target and only the spacing
+ * around it tightens.
+ */
+
+/* ── The scale: every component that reads these tightens with them ── */
+:root[data-density="compact"] {
+  --nav-item-h: 28px;
+  --leading-prose: 24px;
+  --leading-bubble: 22px;
+}
+
+/* ── Kit rows and lists (Work, Library, Personal, Settings) ── */
+:root[data-density="compact"] .gv-row {
+  gap: 10px;
+  padding: 6px 12px;
+}
+
+:root[data-density="compact"] .gv-row__text {
+  gap: 0;
+}
+
+:root[data-density="compact"] .dv-header {
+  padding: 16px 24px 0;
+}
+
+:root[data-density="compact"] .dv-filters {
+  padding: 10px 24px 0;
+}
+
+:root[data-density="compact"] .dv-body {
+  margin-top: 10px;
+  padding: 0 24px 20px;
+}
+
+:root[data-density="compact"] .dv-list {
+  padding: 0 24px 20px;
+}
+
+:root[data-density="compact"] .dv-split--detail > .dv-list {
+  padding: 0 12px 20px 24px;
+}
+
+:root[data-density="compact"] .dv-group__label {
+  margin-bottom: 4px;
+}
+
+:root[data-density="compact"] .dv-pane__header {
+  padding: 2px 16px 8px;
+}
+
+:root[data-density="compact"] .dv-pane__body {
+  gap: 16px;
+  padding: 2px 16px 16px;
+}
+
+:root[data-density="compact"] .dv-pane__footer {
+  padding: 8px 16px;
+}
+
+:root[data-density="compact"] .dv-facts__row {
+  padding: 6px 0;
+}
+
+:root[data-density="compact"] .shell-recent__list {
+  gap: 0;
+}
+
+/* ── The transcript ── */
+:root[data-density="compact"] .chat-main .messages {
+  padding: 16px 16px 8px;
+}
+
+:root[data-density="compact"] .chat-column {
+  gap: 8px;
+}
+
+:root[data-density="compact"] .message {
+  gap: 8px;
+}
+
+:root[data-density="compact"] .message.user .message-bubble {
+  padding: 6px 12px;
+}
+
+:root[data-density="compact"] .message.neutral .message-bubble {
+  padding: 6px 12px;
+}
+
+:root[data-density="compact"] .message-actions {
+  min-height: 24px;
+  margin-top: 0;
+}
+
+:root[data-density="compact"] .composer-box {
+  padding: 8px 8px 6px 10px;
+}
+
+/* ── Row heights, for a mouse or trackpad only ── */
+@media (pointer: fine) {
+  :root[data-density="compact"] .gv-row {
+    min-height: 40px;
+  }
+
+  :root[data-density="compact"] .gv-option,
+  :root[data-density="compact"] .gv-menu-item {
+    min-height: 28px;
+  }
+
+  :root[data-density="compact"] .cmd-item {
+    min-height: 30px;
+  }
+
+  :root[data-density="compact"] .model-picker__row {
+    min-height: 28px;
+    padding: 2px 8px;
+  }
+
+  :root[data-density="compact"] .composer-slash-item {
+    min-height: 28px;
+    padding: 4px 10px;
+  }
+}

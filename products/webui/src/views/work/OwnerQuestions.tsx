@@ -111,9 +111,28 @@ function readAnswered(value: unknown): AnsweredQuestion[] {
     if (typeof item.id !== 'string' || typeof item.title !== 'string' || item.status !== 'answered') return [];
     if (!(item.kind === 'question' && delivery) && item.kind !== 'approval') return [];
     const answer = item.answer as { option?: unknown; text?: unknown } | undefined;
+    if (item.kind === 'approval') {
+      const reason = typeof answer?.text === 'string' && answer.text ? answer.text : '';
+      const said = answer?.option === 'approve' ? 'You said yes' : answer?.option === 'deny' ? 'You said no' : '';
+      return [{ id: item.id, title: approvalTitle(item), answer: [said, reason].filter(Boolean).join(': '), ...(delivery ? { delivery } : {}) }];
+    }
     const words = [answer?.option, answer?.text].filter((part): part is string => typeof part === 'string' && part.length > 0).join(': ');
     return [{ id: item.id, title: item.title, answer: words, ...(delivery ? { delivery } : {}) }];
   });
+}
+
+/**
+ * A permission ask's row title in the words it was asked in: the ask's own one-line title
+ * ("Run bun test?"), else its question with what it was about ("Run this command? ls -la"),
+ * and the daemon's tool line only when the item carries no words at all.
+ */
+function approvalTitle(item: Record<string, unknown>): string {
+  const presentation = item.presentation as { title?: unknown; question?: unknown; subject?: { lines?: unknown } } | undefined;
+  if (typeof presentation?.title === 'string' && presentation.title) return presentation.title;
+  const subjectLines: unknown = presentation?.subject?.lines;
+  const lines = Array.isArray(subjectLines) ? subjectLines.filter((line): line is string => typeof line === 'string') : [];
+  if (typeof presentation?.question === 'string' && presentation.question) return [presentation.question, lines[0]].filter(Boolean).join(' ');
+  return typeof item.title === 'string' ? item.title : '';
 }
 
 const DELIVERY_TONE: Record<AnswerDelivery['state'], StatusTone> = { delivered: 'ok', waiting: 'info', undeliverable: 'warn' };

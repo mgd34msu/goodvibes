@@ -57,8 +57,11 @@ const CONNECTED_SCHEDULES: ScheduleHost<CommandContext> = {
           runCount: schedule.runCount ?? 0,
           nextRunAt: schedule.nextRunAt,
           lastRunAt: schedule.lastRunAt,
-          timing: schedule.scheduleKind ? `${schedule.scheduleKind} ${schedule.scheduleValue ?? ''}${schedule.timezone ? ` [${schedule.timezone}]` : ''}`.trim() : 'not said',
-          prompt: '',
+          // In words, with the cron beside it, as the terminal app shows its own schedules.
+          timing: schedule.definition
+            ? formatScheduleTiming(schedule.definition)
+            : schedule.scheduleKind ? `${schedule.scheduleKind} ${schedule.scheduleValue ?? ''}${schedule.timezone ? ` [${schedule.timezone}]` : ''}`.trim() : 'not said',
+          prompt: schedule.prompt ?? '',
           ...(run && (run.status === 'missed' || run.status === 'failed') ? { outcome: run.status } : {}),
         };
       }),

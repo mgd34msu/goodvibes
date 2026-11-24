@@ -1132,7 +1132,7 @@ The client sends the token as `Authorization: Bearer <token>`, which is what the
 
 ## SDK entry points
 
-The package `@goodvibes/engine` (version 3.4.8) contains typed clients for this API. It does not call model providers itself; the daemon does.
+The package `@goodvibes/engine` (version {{release}}) contains typed clients for this API. It does not call model providers itself; the daemon does.
 
 How it is published: two packages of the repository are publishable, `@goodvibes/engine` (`packages/engine`) and `@goodvibes/judgment` (`packages/judgment`); the products (`goodvibes`, `goodvibes-agent`, the daemon, the web UI) are private and never published. The release workflow publishes the two packages to `https://registry.npmjs.org` with provenance only when a release runs from a version tag and the repository variable `PUBLISH_NPM` is `true`; otherwise a release produces the native GitHub release and its installer assets and publishes nothing to npm. The repository does not record that variable's value, so whether a given version is on npm is answered by the registry, not by the source:
 
@@ -1143,8 +1143,8 @@ npm view @goodvibes/engine versions --json
 When the version you need is there, install it like any package:
 
 ```sh
-bun add @goodvibes/engine@3.4.8
-npm install @goodvibes/engine@3.4.8
+bun add @goodvibes/engine@{{release}}
+npm install @goodvibes/engine@{{release}}
 ```
 
 When it is not, use it from a source checkout of the same version, inside that checkout's workspace:
@@ -1152,7 +1152,7 @@ When it is not, use it from a source checkout of the same version, inside that c
 ```sh
 git clone https://github.com/mgd34msu/goodvibes.git
 cd goodvibes
-git checkout v3.4.8
+git checkout v{{release}}
 bun install
 bun run build                 # produces the dist/ directories the package's exports name
 mkdir -p products/my-client

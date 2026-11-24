@@ -14,9 +14,12 @@
  * A command whose every action runs only in the terminal app is not listed:
  * the menu never offers a command that would do nothing here or send its text
  * to the model as a chat message.
+ *
+ * The actions load with the command catalog (lib/command-catalog.ts) when a `/`
+ * is first typed; until then the list is `/new` alone.
  */
-import { COMMAND_ACTIONS } from '../../lib/generated/command-actions';
-import { COMMAND_SCREENS } from '../../components/command/screens/CommandScreens';
+import type { CommandActionsSnapshot } from '../../lib/command-actions-types';
+import { COMMAND_SCREEN_LIST } from '../../components/command/screens/command-screen-list';
 
 /** What running a slash command does in the browser. */
 export type SlashRun =
@@ -32,11 +35,12 @@ export interface SlashCommand {
   readonly run: SlashRun;
 }
 
-function buildSlashCommands(): SlashCommand[] {
+/** The composer's commands: `/new`, and with the loaded actions every command the browser can run. */
+export function slashCommandsOf(actions: CommandActionsSnapshot | null): readonly SlashCommand[] {
   const out: SlashCommand[] = [{ name: 'new', description: 'Start a new chat', run: { kind: 'new-chat' } }];
-  for (const command of COMMAND_ACTIONS.commands) {
+  for (const command of actions?.commands ?? []) {
     if (command.name === 'new') continue;
-    const screen = COMMAND_SCREENS.find((entry) => entry.command === command.name);
+    const screen = COMMAND_SCREEN_LIST.find((entry) => entry.command === command.name);
     if (screen) {
       out.push({ name: command.name, description: screen.title, run: { kind: 'palette-command', id: `screen.${screen.id}` } });
       continue;
@@ -51,8 +55,6 @@ function buildSlashCommands(): SlashCommand[] {
   }
   return out.sort((a, b) => (a.name === 'new' ? -1 : b.name === 'new' ? 1 : a.name.localeCompare(b.name)));
 }
-
-export const SLASH_COMMANDS: readonly SlashCommand[] = buildSlashCommands();
 
 /**
  * What a draft is: a command this composer runs, a command attempt it does
@@ -72,11 +74,16 @@ export type SlashDraft =
 
 const COMMAND_ATTEMPT = /^\/([A-Za-z][A-Za-z0-9_-]*)(?=\s|$)/;
 
-export function parseSlashCommand(draft: string): SlashDraft {
+/** True when the draft starts like a slash command: the catalog is wanted before it is read. */
+export function isSlashAttempt(draft: string): boolean {
+  return COMMAND_ATTEMPT.test(draft.trim());
+}
+
+export function parseSlashCommand(draft: string, commands: readonly SlashCommand[]): SlashDraft {
   const trimmed = draft.trim();
   const word = COMMAND_ATTEMPT.exec(trimmed)?.[1];
   if (!word) return { kind: 'text' };
-  const known = SLASH_COMMANDS.find((command) => command.name === word.toLowerCase());
+  const known = commands.find((command) => command.name === word.toLowerCase());
   // A command runs only when typed alone; with words after it, it is held: the
   // browser's sheets and screens take their values in their own fields.
   if (known && trimmed.length === word.length + 1) return { kind: 'command', command: known };

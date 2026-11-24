@@ -14,7 +14,7 @@
  * selection ("Apply selected"); a command waiting on its terminal takes the
  * reply it is sent.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { agoWords } from '@goodvibes/engine/contracts';
 import { client as platformClient } from '../../lib/goodvibes';
@@ -64,6 +64,29 @@ function capitalized(text: string): string {
 function choiceLabel(choice: AskChoice, question: boolean): string {
   if (choice.id === 'own-words' && question) return 'Answer in your own words';
   return choice.label;
+}
+
+/**
+ * The key that answers with a choice while the card has focus: the presentation's own
+ * key (the terminal card's y / a / n / 1..8), else the same letters for the same choices.
+ */
+function choiceKey(choice: AskChoice): string | undefined {
+  if (choice.key) return choice.key.toLowerCase();
+  if (choice.id === 'once') return 'y';
+  if (choice.id === 'remember') return 'a';
+  if (choice.id === 'no') return 'n';
+  const option = /^option:(\d+)$/.exec(choice.id);
+  if (option) {
+    const index = Number(option[1]);
+    return index < 9 ? String(index + 1) : undefined;
+  }
+  return undefined;
+}
+
+/** A key event in a field types text; only a key pressed elsewhere on the card answers. */
+function typingTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName);
 }
 
 type Mode = { readonly step: 'choose' } | { readonly step: 'remember' } | { readonly step: 'refuse'; readonly choice: AskChoice } | { readonly step: 'own-words'; readonly choice: AskChoice };
@@ -172,20 +195,40 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
   // ahead even when the notice never reached the person is the presentation's consequence, on the card's face.
   const goesAhead = answerable && p.countdown?.verb === 'goes ahead';
 
+  const choiceDisabled = (choice: AskChoice): boolean => busy || !answerable
+    || (choice.id === 'apply-selected' && selected.size === 0)
+    || (p.kind === 'answer-command-prompt' && choice.id === 'once' && execAnswer.length === 0);
+
+  // While the card has focus (and no field on it is being typed in), a choice's key answers with it.
+  const onCardKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (mode.step !== 'choose' || !answerable || event.defaultPrevented) return;
+    if (event.ctrlKey || event.metaKey || event.altKey || typingTarget(event.target)) return;
+    const pressed = event.key.toLowerCase();
+    const choice = p.choices.find((candidate) => choiceKey(candidate) === pressed);
+    if (!choice || choiceDisabled(choice)) return;
+    event.preventDefault();
+    run(choice);
+  };
+
   const choices = (
     <div className="ask-card__choices">
       <div className="ask-card__buttons" role="group" aria-label="Your answer">
-        {p.choices.map((choice) => (
-          <Button
-            key={choice.id}
-            size="sm"
-            variant={choice === primary ? 'primary' : 'secondary'}
-            disabled={busy || !answerable || (choice.id === 'apply-selected' && selected.size === 0) || (p.kind === 'answer-command-prompt' && choice.id === 'once' && execAnswer.length === 0)}
-            onClick={() => run(choice)}
-          >
-            {choiceLabel(choice, question)}
-          </Button>
-        ))}
+        {p.choices.map((choice) => {
+          const key = choiceKey(choice);
+          return (
+            <Button
+              key={choice.id}
+              size="sm"
+              variant={choice === primary ? 'primary' : 'secondary'}
+              disabled={choiceDisabled(choice)}
+              aria-keyshortcuts={key}
+              onClick={() => run(choice)}
+            >
+              {choiceLabel(choice, question)}
+              {key && <kbd className="ask-card__key" aria-hidden="true">{key.toUpperCase()}</kbd>}
+            </Button>
+          );
+        })}
         {withdraw && (
           <Button size="sm" variant="ghost" className="ask-card__withdraw" disabled={busy || withdraw.busy} onClick={withdraw.run}>
             Withdraw this request
@@ -261,6 +304,9 @@ export function AskCard({ ask, actions, variant, extraDetails = [], onDecided, l
       className={`ask-card ask-card--${variant}${cannotUndo ? ' ask-card--undo' : ''}${question ? ' ask-card--question' : ''}`}
       role="group"
       aria-label={p.question}
+      // Focusable so its keys can be used from the card itself, not only from one of its buttons.
+      tabIndex={answerable ? 0 : undefined}
+      onKeyDown={onCardKeyDown}
     >
       {lead}
       <p className="ask-card__question">{p.question}</p>

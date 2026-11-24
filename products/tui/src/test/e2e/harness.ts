@@ -19,6 +19,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { getProviderModelsCachePath } from '@goodvibes/engine/platform/platform/providers';
+import { HOST_MESSAGE_HEADER } from '@goodvibes/engine/platform/platform/core';
 import { TuiConfigManager } from '../../config/host-settings.ts';
 import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
 import { seedProviderMetadataCacheFixture } from '../helpers/provider-metadata-cache-fixture.ts';
@@ -152,10 +153,12 @@ export function offeredTools(request: ModelRequest): string[] {
   return request.tools.map((tool) => String((tool as { function?: { name?: unknown } }).function?.name ?? ''));
 }
 
-/** The last user message of a request. */
+/** The last message the person sent: the last user message that is not the host channel's trailing message. */
 export function lastUserText(request: ModelRequest): string {
   for (let i = request.messages.length - 1; i >= 0; i -= 1) {
-    if (request.messages[i]!.role === 'user') return messageText(request.messages[i]!);
+    if (request.messages[i]!.role !== 'user') continue;
+    const text = messageText(request.messages[i]!);
+    if (!text.startsWith(HOST_MESSAGE_HEADER)) return text;
   }
   return '';
 }

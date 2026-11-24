@@ -121,6 +121,8 @@ export type ConversationMessageSnapshot =
     outcome?: 'ok' | 'error' | 'cancelled';
     /** Host-only facts the tool reported beside its text (a read's observations); saved with the message, never shown to the model. */
     hostEvidence?: ToolHostEvidence | undefined;
+    /** The line a person reads for this result in place of `content` (a malformed call the model was asked to send again); never shown to the model. */
+    ownerLine?: string | undefined;
   };
 
 type Message = ConversationMessageSnapshot;
@@ -464,6 +466,7 @@ export class ConversationManager {
         outcome: result.cancelled === true ? 'cancelled' : result.success ? 'ok' : 'error',
         ...(toolName ? { toolName } : {}),
         ...(result.hostEvidence ? { hostEvidence: structuredClone(result.hostEvidence) } : {}),
+        ...(result.ownerLine ? { ownerLine: result.ownerLine } : {}),
       });
     }
     this._messagesRevision++;

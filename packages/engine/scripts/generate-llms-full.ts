@@ -2,7 +2,8 @@
 /**
  * generate-llms-full.ts
  *
- * Writes docs/llms-full.txt: the single file a language model reads to install,
+ * Writes docs/llms-full.txt, and beside it docs/llms.txt (one line per part and
+ * what it covers, then the full file): llms-full.txt is the single file a language model reads to install,
  * configure and operate GoodVibes. It is the hand-written parts in docs/llms/
  * (`NN-slug.md`, concatenated in number order) with every line of the form
  * `<!-- generated: NAME -->` replaced by a reference section built here from
@@ -16,8 +17,8 @@
  * PATH and a throwaway HOME, so nothing on this machine (settings, keys, a
  * daemon) reaches the output, and the output carries no machine path or time.
  *
- *   bun packages/engine/scripts/generate-llms-full.ts           write docs/llms-full.txt
- *   bun packages/engine/scripts/generate-llms-full.ts --check   exit 1, naming what differs, when it is stale
+ *   bun packages/engine/scripts/generate-llms-full.ts           write docs/llms-full.txt and docs/llms.txt
+ *   bun packages/engine/scripts/generate-llms-full.ts --check   exit 1, naming what differs, when either is stale
  *
  * A part that names an unknown marker fails both modes.
  */
@@ -32,12 +33,17 @@ const ENGINE_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const REPO_ROOT = resolve(ENGINE_ROOT, '../..');
 const PARTS_DIR = join(REPO_ROOT, 'docs/llms');
 const OUTPUT = join(REPO_ROOT, 'docs/llms-full.txt');
+/** The small index of the parts, beside the full file (partsIndex). */
+const INDEX_OUTPUT = join(REPO_ROOT, 'docs/llms.txt');
 const CHECK_ONLY = process.argv.includes('--check');
 const PLATFORM = join(ENGINE_ROOT, 'platform/src/platform');
 const PART_NAME = /^\d\d-[a-z0-9-]+\.md$/;
 /** The part that holds every complete list in full. */
 const REFERENCE_PART = '90-reference.md';
 const MARKER = /^<!-- generated: ([a-z0-9-]+(?::[A-Za-z0-9._-]+)?) -->$/;
+/** Written in a part where the release is named; replaced by the suite version, so a part never names a release by hand. */
+const RELEASE_TOKEN = '{{release}}';
+const RELEASE = (JSON.parse(readFileSync(join(REPO_ROOT, 'package.json'), 'utf8')) as { readonly version: string }).version;
 
 // ---------------------------------------------------------------------------
 // Isolation: nothing from this machine may reach the output.
@@ -1789,7 +1795,7 @@ async function assemble(): Promise<string> {
       const marker = MARKER.exec(line.trim());
       if (!marker) {
         if (line.includes('<!-- generated:')) problems.push(`docs/llms/${part}:${index + 1}: a malformed marker: ${line.trim()}`);
-        rendered.push({ text: line, source: index + 1 });
+        rendered.push({ text: line.replaceAll(RELEASE_TOKEN, RELEASE), source: index + 1 });
         continue;
       }
       if (marker[1] === 'toc') {
@@ -1928,11 +1934,57 @@ function firstDifference(current: string, next: string): string {
   return 'the files differ only in their ends';
 }
 
+/**
+ * docs/llms.txt, the small index beside the full file: one line per part, its
+ * title and the first sentence of its opening paragraph (what the part says it
+ * covers), then the full file with its size. An opening sentence about "this
+ * file" describes the whole full file, not the part, so that part is listed by
+ * its title alone.
+ */
+function partsIndex(fullBytes: number): string {
+  const parts = existsSync(PARTS_DIR) ? readdirSync(PARTS_DIR).filter((name) => PART_NAME.test(name)).sort(byText) : [];
+  const entries: string[] = [];
+  for (const part of parts) {
+    const lines = readFileSync(join(PARTS_DIR, part), 'utf8').replace(/\r\n/g, '\n').split('\n');
+    const titleAt = lines.findIndex((line) => /^# \S/.test(line));
+    if (titleAt < 0) {
+      problems.push(`docs/llms/${part}: no "# " title line for docs/llms.txt`);
+      continue;
+    }
+    const title = lines[titleAt]!.slice(2).trim();
+    const opening: string[] = [];
+    for (const line of lines.slice(titleAt + 1)) {
+      if (line.trim() === '') { if (opening.length > 0) break; continue; }
+      if (/^(#{1,6} |<!--|```|~~~|[|>*-] )/.test(line)) break;
+      opening.push(line.trim());
+    }
+    const sentence = /^(.+?[.!?])(?:\s|$)/.exec(opening.join(' '))?.[1];
+    const covers = sentence === undefined || /^This file\b/.test(sentence) ? '' : `: ${sentence}`;
+    entries.push(`- [${title}](llms/${part})${covers}`);
+  }
+  return [
+    '# GoodVibes',
+    '',
+    '> How to install, configure and operate GoodVibes, written for a language model that operates it for a person. Each part below is one file in `llms/`; `llms-full.txt` is all of them in order, with every `<!-- generated: ... -->` line of a part replaced by the complete list the code holds (settings, commands, slash commands, tools, operator API methods, events, errors, environment variables).',
+    '',
+    '## Parts',
+    '',
+    ...entries,
+    '',
+    '## Everything in one file',
+    '',
+    `- [GoodVibes, complete](llms-full.txt): every part above in one file, with the generated lists filled in (${fullBytes} bytes).`,
+    '',
+  ].join('\n');
+}
+
 let exitCode = 0;
 try {
   const output = await assemble();
   if (output.includes(SCRATCH) || output.includes(REPO_ROOT)) problems.push('the output contains a path on this machine');
   const current = existsSync(OUTPUT) ? readFileSync(OUTPUT, 'utf8') : null;
+  const index = partsIndex(Buffer.byteLength(output, 'utf8'));
+  const currentIndex = existsSync(INDEX_OUTPUT) ? readFileSync(INDEX_OUTPUT, 'utf8') : null;
   for (const problem of problems) console.error(`[llms-full] ${problem}`);
   if (problems.length > 0) exitCode = 1;
   if (CHECK_ONLY) {
@@ -1942,12 +1994,20 @@ try {
     } else if (current !== output) {
       console.error(`[llms-full] docs/llms-full.txt is out of step with docs/llms and the registries (${firstDifference(current, output)}); run \`bun run llms:generate\` and commit docs/llms-full.txt`);
       exitCode = 1;
-    } else if (exitCode === 0) {
-      console.log('[llms-full] docs/llms-full.txt is up to date');
     }
+    if (currentIndex === null) {
+      console.error('[llms-full] docs/llms.txt does not exist; run `bun run llms:generate`');
+      exitCode = 1;
+    } else if (currentIndex !== index) {
+      console.error(`[llms-full] docs/llms.txt is out of step with docs/llms (${firstDifference(currentIndex, index)}); run \`bun run llms:generate\` and commit docs/llms.txt`);
+      exitCode = 1;
+    }
+    if (exitCode === 0) console.log('[llms-full] docs/llms-full.txt and docs/llms.txt are up to date');
   } else {
     if (current !== output) writeFileSync(OUTPUT, output, 'utf8');
+    if (currentIndex !== index) writeFileSync(INDEX_OUTPUT, index, 'utf8');
     console.log(`[llms-full] ${current === output ? 'unchanged' : 'wrote'} docs/llms-full.txt (${Buffer.byteLength(output, 'utf8')} bytes, ${output.split('\n').length} lines)`);
+    console.log(`[llms-full] ${currentIndex === index ? 'unchanged' : 'wrote'} docs/llms.txt (${index.split('\n').length} lines)`);
     for (const [name, count] of [...counts].sort(([a], [b]) => byText(a, b))) console.log(`[llms-full]   ${name}: ${count}`);
     if (missingDescriptions.size > 0) {
       console.log(`[llms-full] entries a registry leaves without a description (${missingDescriptions.size}):`);

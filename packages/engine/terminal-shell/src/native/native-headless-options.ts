@@ -8,6 +8,8 @@ export interface HeadlessRunFlags {
   readonly omitAccumulated?: boolean | undefined;
   /** Read owner answers to permission prompts from stdin (stream-json only). */
   readonly answerPermissions?: boolean | undefined;
+  /** Read the prompt from this file, or from stdin for `-`. */
+  readonly promptFile?: string | undefined;
 }
 
 /** The flags of a parsed command line this module reads: the catalogs declare them, one parser fills them. */
@@ -18,6 +20,7 @@ export interface HeadlessCliFlags {
   readonly maxTurns?: string | undefined;
   readonly omitAccumulated?: boolean | undefined;
   readonly answerPermissions?: boolean | undefined;
+  readonly promptFile?: string | undefined;
 }
 
 export interface HeadlessInvocation {
@@ -55,6 +58,7 @@ export function headlessInvocationFromFlags(flags: HeadlessCliFlags): HeadlessIn
     ...(maxTurns === undefined ? {} : { maxTurns }),
     ...(flags.omitAccumulated ? { omitAccumulated: true } : {}),
     ...(flags.answerPermissions ? { answerPermissions: true } : {}),
+    ...(flags.promptFile !== undefined ? { promptFile: flags.promptFile } : {}),
   };
   return { mode: flags.intakeMode ?? 'submit', errors, ...(Object.keys(run).length ? { run } : {}) };
 }

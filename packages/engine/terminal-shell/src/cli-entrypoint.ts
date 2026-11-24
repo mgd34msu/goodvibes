@@ -57,11 +57,68 @@ export function shellMetadataResult(
   if (cli.command === 'completion') return ports.completion(cli.commandArgs, binary);
   return null;
 }
-/** Override errors are terminal before runtime construction, headless effects or command dispatch. */
+/** Override errors are terminal before runtime construction, headless effects or command dispatch: written as text, then exit 2. */
 export function requireValidCliOverrides(errors: readonly string[], write: (message: string) => void, exit: (code: number) => never): void {
   if (errors.length === 0) return;
-  write(errors.join('\n'));
+  const result = cliUsageRefusalResult({ command: '', flags: {} }, errors, undefined);
+  if (result?.stderr !== undefined) write(result.stderr);
   exit(2);
+}
+
+/** A `run` that was refused before it started, as the run's own result writer takes it. */
+export interface CliUsageRunResult {
+  readonly exitCode: 2;
+  readonly response: '';
+  readonly error: string;
+  readonly stopReason: 'invalid-input';
+}
+
+export interface CliUsageRefusalPorts {
+  readonly stdout: (text: string) => void;
+  readonly stderr: (text: string) => void;
+  /**
+   * The program's `run` result writer, loaded only when a `run` asked for JSON
+   * is refused, so its answer has the one shape every `run` final frame has.
+   */
+  readonly loadRunResultWriter: () => Promise<(result: CliUsageRunResult, format: string, stdout: (line: string) => void) => void>;
+}
+
+type CliUsageRefusalCli = { readonly command: string; readonly flags: { readonly outputFormat?: string | undefined } };
+
+const asksForJson = (cli: CliUsageRefusalCli): boolean => cli.flags.outputFormat === 'json' || cli.flags.outputFormat === 'stream-json';
+
+/**
+ * What a usage error prints (exit 2): the error lines and, when given, the one
+ * usage line of the command, never the whole manual. With `--output json` or
+ * `stream-json` it is one `{ok:false, kind:"usage", error, next}` document on
+ * stdout instead. Undefined for a `run` that asked for JSON: its answer is the
+ * run's own final frame, which {@link writeCliUsageRefusal} writes.
+ */
+export function cliUsageRefusalResult(cli: CliUsageRefusalCli, errors: readonly string[], usageLine: string | undefined): ShellMetadataResult | undefined {
+  if (!asksForJson(cli)) return { stderr: [...errors, ...(usageLine ? [usageLine] : [])].join('\n'), exitCode: 2 };
+  if (cli.command === 'run') return undefined;
+  return { stdout: JSON.stringify({ ok: false, kind: 'usage', error: errors.join(' '), ...(usageLine ? { next: [usageLine] } : {}) }, null, 2), exitCode: 2 };
+}
+
+/**
+ * Write a usage error (the caller exits 2): {@link cliUsageRefusalResult}, and
+ * for a `run` that asked for JSON the run's final frame (`stopReason`
+ * `invalid-input`), so it has the one shape every `run` final frame has.
+ */
+export async function writeCliUsageRefusal(
+  cli: CliUsageRefusalCli,
+  errors: readonly string[],
+  usageLine: string | undefined,
+  ports: CliUsageRefusalPorts,
+): Promise<void> {
+  const result = cliUsageRefusalResult(cli, errors, usageLine);
+  if (result === undefined) {
+    const write = await ports.loadRunResultWriter();
+    write({ exitCode: 2, response: '', error: errors.join(' '), stopReason: 'invalid-input' }, cli.flags.outputFormat ?? 'json', ports.stdout);
+    return;
+  }
+  if (result.stdout !== undefined) ports.stdout(result.stdout);
+  if (result.stderr !== undefined) ports.stderr(result.stderr);
 }
 export function applyCliModelSelection(
   flags: { readonly provider?: string | undefined; readonly model?: string | undefined },

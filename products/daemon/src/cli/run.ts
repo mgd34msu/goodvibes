@@ -12,7 +12,7 @@ import { applyDaemonHomeEnvironment } from './daemon-home-environment.js';
 import { answersHelpFlag, renderGoodVibesDaemonHelp, renderDaemonCommandHelp, renderGoodVibesVersion, renderDaemonCliCatalog } from './help.js';
 import { DAEMON_COMMAND_FAILURE_NEXT_STEP, daemonCommandFailureLines, daemonCommandWords } from './command-failure.js';
 import { runCompletionCommand } from './completion.js';
-import { daemonCommandSpec, isRawInterceptCommand } from './command-catalog.js';
+import { daemonCommandSpec, isRawInterceptCommand, resolveDaemonCommand } from './command-catalog.js';
 import { isActivatingServiceSubcommand, isDaemonServiceSubcommand } from '../daemon/service-subcommands.js';
 import { readEnvDaemonToken } from './daemon-tokens.js';
 import type { DaemonCliRuntime } from './serve.js';
@@ -53,13 +53,15 @@ const PARTIAL = 'Serving requires an explicit production inbox composition. Conf
 export async function runDaemonCli(argv: readonly string[], options: DaemonCliOptions = {}): Promise<number> {
   const stdout = options.stdout ?? ((line: string) => { writeSync(1, `${line}\n`); });
   const stderr = options.stderr ?? ((line: string) => { writeSync(2, `${line}\n`); });
-  const result = (answer: DaemonCommandResult, write = answer.exitCode === 0 ? stdout : stderr): number => {
-    for (const line of answer.lines) write(line);
-    return answer.exitCode;
-  };
   // Whether the caller asked for a JSON document. Until the arguments parse, a
   // raw scan decides; after, the parsed flag or a passthrough command's own `--json`.
   let jsonRequested = argv.includes('--json');
+  // An answer goes to stdout when it succeeded or when the caller asked for JSON
+  // (its failure document is the answer); a text failure goes to stderr.
+  const result = (answer: DaemonCommandResult, write = answer.exitCode === 0 || jsonRequested ? stdout : stderr): number => {
+    for (const line of answer.lines) write(line);
+    return answer.exitCode;
+  };
   // Every failure a --json caller gets is one document on stdout, the same
   // {ok:false, code, error, fix} envelope the commands' own failures use.
   const failure = (exitCode: number, code: string, error: string, fix: string, prose: readonly string[]): number => (jsonRequested
@@ -78,8 +80,13 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         && cli.refusedFlags.some((flag) => flag === '--port' || flag === '--hostname');
       const endpointLines = endpointFlag ? ['The installed service reads controlPlane.host and controlPlane.port from settings each time it starts, so a flag here could never reach it.',
         `Set the persistent binding instead: goodvibes-daemon config set controlPlane.host <host> / controlPlane.port <port>, then run \`${cli.command}\` again.`] : [];
+      // The error and the command's one usage line, not the whole manual.
+      const named = cli.rawCommand === undefined ? cli.command : resolveDaemonCommand(cli.rawCommand);
+      const usageLine = named === undefined
+        ? 'Usage: goodvibes-daemon <command> [options]   (goodvibes-daemon --help lists every command and option)'
+        : `Usage: ${daemonCommandSpec(named).usage}   (goodvibes-daemon ${named} --help shows every form and option)`;
       return failure(2, 'PARSE_ERROR', cli.errors.join('; '), endpointLines.length ? endpointLines.join(' ') : 'see goodvibes-daemon --help',
-        [...cli.errors, ...endpointLines, '', renderGoodVibesDaemonHelp()]);
+        [...cli.errors, ...endpointLines, usageLine]);
     }
     jsonRequested = cli.flags.json || (isRawInterceptCommand(cli.command) && cli.commandArgs.includes('--json'));
     for (const warning of cli.warnings) stderr(`[goodvibes-daemon] warning: ${warning}`);
@@ -252,13 +259,12 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
             surfaceRoot: GOODVIBES_DAEMON_SURFACE_ROOT, daemonHome: daemonHomeDirectory, configManager: config, diagnosticMode: 'structural' }));
           return result({ exitCode: 0, lines: [...answer.lines, '  The certificate authority is removed: turning https on again makes a new one, which each phone installs again.'] });
         }
-        return result(answer, cli.commandArgs.includes('--json') ? stdout : undefined);
+        return result(answer);
       }
       case 'listener': {
         const { runListenerCommand } = await import('../daemon/listener-command.js');
-        // A --json failure document goes to stdout like every other --json answer.
-        return result(runListenerCommand(cli.commandArgs, { configManager: config, daemonHomeDir: daemonHomeDirectory, env }),
-          cli.commandArgs.includes('--json') ? stdout : undefined);
+        // A --json failure document goes to stdout like every other --json answer (result).
+        return result(runListenerCommand(cli.commandArgs, { configManager: config, daemonHomeDir: daemonHomeDirectory, env }));
       }
       case 'cluster': {
         const [{ runClusterCommand }, { readAllStdin }] = await Promise.all([

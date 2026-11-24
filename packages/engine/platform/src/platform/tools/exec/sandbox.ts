@@ -100,6 +100,10 @@ export interface SandboxHostProbe {
   readonly bwrapWorks: boolean;
   /** A trivial `bwrap --unshare-net --ro-bind / / /bin/true`-style run exited 0. */
   readonly netUnshareWorks: boolean;
+  /** Why the probe could not run at all (no usable temp folder), when that is the cause. */
+  readonly probeFault?: string | undefined;
+  /** What bubblewrap printed when the trivial run failed (its first line). */
+  readonly bwrapError?: string | undefined;
 }
 
 /**
@@ -127,13 +131,17 @@ export function detectSandboxAvailability(probe: SandboxHostProbe): SandboxAvail
     };
   }
   if (!probe.bwrapWorks) {
+    // The cause found is reported: a probe that never ran, or what bubblewrap said; a guess only when it said nothing.
+    const cause = probe.probeFault !== undefined
+      ? `its trivial probe could not run: ${probe.probeFault}`
+      : probe.bwrapError !== undefined && probe.bwrapError !== ''
+        ? `a trivial sandbox probe failed: ${probe.bwrapError}`
+        : 'a trivial sandbox probe failed without saying why, unprivileged user namespaces are likely disabled on this host';
     return {
       available: false,
       backend: 'none',
       bwrapPath: probe.bwrapPath,
-      reason:
-        `per-command exec sandbox unavailable: bubblewrap is installed (${probe.bwrapPath}) but a ` +
-        `trivial sandbox probe failed, unprivileged user namespaces are likely disabled on this host`,
+      reason: `per-command exec sandbox unavailable: bubblewrap is installed (${probe.bwrapPath}) but ${cause}`,
       networkIsolationGuaranteed: false,
     };
   }
@@ -617,23 +625,29 @@ export function probeSandboxHost(env: NodeJS.ProcessEnv = process.env): SandboxH
   // Probe with the argv a real run uses, so a host where its namespaces, tmpfs or
   // binds fail is reported unavailable instead of failing every command later.
   let workspace: string;
+  const tempRoot = tmpdir();
   try {
-    workspace = mkdtempSync(join(tmpdir(), 'gv-bwrap-probe-'));
-  } catch {
-    // No usable temp directory means the probe cannot run; report unavailable rather than throw at startup.
-    return { platform, bwrapPath, bwrapWorks: false, netUnshareWorks: false };
+    workspace = mkdtempSync(join(tempRoot, 'gv-bwrap-probe-'));
+  } catch (error) {
+    // No usable temp directory means the probe cannot run; report that cause rather than throw at startup.
+    const why = error instanceof Error ? error.message : String(error);
+    return { platform, bwrapPath, bwrapWorks: false, netUnshareWorks: false, probeFault: `the temp folder ${tempRoot} could not be used (${why})` };
   }
   let bwrapWorks = false;
   let netUnshareWorks = false;
+  let bwrapError: string | undefined;
   try {
-    const attempt = (networkEnabled: boolean): boolean => {
+    const attempt = (networkEnabled: boolean): { readonly ok: boolean; readonly said: string } => {
       const [command, ...args] = buildBwrapArgv({ bwrapPath, workspaceDir: workspace, cwd: workspace, writableExtras: [], networkEnabled });
-      return spawnSync(command!, [...args, '/bin/true'], { timeout: 5000, env }).status === 0;
+      const run = spawnSync(command!, [...args, '/bin/true'], { timeout: 5000, env, encoding: 'utf8' });
+      return { ok: run.status === 0, said: (run.stderr ?? '').trim().split('\n')[0] ?? '' };
     };
-    bwrapWorks = attempt(true);
-    netUnshareWorks = attempt(false);
+    const plain = attempt(true);
+    bwrapWorks = plain.ok;
+    if (!plain.ok) bwrapError = plain.said;
+    netUnshareWorks = attempt(false).ok;
   } finally {
     rmSync(workspace, { recursive: true, force: true });
   }
-  return { platform, bwrapPath, bwrapWorks, netUnshareWorks };
+  return { platform, bwrapPath, bwrapWorks, netUnshareWorks, ...(bwrapError !== undefined ? { bwrapError } : {}) };
 }

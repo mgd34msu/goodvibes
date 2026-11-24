@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
 import { announceSettingsIngestionNotices } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
+import { getInteractiveTerminalLaunchError } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
+import { writeFatalLine } from '@goodvibes/engine/platform/platform/daemon';
 import { isNativeConversationTurnReady, nativeConversationTurnInputOptions } from '@goodvibes/engine/terminal-shell/native-ingress';
 import { readShellFrameFacts, createShellSubmissionPorts, createUiEventPublisher, readUiFrame } from '@goodvibes/engine/terminal-shell/shell-frame-facts';
 import { join } from 'node:path';
@@ -120,6 +122,7 @@ import { createModeWordsSource, getSharedModeFlash } from '@goodvibes/engine/ter
 import { terminalAskFacts, type TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
 import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes/engine/terminal-shell/status-line';
+import { newestUnreadNoticeTitle } from '@goodvibes/engine/terminal-shell/shell-footer';
 import { drawSplashAdditions } from '@goodvibes/engine/terminal-shell/first-run';
 import { getSharedNotificationFeed } from './views/notifications-feed.ts';
 import { keepAwakeHolding } from './core/power-status.ts';
@@ -154,6 +157,20 @@ async function main(prepared: PreparedShellCliRuntime) {
   const stdout = process.stdout;
   const stdin = process.stdin;
   const { cli, configManager, bootstrapWorkingDir, bootstrapHomeDirectory } = prepared;
+
+  // No terminal (a pipe, a script, `< /dev/null`): refused with one line and
+  // exit 2 before anything puts the terminal into raw mode, as the Agent does.
+  const terminalLaunchError = getInteractiveTerminalLaunchError({
+    binary: cli.binary,
+    stdinIsTTY: stdin.isTTY,
+    stdoutIsTTY: stdout.isTTY,
+    words: cli.flags.prompt ?? (cli.rawCommand === undefined && cli.positionals.length > 0 ? cli.positionals.join(' ') : undefined),
+  });
+  if (terminalLaunchError !== null) {
+    // Descriptor write: the process exits at once, and a stream write could still be in flight.
+    writeFatalLine(terminalLaunchError);
+    process.exit(2);
+  }
 
   // Between binary start and the first frame, boot used to be silent (config
   // load, trust manager, memory init, hooks). One honest pre-alt-screen line,
@@ -1100,6 +1117,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       modeKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('cycle-permission-mode')),
       modeFlash: getSharedModeFlash().active(),
       unreadNotices: getSharedNotificationFeed().unreadCount(),
+      newestNotice: newestUnreadNoticeTitle(getSharedNotificationFeed()),
       noticesKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('open-notifications')),
       contextWindow: knownContextWindow,
       contextStatusHint,
@@ -1552,6 +1570,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     shellPaths: ctx.services.shellPaths,
     surface: ctx.services.surface,
     render,
+    // The trust question, asked as the program opens in a folder with no decision.
+    requestTrustDecision: () => trustPromptRef.requestTrustDecision(),
   });
 
   const dispatchInput = (data: string): void => {

@@ -1,6 +1,39 @@
 # Troubleshooting
 
-## Dev server is not reachable
+## The page does not open
+
+The web UI is served by the GoodVibes daemon. If the address does not answer:
+
+- check that GoodVibes is running on that computer (`goodvibes-daemon status`);
+- on the same computer, open `http://127.0.0.1:3421/`;
+- from a phone or another computer, the daemon must be serving your network
+  (Settings, General, Network, or "Yes, serve it to my network" when pairing a
+  phone), and both must be on the same network; a firewall must allow the
+  daemon's port. A plain `http://` address on your network works; the
+  camera-based QR scanner, notifications and the browser's own dictation need
+  HTTPS (for example through Tailscale).
+
+## The page shows the sign-in screen
+
+This browser is not signed in to this daemon. On the computer running
+GoodVibes, run `goodvibes pair` and scan the code or open its link, or paste
+the code under "Other ways to sign in". A refused code says why on the sign-in
+screen. See "Auth fails" below for what each sign-in path uses.
+
+## "Can't reach the daemon"
+
+The page lost the daemon. It keeps what is on screen, unsent text included,
+and comes back by itself when the daemon answers again; "Retry now" checks at
+once.
+
+## A view says "Loading…" for a long time
+
+Work, Library, Personal and Settings load their script the first time each is
+opened. On a slow connection that takes a moment once; after that they open at
+once. A page older than the daemon's current one reloads itself once when it
+fails to load a view.
+
+## For developers: the dev server is not reachable
 
 Check the Vite bind address:
 

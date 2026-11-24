@@ -117,6 +117,8 @@ export const ENV_CATALOG: readonly EnvEntry[] = [
   { name: 'EDITOR', readBy: 'terminal apps', does: 'The editor the apps open when `VISUAL` is not set.' },
   { name: 'DISPLAY', readBy: 'every program', does: 'An X display; with `WAYLAND_DISPLAY` it decides whether a graphical browser or image viewer can be opened, and which clipboard command is used.' },
   { name: 'WAYLAND_DISPLAY', readBy: 'every program', does: 'A Wayland display; see `DISPLAY`. Its presence selects the Wayland clipboard command.' },
+  { name: 'SSH_CONNECTION', readBy: 'terminal apps', does: 'Present in an SSH session: copying skips the system clipboard programs (they would fill the remote machine\'s clipboard) and goes to the terminal\'s clipboard (OSC 52).' },
+  { name: 'SSH_TTY', readBy: 'terminal apps', does: 'Present in an SSH session; read with `SSH_CONNECTION`, with the same effect on copying.' },
   { name: 'WSL_DISTRO_NAME', readBy: 'every program', does: 'Present inside WSL: links and images open in Windows, and the sandbox is treated as running under WSL.' },
   { name: 'WSL_INTEROP', readBy: 'every program', does: 'Present inside WSL; read with `WSL_DISTRO_NAME` to detect WSL.' },
   { name: 'HERMES_HOME', readBy: 'goodvibes-agent', does: 'A directory whose `SOUL.md` Agent adds to its project context files.' },

@@ -329,7 +329,9 @@ export class InputHandler extends TerminalInputHandlerState {
     opts: SelectionOpenOptions | undefined,
     callback: SelectionModalCallback,
   ): void {
-    this.selectionQueue.request({ title, items, opts, callback });
+    // A question that opened by itself reads the composer, so typing in flight and a draft stay there.
+    const withComposer = opts?.unprompted ? { ...opts, composerEmpty: () => this.prompt.length === 0 } : opts;
+    this.selectionQueue.request({ title, items, opts: withComposer, callback });
   }
 
   public registerPaste(content: string): string {

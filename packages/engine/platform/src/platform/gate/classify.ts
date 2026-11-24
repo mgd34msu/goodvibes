@@ -162,6 +162,12 @@ export interface CallFacts {
    * not a reading, owns that fact.
    */
   readonly declaredReadOnly?: boolean | undefined;
+  /**
+   * True when the owner explicitly kept the workspace restricted (the trust
+   * manager's isRestricted); false or absent when it is trusted, has no
+   * decision yet, or no workspace trust policy applies.
+   */
+  readonly workspaceRestricted?: boolean | undefined;
 }
 
 /** What settled a fact, for the caller's own records. */
@@ -274,7 +280,9 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
         : facts.declaredReadOnly === true ? 'a call its tool declared read-only' : 'a read of the app\'s own state',
     } };
   }
-  if (effects !== undefined && paths !== undefined && paths.every((path) => path.inside)) {
+  // A workspace the owner kept restricted has no write allowed by code: it is refused at dispatch.
+  // A workspace with no decision yet is decided as before (an interactive session asks, or trusts, on opening).
+  if (effects !== undefined && paths !== undefined && paths.every((path) => path.inside) && facts.workspaceRestricted !== true) {
     if (facts.category === 'write' && paths.length > 0 && facts.recoverable && effects.every((effect) => LOCAL_EFFECTS.has(effect))) {
       return { kind: 'fact', allow: true, basis: 'declared-effect', decision: {
         state: 'allowed', decidedBy: 'code', reason: 'a recoverable change inside the allowed directories',

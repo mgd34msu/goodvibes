@@ -54,6 +54,12 @@ export interface CommandFlagSpec<TField extends string> {
   readonly warning?: string | undefined;
   /** Compatibility for a vocabulary whose boolean flags accept an ignored inline suffix. */
   readonly allowInlineValue?: boolean | undefined;
+  /**
+   * Global flags only: the commands that use this flag. Absent, every command
+   * does. Every command still accepts it (another one ignores it); a refusal of
+   * an unknown option lists it only for these commands.
+   */
+  readonly commands?: readonly string[] | undefined;
 }
 
 /**

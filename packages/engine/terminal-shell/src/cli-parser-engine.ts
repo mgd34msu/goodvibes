@@ -282,7 +282,10 @@ function unacceptedOptionError<TCommand extends string, TField extends string>(
   arity: ReadonlyMap<string, CliFlagKind>,
   name: string,
 ): string {
-  const accepted = [...catalogFlagsForCommand(catalog, spec.name).flatMap((flagSpec) => flagSpec.tokens),
+  // A flag scoped to other commands is accepted here too (and ignored), but not offered.
+  const accepted = [...catalogFlagsForCommand(catalog, spec.name)
+    .filter((flagSpec) => flagSpec.commands === undefined || flagSpec.commands.includes(spec.name))
+    .flatMap((flagSpec) => flagSpec.tokens),
     ...(spec.options ?? []).flatMap((option) => option.tokens)]
     .filter((token) => token.startsWith('--'))
     .join(', ');

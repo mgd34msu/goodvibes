@@ -1,6 +1,6 @@
 import { productVersionFromModule } from '@goodvibes/engine/terminal-shell/cli-help';
 import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal-shell/cli-help';
-import { renderDetailedCommandHelp, renderMostUsedHelp, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
+import { renderDetailedCommandHelp, renderMostUsedHelp, renderUsageLine, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
 import { join } from 'node:path';
 import { GOODVIBES_CLI_CATALOG } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
 import { VERSION } from '../version.ts';
@@ -93,7 +93,8 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
     '      --max-turns <n>            run: stop after n model answers that still ask for tools; exits 1',
     '      --omit-accumulated         run: with stream-json, leave `accumulated` out of STREAM_DELTA',
     '      --answer-permissions       run: with stream-json, read PERMISSION_ANSWER lines on stdin for owner prompts',
-    '  -y, --yes                      Auto-confirm prompts (non-interactive)',
+    '      --prompt-file <path>       run: read the prompt from a file; - reads it from standard input',
+    '  -y, --yes                    Auto-confirm prompts (non-interactive)',
     '      --non-interactive          Disable all interactive prompts (implies --yes)',
     '      --strict                   doctor: also fail on advisory findings, for CI',
     '  -h, --help                     Print help',
@@ -135,7 +136,7 @@ const COMMAND_HELP: Record<string, CommandHelp> = {
       'run [prompt] [--output text|json|stream-json]',
       'exec [prompt]',
       'run --intake-status|--intake-retry|--intake-resume|--intake-cancel',
-      'run [prompt] [--timeout <duration>] [--max-turns <n>] [--omit-accumulated] [--answer-permissions]',
+      'run [prompt | --prompt-file <path>|-] [--timeout <duration>] [--max-turns <n>] [--omit-accumulated] [--answer-permissions]',
     ],
     summary:
       'Run one prompt non-interactively and print the result; the prompt goes straight to the local model. The --intake-* modes work on a prompt captured through native daemon admission: status is read-only and recovery reuses the saved input. Use -- before literal prompt tokens.',
@@ -346,6 +347,13 @@ const HELP_ALIASES: Record<string, string> = {
 };
 
 const normalizeHelpTopic = (topic: string) => normalizeTopic(topic, HELP_ALIASES);
+
+/** The one usage line a usage error shows: the named command's, or the program's when the line named none. */
+export function renderGoodVibesUsageLine(cli: { readonly command: string; readonly rawCommand?: string | undefined }, binary = 'goodvibes'): string {
+  const normalized = cli.rawCommand === undefined && cli.command === 'tui' ? undefined : normalizeHelpTopic(cli.command);
+  const help = normalized !== undefined && Object.hasOwn(COMMAND_HELP, normalized) ? COMMAND_HELP[normalized] : undefined;
+  return renderUsageLine(normalized, help, binary);
+}
 
 export function renderGoodVibesCommandHelp(topic: string, binary = 'goodvibes'): string {
   const normalized = normalizeHelpTopic(topic);

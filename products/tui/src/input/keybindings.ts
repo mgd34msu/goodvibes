@@ -91,42 +91,45 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
 // Alt+K: kill to end of line. Ctrl+K was reassigned to the command palette
   // (the standard palette chord); Alt+K keeps kill-to-end available and is
   // otherwise unused in the default table.
-  'kill-line':             [{ key: 'k', alt: true }],
+  // Every Alt and Ctrl+Shift chord below has a second one a terminal without Alt
+  // (macOS Terminal) or without the extended keyboard protocol still sends
+  // (keybinding-catalog.ts): a function key, a free Ctrl chord, or Ctrl with an arrow or Delete.
+  'kill-line':             [{ key: 'k', alt: true }, { key: 'x', ctrl: true }],
 // Alt+U: clear entire prompt. Ctrl+U is owned by kill-to-start (readline
   // convention). Alt+U is unused by any other default and is representable by
   // the tokenizer's { key, alt } combo form.
-  'clear-prompt':          [{ key: 'u', alt: true }],
-// Word navigation (Alt+B / Alt+F, emacs readline standard)
-  'word-back':             [{ key: 'b', alt: true }],
-  'word-forward':          [{ key: 'f', alt: true }],
+  'clear-prompt':          [{ key: 'u', alt: true }, { key: 'g', ctrl: true }],
+// Word navigation (Alt+B / Alt+F, emacs readline standard; Ctrl+Left / Ctrl+Right as most editors)
+  'word-back':             [{ key: 'b', alt: true }, { key: 'left', ctrl: true }],
+  'word-forward':          [{ key: 'f', alt: true }, { key: 'right', ctrl: true }],
 // Kill-ring operations.
   // Note: 'kill-line' (Alt+K) kills to end; 'kill-to-start' (Ctrl+U) kills to start.
   // 'clear-prompt' (Alt+U) clears the entire buffer regardless of cursor position.
   // kill-to-start owns Ctrl+U (readline convention); clear-prompt uses Alt+U.
   'kill-to-start':         [{ key: 'u', ctrl: true }],
 // Alt+D: kill word forward (no prior conflict)
-  'kill-word-forward':     [{ key: 'd', alt: true }],
+  'kill-word-forward':     [{ key: 'd', alt: true }, { key: 'delete', ctrl: true }],
 // Ctrl+Shift+Y: yank from kill ring.
   // CONFLICT RESOLVED: Ctrl+Y was 'block-copy'; yank moved to Ctrl+Shift+Y.
-  'yank':                  [{ key: 'y', ctrl: true, shift: true }],
+  'yank':                  [{ key: 'y', ctrl: true, shift: true }, { key: '\\', ctrl: true }],
 // Alt+Y: yank-pop (rotate ring after yank)
-  'yank-pop':              [{ key: 'y', alt: true }],
+  'yank-pop':              [{ key: 'y', alt: true }, { key: ']', ctrl: true }],
 // Alt+C: cancel the currently-running tool call (the turn continues). Alt+C
   // is unused by any other default and representable by the tokenizer's
   // { key, alt } combo form. Ctrl+C stays whole-input clear/cancel; this is the
   // narrower per-tool stop.
-  'cancel-tool-call':      [{ key: 'c', alt: true }],
+  'cancel-tool-call':      [{ key: 'c', alt: true }, { key: 't', ctrl: true }],
 // Alt+A: toggle keep-awake (the one-key affordance for the "sleep disabled"
   // chip). Alt+A is unused by any other default. The always-visible chip is the
   // confirmation of the toggle's state.
-  'toggle-keep-awake':     [{ key: 'a', alt: true }],
+  'toggle-keep-awake':     [{ key: 'a', alt: true }, { key: 'f6' }],
 // Alt+M: expand/collapse the "used N memories" provenance chip's drill-in.
   // Alt+M is unused by any other default. A no-op when the chip is not showing.
-  'toggle-memory-provenance': [{ key: 'm', alt: true }],
+  'toggle-memory-provenance': [{ key: 'm', alt: true }, { key: 'f7' }],
 // Alt+V: start/stop voice input. Alt+V is unused by any other default (Ctrl+V
   // is paste and stays paste). Two presses rather than a hold: see the action's
   // description, a terminal has no key-release event to hold against.
-  'voice-input':           [{ key: 'v', alt: true }],
+  'voice-input':           [{ key: 'v', alt: true }, { key: 'f8' }],
 // Shift+Tab: cycle this session's permission mode. The tokenizer reads the
   // xterm back-tab (CSI Z) as this chord.
   'cycle-permission-mode': [{ key: 'tab', shift: true }],
@@ -134,10 +137,10 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'open-notifications':    [{ key: 'n', ctrl: true }],
 // Alt+O and Alt+I: the failed turn's "use another model" and "details". Chords
   // that can never be typed text (like Alt+R retry), unused by any other default.
-  'failure-other-model':   [{ key: 'o', alt: true }],
-  'failure-details':       [{ key: 'i', alt: true }],
+  'failure-other-model':   [{ key: 'o', alt: true }, { key: 'f9' }],
+  'failure-details':       [{ key: 'i', alt: true }, { key: 'f3' }],
   // Alt+S: the row of a turn whose provider refused its key, "sign in again".
-  'failure-sign-in':       [{ key: 's', alt: true }],
+  'failure-sign-in':       [{ key: 's', alt: true }, { key: 'f4' }],
 });
 
 export class KeybindingsManager extends PlatformKeybindingsManager<KeyAction> {

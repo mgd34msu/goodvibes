@@ -57,10 +57,11 @@ The adapter is a protocol mapping over that surface:
 | `session/cancel`              | aborts the agents the session started, then resolves the prompt `cancelled` |
 | `session/close`               | cancels the session's work, closes its shared session and its embedded session; the daemon stops when no session uses it |
 
-Stop-reason mapping: a completed run is `end_turn`, a cancelled one `cancelled`;
-a failed run, or an input no agent took (queued behind other work), is `refusal`
-with one message chunk saying why. A completed run that streamed no text sends
-its final output as the message.
+Stop-reason mapping: a completed run is `end_turn`, a cancelled one `cancelled`.
+A failed run, or an input no agent took (queued behind other work), has no stop
+reason: the `session/prompt` request ends with a JSON-RPC error whose message
+says why (`The run failed: <error>` or `Nothing ran (<state>): <reason>`).
+A completed run that streamed no text sends its final output as the message.
 
 ## Honest capability surface
 

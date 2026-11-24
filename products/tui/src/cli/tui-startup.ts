@@ -2,9 +2,9 @@ import { reportStartupFailure, applySeededCliPrompt, resumeSessionAndRender } fr
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
-import type { WorkspaceRegistrationManager } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { NOTHING_OF_ITS_OWN_TO_RUN, type WorkspaceRegistrationManager, type WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { readOnboardingCheckMarker, writeOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
-import { FirstRunModal, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
+import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/startup-provider-registration.ts';
 import { readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
@@ -43,9 +43,14 @@ export function decodeFirstOpenChoice(id: string | null): FirstOpenTrustLevel | 
  * about a registry the user hasn't met yet.
  */
 export function buildFirstOpenItems(folder: FolderTrustFacts): { readonly title: string; readonly items: SelectionItem[] } {
-  const found = folder.found.length > 0
-    ? `This folder has ${folder.found.join(' and ')}.`
-    : 'This folder has no hooks file or tool servers (MCP) of its own.';
+  // What trusting lets run, named from what the folder has; never a sentence about things it does not have.
+  const runs = [
+    ...(folder.hooksFile !== null ? [`the hooks in ${folder.hooksFile} run`] : []),
+    ...(folder.mcpFiles.length > 0 ? [`the tool servers (MCP) in ${folder.mcpFiles.join(', ')} start`] : []),
+  ];
+  const lets = runs.length > 0
+    ? `Trusting it lets ${runs.join(' and ')}, and lets GoodVibes change files and run commands here.`
+    : 'Trusting it lets GoodVibes change files and run commands here.';
   const undo = 'Change it later with /security trust-folder or /security restrict-folder.';
   return {
     title: `Trust ${folder.shownPath}?`,
@@ -53,13 +58,13 @@ export function buildFirstOpenItems(folder: FolderTrustFacts): { readonly title:
       {
         id: 'trusted',
         label: 'Trust this workspace',
-        detail: `${found} Trusting it lets them run and lets GoodVibes change files here. It approves nothing: each action still follows your setting for when GoodVibes asks. ${undo}`,
+        detail: `${lets} It approves nothing: each action still follows your setting for when GoodVibes asks. ${undo}`,
         primaryAction: 'select',
       },
       {
         id: 'restricted',
         label: 'Keep restricted (read-only)',
-        detail: `GoodVibes can read this folder but cannot change files or run commands in it, and the folder's own hooks and MCP servers stay off, until you trust it. ${undo}`,
+        detail: `GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it. ${undo}`,
         primaryAction: 'select',
       },
     ],
@@ -69,8 +74,12 @@ export function buildFirstOpenItems(folder: FolderTrustFacts): { readonly title:
 /** What the trust prompt names: the folder (home shortened to ~) and the files of its own that trusting would let run. */
 export interface FolderTrustFacts {
   readonly shownPath: string;
-  /** "a hooks file (hooks.json)", "tool servers (.goodvibes/mcp.json)"; empty when it has none. */
-  readonly found: readonly string[];
+  /** The folder's own hooks file as shown ("hooks.json"), or null when it has none. */
+  readonly hooksFile: string | null;
+  /** Its own MCP server files as shown (".mcp.json"); empty when it has none. */
+  readonly mcpFiles: readonly string[];
+  /** True when it has a hooks file or MCP server files of its own. */
+  readonly hasItsOwn: boolean;
 }
 
 /** Read which of the folder's own hooks and MCP files exist (two or three stat calls, once per prompt). */
@@ -78,15 +87,13 @@ export function readFolderTrustFacts(workingDirectory: string, homeDirectory: st
   let real = workingDirectory;
   try { real = realpathSync(workingDirectory); } catch { /* the folder as given */ }
   const shownPath = homeDirectory && (real === homeDirectory || real.startsWith(`${homeDirectory}${sep}`)) ? `~${real.slice(homeDirectory.length)}` : real;
-  const found: string[] = [];
   const hooks = isAbsolute(hooksFile) ? hooksFile : join(workingDirectory, hooksFile || 'hooks.json');
-  if (existsSync(hooks)) found.push(`a hooks file (${relative(workingDirectory, hooks) || hooks})`);
-  const mcp = getMcpConfigLocations({ workingDirectory, homeDirectory })
+  const hooksShown = existsSync(hooks) ? relative(workingDirectory, hooks) || hooks : null;
+  const mcpFiles = getMcpConfigLocations({ workingDirectory, homeDirectory })
     .filter((location) => location.kind === 'project-mcp' || location.kind === 'project-goodvibes')
     .filter((location) => existsSync(location.path))
     .map((location) => relative(workingDirectory, location.path));
-  if (mcp.length > 0) found.push(`tool servers (MCP: ${mcp.join(', ')})`);
-  return { shownPath, found };
+  return { shownPath, hooksFile: hooksShown, mcpFiles, hasItsOwn: hooksShown !== null || mcpFiles.length > 0 };
 }
 
 /**
@@ -123,6 +130,39 @@ export async function selfRecordWorkspaceRegistration(
   }
 }
 
+/**
+ * Settle the workspace's trust as the program opens (its saved decision read
+ * first). A folder with no decision and no hooks file or MCP servers of its own
+ * is trusted without a question: trusting it would let nothing run that the
+ * permission mode does not already govern. It is recorded with the reason
+ * "nothing of its own to run" and the person is told nothing. A folder with no
+ * decision that has them is asked about, naming them. A folder trusted that way
+ * that has gained them since is asked about now, before any of them runs; one
+ * that gains them later is asked when its hooks are about to fire or its
+ * servers to start (the manager's repositoryFilesHeld). Resolves when settled:
+ * answered, dismissed (left as it was; a write or command asks again), or not needed.
+ */
+async function askTrustOnOpen(
+  manager: Pick<WorkspaceTrustManager, 'load' | 'isDecided' | 'trustQuestion' | 'setLevel' | 'trustedForNothingToRun' | 'askWhenRepositoryFilesAppear'> | undefined,
+  requestTrustDecision: (() => Promise<FirstOpenTrustLevel>) | undefined,
+  folder: () => FolderTrustFacts,
+): Promise<void> {
+  if (!manager || !requestTrustDecision) return;
+  try {
+    await manager.load();
+    manager.askWhenRepositoryFilesAppear(requestTrustDecision);
+    const hasItsOwn = folder().hasItsOwn;
+    if (!manager.isDecided() && !hasItsOwn) {
+      const saved = await manager.setLevel('trusted', NOTHING_OF_ITS_OWN_TO_RUN);
+      if (!saved.saved) logger.warn('The workspace was trusted for this session (nothing of its own to run) but the decision could not be saved', { fault: saved.fault });
+      return;
+    }
+    if (!manager.isDecided() || (manager.trustedForNothingToRun() && hasItsOwn)) await manager.trustQuestion(requestTrustDecision).answer;
+  } catch (error) {
+    logger.info('The workspace trust question asked on opening was not answered', { error: summarizeError(error) });
+  }
+}
+
 export function applyInitialTuiCliState(options: {
   readonly cli: GoodVibesCliParseResult;
   readonly input: InputHandler;
@@ -137,16 +177,26 @@ export function applyInitialTuiCliState(options: {
    */
   readonly surface: SessionSurface;
   readonly render: () => void;
+  /** Raises the trust prompt (ui-openers' trustPromptRef); asked here once when the folder has no decision. */
+  readonly requestTrustDecision?: (() => Promise<FirstOpenTrustLevel>) | undefined;
 }): Promise<void> | undefined {
   const { cli, input, commandRegistry, commandContext, shellPaths, surface, render } = options;
   const globalOnboardingMarker = readOnboardingCheckMarker(shellPaths, 'user');
+
+  // A folder with no trust decision is settled as it opens, before any prompt
+  // is acted on (askTrustOnOpen): trusted without a question when it has nothing
+  // of its own to run, otherwise asked, the prompt opening on "Trust this
+  // workspace" (the person came to work here). After "Keep restricted" nothing
+  // in the folder is changed: a restriction refuses every write and command.
+  const trustSettled = askTrustOnOpen(commandContext.workspace?.workspaceTrustManager, options.requestTrustDecision,
+    () => readFolderTrustFacts(shellPaths.workingDirectory, shellPaths.homeDirectory, String(commandContext.platform.configManager.get('tools.hooksFile') ?? '')));
 
   // Registration self-records on every launch of an already-trusted
   // workspace (fire-and-forget, never blocks or gates startup, never a
   // modal). A workspace that is undecided or restricted is never
   // self-registered here; for one that becomes trusted just now (via the
-  // consequence-time trust prompt), main.ts's trustPromptRef wiring calls
-  // this same helper right after the decision.
+  // trust prompt), main.ts's trustPromptRef wiring calls this same helper
+  // right after the decision.
   if (commandContext.workspace?.workspaceTrustManager?.isTrusted()) {
     void selfRecordWorkspaceRegistration(commandContext.workspace.workspaceRegistrationManager);
   }
@@ -163,11 +213,10 @@ export function applyInitialTuiCliState(options: {
   });
 
   // First run: when the model this session will use is not ready, choose a
-  // provider, sign in, and land in the conversation (first-run-flow.ts).
-  // Trust stays undecided here on purpose: the first non-read tool request is
-  // what raises the trust question (main.ts's trustPromptRef).
+  // provider, sign in, and land in the conversation (first-run-flow.ts). It
+  // starts once the trust question asked on opening is settled.
   const runFirstRunSteps = (): void => {
-    void startFirstRun(firstRunDeps(commandContext, shellPaths, render, globalOnboardingMarker.payload !== null, () => { input.conversationManager?.invalidateRenderedLines(); })).catch((error: unknown) => {
+    void trustSettled.then(() => startFirstRun(firstRunDeps(commandContext, shellPaths, render, globalOnboardingMarker.payload !== null, () => { input.conversationManager?.invalidateRenderedLines(); }))).catch((error: unknown) => {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
@@ -257,6 +306,10 @@ function firstRunDeps(commandContext: CommandContext, shellPaths: TuiStartupShel
     redrawConversation: redraw,
     markDone: () => { writeOnboardingCheckMarker(shellPaths, { source: 'command' }); },
     isMarkedDone: () => markedDone,
+    // "Who decides" after the model, when no decision model can be asked yet.
+    decisionModel: firstRunDecisionModel(commandContext.platform.configManager, requireSecretsManager(commandContext)),
+    // "Another decision model…": Settings, on the decision model.
+    openDecisionModelSettings: () => { commandContext.openSettingsModal?.('judgment.model'); },
   };
 }
 

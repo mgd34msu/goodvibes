@@ -194,6 +194,29 @@ export function renderVetoMessage(facts: PurchaseFacts, expiresInMinutes: number
   return lines.join('\n');
 }
 
+/** What a purchase's window notice names, read back for a one-line row: what, from whom, and the total with its currency. */
+export interface PurchaseNoticeRow {
+  readonly item: string;
+  readonly merchant: string;
+  readonly total: string;
+}
+
+/**
+ * The item, merchant and total of a notice renderApprovalMessage or
+ * renderVetoMessage wrote (its `  <item>`, `  from <merchant>` and
+ * `  TOTAL:` lines); undefined for any other text.
+ */
+export function readPurchaseNoticeRow(notice: string): PurchaseNoticeRow | undefined {
+  const lines = notice.split('\n');
+  const from = lines.findIndex((line) => line.startsWith('  from '));
+  const totalLine = lines.find((line) => line.startsWith('  TOTAL:'));
+  if (from < 1 || totalLine === undefined) return undefined;
+  const item = lines[from - 1]!.trim();
+  const merchant = lines[from]!.slice('  from '.length).trim();
+  const total = totalLine.slice('  TOTAL:'.length).trim();
+  return item && merchant && total ? { item, merchant, total } : undefined;
+}
+
 function amountLines(facts: PurchaseFacts): string[] {
   const lines = [
     `  Item:     ${formatMinorUnits(facts.itemMinorUnits, facts.currency)}`,

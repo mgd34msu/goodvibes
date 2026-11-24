@@ -37,7 +37,7 @@ import type {
   CompactionEvent,
   CompactionConfig,
 } from './compaction-types.js';
-import { DEFAULT_COMPACTION_CONFIG, IMAGE_TOKEN_ESTIMATE, estimateTokens } from './compaction-types.js';
+import { compactionConfigForWindow, IMAGE_TOKEN_ESTIMATE, estimateTokens } from './compaction-types.js';
 import {
   buildHandoffHeader,
   buildSessionMemories,
@@ -490,7 +490,7 @@ async function runCompaction(
   work: OwnedJudgmentWork,
 ): Promise<CompactionResult> {
   work.assertCurrent();
-  const config = DEFAULT_COMPACTION_CONFIG;
+  const config = compactionConfigForWindow(ctx.contextWindow);
   const tokensBeforeEstimate = estimateConversationTokens(ctx.messages);
 
   logger.info('Context compaction: starting', {

@@ -1,4 +1,5 @@
 import { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance, readPaymentOperation, readPaymentOperationCancellation, paymentOperationDescription, isLivePaymentOperation, canReconcilePaymentOperation,
+  formatMinorUnits, readPurchaseNoticeRow,
   type PaymentWindowView, type PaymentOperationView, type PaymentSecurityCodeRequestView } from '@goodvibes/engine/platform/platform/payments/browser';
 import type { ConcealedInputRequest } from './concealed-input.js';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
@@ -32,6 +33,37 @@ function text(value: string): string {
 }
 function detail(window: PaymentWindowView): string {
   return `${text(window.notice)}\n\nDeadline: ${new Date(window.deadlineMs).toLocaleString()}`;
+}
+
+function shortTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+}
+
+/** What a purchase is, in one phrase: "USB-C cable from shop.example, $12.99"; undefined when its notice does not say. */
+function purchasePhrase(notice: string | undefined): string | undefined {
+  const row = notice === undefined ? undefined : readPurchaseNoticeRow(text(notice));
+  return row ? `${row.item} from ${row.merchant}, ${row.total}` : undefined;
+}
+
+/** A window's row: what, from whom, the amount, and when it goes ahead (or stops waiting). */
+function windowRow(window: PaymentWindowView): string {
+  const what = purchasePhrase(window.notice) ?? `purchase ${text(window.purchaseId)}`;
+  return window.kind === 'veto'
+    ? `${what} · goes ahead ${shortTime(window.deadlineMs)} unless you stop it`
+    : `${what} · waits for your yes until ${shortTime(window.deadlineMs)}`;
+}
+
+/** An operation's row: its state, then the purchase in one phrase (from its window, else its own total). */
+function operationRow(operation: PaymentOperationView, windows: readonly PaymentWindowView[]): string {
+  const fromWindow = purchasePhrase(windows.find((window) => window.purchaseId === operation.purchaseId)?.notice);
+  let amount: string | undefined;
+  try {
+    // The daemon's own currency code, read back from its record: formatted as it was kept.
+    amount = operation.totalMinorUnits !== null && operation.currency !== null
+      ? formatMinorUnits(operation.totalMinorUnits, operation.currency as Parameters<typeof formatMinorUnits>[1]) : undefined;
+  } catch { amount = undefined; }
+  const what = fromWindow ?? `purchase ${text(operation.purchaseId)}${amount ? `, ${amount}` : ''}`;
+  return `${operation.state}: ${what}`;
 }
 
 /** The products supply host-selection policy; menu, gesture, transport and
@@ -243,10 +275,11 @@ export function createPaymentWindowCommand<Context extends PaymentWindowCommandC
         const byCodeId = new Map(securityCodes.map((request, index) => [`code-${index}`, request]));
         const byId = new Map(windows.map((window, index) => [`window-${index}`, window]));
         const byOperationId = new Map(operations.map((operation, index) => [`operation-${index}`, operation]));
-        const items: SelectionItem[] = [...byCodeId].map(([id, request]) => ({ id, label: `Security code needed: ${text(request.purchaseId)}`,
+        const items: SelectionItem[] = [...byCodeId].map(([id, request]) => ({ id,
+          label: `Security code needed: ${purchasePhrase(windows.find((window) => window.purchaseId === request.purchaseId)?.notice) ?? `a purchase from ${text(request.merchantDomain)}`}, card ending ${text(request.cardLast4)} · waits until ${shortTime(request.deadlineMs)}`,
           detail: `${text(request.merchantDomain)}, card ending ${text(request.cardLast4)}. The purchase is approved and waits for the code until ${new Date(request.deadlineMs).toLocaleString()}.` }));
-        items.push(...[...byId].map(([id, window]) => ({ id, label: `${window.kind === 'approval' ? 'Approval' : 'Veto'}: ${text(window.purchaseId)}`, detail: detail(window) })));
-        for (const [id, operation] of byOperationId) items.push({ id, label: `${operation.state}: ${text(operation.purchaseId)}`, detail: paymentOperationDescription(operation) });
+        items.push(...[...byId].map(([id, window]) => ({ id, label: windowRow(window), detail: detail(window) })));
+        for (const [id, operation] of byOperationId) items.push({ id, label: operationRow(operation, windows), detail: paymentOperationDescription(operation) });
         // Named so its evidence is inspected; there is nothing to answer or stop on it from here.
         for (const [index, row] of unreadable.entries()) items.push({ id: `unreadable-${index}`, label: `unreadable: ${text(row.purchaseId)}`, detail: text(row.reason) });
         items.push({ id: 'refresh', label: 'Refresh purchases', detail: 'Read current operations and windows from this same paired host.' });

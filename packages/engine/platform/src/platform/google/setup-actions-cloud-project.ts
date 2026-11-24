@@ -69,7 +69,10 @@ function gcloudInstalledRunner(deps: GoogleSetupActionDeps, state: GcloudState):
       state.path = detection.path;
       return alreadyDone(`gcloud is already installed (${detection.version}).`);
     }
-    const install = await installGcloud(deps.commands, { homeDirectory: deps.homeDirectory });
+    const install = await installGcloud(deps.commands, {
+      homeDirectory: deps.homeDirectory,
+      ...(deps.installProgress ? { onProgress: deps.installProgress } : {}),
+    });
     if (!install.ok) {
       return failed('gcloud could not be installed.', install.problem, install.fix);
     }

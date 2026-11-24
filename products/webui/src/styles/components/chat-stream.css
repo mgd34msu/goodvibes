@@ -57,6 +57,21 @@
   background: var(--surface-2);
 }
 
+/* The key that stops it, Esc, named on the button (not on a touch screen, which has none). */
+.stream-stop-btn__key {
+  padding: 0 4px;
+  color: var(--text-3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-xs);
+  font: var(--weight-medium) var(--text-xs) / 16px var(--font-mono);
+}
+
+@media (pointer: coarse) {
+  .stream-stop-btn__key {
+    display: none;
+  }
+}
+
 /* Running tool calls: cancel one call without ending the turn. */
 .active-tool-calls {
   display: grid;

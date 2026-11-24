@@ -298,6 +298,7 @@ export type {
 export {
   detectPriorWorkspaceState,
   heldForRepositoryTrust,
+  NOTHING_OF_ITS_OWN_TO_RUN,
   readPersistedWorkspaceTrust,
   REPOSITORY_TRUST_NEXT_STEP,
   repositoryFileGate,

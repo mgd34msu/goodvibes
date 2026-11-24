@@ -13,6 +13,7 @@ import { ToolActivityGroup } from './ToolActivityGroup';
 import { failureReadingOf, TurnFailureRow } from './TurnFailureRow';
 import { readMemoryProvenanceIds } from '../../lib/memory-provenance';
 import { useWebUiPreferences } from '../../lib/ui-preferences';
+import { formatShortcut } from '../../lib/shortcut-keys';
 import { isCompactionHandoffMessage } from '../../lib/compaction';
 import {
   attachmentLabel,
@@ -173,7 +174,7 @@ export const MessageItem = memo(function MessageItem({
           className="message-edit-submit"
           onClick={handleEditSubmit}
           disabled={!editDraft.trim() || isSendPending || editSubmitting}
-          aria-label="Send edited message (Ctrl+Enter)"
+          aria-label={`Send edited message (${formatShortcut('mod+enter')})`}
         >
           Send
         </Button>

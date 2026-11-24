@@ -35,7 +35,7 @@ import { assertRemoteSettingsImportPrecondition, applyRemoteSettingsImportPrecon
 import { firstJsonSchemaFailure, firstJsonSchemaFailureAsync } from '@goodvibes/engine/transport-http';
 import { PERMISSION_CATEGORIES, type Tool, type ToolDefinition, type ToolExecuteOptions, type ToolResult } from '../types/tools.js';
 import type { ToolActivity } from '@goodvibes/engine/contracts';
-import { UnknownPreparedToolError } from './preparation-error.js';
+import { ToolInputError, UnknownPreparedToolError } from './preparation-error.js';
 import { createToolSchemaTool, deferredToolRefusal, oneLineDefinition, TOOL_SCHEMA_TOOL_NAME } from './tool-schema.js';
 import { ToolError } from '../types/errors.js';
 import { repairToolCall } from './auto-repair.js';
@@ -926,8 +926,13 @@ export class ToolRegistry {
       this.repairProjection(record, effective);
       const schemaArgs = record.nativeSchemaArgs ? record.nativeSchemaArgs(effective) : effective;
       const schemaFailure = await firstJsonSchemaFailureAsync(record.definition.parameters, schemaArgs, { signal, isolatedTester: this.schemaPatternTester() });
-      // Path and expectation come from the schema, never from the argument values.
-      if (schemaFailure) throw new ToolError(`Prepared tool arguments do not match the registered schema at ${schemaFailure.path || '(root)'}: expected ${schemaFailure.expected}. Nothing was executed; fix that argument and re-issue the call.`, name);
+      // The model is told the field, what it sent and what is accepted; the value itself only
+      // for a word outside a fixed list, where the type alone does not say what was wrong.
+      if (schemaFailure) {
+        throw new ToolInputError(name, schemaFailure,
+          /^(?:one of |")/.test(schemaFailure.expected) ? valueAtSchemaPath(schemaArgs, schemaFailure.path) : undefined,
+          repair.repaired ? repair.repairs : []);
+      }
       const call = Object.freeze({ callId, name, args: effective, schemaRevision: record.definitionRevision, judgmentDecisionIds: Object.freeze(ids) });
       this.prepared.set(call, { tool: record.tool, executor: record.executor, definitionRevision: record.definitionRevision,
         warnings: [...(repair.warnings ?? [])], repairs: repair.repaired ? [...repair.repairs] : [],
@@ -1653,6 +1658,19 @@ export class ToolRegistry {
   list(): Tool[] {
     return Array.from(this.tools.values()).filter((tool) => tool.definition.name !== TOOL_SCHEMA_TOOL_NAME);
   }
+}
+
+/** The scalar the model sent at a `$`-rooted validator path, quoted and shortened; undefined for anything else. */
+function valueAtSchemaPath(args: Record<string, unknown>, path: string): string | undefined {
+  let value: unknown = args;
+  for (const step of path.replace(/^\$/, '').match(/\.[^.[]+|\[\d+\]/g) ?? []) {
+    if (value === null || typeof value !== 'object') return undefined;
+    const key = step.startsWith('[') ? Number(step.slice(1, -1)) : step.slice(1);
+    value = (value as Record<string | number, unknown>)[key];
+  }
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  if (typeof value !== 'string') return undefined;
+  return JSON.stringify(value.length > 60 ? `${value.slice(0, 60)}…` : value);
 }
 
 /**

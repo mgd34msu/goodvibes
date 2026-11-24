@@ -8,6 +8,7 @@
 import { Menu as MenuIcon, RefreshCw, Search, SquarePen } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { IconButton } from '../ui/IconButton';
+import { formatShortcut } from '../../lib/shortcut-keys';
 import { useHeaderSlotHost } from './HeaderSlots';
 
 export interface ShellHeaderProps {
@@ -69,7 +70,7 @@ export function ShellHeader({ title, phone, indicators, onOpenDrawer, onNewChat,
       <div className="shell-header__end">
         {indicators && <div className="shell-header__indicators">{indicators}</div>}
         {actionsSlot}
-        {!hideSearch && <IconButton label="Search" shortcut="Ctrl K" icon={<Search />} onClick={onSearch} />}
+        {!hideSearch && <IconButton label="Search" shortcut={formatShortcut('mod+k')} icon={<Search />} onClick={onSearch} />}
         <IconButton label="Refresh" icon={<RefreshCw />} onClick={onRefresh} disabled={refreshing} />
       </div>
     </header>

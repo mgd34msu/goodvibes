@@ -144,14 +144,21 @@ function parseLinkTarget(raw: string): AgentChannelDeliveryTarget {
   return { kind: 'link', ...(parsed.address ? { address: parsed.address } : {}) };
 }
 
+/**
+ * The recipients named: a channel, route or webhook. A link travels with the
+ * message to one of those; only on its own is it the target (the message
+ * published as a document and its link announced).
+ */
 function selectedTargetInputs(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): readonly string[] {
-  return [input.channel, input.route, input.webhook, input.link].map(readTargetText).filter((value): value is string => Boolean(value));
+  const recipients = [input.channel, input.route, input.webhook].map(readTargetText).filter((value): value is string => Boolean(value));
+  if (recipients.length > 0) return recipients;
+  return [input.link].map(readTargetText).filter((value): value is string => Boolean(value));
 }
 
 /**
- * The one rule for a delivery target: exactly one of channel, route, webhook
- * or link. With none or several, which recipient was meant is unknown, so
- * nothing is sent.
+ * The one rule for a delivery target: exactly one of channel, route or
+ * webhook, or a link alone. With none or several, which recipient was meant is
+ * unknown, so nothing is sent.
  */
 export function requireOneDeliveryTarget(input: Pick<AgentChannelDeliveryInput, 'channel' | 'route' | 'webhook' | 'link'>): void {
   const count = selectedTargetInputs(input).length;
@@ -160,14 +167,16 @@ export function requireOneDeliveryTarget(input: Pick<AgentChannelDeliveryInput, 
 }
 
 export function buildAgentChannelDeliveryPreview(input: AgentChannelDeliveryInput): AgentChannelDeliveryPreview {
-  const message = readText(input.message);
-  if (!message) throw new Error('Channel delivery message is required.');
+  const given = readText(input.message);
+  if (!given) throw new Error('Channel delivery message is required.');
   requireOneDeliveryTarget(input);
 
   const channel = readText(input.channel);
   const route = readText(input.route);
   const webhook = readTargetText(input.webhook) === undefined ? undefined : input.webhook;
   const link = readText(input.link);
+  // A link given with a channel, route or webhook is sent with the message, under it.
+  const message = link && (channel || route || webhook) ? `${given}\n\n${link}` : given;
   const target = channel
     ? parseChannelTarget(channel)
     : route

@@ -45,7 +45,7 @@ export function daemonRepairItems(offer: DaemonRepairOffer): SelectionItem[] {
 /** The question on the input handler's selection modal. Escape or closing it declines. */
 export function createDaemonRepairQuestion(opener: SelectionOpener): AskDaemonRepair {
   return (offer, answer) => {
-    opener.openSelection(DAEMON_REPAIR_QUESTION, daemonRepairItems(offer), { preSelectId: 'leave', allowSearch: false }, (result) => {
+    opener.openSelection(DAEMON_REPAIR_QUESTION, daemonRepairItems(offer), { preSelectId: 'leave', allowSearch: false, unprompted: true }, (result) => {
       answer(result?.item.id === 'repair');
     });
   };

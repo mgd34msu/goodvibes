@@ -39,6 +39,70 @@ Execution permissions are in **Permissions → Execution permissions**, includin
 or `TYPESAFE_DEFAULT_MODEL`), every policy works without one: no decision model
 is asked, nothing waits and nothing reports an error.
 
+## What one decision request sends
+
+This is what GoodVibes sends; it says nothing about what a decision service
+keeps.
+
+**Where it goes.** One HTTP `POST` to the decision target you set: for the
+hosted Jev, `https://api.typesafe.ai/v1/systemone`; for a model you run
+yourself, `<your endpoint>/v1/systemone`; for Clef or Clef-flash, the
+Cloudflare run address you set. A fallback target is asked only when the one
+before it gave no answer. Redirects are refused, not followed.
+
+**Headers.** `Authorization: Bearer <your decision model key>` (left out for a
+local target set to no authentication), `Content-Type: application/json`,
+`Accept: application/json`, and `TypeSafe-Danger-Zone-Long-Context: true` when
+the request is larger than the model's ordinary context (more than about 64,000
+tokens, or after the endpoint answered that it was).
+
+**Body.** Exactly `{"state": ..., "questions": ..., "model": "<model>"}`.
+`questions` are GoodVibes' own fixed questions and options. `model` is the
+model name you chose. `state` is the evidence, and for a tool call it holds:
+
+- the tool's name and its **complete arguments** as the coding model wrote them.
+  These are your content: the command text of a shell command, the file paths
+  the call names, and, for a write or an edit, the text it would put in the file
+  (all of it). GoodVibes does not read files from disk to add to a request;
+  file contents go only when they are in the call's own arguments;
+- the absolute path of the working folder;
+- the request the call serves: the text of your prompt for the turn (or the
+  original goal of a contract) and its criteria, and, when the host attached
+  them, earlier messages of the conversation and a diff it selected;
+- what GoodVibes already worked out about the call (its own boundary checks and
+  the decision model's earlier reading of it), the permission mode in force,
+  whether your own permission settings allow the call, and which surface it
+  came from (for example the terminal or a chat channel);
+- the alternatives the host offers in its place, when there are any, and
+  identifiers that tie the answer to this one call (its id and revision
+  numbers).
+
+A tool call is read first (does it change things, reach outside, touch
+secrets, is it reversible), with only the tool name, its complete arguments and
+the working folder in the state; the decision about the call is a second
+request with the state above. Every other decision (whether a message gets a
+reply or becomes work, contract steps, a question from an MCP server, knowledge
+and memory decisions) sends the same body with its own state, which holds the
+content it decides about: the message decision's state includes the text of
+the message.
+
+**What a tool call never sends.** Before its requests, the state is checked: a call whose
+arguments hold a credential (a value under a credential's name, a value shaped
+like a key or token, or a password inside a URL) or card details is not sent to
+the decision model at all; that call is refused or put to you instead. A tool
+call's requests carry only what is listed above: nothing else from your
+settings files, your secret store or your saved sessions.
+
+**Truncation.** None: arguments are sent whole, and a request over 32 MB is
+refused before sending rather than shortened. When a request does not fit what
+every target accepts, it is sent as several requests split by question; a
+question that does not fit even alone is sent with the parts of the state most
+related to it, and each part left out is replaced by a marker saying it was
+left out of that request. A target that reports it cut the state is treated as
+having given no answer.
+
+**What the hosted service keeps.** [OWNER TO COMPLETE: what TypeSafe keeps of a decision request (state, questions, answers), for how long, and whether it is used for anything else.]
+
 ## How much you are asked
 
 The policy and the permission mode (`permissions.mode`, below) decide together

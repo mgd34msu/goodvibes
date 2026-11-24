@@ -457,6 +457,7 @@ export function useChatStream({
                 toolInput: pending?.toolInput,
                 result: resultRecord.result,
                 isError: Boolean(resultRecord.isError),
+                ...(firstString(resultRecord, ['ownerLine']) ? { ownerLine: firstString(resultRecord, ['ownerLine']) } : {}),
                 // Timed by this browser: the row's "· 4 s" is what the person waited.
                 ...(pending ? { startedAt: pending.startedAt, finishedAt: Date.now() } : {}),
               },

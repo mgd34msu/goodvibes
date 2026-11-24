@@ -104,20 +104,20 @@ mistaken for hidden contracts.
   sessions" loads the next page, back to the first. Chat's history search
   looks in two places at once: session titles over the full history
   (`sessions.search`) and the text of messages (`chat.messages.search`).
-- Several verb families emit no wire event yet (fleet workstream rows,
-  checkpoints, CI watches, check-in, principals, memory, local-voice status).
-  Each such list (mail, calendar, occasions, memory and its review queue and
-  consolidation receipts, checkpoints and session changes, CI watches,
-  check-ins, who is who and channel profiles, paired devices, Tailscale, local
-  voice, the delegated Telegram intake) is read again when its view opens, when
-  the window or tab regains focus and when the connection comes back, keeping
-  what is on screen until the new answer arrives; several say when they were
-  last read ("Read 2 min ago · Refresh"; a CI watch says "status from 5m ago"
-  beside Check now). The Telegram intake also follows the owner-inbox event.
-- Each of those lists also follows the daemon's LIST_CHANGED event, so a
-  change made from another program, device or the daemon itself shows with no
-  click; session changes follow the checkpoints list. A native request (New, Ask for work to be
-  done) follows NATIVE_REQUEST_CHANGED.
+- The lists that have no event of their own (mail, calendar, occasions,
+  memory and its review queue and consolidation receipts, checkpoints and
+  session changes, CI watches, check-ins, who is who and channel profiles,
+  paired devices, Tailscale, local voice, the delegated Telegram intake) follow
+  the daemon's LIST_CHANGED event, so a change made from another program,
+  device or the daemon itself shows with no click; session changes follow the
+  checkpoints list, and the Telegram intake also follows the owner-inbox event.
+  A native request (New, Ask for work to be done) follows
+  NATIVE_REQUEST_CHANGED.
+- Where an event can be missed (the connection was down), each of those lists
+  is also read again when its view opens, when the window or tab regains focus
+  and when the connection comes back, keeping what is on screen until the new
+  answer arrives; several say when they were last read ("Read 2 min ago ·
+  Refresh"; a CI watch says "status from 5m ago" beside Check now).
 - Session gate presets and context usage answer for the daemon's own runtime
   session and every session it hosts (a web chat runs under the daemon-wide
   mode). A session another program runs (the terminal app's or the Agent's own

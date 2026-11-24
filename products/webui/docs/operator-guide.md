@@ -10,8 +10,11 @@ work uses Jev admission and recorded outcomes.
 GoodVibes has four places: Chat, Work, Library and Personal. The sidebar lists
 them in order:
 
-- New chat, a fresh conversation
+- New chat, a fresh conversation (G then N, outside a text field)
 - Search (Ctrl K), the command palette
+
+Every key named on the page follows the platform: on a Mac, iPhone or iPad,
+Ctrl reads ⌘ (⌘ K, ⌘ B, ⌘ comma) and so does the key that works.
 - Work, what is running for you and what needs you. Its dot or count is the
   number of items waiting on you.
 - Library, what GoodVibes remembers and knows
@@ -59,7 +62,19 @@ or picking anything in it, closes it. The drawer never traps.
 Settings is a dialog, not a page, so it opens over whatever you were doing.
 Open it from the account menu, with Ctrl comma, or from a `?settings=<section>`
 link. It has seven pages, each holding one or more sections; a search box at
-the top finds a section by name or by the setting inside it.
+the top finds a section by name or by the setting inside it. Its script loads
+the first time it opens, as Work's, the Library's and Personal's do the first
+time each is opened; the chat loads first.
+
+Density (General, Display) set to Compact tightens rows and spacing in every
+list (Work, Library, Personal, Settings, the sidebar, menus and the palette)
+and in the transcript; on a touch screen rows keep their 44-point height and
+only the spacing tightens.
+
+Focus is always shown: a 2-point ring in the accent colour, which stands at
+least 3 to 1 against every surface in every theme (dark, light and Neon); a
+text field shows it on its box, and the row the keyboard is on in a menu, the
+palette or the model menu carries an accent bar at its start.
 
 | Page | Sections | What it covers |
 | --- | --- | --- |
@@ -198,8 +213,13 @@ Chat 1 Medium"). One click opens one menu in three steps: the provider, then
 that provider's models, then the chosen model's effort (only for a model that
 has effort levels; the one in use is checked). Providers you are connected to
 come first; the others are listed under "Not connected" with the one action
-that connects them ("Connect in Settings", or "Copy /provider sign-in <id>"
-where only the terminal app can sign in). Each model says what it costs to use
+that connects them ("Connect in Settings", or "Sign in in Settings" for a
+subscription, which is signed in to from Settings, Models and providers, in the
+browser). With no model set up the control reads "Connect a model" and still
+opens: the menu says "No model
+is set up yet. Choose a provider to connect it in Settings." over the providers
+to connect. Its label keeps at least six characters of the model's name; the
+effort beside it gives way first. Each model says what it costs to use
 ("free", "paid", "subscription" or "price not known", the daemon's price
 tier); when a model you use stops being free, the daemon's warning shows as a
 notice that stays until you close it. Within a provider: Favorites (pinned
@@ -244,8 +264,21 @@ not listed. Arrows move, Tab or Enter on a partly typed name completes it,
 Enter on a whole name runs it, Escape closes the list. A listed command typed
 with words after it is held ("takes nothing after it here"); any other
 `/word` is not sent either: the composer says it is not a command here, points
-at `/` and Ctrl K, keeps the text, and offers "Send as a message". A slash that
-starts a path (`/etc/hosts is broken`, `/var/log/app.log`) is sent as written.
+at `/` and Ctrl K (⌘ K on a Mac), keeps the text, and offers "Send as a
+message". A slash that starts a path (`/etc/hosts is broken`,
+`/var/log/app.log`) is sent as written. The list of commands loads the first
+time `/` is typed; a command sent before it has loaded runs once it has.
+
+What you type in a chat and have not sent stays with that chat: it is still
+there after going to Work and back or reloading the tab, and another chat shows
+its own (a new chat has one too). Files attached and not sent stay with it the
+same way. Sending clears it; signing out clears every chat's.
+
+While a reply is being written, Escape stops it (the Stop button shows "Esc").
+An approval card answers to its keys while it has focus (click it or Tab to
+it): Y for "Yes, once", A for "Yes, and remember", N for "No", and a question's
+options to their numbers; the keys show on the buttons while the card has
+focus.
 
 On a phone, when something outside this chat waits for you, a banner at the top
 of the chat names the most urgent one (a purchase that goes ahead soonest
@@ -260,14 +293,21 @@ below the last message with its choices and the links "Why am I asked?" and
 open it), and the chat header shows a chip ("asking you · 1") that lists them.
 On a phone the header keeps the chat's title and that chip; the "When GoodVibes
 asks" chip steps aside while it shows, and the chip's sheet ends with the mode
-in force and Change. Work lists the same asks. Once one is decided, here or
+in force and Change. Otherwise on a phone the "When GoodVibes asks" chip is its
+shield and one word for the mode in force ("Asking", "Jev"), so the chat's
+title keeps its room; tapping it opens the whole line. Work lists the same asks. Once one is decided, here or
 anywhere else, the card folds to one dim line saying what was decided ("You
 said yes once", "You said yes and to remember: Any bun command in this
 project", "You said no").
 
 A turn's tool calls read as one collapsed line ("Read 2 files, edited 1 · 4 s")
 that opens to one line per call, worded as the terminal words it; the raw
-result is behind each call's Details. A reply that failed or was refused is a
+result is behind each call's Details. A call the model sent malformed reads
+"The model's call to find was malformed; it was asked to send it again." (the
+words written for the model are not shown). A long chat draws only the messages
+near what is on screen; the rest keep their place and their words, so the
+scrollbar, the browser's find, a selection across messages and jumping to a
+message from search all work on the whole chat. A reply that failed or was refused is a
 row in the conversation: what happened, the cause and what was changed, then
 buttons for the next step (Try again, Use another model, Details, or Choose a
 model or "How to sign in again" for a refusal, which opens Models and
@@ -276,13 +316,16 @@ the row is the same after a reload.
 
 ## Command palette and guided sheets
 
-Search (Ctrl K) opens the command palette: chats, places to go, settings
-sections, and every slash-command action the daemon can run. Picking an action
-opens its guided sheet, with the same blanks, the same sentence above the
-button and the same "what happened" line as the terminal. A schedule or trigger
-described in words is read back by the daemon first, and the sheet shows what
-will be kept before you save it. An action only a terminal can do is listed
-with the reason. The palette also opens four screens built the same way:
+Search (Ctrl K, ⌘ K on a Mac) opens the command palette: chats, places to go,
+settings sections, and every slash-command action the daemon can run for the
+browser (they load the first time the palette opens). Picking an action opens
+its guided sheet, with the same blanks, the same sentence above the button and
+the same "what happened" line as the terminal. A schedule or trigger described
+in words is read back by the daemon first, and the sheet shows what will be
+kept before you save it. An action only a terminal can do is not listed here;
+it is run from the terminal app. New chat is G then N and Toggle theme is G then
+T, both outside a text field: the browsers keep Ctrl Shift N, O and T for
+themselves. The palette also opens four screens built the same way:
 Schedules, MCP servers and tools, Repeat purchases, and Triggers. The same
 actions and screens are listed when you type `/` in the chat composer (see
 Chat).
@@ -303,8 +346,10 @@ visible near the composer. Large outputs open in the artifacts slide-over.
 ## Markdown responses
 
 Assistant and Knowledge responses support Markdown rendering. Registered language
-tags use their declared grammar. Untagged or unsupported fences require a current
-daemon-owned language reading; unavailable or held readings leave escaped plaintext.
+tags use their declared grammar. An untagged or unsupported fence is matched in the
+page against the registered grammars (nothing is sent anywhere); it is coloured and
+named only when the match is clear, else it is shown plain under "code" (a
+directory tree or a sentence is never labelled with a guessed language).
 
 Code block line numbers are optional and controlled from Settings, General. They are
 decorative and are not copied.
@@ -384,7 +429,11 @@ asks it last read and says so above them: "Questions and purchase windows could
 not be read: <reason>." with Retry. A search box narrows the rows, and the Show select
 switches between Active (the default), Waiting for you (only what waits, also
 `?tab=waiting`) and Archive. Select a row to open its
-detail beside the list (over the page on a phone). An ask opens as its card:
+detail beside the list (over the page on a phone); the browser's Back closes an
+open detail first, and the next Back leaves the page (the same in Library and
+Personal). A permission ask you answered is listed under "Your answers" in the
+words it was asked in ("Run ls -la trays?") with what you said ("You said
+yes", "You said no"). An ask opens as its card:
 who asked and when, the question, what it acts on, what it will do, the
 choices, and "Why am I asked?" and "Details" (the tool, its arguments, who
 requested it, the session and the decision trail). "I'll handle this" marks an
@@ -438,8 +487,7 @@ on without you (an interrupted start, a reply that failed without changing
 anything, a result that did not pass its final check), with the one button that
 answers it; Cancel stops a message that is still in progress. Identifiers and
 revisions are under Details. A message is kept in this browser only until the
-daemon has finished with it. Files and images cannot be attached here yet; note
-them as missing so the daemon knows what it was not given.
+daemon has finished with it.
 
 Contract details show the original ask, criteria, recorded readings, checks,
 attempts and terminal result. Inspection is read-only. Recorded confirmation or

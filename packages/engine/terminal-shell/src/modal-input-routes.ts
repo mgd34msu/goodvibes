@@ -27,12 +27,16 @@ type SelectionRouteState = {
         allowSearch: boolean;
         customActions: Map<string, SelectionAction>;
         selectedIndex: number;
+        /** The rows shown, in order; a picker without search answers a row numbered "N. " to its number. */
+        readonly filteredItems?: readonly { readonly label: string }[] | undefined;
         getSelected: () => SelectionResult['item'] | null | undefined;
         setQuery: (query: string) => void;
         moveUp: () => void;
         moveDown: () => void;
         scrollContext?: (delta: number) => void;
         close: () => void;
+        /** True for typing that belongs to the composer while an unprompted question is not yet addressed. */
+        takesTyping?: (token: InputToken) => boolean;
     };
     selectionCallback: ((result: SelectionResult | null) => void) | null;
     getSelectionCallback?: (() => ((result: SelectionResult | null) => void) | null) | undefined;
@@ -42,6 +46,9 @@ type SelectionRouteState = {
 };
 export function handleSelectionModalToken(state: SelectionRouteState, token: InputToken): boolean {
     if (!state.selectionModal.active)
+        return false;
+    // A question that opened by itself while the person was typing: the typing goes on into the composer.
+    if (state.selectionModal.takesTyping?.(token))
         return false;
     const getPrimaryAction = (selected: NonNullable<ReturnType<typeof state.selectionModal.getSelected>> | null | undefined): SelectionAction | null => {
         if (selected?.primaryAction)
@@ -106,6 +113,15 @@ export function handleSelectionModalToken(state: SelectionRouteState, token: Inp
         }
         else if (single && state.selectionModal.customActions.has(token.value)) {
             fireClaimedKey(token.value);
+        }
+        else if (single && /^[1-9]$/.test(token.value)) {
+            // A list that shows numbers answers to them: the row numbered so is chosen.
+            const at = state.selectionModal.filteredItems?.findIndex((item) => item.label.startsWith(`${token.value}. `)) ?? -1;
+            if (at >= 0) {
+                state.selectionModal.selectedIndex = at;
+                const selected = state.selectionModal.getSelected();
+                if (selected) dispatchSelectionAction(getPrimaryAction(selected) ?? 'select', selected);
+            }
         }
         else if (single && token.value === ' ') {
             fireSpace();

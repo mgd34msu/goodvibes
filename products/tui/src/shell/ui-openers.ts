@@ -1,4 +1,5 @@
 import { createModelPickerCommandOpeners } from '@goodvibes/engine/terminal-shell/model-picker-open';
+import { choosableProviderIds } from '@goodvibes/engine/terminal-shell/first-run';
 import { shortcutGroups } from '../renderer/shortcut-groups.ts';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
 import { createSettingsWorkspaceOpener } from '@goodvibes/engine/terminal-shell/shell-ui-openers';
@@ -146,8 +147,9 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     trustPromptRef,
   } = options;
 
-  // Trust-at-consequence-time: raised by trustGatedAsk on the first non-read
-  // request in an undecided workspace; the answer persists via setLevel().
+  // The trust prompt: asked as the program opens in a folder with no decision
+  // (tui-startup.ts askTrustOnOpen), and by trustGatedAsk when a non-read
+  // request reaches it in a folder still undecided; the answer persists via setLevel().
   // Registration self-records here too when trusted (never for restricted,
   // see selfRecordWorkspaceRegistration's doc). A dismissed prompt, or no
   // selection surface to ask on, rejects as unsettled: nothing is saved, the
@@ -161,7 +163,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       }
       // While the question is open the turn waits on the owner, not the model (the throbber says so).
       trustPromptRef.awaitingOwner = true;
-      commandContext.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose' }, (result) => {
+      // It opens by itself (on opening, or when the folder gained hooks or MCP files): typing in flight stays in the composer.
+      commandContext.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose', unprompted: true }, (result) => {
         trustPromptRef.awaitingOwner = false;
         const level = decodeFirstOpenChoice(result?.item.id ?? null);
         if (level === null) {
@@ -250,7 +253,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     render,
     ...(options.onProvidersChanged ? { onModelsChanged: options.onProvidersChanged } : {}),
     listModels: () => providerRegistry.getSelectableModels().filter((m) => providerRegistry.has(m.provider)),
-    listProviders: () => [...new Set(providerRegistry.listModels().map((m) => m.provider))].filter((id) => providerRegistry.has(id)),
+    // The same list first run counts: providers with a model, the internal router left out.
+    listProviders: () => choosableProviderIds(providerRegistry),
     currentModelId: getCurrentModelForPickerTarget,
     currentProviderId: getCurrentProviderForPickerTarget,
     configuredProviderIds: () => new Set(getConfiguredProviderIds()),

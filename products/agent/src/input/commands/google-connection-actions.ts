@@ -379,7 +379,7 @@ export async function adoptGoogleCredentials(
   if (outcome.needsConfirmation === true) {
     return {
       adopted: false,
-      text: [outcome.detail, outcome.prompt ?? '', 'Confirm with: /google adopt --yes'].filter(Boolean).join('\n'),
+      text: [outcome.detail, outcome.prompt ?? '', 'Replace them with: /google adopt --replace'].filter(Boolean).join('\n'),
     };
   }
 
@@ -471,18 +471,19 @@ export async function connectGoogle(
   announceConsentUrl: (url: string) => void,
 ): Promise<GoogleConnectOutcome> {
   const plan = await planGoogleConnectionFor(ctx);
-  const lines: string[] = [...describeGoogleConnectionPlan(plan)];
+  // The plan is said before its steps run, so what it found is read in order (it was found before anything installed).
+  progress.note(describeGoogleConnectionPlan(plan).join('\n      '));
 
   // Already complete: refresh it and prove it, asking nobody anything.
   if (plan.route === 'stored-credential') {
     const connection = await openConnection(ctx, plan.gcloud?.account ?? null);
     if (connection === null) {
-      return { connected: false, text: [...lines, 'The stored credential could not be assembled.'].join('\n') };
+      return { connected: false, text: 'The stored credential could not be assembled.' };
     }
     const proof = await proveGoogleConnection(connection.client);
     return {
       connected: proof.ok,
-      text: [...lines, '', ...describeGoogleConnectionProof(proof)].join('\n'),
+      text: describeGoogleConnectionProof(proof).join('\n'),
     };
   }
 
@@ -490,6 +491,8 @@ export async function connectGoogle(
   const deps: GoogleSetupActionDeps = {
     ...googleActionDeps(ctx),
     announceConsentUrl,
+    // What it installs, as it goes: the request was the consent, so nothing is asked.
+    installProgress: (message) => progress.note(message),
     ...(plan.intendedAccount === null ? {} : { loginHint: plan.intendedAccount }),
     proveConnection: proveConnectionFor(ctx, plan.gcloud?.account ?? null),
   };
@@ -499,7 +502,7 @@ export async function connectGoogle(
     runners: buildGoogleSetupRunners(setupPath, deps),
   });
 
-  return { connected: report.ok, text: [...lines, '', report.summary].join('\n') };
+  return { connected: report.ok, text: report.summary };
 }
 
 /**
@@ -662,6 +665,5 @@ export async function forgetGoogleCredentials(
         : `Removed the '${GOOGLE_CALENDAR_SUBSCRIPTION_NAME}' calendar feed and its stored address.`,
     ].join('\n');
   }
-  if ('refused' in result) return result.prompt;
-  return [result.prompt, 'Confirm with: /google forget --yes'].join('\n');
+  return result.prompt;
 }

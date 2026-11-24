@@ -277,6 +277,29 @@ export function announceHeadlessRecovery(
   return recovery;
 }
 
+/** What the `SESSION` frame of a headless run is read from: the bootstrapped runtime. */
+export interface HeadlessSessionSource {
+  readonly runtime: { readonly sessionId: string; readonly model: string; readonly provider: string };
+  readonly permissions: { getMode(): string };
+}
+
+/**
+ * The first `stream-json` frame of a run that reached a session, written once
+ * the session is final (after a resume): `{"type":"SESSION","sessionId",
+ * "model","provider","workingDirectory","permissionMode"}`. Nothing in the
+ * other formats.
+ */
+export function announceHeadlessSession(
+  ctx: HeadlessSessionSource,
+  workingDirectory: string,
+  format: string,
+  stdout: (line: string) => void = (line) => { process.stdout.write(`${line}\n`); },
+): void {
+  if (format !== 'stream-json') return;
+  stdout(JSON.stringify({ schemaVersion: HEADLESS_SCHEMA_VERSION, type: 'SESSION', sessionId: ctx.runtime.sessionId,
+    model: ctx.runtime.model, provider: ctx.runtime.provider, workingDirectory, permissionMode: ctx.permissions.getMode() }));
+}
+
 /**
  * The result of a run refused before it started because the session it was
  * told to resume is open in another running copy: exit `1` (a refusal, like

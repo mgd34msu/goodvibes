@@ -37,6 +37,7 @@ an ordinary web page with headings, buttons and labels.
 | What | How |
 | --- | --- |
 | Less motion | Turn on `display.reduceMotion` (`/settings`, Reduce motion): the working spinner becomes one still mark with no colour sweep, and running rows stop spinning; times still count. With `display.stream` off as well, each answer appears whole. |
+| Select with the terminal | Turn off `display.mouseCapture` (`/settings`, Use the mouse in the terminal programs) and start the Agent again: the terminal keeps the mouse, so dragging selects text its own way. Copy (`Ctrl+Y` for a block) uses a clipboard program when one is installed (wl-copy, xclip, xsel, pbcopy, clip.exe) and says `Copied` only when it confirmed the copy; otherwise the text goes to the terminal as OSC 52 and the status line says `Sent to your terminal's clipboard`. |
 | No colour at all | Set `NO_COLOR` to any value before starting (`NO_COLOR=1 goodvibes-agent`). `TERM=dumb` does the same. Everything is still drawn; nothing depends on colour alone to be read (an ask that cannot be undone also says `This can't be undone.`). |
 | Answers all at once, not word by word | `/settings`, `Show answers as they are written` off (`display.stream`). The answer is painted once, when it is complete. |
 | Plain ASCII lines in the work tree | `/settings`, `Line style for the work tree`, `ascii` (`display.treeGlyphs`). |

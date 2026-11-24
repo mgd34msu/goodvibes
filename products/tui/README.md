@@ -4,7 +4,7 @@
 
 `goodvibes` is the GoodVibes terminal app for working in a project. You run `goodvibes` in a project directory and get a full-screen terminal app where you talk to a model that can read and edit your files, run shell commands and tests, search the web, and hand work off to helper agents. Reads and edits inside the project just happen; how often it stops to ask you about the rest is a setting (see [How much it asks you](../../README.md#how-much-it-asks-you)).
 
-It talks to many model providers (OpenAI, Anthropic, Gemini, Bedrock, Copilot, OpenRouter and other OpenAI-compatible gateways, plus local servers like Ollama and LM Studio that `/scan` finds on your machine and LAN), keeps its settings, sessions, and secrets on your own machine, and shows you the token count and running cost of every turn. Background work opens in large modals over the conversation: running agents, changed files and diffs, tokens and cost.
+It talks to many model providers (OpenAI, Anthropic, Gemini, Bedrock, Copilot, OpenRouter and other OpenAI-compatible gateways, plus local servers like Ollama and LM Studio that `/scan` finds on your machine and LAN), stores its settings, sessions, and secrets on your own machine (what you ask and what the tools do is sent to the models you choose, and each decision request to the decision model when one is set: [what one request sends](../../docs/decision-model-policy.md#what-one-decision-request-sends)), and shows you the token count and running cost of every turn. Background work opens in large modals over the conversation: running agents, changed files and diffs, tokens and cost.
 
 <img src="docs/assets/splash.png" alt="GoodVibes starting up in a terminal: a glitch-art GOODVIBES wordmark in a cyan-to-magenta gradient, the version v3.4.8 and tagline beneath it, the model rtfake:rt-1 with 28 tools, the working directory, and the hint Ctrl+P commands, ? help, F2 agents. Below the empty composer the status bar reads Permissions: asking you, for now · you chose Jev decides, shift+tab, 1 notice, then context 0%, branch main, changed and model rt-1." width="900">
 
@@ -69,7 +69,7 @@ Work that is not conversation opens in modals instead of scrolling past in the t
 
 <img src="docs/assets/help-overlay.png" alt="The Commands list opened with ?, with a search field reading Type a command, setting, model or key and the count 154 commands and keys. Rows are grouped as suggested, session, views, settings and commands, each with its slash command on the right, from See changes /changes to Change when GoodVibes asks /settings. The detail pane shows See changes: changed files with their diff. The footer reads move, run, tab fill composer and 135 more." width="820">
 
-Press `?` on an empty prompt, `Ctrl+P` or `/help` for one searchable list of everything you can do: every command, view and setting, with the keyboard shortcuts at the end. Every slash command is guided: typing it alone opens a short list of what it can do, and an action with blanks opens a form that shows the line it will run. Each command has one name and no short aliases. The same list is generated into [docs/commands-reference.md](docs/commands-reference.md); the commands this release removed or renamed are listed in the [3.3.2 release notes](../../docs/releases/3.3.2.md#removed-and-renamed-commands).
+Press `?` on an empty prompt, `Ctrl+P` or `/help` for one searchable list of everything you can do: every command, view and setting, with the keyboard shortcuts at the end. Every slash command is guided: typing it alone opens a short list of what it can do, and an action with blanks opens a form that shows the line it will run. Each command has one name and no short aliases. The same list is generated into [docs/commands-reference.md](docs/commands-reference.md); the commands removed or renamed when each command got one name (3.3.2) are listed in the [3.3.2 release notes](../../docs/releases/3.3.2.md#removed-and-renamed-commands).
 
 ### Keys worth knowing on day one
 
@@ -304,7 +304,7 @@ src/
 
 ## Stability
 
-GoodVibes ships as one suite version. Changes, including renamed settings and removed commands, are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/); the current release is [3.3.2](../../docs/releases/3.3.2.md).
+GoodVibes ships as one suite version. Changes, including renamed settings and removed commands, are recorded in the [suite changelog](../../packages/engine/CHANGELOG.md) and the [release notes](../../docs/releases/), one file per release.
 
 ## License
 

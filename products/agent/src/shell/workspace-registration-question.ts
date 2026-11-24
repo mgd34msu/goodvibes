@@ -23,7 +23,7 @@ export interface SelectionOpener {
   openSelection(
     title: string,
     items: SelectionItem[],
-    opts: { preSelectId?: string; allowSearch?: boolean } | undefined,
+    opts: { preSelectId?: string; allowSearch?: boolean; unprompted?: boolean } | undefined,
     callback: (result: SelectionResult | null) => void,
   ): void;
 }
@@ -38,7 +38,7 @@ export function workspaceRegistrationItems(root: string): SelectionItem[] {
 /** The question on the input handler's selection modal. Escape or closing it declines. */
 export function createWorkspaceRegistrationQuestion(opener: SelectionOpener): AskWorkspaceRegistration {
   return (root, answer) => {
-    opener.openSelection(WORKSPACE_REGISTRATION_QUESTION, workspaceRegistrationItems(root), { preSelectId: 'decline', allowSearch: false }, (result) => {
+    opener.openSelection(WORKSPACE_REGISTRATION_QUESTION, workspaceRegistrationItems(root), { preSelectId: 'decline', allowSearch: false, unprompted: true }, (result) => {
       answer(result?.item.id === 'register');
     });
   };

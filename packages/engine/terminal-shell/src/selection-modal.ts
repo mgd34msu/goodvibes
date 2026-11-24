@@ -2,6 +2,8 @@
  * SelectionModal - Generic reusable selection modal with fuzzy search.
  * Used by /template, /sessions, /session bookmarks, /tools, and focused pickers.
  */
+import type { InputToken } from '@goodvibes/engine/platform/platform/core';
+import { cardAwaitsTab, routeCardInput, type CardTypeahead } from './blocking-permission-input.js';
 
 export interface SelectionItem {
   id: string;
@@ -39,10 +41,31 @@ export interface SelectionOpenOptions {
   onHighlight?: ((item: SelectionItem | null) => void) | undefined;
   /** Input owners cancel the exact queued/displayed picker with this signal. */
   signal?: AbortSignal | undefined;
+  /**
+   * The question opened by itself, not because the person asked for it (a
+   * trust question for files the folder gained, a pairing request): the
+   * approval card's typing rule applies (blocking-permission-input.ts
+   * routeCardInput). Keys typed as it appears, and every key while the
+   * composer holds a draft, go to the composer, untouched; a key after a
+   * pause with an empty composer, or Tab, addresses the question.
+   */
+  unprompted?: boolean | undefined;
+  /** Filled in by the input owner for an unprompted question: whether the composer is empty now. */
+  composerEmpty?: (() => boolean) | undefined;
+}
+
+/** An input token as one stdin chunk for the typing rule: mouse and focus are never typing, Tab addresses. */
+function typingChunkOf(token: InputToken): string {
+  if (token.type === 'mouse' || token.type === 'focus') return '';
+  if (token.type === 'text') return token.value;
+  return token.logicalName === 'tab' && !token.shift && !token.ctrl && !token.meta ? '\t' : `\x1b[${token.logicalName}`;
 }
 
 export class SelectionModal {
   public active = false;
+  /** Typing state while an unprompted question is open (see SelectionOpenOptions.unprompted); null otherwise. */
+  private typeahead: CardTypeahead | null = null;
+  private composerEmpty: () => boolean = () => true;
   public title = '';
   /** The always-live search row's query (fuzzy). Typing edits it directly; there is no search mode. */
   public query = '';
@@ -80,6 +103,8 @@ export class SelectionModal {
     this.allowSearch = opts?.allowSearch ?? true;
     this.customActions = opts?.customActions ?? new Map();
     this.primaryVerbLabel = opts?.primaryVerbLabel;
+    this.typeahead = opts?.unprompted ? { openedAt: Date.now() } : null;
+    this.composerEmpty = opts?.composerEmpty ?? (() => true);
     this.active = true;
     this.filterItems();
 
@@ -108,6 +133,24 @@ export class SelectionModal {
     this.selectedIndex = 0;
     this.customActions = new Map();
     this.primaryVerbLabel = undefined;
+    this.typeahead = null;
+    this.composerEmpty = () => true;
+  }
+
+  /**
+   * True when this token is typing that belongs to the composer, not an answer:
+   * an unprompted question not yet addressed (routeCardInput's rule).
+   */
+  takesTyping(token: InputToken, now = Date.now()): boolean {
+    if (!this.active || this.typeahead === null || this.typeahead.addressed) return false;
+    const routed = routeCardInput(typingChunkOf(token), this.typeahead, now, this.composerEmpty());
+    this.typeahead = routed.card;
+    return !routed.answer;
+  }
+
+  /** The question waits for Tab: it opened over a draft and has not been addressed. */
+  awaitsTab(): boolean {
+    return this.typeahead !== null && cardAwaitsTab(this.typeahead, this.composerEmpty());
   }
 
   moveUp(): void {

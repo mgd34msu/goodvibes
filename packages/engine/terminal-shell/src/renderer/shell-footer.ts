@@ -7,6 +7,7 @@ import { activeTokens } from './theme.js';
 import { renderComposer, COMPOSER_FIXED_ROWS } from './composer.js';
 import { renderStatusLine, type StatusAsks, type StatusChip } from './status-line.js';
 import { getSharedModeFlash } from '../session-permission-mode.js';
+import { copyOutcomeWords, lastCopyOutcome } from '../clipboard.js';
 import { renderThrobberLine, type ThrobberState } from './throbber.js';
 import { renderBackToBottomPill, type BackToBottomState } from './back-to-bottom.js';
 import { voiceCaptureChip } from './voice-capture-chip.js';
@@ -45,6 +46,8 @@ export interface SharedShellFooterOptions {
   readonly modeFlash?: boolean | undefined;
   /** Notices not yet seen in the notifications view: `2 notices`; none at zero. */
   readonly unreadNotices?: number | undefined;
+  /** The newest unread notice's title, shown beside the count while the status row has room. */
+  readonly newestNotice?: string | undefined;
   /** The key that opens the notifications, as bound ("ctrl+n"). */
   readonly noticesKey?: string | undefined;
   /** The model's context window; null when it is unknown (the meter says "unknown"). */
@@ -128,6 +131,20 @@ const WORK_TREE_KEYS: ReadonlyArray<readonly [string, string]> = [
   ['y', 'copy'],
 ];
 
+/**
+ * The newest unread notice's subject (the feed lists newest first): its title,
+ * or the first words of its text when it has no title; undefined when none is unread.
+ */
+export function newestUnreadNoticeTitle<Entry extends { readonly title: string; readonly body?: string | undefined }>(feed: { list(): readonly Entry[]; isUnread(entry: Entry): boolean }): string | undefined {
+  const newest = feed.list().find((entry) => feed.isUnread(entry));
+  if (!newest) return undefined;
+  const title = newest.title.trim();
+  if (title !== '') return title;
+  const words = (newest.body ?? '').trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return undefined;
+  return words.length > 8 ? `${words.slice(0, 8).join(' ')}…` : words.join(' ');
+}
+
 export function createShellFooter<Options extends SharedShellFooterOptions>(ports: {
   readonly blankRow: (width: number) => Line;
   readonly renderStatusLine?: typeof renderStatusLine | undefined;
@@ -204,6 +221,8 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
     const chips = [...safetyChips(options, !saysYolo), ...ports.flags(options)];
 
     const copied = Date.now() - options.lastCopyTime < 2000;
+    // "Copied" only when a clipboard program confirmed it; OSC 52 gives no answer.
+    const copiedWords = copyOutcomeWords(lastCopyOutcome());
     if (view) {
       // Inside an agent or process view: its keys (what Esc does first), then main kept in sight.
       lines.push(
@@ -213,7 +232,7 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
             chips: safetyChips(options),
             notice: options.showExitNotice
               ? { text: 'Press Ctrl+C again to exit', tone: 'error' }
-              : (view.notice ?? (copied ? { text: 'Copied', tone: 'info' } : null)),
+              : (view.notice ?? (copied ? { text: copiedWords, tone: 'info' } : null)),
             keys: view.keys,
             // While main works its throbber names what it does; the trail would only repeat "working".
             trail: options.throbber ? null : (view.trail ?? null),
@@ -234,11 +253,11 @@ export function createShellFooter<Options extends SharedShellFooterOptions>(port
           state: options.composerPendingRisk === 'approval-wait' ? 'waiting' : options.turnRunning ? 'working' : null,
           asks,
           chips,
-          notices: options.unreadNotices && options.unreadNotices > 0 ? { count: options.unreadNotices, key: options.noticesKey } : null,
+          notices: options.unreadNotices && options.unreadNotices > 0 ? { count: options.unreadNotices, key: options.noticesKey, subject: options.newestNotice } : null,
           notice: options.showExitNotice
             ? { text: 'Press Ctrl+C again to exit', tone: 'error' }
             : copied
-              ? { text: 'Copied', tone: 'info' }
+              ? { text: copiedWords, tone: 'info' }
               : null,
           // With text in the composer the next Esc clears it; scrolled back, it returns to the
           // bottom; only an empty composer's Esc at the bottom interrupts.

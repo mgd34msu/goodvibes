@@ -24,7 +24,7 @@
  * (and this round's adoption note: no streamed per-step progress exists on the wire,
  * install is a single request/response call).
  */
-import { useMemo, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { Settings2 } from 'lucide-react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queries';
@@ -41,11 +41,13 @@ import {
   voiceLocalStateLabel,
 } from '../../lib/voice/voice-local-setup';
 import { useVoiceLocalInstall, useVoiceLocalStatus } from '../../hooks/useVoiceLocalSetup';
-import { WakeWordSettings } from './WakeWordSettings';
 import { Button } from '../ui/Button';
 import { Dialog } from '../ui/Dialog';
 import { Select } from '../ui/Select';
 import { StatusDot } from '../ui/StatusDot';
+
+// The wake-word section loads when the voice settings first open.
+const WakeWordSettings = lazy(() => import('./WakeWordSettings').then((module) => ({ default: module.WakeWordSettings })));
 
 interface VoiceOption {
   id: string;
@@ -303,7 +305,12 @@ export function VoiceSettings() {
               rather than a row in the schema-driven Settings group, because getting
               it running in a browser needs an act (download) and an opt-in
               (per-origin microphone permission) that no config row can express. */}
-          <WakeWordSettings open={open} />
+          {/* Its script (with the settings descriptions it quotes) loads when these settings first open. */}
+          {open && (
+            <Suspense fallback={null}>
+              <WakeWordSettings open={open} />
+            </Suspense>
+          )}
       </Dialog>
     </div>
   );

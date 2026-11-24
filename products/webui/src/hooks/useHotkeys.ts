@@ -9,10 +9,11 @@
  *  - Two-key sequences: "g c" (press g, then c within 1 s)
  *  - Allow-list for combos that SHOULD fire inside inputs (e.g. mod+Enter)
  *
- * "mod" maps to Meta on Mac and Ctrl everywhere else.
+ * "mod" maps to Meta on a Mac, iPhone or iPad and Ctrl everywhere else (lib/shortcut-keys.ts).
  */
 
 import { useEffect, useRef } from 'react';
+import { isApplePlatform } from '../lib/shortcut-keys';
 
 export type HotkeyHandler = (event: KeyboardEvent) => void;
 
@@ -39,24 +40,13 @@ function isEditableTarget(target: EventTarget | null): boolean {
   return false;
 }
 
-function isMac(): boolean {
-  if (typeof navigator === 'undefined') return false;
-  // Prefer the non-deprecated userAgentData API when available
-  const platform =
-    (navigator as Navigator & { userAgentData?: { platform?: string } })
-      .userAgentData?.platform ??
-    navigator.platform ??
-    navigator.userAgent;
-  return /mac/i.test(platform);
-}
-
 /**
  * Normalise a combo string to a canonical form.
  * e.g. "mod+K" → "Meta+k" (on Mac) or "Control+k" (elsewhere).
  */
 function normaliseToken(token: string): string {
   const lower = token.toLowerCase();
-  if (lower === 'mod') return isMac() ? 'Meta' : 'Control';
+  if (lower === 'mod') return isApplePlatform() ? 'Meta' : 'Control';
   if (lower === 'ctrl') return 'Control';
   if (lower === 'cmd' || lower === 'meta') return 'Meta';
   if (lower === 'alt') return 'Alt';

@@ -342,7 +342,7 @@ Run `/session` with no arguments to open its list of actions; a model or a scrip
 
 Most shortcuts are customizable via `~/.goodvibes/tui/keybindings.json`. Use `/help keys` to view current bindings.
 
-Four keys are fixed and are not in the rebindable table: `F2` (open or close Your agents), `Esc` (exit the current mode), `?` (the list of every command and key, on an empty prompt), and `@` (file picker). `Shift+Tab` is `cycle-permission-mode` in the table. Everything else below resolves through the keybindings table and can be reassigned.
+Only the actions `/help keys` lists can be reassigned: each key below that is the default of one of those actions (`Shift+Tab` is `cycle-permission-mode`, `Ctrl+O` is `open-agents`, and so on). These keys are fixed and are not in the rebindable table: `Enter` and `Shift+Enter` (send, new line), `Tab` (path completion), `Esc` (exit the current mode), `F2` (open or close Your agents), `?` (the list of every command and key, on an empty prompt), `@` (file picker), `Alt+R` or `F12` (try a failed turn again), `Alt+J` or `F10` (open the fix session), the arrow keys, `PageUp` / `PageDown`, the mouse, and the keys inside a view, search or picker (`n` / `N`, `Ctrl+X` to stop, and the selection-modal keys below).
 
 ### Input and editing
 
@@ -352,20 +352,22 @@ Four keys are fixed and are not in the rebindable table: `F2` (open or close You
 | `Shift+Enter` | Insert newline |
 | `Tab` | Path completion, else toggle block collapse |
 | `Ctrl+U` | Kill from cursor to start of line (push to kill ring) |
-| `Alt+U` | Clear entire prompt (no kill-ring push) |
+| `Alt+U` or `Ctrl+G` | Clear entire prompt (no kill-ring push) |
 | `Ctrl+W` | Kill word backward (push to kill ring) |
-| `Alt+K` | Kill from cursor to end of line (push to kill ring) |
-| `Alt+D` | Kill word forward (push to kill ring) |
-| `Ctrl+Shift+Y` | Yank from kill ring |
-| `Alt+Y` | Yank-pop (rotate kill ring, replace last yank); only valid immediately after a yank |
-| `Alt+B` | Move word backward |
-| `Alt+F` | Move word forward |
+| `Alt+K` or `Ctrl+X` | Kill from cursor to end of line (push to kill ring) |
+| `Alt+D` or `Ctrl+Delete` | Kill word forward (push to kill ring) |
+| `Ctrl+Shift+Y` or `Ctrl+\` | Yank from kill ring |
+| `Alt+Y` or `Ctrl+]` | Yank-pop (rotate kill ring, replace last yank); only valid immediately after a yank |
+| `Alt+B` or `Ctrl+Left` | Move word backward |
+| `Alt+F` or `Ctrl+Right` | Move word forward |
 | `Ctrl+Z` | Undo prompt edit |
-| `Ctrl+Shift+Z` | Redo prompt edit |
+| `Ctrl+Shift+Z` or `Ctrl+^` | Redo prompt edit |
 | `Ctrl+V` | Paste (image or text) |
 | `@` | Open file picker (insert file path) |
 | `?` | Open the list of every command and key (empty prompt) |
-| `Alt+R` / `Alt+O` / `Alt+I` / `Alt+S` | On the newest failed turn's row: try again / use another model / details / sign in again |
+| `Alt+R` / `Alt+O` / `Alt+I` / `Alt+S` (or `F12` / `F9` / `F3` / `F4`) | On the newest failed turn's row: try again / use another model / details / sign in again |
+
+Every `Alt` and `Ctrl+Shift` key has a second default because macOS Terminal sends no `Alt` unless "Use Option as Meta key" is on, and a terminal without the extended keyboard protocol sends `Ctrl+Shift+<letter>` as `Ctrl+<letter>`: `Alt+C` cancel the running tool `Ctrl+T`, `Alt+A` keep-awake `F6`, `Alt+M` memories used `F7`, `Alt+V` voice `F8`, `Alt+N` / `Alt+P` next and previous session `Ctrl+Q` / `Ctrl+_`, `Ctrl+Shift+C` copy selection `F5`, `Alt+J` open the fix session `F10`.
 
 `Ctrl+W` uses whitespace-delimited word boundaries (readline/unix-word-rubout semantics), while `Alt+D`, `Alt+B`, and `Alt+F` use Unicode word boundaries (letters, digits, underscore).
 

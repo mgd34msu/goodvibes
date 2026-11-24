@@ -14,6 +14,7 @@ import {
 } from 'react';
 import { ArrowUp, Paperclip, Plus, X } from 'lucide-react';
 import { formatError } from '../../lib/errors';
+import { formatShortcut } from '../../lib/shortcut-keys';
 import { ModelPicker, type ModelPickerProps } from './ModelPicker';
 import { dragHasFiles, filesFromDrop, imageFilesFromPaste, isImageFile, previewUrl } from './composer-attachments';
 import { MicButton } from '../../components/voice/MicButton';
@@ -415,8 +416,8 @@ export function Composer({
   // While a reply runs, Send queues the message behind it and the second control
   // interrupts. Ctrl/Cmd+Enter and holding Send stay as shortcuts for interrupting.
   const queueing = replyRunning && Boolean(onSteer);
-  const paletteKey = typeof navigator !== 'undefined' && /mac|iphone|ipad/i.test(navigator.platform ?? '') ? '⌘K' : 'Ctrl+K';
-  const steerKey = paletteKey === '⌘K' ? '⌘+Enter' : 'Ctrl+Enter';
+  const paletteKey = formatShortcut('mod+k');
+  const steerKey = formatShortcut('mod+enter');
 
   return (
     <form

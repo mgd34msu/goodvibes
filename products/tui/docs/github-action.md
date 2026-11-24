@@ -36,6 +36,24 @@ Run a health check:
     args: --json
 ```
 
+`command` and `args` are split into words the way a shell splits them: spaces
+(and tabs and new lines) separate words, and single or double quotes keep a
+phrase in one word. Nothing is expanded: no `$VARIABLES`, no `*` globs, no
+backslash escapes. Explain one decision, quoting the command it is about:
+
+```yaml
+- uses: mgd34msu/goodvibes/products/tui@v3.4.8
+  with:
+    version: v3.4.8
+    command: doctor explain
+    args: "'rm -rf build'"
+```
+
+The outer double quotes are YAML's; the single quotes reach the action and
+make `rm -rf build` one argument. A quote that is never closed stops the step
+with exit `2`. `prompt`, `output`, `timeout`, `max-turns`, `working-directory`
+and `install-dir` are each passed as one value, spaces included.
+
 Run a non-interactive prompt (needs a provider credential in the job env) and
 use its answer in a later step:
 
@@ -67,8 +85,8 @@ later step instead.
 | --- | --- | --- |
 | `version` | `latest` | Published suite release tag (for example `v3.4.8`) or `latest`. |
 | `prompt` | `""` | Non-interactive prompt for `goodvibes run`. Needs a provider credential. |
-| `command` | `""` | A subcommand to run instead (e.g. `doctor`, `status`). Ignored when `prompt` is set. |
-| `args` | `""` | Extra arguments appended after the command. |
+| `command` | `""` | A subcommand to run instead (e.g. `doctor`, `status`, `doctor explain`), split into words as a shell would (quote a word that holds spaces). Ignored when `prompt` is set. |
+| `args` | `""` | Extra arguments appended after the command or prompt, split into words as a shell would: single or double quotes keep a phrase in one argument; nothing is expanded. |
 | `output` | `text` | Output format for `run`: `text` \| `json` \| `stream-json`. |
 | `timeout` | `30m` | Cancel a prompt run after this long (`run --timeout`): seconds, or an `ms`, `s`, `m` or `h` suffix. Exit `124`, `stopReason` `timeout`. Empty removes the limit. |
 | `max-turns` | `50` | Stop a prompt run after this many model answers that still ask for tools (`run --max-turns`). Exit `1`, `stopReason` `max_turns`. Empty removes the limit. |

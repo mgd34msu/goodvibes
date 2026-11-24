@@ -398,22 +398,23 @@ export interface CommandContext extends CommandUiActions, CommandShellUiOpeners 
  * evaluator finding. Typed filtering (any non-empty query) is completely
  * unaffected, fuzzyMatch still searches every registered command exactly as
  * before; this only reorders the empty-query case. Curated for breadth across
- * the product's main workflows rather than raw usage frequency: help/config
- * (orientation), model (workspace + provider), recall/codebase/search
- * (knowledge), workstream/checkpoint (control-plane), imagine (generation),
- * sessions (continuity), quit (exit).
+ * the product's main workflows rather than raw usage frequency: help/settings
+ * (orientation), model (workspace + provider), memory/knowledge/codebase
+ * (knowledge), workstream/checkpoint (control-plane), media (generation),
+ * session (continuity), quit (exit). Every name is a registered command's;
+ * the registry keeps only the names it has (createTerminalCommandRegistry).
  */
 export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'help',
-  'config',
+  'settings',
   'model',
-  'recall',
+  'memory',
+  'knowledge',
   'codebase',
   'workstream',
   'checkpoint',
-  'search',
-  'imagine',
-  'sessions',
+  'media',
+  'session',
   'quit',
 ]);
 

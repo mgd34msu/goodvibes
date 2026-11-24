@@ -130,13 +130,6 @@
   line-height: 28px;
 }
 
-/* The title takes focus when the dialog opens (so the search field does not
-   greet the person with a focus ring); a heading needs no ring of its own. */
-.settings-pane-title:focus {
-  outline: none;
-  box-shadow: none;
-}
-
 /* Jump links to the page's sections, one compact row under the title. */
 .settings-jump {
   display: flex;

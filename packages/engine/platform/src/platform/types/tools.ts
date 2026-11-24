@@ -294,6 +294,10 @@ export interface ToolResult {
   cancelled?: boolean | undefined;
   /** Host-only facts about this result; never rendered to the model. See {@link ToolHostEvidence}. */
   hostEvidence?: ToolHostEvidence | undefined;
+  /** True when the call's arguments did not match the tool's schema: nothing ran, and the model was asked to send it again. */
+  malformed?: boolean | undefined;
+  /** The line a person reads for this result in place of the model-facing text; never sent to the model. */
+  ownerLine?: string | undefined;
   /**
    * Pictures for the model, beside the text (an image file read, a phone
    * capture). Every conversation loop attaches them to its next request when

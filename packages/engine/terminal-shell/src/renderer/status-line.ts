@@ -15,6 +15,8 @@
  *     sleep disabled), never dropped; optional chips after them (an attached
  *     image, the composer's intent) are dropped first;
  *   - `2 notices` and the key that opens them (` ctrl+n `), absent at zero;
+ *     while the row has room, the newest notice's subject beside the count
+ *     (`1 notice: Model list updated`), giving way after the branch;
  *   - while a main turn runs, the `esc` keycap with what Esc does now;
  *   - a background-work summary while agents or processes run (highlighted
  *     with its keys while it owns keyboard focus), truncated into the room
@@ -98,7 +100,12 @@ export interface StatusAsks {
 export interface StatusNotices {
     readonly count: number;
     readonly key?: string | undefined;
+    /** The newest unread notice's subject, shown beside the count while the row has room. */
+    readonly subject?: string | undefined;
 }
+
+/** The longest the newest notice's subject is shown beside the count. */
+const NOTICE_SUBJECT_MAX = 48;
 /** The current branch and whether the working tree differs from HEAD. */
 export interface StatusBranch {
     readonly name: string;
@@ -271,12 +278,22 @@ function asksWordRuns(asks: StatusAsks, form: AsksForm): Run[] {
 function asksWidth(asks: StatusAsks, form: AsksForm): number {
     return runsWidth(asksWordRuns(asks, form)) + (form.key && asks.key ? KEY_GAP + getDisplayWidth(asks.key) + 2 : 0);
 }
-function noticesRuns(notices: StatusNotices): Run[] {
-    const t = activeTokens();
-    return [{ text: `${notices.count} notice${notices.count === 1 ? '' : 's'}`, fg: t.info, bold: true }];
+function noticeSubject(notices: StatusNotices): string | undefined {
+    const subject = notices.subject?.replace(/\s+/g, ' ').trim();
+    if (!subject)
+        return undefined;
+    return getDisplayWidth(subject) <= NOTICE_SUBJECT_MAX ? subject : `${[...subject].slice(0, NOTICE_SUBJECT_MAX - 1).join('')}…`;
 }
-function noticesWidth(notices: StatusNotices, withKey: boolean): number {
-    return runsWidth(noticesRuns(notices)) + (withKey && notices.key ? KEY_GAP + getDisplayWidth(notices.key) + 2 : 0);
+function noticesRuns(notices: StatusNotices, withSubject = false): Run[] {
+    const t = activeTokens();
+    const subject = withSubject ? noticeSubject(notices) : undefined;
+    return [
+        { text: `${notices.count} notice${notices.count === 1 ? '' : 's'}`, fg: t.info, bold: true },
+        ...(subject ? [{ text: `: ${subject}`, fg: t.textMuted }] : []),
+    ];
+}
+function noticesWidth(notices: StatusNotices, withKey: boolean, withSubject = false): number {
+    return runsWidth(noticesRuns(notices, withSubject)) + (withKey && notices.key ? KEY_GAP + getDisplayWidth(notices.key) + 2 : 0);
 }
 /** `branch main, changed`; with `short`, the state word goes (`branch main`). */
 function branchRuns(branch: StatusBranch, short = false): Run[] {
@@ -310,6 +327,8 @@ interface Plan {
     notices: boolean;
     /** The notices segment keeps its `ctrl+n` keycap. */
     noticesKey: boolean;
+    /** The newest notice's subject stands beside the count. */
+    noticesSubject: boolean;
     /** The branch drops its state word (`, changed`). */
     branchShort: boolean;
     summary: boolean;
@@ -354,6 +373,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         chips: [...chips],
         notices: notices !== null,
         noticesKey: true,
+        noticesSubject: notices?.subject !== undefined,
         branchShort: false,
         summary: bg !== null,
         cost: cost !== null,
@@ -380,7 +400,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         if (p.chips.length > 0)
             widths.push(p.chips.reduce((s, c, i) => s + (i > 0 ? CHIP_GAP : 0) + getDisplayWidth(c.text), 0));
         if (p.notices && notices)
-            widths.push(noticesWidth(notices, p.noticesKey));
+            widths.push(noticesWidth(notices, p.noticesKey, p.noticesSubject));
         if (leadW > 0)
             widths.push(leadW);
         if (escHints)
@@ -430,6 +450,8 @@ export function renderStatusLine(options: StatusLineOptions): Line {
         () => { plan.branchShort = true; },
         () => { plan.context = false; },
         () => { plan.branch = false; },
+        // The newest notice's subject stays while the row has room once the background facts above have gone.
+        () => { plan.noticesSubject = false; },
         ...(failureReason ? [() => { plan.asks = { ...plan.asks, because: 'short' }; }] : []),
         () => { if (!bg?.focused) plan.summary = false; },
         () => { plan.model = false; },
@@ -547,7 +569,7 @@ export function renderStatusLine(options: StatusLineOptions): Line {
     }
     if (plan.notices && notices) {
         const start = next();
-        x = putRuns(line, start, rightEdge, noticesRuns(notices));
+        x = putRuns(line, start, rightEdge, noticesRuns(notices, plan.noticesSubject));
         if (notices.key && plan.noticesKey)
             x = putText(line, x + KEY_GAP, rightEdge, keycapRun(notices.key));
         options.tagRegion?.(line, start, x, 'notices');

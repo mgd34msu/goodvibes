@@ -66,6 +66,7 @@ import { createModeWordsSource, getSharedModeFlash } from '@goodvibes/engine/ter
 import { terminalAskFacts, type TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
 import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes/engine/terminal-shell/status-line';
+import { newestUnreadNoticeTitle } from '@goodvibes/engine/terminal-shell/shell-footer';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
 import { drawSplashAdditions } from '@goodvibes/engine/terminal-shell/first-run';
 import { GitStatusProvider, type GitHeaderInfo } from '@goodvibes/engine/terminal-shell/git-status';
@@ -81,7 +82,8 @@ import type { PreparedShellCliRuntime } from './cli/entrypoint.ts';
 import { reachabilityAtLaunch } from './runtime/path-shadow-startup.ts';
 import { selfUpdateAtLaunch } from './cli/launch-auto-update.ts';
 import { startPeriodicSelfUpdate } from './runtime/periodic-update.ts';
-import { applyInitialTuiCliState, getInteractiveTerminalLaunchError, reportFatalStartupError } from './cli/tui-startup.ts';
+import { applyInitialTuiCliState, reportFatalStartupError } from './cli/tui-startup.ts';
+import { getInteractiveTerminalLaunchError } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
 import { writeFatalLine } from './utils/fatal-boot-write.ts';
 import { wireSpokenTurnRuntime } from './audio/spoken-turn-wiring.ts';
 import { installVoiceCapture } from './shell/voice-capture-shell.ts';
@@ -123,6 +125,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     binary: cli.binary,
     stdinIsTTY: stdin.isTTY,
     stdoutIsTTY: stdout.isTTY,
+    words: cli.flags.prompt ?? (cli.rawCommand === undefined && cli.positionals.length > 0 ? cli.positionals.join(' ') : undefined),
   });
   if (terminalLaunchError !== null) {
     // Descriptor write, not process.stderr: this is a refusal that exits
@@ -472,6 +475,8 @@ async function main(prepared: PreparedShellCliRuntime) {
   const terminalLifecycle = createTerminalLifecycle({
     write: (data) => { stdout.write(data); },
     noAltScreen: cli.flags.noAltScreen,
+    // Off: the terminal keeps the mouse, so dragging selects text its own way.
+    mouseCapture: configManager.get('display.mouseCapture') !== false,
     guardedWrite: allowTerminalWrite,
     disposeOutputGuard: () => terminalOutputGuard?.dispose(),
     setRawMode: (enabled) => stdin.setRawMode(enabled),
@@ -1137,6 +1142,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       modeKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('cycle-permission-mode')),
       modeFlash: getSharedModeFlash().active(),
       unreadNotices: getSharedNotificationFeed().unreadCount(),
+      newestNotice: newestUnreadNoticeTitle(getSharedNotificationFeed()),
       noticesKey: keycapLabel(ctx.services.keybindingsManager.getComboLabel('open-notifications')),
       view: viewFrame?.footer ?? null,
       contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel), // null: unknown, the meter says so

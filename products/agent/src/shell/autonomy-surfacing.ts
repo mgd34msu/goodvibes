@@ -127,7 +127,7 @@ export function createAutonomySurfacing(options: AutonomySurfacingOptions) {
       const drafted = await propose(lifetime.signal);
       lifetime.signal.throwIfAborted();
       if (drafted > 0) {
-        options.router.low(`[Status] I drafted ${drafted} skill${drafted !== 1 ? 's' : ''} from recent work, review them under Memory`);
+        options.router.low(`[Status] I drafted ${drafted} skill${drafted !== 1 ? 's' : ''} from recent work; /my-skills review marks each one reviewed (Procedures in the workspace lists them)`);
         options.render();
       }
     } catch (err) {

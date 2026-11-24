@@ -14,8 +14,8 @@
  *
  * Every failure exits non-zero with a plain-language message naming the fix.
  */
-import { Writable } from 'node:stream';
 import { createInterface } from 'node:readline/promises';
+import { askSecretOnStdin } from './cli-hidden-input.js';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type {
   RotateKeyResult,
@@ -290,19 +290,6 @@ async function askOnStdin(question: string, toStderr = false): Promise<string> {
     return (await rl.question(question)).trim();
   } finally {
     rl.close();
-  }
-}
-
-/** Ask for a secret without echoing it to the screen or leaving it in the scrollback. */
-async function askSecretOnStdin(question: string, toStderr = false): Promise<string> {
-  (toStderr ? process.stderr : process.stdout).write(question);
-  const swallow = new Writable({ write: (_chunk, _encoding, done) => done() });
-  const rl = createInterface({ input: process.stdin, output: swallow, terminal: true });
-  try {
-    return (await rl.question('')).trim();
-  } finally {
-    rl.close();
-    (toStderr ? process.stderr : process.stdout).write('\n');
   }
 }
 

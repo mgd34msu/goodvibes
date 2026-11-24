@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { type CommandDef, getCommands, subscribeCommands } from '../../lib/commands';
 import { buildPaletteSections, PALETTE_SECTION_LABELS } from '../../lib/command-groups';
 import { Dialog } from '../ui/Dialog';
-import { formatShortcut } from './CommandPalette';
+import { formatShortcut } from '../../lib/shortcut-keys';
 
 interface ShortcutCheatsheetProps {
   open: boolean;

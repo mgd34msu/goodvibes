@@ -1,4 +1,4 @@
-import type { ConfigKey, ConfigManager } from '../config/index.ts';
+import type { ConfigManager } from '../config/index.ts';
 import { ConfigError } from '@goodvibes/engine/platform/platform/types/errors';
 import { DEFAULT_CONTROL_PLANE_PORT, parseDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { resolveFeatureEnablementWrite } from '../runtime/feature-enablement.ts';
@@ -6,18 +6,9 @@ import type { GoodVibesCliCommand, GoodVibesCliFlags } from './types.ts';
 import { RUNTIME_ENDPOINT_CONFIG_KEYS, hostModeForHostname } from './endpoints.ts';
 import type { RuntimeEndpointId } from './endpoints.ts';
 
-function parseConfigOverrideValue(value: string): unknown {
-  const trimmed = value.trim();
-  if (trimmed.length === 0) return '';
-  try {
-    return JSON.parse(trimmed) as unknown;
-  } catch {
-    if (trimmed === 'true') return true;
-    if (trimmed === 'false') return false;
-    if (/^-?\d+(?:\.\d+)?$/.test(trimmed)) return Number(trimmed);
-    return value;
-  }
-}
+// `-c key=value` and a single runtime write have one owner, shared with the terminal app.
+import { applyRuntimeConfigValue } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
+export { applyRuntimeConfigOverrides, applyRuntimeConfigValue } from '@goodvibes/engine/terminal-shell/cli-config-overrides';
 
 function parseRuntimeUrl(rawValue: string, source: string): string {
   const trimmed = rawValue.trim();
@@ -53,32 +44,6 @@ function parseRuntimeUrl(rawValue: string, source: string): string {
   const origin = parseDaemonOrigin(`${url.protocol}//${url.host.replace(/:\d+$/, '')}:${port}`);
   if (!origin) throw new ConfigError(`${source} must be a valid http(s)://host:port URL.`);
   return origin.baseUrl;
-}
-
-export function applyRuntimeConfigValue(configManager: ConfigManager, key: ConfigKey, value: unknown): void {
-  configManager.setRuntimeOverride(key, value as never);
-}
-
-export function applyRuntimeConfigOverrides(
-  configManager: ConfigManager,
-  overrides: readonly string[],
-): readonly string[] {
-  const errors: string[] = [];
-  for (const override of overrides) {
-    const index = override.indexOf('=');
-    if (index <= 0) {
-      errors.push('Invalid --config override. Expected key=value.');
-      continue;
-    }
-    const key = override.slice(0, index) as ConfigKey;
-    const rawValue = override.slice(index + 1);
-    try {
-      applyRuntimeConfigValue(configManager, key, parseConfigOverrideValue(rawValue));
-    } catch (error) {
-      errors.push(error instanceof Error ? `Invalid --config override. ${error.message}` : 'Invalid --config override.');
-    }
-  }
-  return errors;
 }
 
 export function applyRuntimeUrlOverride(

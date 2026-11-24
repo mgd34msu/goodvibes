@@ -127,6 +127,10 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
       const action = description.actions.find((candidate) => candidate.id === parsed.action.id)!;
       if (parsed.problem) throw commandRefusal(parsed.problem, usageLine(description.name, parsed.action), 'USAGE');
       if (parsed.missing.length > 0) {
+        // Nothing typed after the action word: an action with a screen that chooses its blanks opens it.
+        const opens = action.blankOpens && parsed.given.length === 0
+          ? description.actions.find((candidate) => candidate.id === action.blankOpens) : undefined;
+        if (dialog && opens) { await runComplete(description, opens, defaultsOf(opens as ActionDescription<never>), ctx); return; }
         if (dialog) {
           const given = Object.fromEntries(parsed.given.map((id) => [id, parsed.values[id]!]));
           await runGuided(unknown, { action: parsed.action, values: given }, ctx);

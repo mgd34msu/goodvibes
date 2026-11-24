@@ -37,6 +37,10 @@ registry.register(descriptionQuality);
 import { pendingApproval } from './batteries/pending-approval.js';
 registry.register(pendingApproval);
 
+// Runtime: the one request that checks a decision model answers (first run, Settings).
+import { decisionModelReadinessCheck } from './batteries/decision-model-readiness.js';
+registry.register(decisionModelReadinessCheck);
+
 // State: code index.
 import { codeSearchRerank } from '../state/batteries/code-search-rerank.js';
 registry.register(codeSearchRerank);

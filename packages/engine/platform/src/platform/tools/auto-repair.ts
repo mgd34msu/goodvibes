@@ -93,6 +93,9 @@ async function repairOwnedToolCall(
     // fail_fast / stop_on_error, verbosity / output.format) is renamed to the declared one. ---
     renameAliases(fixed, params, '', repairs);
     relocateVerbosity(fixed, params, repairs);
+    // --- Rule 8: obvious shapes. JSON text where an object or a list belongs, one value
+    // where a list belongs, a bare string where an object with one required text field belongs. ---
+    repairShapes(fixed, params, '', repairs);
     coerceNestedNumbers(fixed, params, '', repairs);
 
     // --- Rule 3 & 4 & 5: Per-property coercions ---
@@ -346,6 +349,64 @@ function coerceNestedNumbers(value: Record<string, unknown>, schema: JsonSchemaN
     }
   }
   forEachDeclaredChild(value, properties, path, (child, childSchema, childPath) => coerceNestedNumbers(child, childSchema, childPath, repairs));
+}
+
+function wantsObject(schema: JsonSchemaNode): boolean {
+  return schema['type'] === 'object' || (schema['type'] === undefined && schemaObject(schema['properties']) !== undefined);
+}
+
+/** The value JSON text holds, or undefined when the text is not JSON. */
+function parsedJson(text: string): unknown {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return undefined;
+  try { return JSON.parse(trimmed) as unknown; } catch { return undefined; }
+}
+
+/**
+ * The field a bare string stands for in an object schema: its one required
+ * property when that takes text; with nothing required, its first declared
+ * property when that takes text (exec's `cmd`). Otherwise none.
+ */
+function soleRequiredText(schema: JsonSchemaNode): string | undefined {
+  const required = Array.isArray(schema['required']) ? schema['required'].filter((key): key is string => typeof key === 'string') : [];
+  const properties = declaredProperties(schema) ?? {};
+  const field = required.length === 1 ? required[0]! : required.length === 0 ? Object.keys(properties)[0] : undefined;
+  return field !== undefined && schemaObject(properties[field])?.['type'] === 'string' ? field : undefined;
+}
+
+/** One value repaired toward `schema`; `at` names it in the note. Returns the value to keep. */
+function repairShape(value: unknown, schema: JsonSchemaNode, at: string, repairs: string[]): unknown {
+  if (typeof value === 'string' && wantsObject(schema)) {
+    const parsed = parsedJson(value);
+    if (plainObject(parsed)) { repairs.push(`parsed ${at} from JSON text into an object`); value = parsed; }
+    else {
+      const field = soleRequiredText(schema);
+      if (field !== undefined) { repairs.push(`wrapped ${at} as {"${field}": …}`); value = { [field]: value }; }
+    }
+  } else if (schema['type'] === 'array' && !Array.isArray(value) && value !== null && value !== undefined) {
+    const parsed = typeof value === 'string' ? parsedJson(value) : undefined;
+    if (Array.isArray(parsed)) { repairs.push(`parsed ${at} from JSON text into a list`); value = parsed; }
+    else { repairs.push(`wrapped ${at} in a one-item list`); value = [value]; }
+  }
+  if (Array.isArray(value)) {
+    const items = schemaObject(schema['items']);
+    if (items) for (let index = 0; index < value.length; index++) value[index] = repairShape(value[index], items, `${at}[${index}]`, repairs);
+  } else {
+    const entry = plainObject(value);
+    if (entry && wantsObject(schema)) repairShapes(entry, schema, `${at}.`, repairs);
+  }
+  return value;
+}
+
+/** Rule 8 over every declared property of `value`, nested objects and list items included. */
+function repairShapes(value: Record<string, unknown>, schema: JsonSchemaNode | undefined, path: string, repairs: string[]): void {
+  const properties = declaredProperties(schema);
+  if (!properties) return;
+  for (const key of Object.keys(value)) {
+    const childSchema = schemaObject(properties[key]);
+    if (!childSchema || !Object.hasOwn(properties, key)) continue;
+    value[key] = repairShape(value[key], childSchema, `${path}${key}`, repairs);
+  }
 }
 
 const VERBOSITY_KEYS = ['verbosity', 'view', 'detail'];

@@ -14,7 +14,7 @@ Terms used here:
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
 - A release is a tagged GoodVibes version such as `v3.4.8`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
-This part describes release 3.4.8.
+This part describes release {{release}}.
 
 ## Choosing an installation method
 
@@ -1736,13 +1736,15 @@ cd ~/code/my-project
 goodvibes
 ```
 
-With a key for the default model's provider present, the first start asks nothing: the conversation opens directly, and the first-run marker is written.
+With a key for a provider present, the first start asks nothing about the model: the conversation opens with one line saying which provider and model it uses and where the key came from (below), and the first-run marker is written.
 
 ### First run: three steps, the same in the terminal app and the Agent
 
 `goodvibes` and `goodvibes-agent` run the same first run. It opens exactly when the model the session will use is not ready (its provider has no key or sign-in and is not keyless); a ready model opens the conversation directly and writes the first-run marker (`~/.goodvibes/tui/onboarding-checked.json`, the Agent's under `~/.goodvibes/agent/`). Leaving at any step and starting again picks up from the facts: a provider chosen in settings but not signed in opens step 2 for it; otherwise step 1.
 
-**Step 1, `Welcome to GoodVibes` (`1 of 3`): `Which model should answer you?`** One row per offer, then `Another provider…` with the count of the other registered providers (`38 more`):
+**A provider key already there is used; nothing is asked about the model.** When a provider is usable through a key in the environment (`ANTHROPIC_API_KEY`, `OPENROUTER_API_KEY`, …), a key in the secret store or a sign-in, first run asks no "which model" question: it uses that provider with its own default model, and goes on to "Who decides" when that is still needed, otherwise straight to the conversation. This holds on a first launch whose model is ready only as the product's default (`provider.model` not set by you) too. With more than one usable, it takes the first in the order step 1 lists them (ChatGPT subscription, Anthropic, OpenRouter, then the others by name); a provider that needs no key and a model server on this computer are not taken this way. The choice is said in one line under the splash, never asked: `Using Anthropic (claude-sonnet-4-5) from ANTHROPIC_API_KEY; change it with the model control.` (`from your stored key`, `from your sign-in`). The steps below show only when nothing usable is found.
+
+**Step 1, `Welcome to GoodVibes` (`1 of 3`, `1 of 4` when "Who decides" follows): `Which model should answer you?`** One row per offer, then `Another provider…` with the count of the other providers the full provider picker lists (the providers that have a model, the internal decision router left out; the picker shows the same list):
 
 | Row | How | Shown with |
 | --- | --- | --- |
@@ -1751,7 +1753,7 @@ With a key for the default model's provider present, the first start asks nothin
 | `OpenRouter` | `paste an API key` | `has a free model` when its model list has a free model. |
 | `A model on this computer` | | `found <server> with <n> models` (green) once the scan of this computer found a model server (Ollama, LM Studio, llama.cpp and the like); `looking for models on this computer…` while it runs; `none found` after it found none. |
 
-The terminal app starts that scan of this computer (never the network) when first run opens; the Agent's start-up already scans this computer. When a key in the environment already makes a provider usable, a line under the rows says `Found in your environment: <VARIABLE> · press a to use it and skip this step`. Keys: Up and Down move, Enter chooses, `a` uses the found key (the provider's default model is chosen and step 2 is skipped), Esc is "set up later". Choosing `Another provider…` opens the full provider picker; choosing a ready model there finishes first run.
+The terminal app starts that scan of this computer (never the network) when first run opens; the Agent's start-up already scans this computer. Keys: Up and Down move, Enter chooses, Esc is "set up later". Choosing `Another provider…` opens the full provider picker; choosing a ready model there finishes first run.
 
 **Step 2 (`2 of 3`)** depends on the row:
 
@@ -1759,9 +1761,11 @@ The terminal app starts that scan of this computer (never the network) when firs
 - The browser: `GoodVibes opened your browser to sign in.`, then `If it didn't open, go to:` and the whole sign-in address, and `Waiting for you to finish in the browser…` while the sign-in page's answer is awaited. When the browser could not be opened, or the provider's sign-in ends on a code, `Paste the code the page shows:` takes the code (or the address the browser ended on). `c` copies the address, Enter continues, Esc or Shift+Tab goes back. A sign-in the provider refused says `<provider> refused the sign-in: <its error>. Press ⏎ to start again.`; one that came back but could not be finished (the code exchange or storing the sign-in failed) says `The sign-in came back but <provider> did not complete it: <reason>. Press ⏎ to start again.`; when the wait for the browser ended (for example it timed out) the line is `The sign-in could not wait for the browser: <reason>. Press ⏎ to start again.` After any of them the code the page shows can still be pasted, or Enter starts again.
 - A model on this computer: `Which model on this computer?` and the models found, each with its server, its size where the server reports one in the model list it already gives (Ollama's parameter size, LM Studio's `params_string`) and its context window; Enter chooses one. With none found, it says so and Enter looks again.
 
-**Step 3 is the conversation.** The splash (the logo, its lines, the hint and the version) is drawn exactly as on every start, at the same place; under it, on the first run only and only in the rows left free above the composer, GoodVibes adds:
+**Who decides (`3 of 4`), when the model is chosen and no decision model can be asked.** With the permission mode `jev-decides` or `just-vibes` (the default is `jev-decides`) and no usable decision model key (none in the environment, the secret store or a fallback target, and "No Decision Model" not chosen), one more step follows the model: `Who decides when GoodVibes would otherwise stop and ask you?` with `Jev decides` (`TypeSafe's decision model, with your key`), `Ask me` (`GoodVibes stops and asks you`) and `Another decision model…` (`Cloudflare and others, in Settings`), and `Chosen once; change it any time in /settings (When GoodVibes asks).` `Jev decides` opens `Paste your TypeSafe key.` with a masked field and `A key comes from your TypeSafe account at console.typesafe.ai. It is kept in the secret store and checked with one request.`; Enter stores it as `TYPESAFE_API_KEY` in the secret store (`judgment.keySource` `secret`) and sends the one request; a refusal shows the decision model's own sentence (for example `jev-latest: its endpoint could not be reached. ...`) and the key can be pasted again. `Ask me` sets `permissions.mode` to `ask-me`. `Another decision model…` opens Settings on the decision model (Cloudflare Workers AI, Laya and the other backends decisions can use, with their endpoint and credential); once one set there is usable, first run goes on by itself. A decision model picked here (the TypeSafe key accepted, or one set through `Another decision model…`) records `jev-decides` as your own choice in `permissions.mode`, so it is in force at once with that model, measured or not, and the status bar reads `Permissions: Jev decides`. Esc leaves it for later. Either way the status bar then reads the mode alone (`Permissions: Jev decides`, `Permissions: Ask me`). When a usable key is already present, nothing is asked and first run has three steps. When the session's model is ready on a first launch, or was taken from a key already there, but no decision model can be asked, first run is this one step, shown with no step count.
 
-1. `You're set.  Answering with <model> · signed in` (`no sign-in needed` for a model on this computer) and `3 of 3`.
+**Step 3 is the conversation (`4 of 4` after "Who decides").** The splash (the logo, its lines, the hint and the version) is drawn exactly as on every start, at the same place; under it, on the first run only and only in the rows left free above the composer, GoodVibes adds:
+
+1. `You're set.  Answering with <model> · signed in` (`no sign-in needed` for a model on this computer) and `3 of 3` (`4 of 4`).
 2. What GoodVibes asks before, for the permission mode in force (for example `GoodVibes asks before it runs commands or changes things outside this folder.`), that Shift+Tab changes when GoodVibes asks, and the command that opens the remaining setup, wrapped to the screen's width so it takes as few rows as its words need.
 
 The two parts follow each other with no blank row between them; rows left over become blank rows (first one under the splash, then one above the composer). At 120x36 both show in both programs. When the free rows are too few for both, the sentence is left out first, whole (the logo always keeps its place); on an 80x24 terminal the terminal app has no free rows under its splash, so nothing is added there. Notices are never drawn over these screens: they are counted on the status bar (`ctrl+n` opens them). Nothing of first run is written into the conversation.

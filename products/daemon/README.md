@@ -280,7 +280,7 @@ sources.
 
 ## Release and license
 
-Current monorepo releases are documented in [release notes](../../docs/releases/); the current release is [3.3.2](../../docs/releases/3.3.2.md).
+Monorepo releases are documented in the [release notes](../../docs/releases/), one file per release.
 
 Package: `@goodvibes/daemon` · `private: true`.
 The repository root owns the shared release version for all suite products.

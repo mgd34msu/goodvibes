@@ -181,14 +181,18 @@ export function promptText(blocks: readonly ContentBlock[]): string {
   return parts.join('\n\n');
 }
 
-/** Map how a run ended onto an ACP stop reason. */
-export function stopReasonFor(outcome: EmbeddedRunOutcome): StopReason {
+/**
+ * Map how a run ended onto an ACP stop reason. A run that failed or never
+ * started has none: the prompt request ends with an error saying why
+ * (outcomeText), never as a refusal the model did not make.
+ */
+export function stopReasonFor(outcome: EmbeddedRunOutcome): StopReason | undefined {
   switch (outcome.outcome) {
     case 'completed': return 'end_turn';
     case 'cancelled': return 'cancelled';
     case 'failed':
     case 'not-started':
-      return 'refusal';
+      return undefined;
   }
 }
 
@@ -359,6 +363,15 @@ export class GoodVibesAcpAgent implements Agent {
         });
         const outcome = await completion.done;
         if (finished) return;
+        const stopReason = state.cancelled ? 'cancelled' : stopReasonFor(outcome);
+        if (stopReason === undefined) {
+          // A failed or never-started run is reported to the editor as an error, with what happened.
+          finished = true;
+          offEvents();
+          state.activePrompt = null;
+          rejectPrompt(new Error(outcomeText(outcome, streamedText) ?? 'The run failed.'));
+          return;
+        }
         const text = state.cancelled ? null : outcomeText(outcome, streamedText);
         if (text) {
           this.notify({
@@ -366,7 +379,7 @@ export class GoodVibesAcpAgent implements Agent {
             update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
           });
         }
-        finish(state.cancelled ? 'cancelled' : stopReasonFor(outcome));
+        finish(stopReason);
       })();
     });
   }

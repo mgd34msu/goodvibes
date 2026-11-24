@@ -37,6 +37,8 @@ function primaryVerb(modal: SelectionModal, item: SelectionItem | null): string 
 }
 
 function hintsFor(modal: SelectionModal): KitHint[] {
+  // Opened by itself over a draft: the keys stay with the composer until Tab, as on the approval card.
+  if (modal.awaitsTab()) return [['tab', 'answer this question (your draft stays)']];
   const item = modal.getSelected();
   const base: KitHint[] = [['↑↓', 'move'], ['⏎', primaryVerb(modal, item)]];
   if (item?.primaryAction === 'toggle' && !item.actions) base.push(['space', 'toggle']);

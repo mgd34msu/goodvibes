@@ -136,7 +136,6 @@ function SettingsDialogBody({ section, onSectionChange, onClose, onOpenView, rea
   const [phoneList, setPhoneList] = useState(() => requested === 'general');
   const searchRef = useRef<HTMLInputElement | null>(null);
   const closeRef = useRef<HTMLButtonElement | null>(null);
-  const titleRef = useRef<HTMLHeadingElement | null>(null);
   const paneRef = useRef<HTMLDivElement | null>(null);
 
   const sectionMatches = useMemo(() => matchSettingsSections(query, groups), [query, groups]);
@@ -273,7 +272,7 @@ function SettingsDialogBody({ section, onSectionChange, onClose, onOpenView, rea
       title="Settings"
       className="settings-dialog"
       onClose={onClose}
-      initialFocusRef={phone ? closeRef : titleRef}
+      initialFocusRef={phone ? closeRef : searchRef}
     >
       {/* Not a control itself: it only catches keys bubbling up from the nav and the page, to route typing into search. */}
       <div className={showList ? 'settings-layout settings-layout--list' : 'settings-layout'} role="presentation" onKeyDown={onKeyDown}>
@@ -297,7 +296,7 @@ function SettingsDialogBody({ section, onSectionChange, onClose, onOpenView, rea
                 <IconButton label="Back to settings" icon={<ChevronLeft />} onClick={() => setPhoneList(true)} noTooltip />
               )}
               <div className="settings-pane-head__titles">
-                <h2 ref={titleRef} tabIndex={-1} className="settings-pane-title">{activePage ? activePage.label : 'Settings'}</h2>
+                <h2 className="settings-pane-title">{activePage ? activePage.label : 'Settings'}</h2>
                 {activePage && <p className="settings-pane-description">{activePage.description}</p>}
                 {multi && visibleSections.length > 1 && (
                   <nav className="settings-jump" aria-label={`Sections in ${activePage?.label ?? 'this page'}`}>

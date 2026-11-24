@@ -17,6 +17,31 @@ import { resumeSessionCore, type SessionResumeDeps } from './session-resume.js';
 import { whenCrashSnapshotFound } from './session-crash-offer.js';
 import { restoreCrashSnapshot, type CrashRecoveryReport } from './session-crash-recovery.js';
 
+export type InteractiveTerminalCheckInput = {
+  readonly binary: string;
+  readonly stdinIsTTY: boolean | undefined;
+  readonly stdoutIsTTY: boolean | undefined;
+  /** The words the program was started with, when they would have become the first prompt. */
+  readonly words?: string | undefined;
+};
+
+/**
+ * Both terminal programs' refusal to start their full-screen view without a
+ * terminal (exit 2): one plain line saying so, and the command that runs the
+ * same words without one. Null when stdin and stdout are terminals.
+ */
+export function getInteractiveTerminalLaunchError(input: InteractiveTerminalCheckInput): string | null {
+  const stdinReady = input.stdinIsTTY === true;
+  const stdoutReady = input.stdoutIsTTY === true;
+  if (stdinReady && stdoutReady) return null;
+
+  const missing = [stdinReady ? null : 'stdin', stdoutReady ? null : 'stdout'].filter((entry): entry is string => entry !== null);
+  const missingLabel = missing.length === 1 ? `${missing[0]} is` : `${missing.join(' and ')} are`;
+  const words = input.words?.trim();
+  const quoted = words ? JSON.stringify(words) : '"<prompt>"';
+  return `${input.binary} needs an interactive terminal (${missingLabel} not a terminal); to run a prompt without one: ${input.binary} run ${quoted}`;
+}
+
 /** Fatal diagnostics are independent: failure of one sink cannot suppress another or the exit. */
 export function reportStartupFailure(
   error: unknown,

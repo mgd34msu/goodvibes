@@ -331,6 +331,12 @@ export interface CompletedToolCall {
   readonly toolInput?: unknown;
   readonly result?: unknown;
   readonly isError: boolean;
+  /**
+   * The platform's one row for the person when it differs from what the model read: a malformed
+   * call ("The model's call to find was malformed; it was asked to send it again."). Shown in place
+   * of the result, which is written for the model and never shown.
+   */
+  readonly ownerLine?: string;
   /** When this browser saw turn.tool_call (epoch ms, client clock). */
   readonly startedAt?: number;
   /** When this browser saw the matching turn.tool_result (epoch ms, client clock). */
@@ -364,7 +370,9 @@ export function toolActivityFromHistory(message: unknown): CompletedToolCall[] {
       if (!toolCallId) continue;
       const result = results.get(toolCallId);
       const activity = readToolActivityWords(call.activity);
+      const ownerLine = result ? firstString(result, ['ownerLine']) : '';
       calls.push({
+        ...(ownerLine ? { ownerLine } : {}),
         toolCallId,
         toolName: firstString(call, ['name']),
         ...(activity ? { activity } : {}),

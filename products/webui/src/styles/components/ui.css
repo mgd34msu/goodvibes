@@ -204,15 +204,16 @@ textarea.gv-input {
   box-shadow: var(--focus-ring);
 }
 
-/* Search fields (settings, Work, Library): no glow. Focus is a quiet border
-   change, and only for keyboard focus (owner review 2026-09-30). */
+/* Search fields (settings, Work, Library): no glow. Focus is a border change, and
+   only for keyboard focus (owner review 2026-09-30): the border turns accent, which
+   reaches 3:1 against the field and the page in every theme. */
 .gv-input--search:focus {
   border-color: var(--line-strong);
   box-shadow: none;
 }
 
 .gv-input--search:focus-visible {
-  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  border-color: var(--accent);
   box-shadow: none;
 }
 
@@ -276,8 +277,13 @@ textarea.gv-input {
   animation: gv-rise-in var(--motion-menu) var(--ease-standard) both;
 }
 
-.gv-popover:focus {
+/* A popover takes focus only to hand it to its rows: a ring shows when the keyboard put it there. */
+.gv-popover:focus:not(:focus-visible) {
   outline: none;
+}
+
+.gv-popover:focus-visible {
+  outline-offset: -2px;
 }
 
 .gv-option,
@@ -312,6 +318,12 @@ textarea.gv-input {
   background: var(--line-strong);
   outline: none;
   box-shadow: none;
+}
+
+/* The row the keyboard is on also carries a 2px accent bar at its start (3:1 or more in every theme). */
+.gv-option[data-active="true"],
+.gv-menu-item:focus-visible {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .gv-option[aria-disabled="true"],
@@ -744,8 +756,13 @@ button.gv-row__main::after {
   animation: gv-dialog-in var(--motion-base) var(--ease-standard) both;
 }
 
-.gv-dialog:focus {
+/* Dialogs, sheets and drawers take focus to hold it inside: a ring along their inside edge when the keyboard put it there. */
+.gv-dialog:focus:not(:focus-visible) {
   outline: none;
+}
+
+.gv-dialog:focus-visible {
+  outline-offset: -2px;
 }
 
 .gv-dialog--confirm {
@@ -854,8 +871,12 @@ button.gv-row__main::after {
   animation: gv-slide-in-up var(--motion-slow) var(--ease-standard) both;
 }
 
-.gv-sheet:focus {
+.gv-sheet:focus:not(:focus-visible) {
   outline: none;
+}
+
+.gv-sheet:focus-visible {
+  outline-offset: -2px;
 }
 
 .gv-sheet__grabber {
@@ -921,8 +942,12 @@ button.gv-row__main::after {
   overflow: hidden;
 }
 
-.gv-drawer:focus {
+.gv-drawer:focus:not(:focus-visible) {
   outline: none;
+}
+
+.gv-drawer:focus-visible {
+  outline-offset: -2px;
 }
 
 .gv-drawer--left {

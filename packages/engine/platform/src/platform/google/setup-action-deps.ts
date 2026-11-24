@@ -55,6 +55,8 @@ export interface GoogleSetupActionDeps extends JudgmentReadingOptions {
    */
   readonly loopback: GoogleLoopbackListenerFactory;
   readonly homeDirectory: string;
+  /** Said while gcloud installs (what, its size, where, and how far along); nothing is asked. */
+  readonly installProgress?: ((message: string) => void) | undefined;
   /** How to obtain OAuth client credentials. Defaults to the console walkthrough. */
   readonly clientIntake?: GoogleClientIntakeChoice;
   /** Directory scanning, needed only by the `downloaded-file` intake route. */

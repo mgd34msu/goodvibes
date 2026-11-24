@@ -55,10 +55,12 @@
   transition: border-color var(--motion-fast) ease-out, box-shadow var(--motion-fast) ease-out;
 }
 
-/* Focus shows on the surface, not as a ring around the bare text field. */
-/* The typing caret plus an accent-tinted border mark focus on the surface. */
+/* Focus shows on the surface, not as a ring around the bare text field: the box's
+   edge turns accent, 2px (1px border plus a 1px shadow), 3:1 or more against the
+   page and the box in every theme. */
 .composer-box:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 40%, var(--line-strong));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
 }
 
 
@@ -241,8 +243,15 @@
   color: var(--text-3);
 }
 
+/* The model's name never shrinks below six characters: the effort gives way first,
+   and the button is never narrower than what that leaves. */
+.composer-model-btn {
+  min-width: min-content;
+}
+
 .composer-model-label {
-  min-width: 0;
+  flex: 0 1 auto;
+  min-width: 6ch;
   overflow: hidden;
   color: var(--text);
   font-weight: var(--weight-medium);
@@ -250,8 +259,11 @@
 }
 
 .composer-model-effort {
-  flex: none;
+  flex: 0 100 auto;
+  min-width: 0;
+  overflow: hidden;
   color: var(--text-2);
+  text-overflow: ellipsis;
 }
 
 .composer-model-btn[data-pending="true"] .composer-model-label {
@@ -378,6 +390,12 @@
   font: var(--weight-regular) var(--text-sm) / 1 var(--font-ui);
 }
 
+/* The filter field's focus is its box's edge: accent, 2px. */
+.model-picker__filter:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+
 .model-picker__input::placeholder {
   color: var(--text-3);
 }
@@ -430,8 +448,10 @@
   font-size: var(--text-sm);
 }
 
+/* The row the keyboard is on: a tint and a 2px accent bar at its start (the bar reaches 3:1). */
 .model-picker__row[data-active="true"] {
   background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .model-picker__row[aria-disabled="true"] {
@@ -687,6 +707,11 @@
 .composer-slash-item:hover,
 .composer-slash-item[aria-selected="true"] {
   background: var(--line-strong);
+}
+
+/* The command the keyboard is on also carries a 2px accent bar (3:1 or more). */
+.composer-slash-item[aria-selected="true"] {
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .composer-slash-item-name {

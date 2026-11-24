@@ -182,6 +182,6 @@ export function readMailboxStatus(getConfig: (key: string) => unknown): MailboxS
     .filter((problem) => !problem.startsWith('the mailbox password'));
   const passwordStored = configString(getConfig, MAILBOX_FIELDS.password).length > 0
     || configString(getConfig, 'surfaces.email.imap.password').length > 0;
-  if (!passwordStored) problems.push('the mailbox password is not stored: /mail set password --yes');
+  if (!passwordStored) problems.push('the mailbox password is not stored: /mail password (asks for it hidden)');
   return { settings, passwordStored, problems, ready: problems.length === 0 };
 }

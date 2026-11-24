@@ -9,6 +9,7 @@ import type {
   PrefixRule,
   EvaluationStep,
 } from '../types.js';
+import { resolve } from 'node:path';
 import { execShellCommands } from '../exec-command-text.js';
 
 /** Result returned by evaluatePrefixRule. */
@@ -123,6 +124,35 @@ export function execContextOf(args: Record<string, unknown>): string {
   return fixed === canonicalJson({ commands: perCommand.map(() => ({})) }) ? '' : fixed;
 }
 
+/** Where a project root is unknown, folders are resolved against this stand-in, so `.` and absent still agree. */
+const UNKNOWN_ROOT = '/.goodvibes-project-root';
+
+/**
+ * A context string from {@link execContextOf} (as a call makes it, or as an exact rule stored it)
+ * with every folder resolved against the project root: an absent folder, `.`, `./` and the root's own
+ * path are all the root and are left out, a relative folder becomes its absolute path. Two contexts
+ * that run in the same place compare equal.
+ */
+export function resolvedExecContext(context: string, projectRoot?: string): string {
+  if (context === '') return '';
+  let parsed: unknown;
+  try { parsed = JSON.parse(context); } catch { return context; }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return context;
+  const root = resolve(projectRoot ?? UNKNOWN_ROOT);
+  const folder = (value: unknown): unknown => {
+    if (value === undefined || value === null) return undefined;
+    if (typeof value !== 'string') return value;
+    const absolute = value.trim() === '' ? root : resolve(root, value);
+    return absolute === root ? undefined : absolute;
+  };
+  const record = parsed as Record<string, unknown>;
+  const commands = Array.isArray(record['commands']) ? record['commands'].map((entry) => {
+    const command = (entry && typeof entry === 'object' ? entry : {}) as Record<string, unknown>;
+    return { ...command, working_dir: folder(command['working_dir']) };
+  }) : [];
+  return execContextOf({ ...record, working_dir: folder(record['working_dir']), commands });
+}
+
 /**
  * evaluatePrefixRule, Evaluates a single PrefixRule against a tool call.
  *
@@ -143,6 +173,8 @@ export function evaluatePrefixRule(
   args: Record<string, unknown>,
   /** The commands the tool declares this call runs; read in place of probing argument names. */
   declaredCommands?: readonly string[],
+  /** The project the call runs in: an exact rule's folder and the call's are compared resolved against it. */
+  projectRoot?: string,
 ): PrefixRuleResult {
   const toolMatches = toolMatchesPrefixPattern(toolName, rule.toolPattern);
 
@@ -189,9 +221,11 @@ export function evaluatePrefixRule(
 
   const classRule = rule.exactCommandMatch === 'command-class';
   const exactLiteral = (command: string): boolean => rule.exactCommands?.some((exact) => command === exact) ?? false;
-  // An exact allow holds only for the environment, directory and detachment it was approved with.
+  // An exact allow holds only for the environment, folder and detachment it was approved with; the
+  // folder is compared resolved on both sides, so `.` and no folder are the same place.
   // A deny or ask rule protects: it holds in any context, and any matching command or segment triggers it.
-  const contextHolds = rule.effect !== 'allow' || classRule || execContextOf(args) === (rule.exactContext ?? execContextOf({}));
+  const contextHolds = rule.effect !== 'allow' || classRule
+    || resolvedExecContext(execContextOf(args), projectRoot) === resolvedExecContext(rule.exactContext ?? '', projectRoot);
 
   const segmentMatches = (command: string, whole = false): boolean => {
     if (whole && exactLiteral(command)) return contextHolds;

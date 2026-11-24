@@ -99,7 +99,7 @@ export interface SetupCommandOptions<Ctx> {
   /** This program's settings, read when the list opens: the checklist's done marks and count. */
   readonly settings?: ((ctx: Ctx) => SetupSettings | undefined) | undefined;
   /** The recommended topics the person chose to skip for now, kept by the program. */
-  readonly skipped?: { read(ctx: Ctx): ReadonlySet<string>; skip(ctx: Ctx, id: SetupTopicId): void } | undefined;
+  readonly skipped?: { read(ctx: Ctx): ReadonlySet<string>; skip(ctx: Ctx, id: SetupTopicId): void; unskip(ctx: Ctx, id: SetupTopicId): void } | undefined;
 }
 
 /** The settings the checklist reads. */
@@ -118,7 +118,8 @@ export const RECOMMENDED_SETUP_TOPICS: readonly SetupTopicId[] = ['model', 'how-
 
 /**
  * The skipped topics kept in one small JSON file (`setup-skipped.json` beside
- * the program's input history): read when `/setup` opens, written on a skip.
+ * the program's input history): read when `/setup` opens, written on a skip
+ * and when a skipped topic is brought back (the checklist's `s` key).
  */
 export function setupSkipFile<Ctx>(pathOf: (ctx: Ctx) => string | undefined): NonNullable<SetupCommandOptions<Ctx>['skipped']> {
   const read = (ctx: Ctx): ReadonlySet<string> => {
@@ -129,13 +130,15 @@ export function setupSkipFile<Ctx>(pathOf: (ctx: Ctx) => string | undefined): No
       return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : []);
     } catch { return new Set(); }
   };
+  const write = (ctx: Ctx, ids: Iterable<string>): void => {
+    const path = pathOf(ctx);
+    if (!path) return;
+    writeFileAtomic(path, `${JSON.stringify([...new Set(ids)])}\n`, { mkdirp: true });
+  };
   return {
     read,
-    skip(ctx, id) {
-      const path = pathOf(ctx);
-      if (!path) return;
-      writeFileAtomic(path, `${JSON.stringify([...new Set([...read(ctx), id])])}\n`, { mkdirp: true });
-    },
+    skip(ctx, id) { write(ctx, [...read(ctx), id]); },
+    unskip(ctx, id) { write(ctx, [...read(ctx)].filter((kept) => kept !== id)); },
   };
 }
 
@@ -243,12 +246,31 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
     'pair', 'unpair',
     'first-run',
   ];
+  // On a checklist topic not yet done: `s` skips it for now, and on a skipped one brings it back.
+  const skippable = (id: string, ctx: Ctx): 'skip' | 'bring-back' | undefined => {
+    if (!options.skipped) return undefined;
+    const item = checklist(ctx).find((entry) => entry.id === id);
+    if (!item || item.done) return undefined;
+    return skippedOf(ctx).has(id) ? 'bring-back' : 'skip';
+  };
   return {
     name: 'setup',
     title: 'Set up GoodVibes',
     summary: 'Set GoodVibes up, one topic at a time',
     group: 'Settings',
     firstScreenRows: rows,
+    rowKey: {
+      key: 's',
+      label: (id, ctx) => {
+        const state = skippable(id, ctx);
+        return state === 'skip' ? 'skip for now' : state === 'bring-back' ? 'bring it back' : undefined;
+      },
+      press: (id, ctx) => {
+        const state = skippable(id, ctx);
+        if (state === 'skip') options.skipped!.skip(ctx, id as SetupTopicId);
+        else if (state === 'bring-back') options.skipped!.unskip(ctx, id as SetupTopicId);
+      },
+    },
     actions,
   };
 }

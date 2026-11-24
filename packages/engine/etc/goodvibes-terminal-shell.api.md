@@ -242,6 +242,7 @@ export type ColorCapability = 'none' | 'basic16' | 'ansi256' | 'truecolor';
 export interface CommandFlagSpec<TField extends string> {
     readonly allowInlineValue?: boolean | undefined;
     readonly bareValue?: string | true | undefined;
+    readonly commands?: readonly string[] | undefined;
     readonly constValue?: CliFlagValue | undefined;
     readonly enumDefault?: string | undefined;
     readonly enumValues?: readonly string[] | undefined;
@@ -753,6 +754,7 @@ export interface GoodVibesCliFlags {
     readonly print: boolean;
     // (undocumented)
     readonly prompt: string | undefined;
+    readonly promptFile?: string | undefined;
     // (undocumented)
     readonly provider: string | undefined;
     // (undocumented)
@@ -1671,6 +1673,7 @@ export interface TerminalLifecycleDeps {
     readonly disposeOutputGuard?: () => void;
     readonly escapes?: TerminalSequenceSet;
     readonly guardedWrite?: (write: () => void) => void;
+    readonly mouseCapture?: boolean | undefined;
     readonly noAltScreen: boolean;
     readonly setRawMode?: (enabled: boolean) => void;
     readonly write: (data: string) => void;

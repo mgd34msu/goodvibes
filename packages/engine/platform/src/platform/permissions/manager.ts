@@ -138,6 +138,29 @@ interface SafetyInput {
   readonly ownerConfirmed?: boolean | undefined;
   /** Where the call sends as the owner (callRecipients): an answer to a new recipient covers these for the session. */
   readonly recipients?: readonly string[] | undefined;
+  /** The host alternatives (revise) and resume conditions (defer) defined for this call, offered to Jev. */
+  readonly choices?: AutonomousToolChoices | undefined;
+}
+
+/**
+ * What the acting model is told when Jev did not let a call run: the outcome, and the
+ * safety reading it rests on (the facts that reading found true), so the model can change course.
+ */
+function jevDecisionDetail(outcome: string, reading: Awaited<ReturnType<typeof readToolCall>> | undefined): string {
+  const facts = reading === undefined ? [] : [
+    reading.irreversible ? 'it cannot be undone' : '',
+    reading.weakensSecurity ? 'it weakens a security protection' : '',
+    reading.secrets ? 'it handles secrets' : '',
+    reading.outward ? 'it sends something off this machine' : '',
+    reading.beyondProject ? 'it reaches outside the project folder' : '',
+    reading.obfuscated ? 'its command is obscured' : '',
+    reading.uncertain.length > 0 ? `it could not be settled with confidence (${reading.uncertain.join(', ')})` : '',
+  ].filter(Boolean);
+  const because = facts.length > 0 ? `the safety reading found that ${facts.join(', ')}${reading?.stakes ? ` (stakes: ${reading.stakes})` : ''}`
+    : reading?.stakes ? `the safety reading put its stakes at ${reading.stakes}` : 'no safety reading was available';
+  if (outcome === 'revise') return `Jev chose a narrower alternative instead of this call, because ${because}.`;
+  if (outcome === 'defer') return `Jev's reason: ${because}. It may run once its condition changes.`;
+  return `Jev's reason: ${because}. A narrower call that avoids this may be allowed.`;
 }
 
 interface SafetyOutcome {
@@ -564,7 +587,8 @@ export interface GateOptions {
   readonly bookkeepingLimits?: { readonly ownerRevisions?: number; readonly retiredClaims?: number } | undefined;
   /** Explicit null declares no workspace policy. Explicit undefined refuses
    * non-read effects; absent property preserves raw embedding compatibility. */
-  readonly workspaceTrust?: Pick<import('../runtime/workspace-trust.js').WorkspaceTrustManager, 'prepareAutonomousConstraint'> | null | undefined;
+  readonly workspaceTrust?: (Pick<import('../runtime/workspace-trust.js').WorkspaceTrustManager, 'prepareAutonomousConstraint'>
+    & Partial<Pick<import('../runtime/workspace-trust.js').WorkspaceTrustManager, 'isRestricted'>>) | null | undefined;
   /** Trusted host alternatives; never populated from model-authored executable prose. */
   readonly autonomousChoices?: ((sourceId: string) => AutonomousToolChoices) | undefined;
   /**
@@ -1169,6 +1193,7 @@ export class PermissionManager {
       workingDirectory: capturedAuthority.directory ?? undefined, source,
       sourceId, actionRevision: `action-${epoch.toString(36)}`, authorityRevision, authoritySnapshot,
       supportingIds: options.preparationDecisionIds ?? [], decoratePort: options.decoratePort, recipients: ownerFacts.recipients,
+      choices: capturedAuthority.autonomousChoices,
       ...(options.ownerConfirmed === true ? { ownerConfirmed: true } : {}),
     });
     const result = safety.result;
@@ -1612,20 +1637,24 @@ export class PermissionManager {
         constraints: { mode: input.mode, ownerPolicyAllowed: input.policyResult.approved },
         provenance: { surface: this.gate.surfaceOf?.() ?? 'owner-direct' } }) as unknown as EntryType,
       evidence: [{ id: 'requested-tool-input', revision: input.actionRevision }, { id: 'live-authority', revision: input.authorityRevision }],
-      supportingDecisionIds: supportingIds, choices: {}, allowAct: input.policyResult.approved,
+      // The host alternatives and resume conditions defined for this call are offered, so Jev can revise or defer.
+      supportingDecisionIds: supportingIds, choices: input.choices ?? {}, allowAct: input.policyResult.approved,
       assertCurrent: input.assertCurrent, signal: input.signal,
     });
     input.assertCurrent();
     const receipt = decision.decision;
+    // What the acting model reads: the outcome and the reading it rests on.
+    const detail = jevDecisionDetail(receipt.outcome, reading);
     // just-vibes does not refuse what Jev would not run: the owner decides it at the end of the run.
     if (input.mode === 'just-vibes' && receipt.outcome !== 'act') {
-      return { ...this.queuedForOwner(input, analysis, `held for you: ${receipt.summary}`), recordClaim: () => decision.recordClaim() };
+      return { ...this.queuedForOwner(input, analysis, `held for you: ${detail}`), recordClaim: () => decision.recordClaim() };
     }
     return {
       result: this.result(receipt.outcome === 'act', false, 'jev_decision', `jev_${receipt.outcome}`, analysis,
-        { boundary: boundaryResult, autonomousDecision: receipt, detail: receipt.summary,
+        { boundary: boundaryResult, autonomousDecision: receipt, detail: receipt.outcome === 'act' ? receipt.summary : detail,
           preset: { preset: input.mode, action: receipt.outcome === 'act' ? 'allow' : 'deny' } }),
       recordClaim: () => decision.recordClaim(),
+      ...(decision.revision ? { revision: decision.revision } : {}),
     };
   }
 
@@ -1638,6 +1667,7 @@ export class PermissionManager {
       paths: paths === undefined ? undefined : classifyPaths(paths, i.directory),
       recoverable: declaredRecoverable(i.definition, i.args),
       ownerOnly: i.ownerOnly, untrustedRead: i.untrustedRead, declaredReadOnly: i.declaredReadOnly,
+      workspaceRestricted: this.gate.workspaceTrust?.isRestricted?.(),
     };
   }
 

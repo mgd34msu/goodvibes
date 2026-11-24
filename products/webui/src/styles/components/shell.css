@@ -503,7 +503,8 @@
   justify-content: center;
 }
 
-/* The chips are never cut on a phone: the title beside them gives way instead. */
+/* The chips are never cut on a phone; each is short there (the mode chip is its
+   shield and one word), so the title beside them keeps its room. */
 .shell-header--phone .shell-header__indicators {
   flex: none;
   overflow: visible;

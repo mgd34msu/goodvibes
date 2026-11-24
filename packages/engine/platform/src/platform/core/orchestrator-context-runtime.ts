@@ -1,4 +1,3 @@
-import { resolveSystemPrompt } from './orchestrator-system-prompt.js';
 import type { ConversationManager } from './conversation.js';
 import type { ConfigManager } from '../config/manager.js';
 import type { ModelDefinition, ProviderRegistry } from '../providers/registry.js';
@@ -159,10 +158,8 @@ async function buildAutoCompactionContext(
   },
 ): Promise<CompactionContext> {
   deps.signal?.throwIfAborted();
-  const instructionChain = deps.getSystemPrompt
-    ? (await resolveSystemPrompt(deps.getSystemPrompt, deps.signal)).trim() || undefined
-    : undefined;
-  deps.signal?.throwIfAborted();
+  // The instruction chain is not copied into the compacted history: it is the system prompt, which every
+  // request after compaction still sends unchanged, so the provider's cached copy of it is reused.
   const activeSkillFrontmatter = deps.getActiveSkillFrontmatter?.()?.trim() || undefined;
   const contracts = deps.contractRunner.list({ sessionId: deps.sessionId, includeTerminal: true });
   return {
@@ -183,7 +180,6 @@ async function buildAutoCompactionContext(
     extractionModelId: params.extractionModelId,
     extractionProvider: params.extractionProvider,
     helperModel: deps.helperModel,
-    instructionChain,
     activeSkillFrontmatter,
     strategy: deps.getCompactionStrategy?.() ?? 'structured',
   };

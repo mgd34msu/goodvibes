@@ -94,6 +94,18 @@ export function ToolActivityGroup({ toolActivity }: { toolActivity: readonly Com
       </summary>
       <ul className="tool-lines" aria-label="Tool calls">
         {toolActivity.map((call) => {
+          // A call the platform words for the person (a malformed call, sent back to the model to send
+          // again): its one row, in the platform's words; the result was written for the model and is not shown.
+          if (call.ownerLine) {
+            return (
+              <li key={call.toolCallId} className="tool-line tool-line--warn">
+                <div className="tool-line__row">
+                  <span className="tool-line__glyph" role="img" aria-label={GLYPH_WORDS.warn}>{GLYPHS.warn}</span>
+                  <span className="tool-line__owner">{call.ownerLine}</span>
+                </div>
+              </li>
+            );
+          }
           const raw = call.result === undefined ? '' : toolResultText(call.result);
           const duration = call.startedAt !== undefined && call.finishedAt !== undefined ? Math.max(0, call.finishedAt - call.startedAt) : undefined;
           return (

@@ -156,7 +156,9 @@ export function renderGoogleSetupRunbook(): string {
   lines.push('');
   lines.push('**"This browser or app may not be secure"**: Google is refusing the automated browser at sign-in. Sign in by hand in the window that opened, then re-run. The session persists after that.');
   lines.push('');
-  lines.push('**IMAP fails with `AUTHENTICATIONFAILED`**: the app password is wrong or was revoked. Google never re-displays an existing app password, so delete the `goodvibes-agent` entry at https://myaccount.google.com/apppasswords and re-run to create a fresh one.');
+  lines.push('**Gmail refuses the app password (over IMAP or SMTP)**: the app password is wrong or was revoked. Google never re-displays an existing app password, so delete the `goodvibes-agent` entry at https://myaccount.google.com/apppasswords, create a new one there, store it with `/mail password`, and re-run to check it.');
+  lines.push('');
+  lines.push('**A mail server cannot be reached**: the failure names the server; this machine\'s network or that address is the cause, and the app password was not checked. Re-run once the network is up.');
   lines.push('');
   lines.push('**Everything worked, then broke about a week later**: this is the Testing-publishing-status trap. Check https://console.cloud.google.com/auth/audience: if publishing status reads "Testing", click PUBLISH APP, then re-authorize. The old token cannot be salvaged.');
   lines.push('');

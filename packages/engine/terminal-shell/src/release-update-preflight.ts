@@ -323,7 +323,7 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
         async run(values, context) {
           if (!policy.daemon) throw commandRefusal('This program reaches no daemon of its own.');
           // A person at the terminal sees an install through to the new version; a model's run answers at once.
-          return describeDaemonUpdates(policy.daemon(context), values.now === 'yes', context.invokedByModel === true ? undefined : { print: context.print });
+          return describeDaemonUpdates(policy.daemon(context), values.now === 'yes', context.invokedByModel === true ? undefined : { print: context.print, printLive: context.printLive });
         },
       }),
       readAction<Context>({

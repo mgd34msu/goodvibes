@@ -4,6 +4,8 @@ import type { ShellPathService } from '@goodvibes/engine/platform/platform/runti
 import type { OnboardingCheckMarkerPayload, OnboardingCheckMarkerState, OnboardingStateScope, WriteOnboardingCheckMarkerOptions, } from './onboarding-state-types.js';
 const ONBOARDING_CHECK_MARKER_FILE = 'onboarding-checked.json';
 const ONBOARDING_COMPLETION_MARKER_FILE = 'onboarding-complete.json';
+/** First run's "Who decides" step was answered or put off (`source`: 'answered' | 'put-off'): it is not opened again by itself. */
+const WHO_DECIDES_MARKER_FILE = 'who-decides-asked.json';
 type OnboardingShellPaths = Pick<ShellPathService, 'workingDirectory' | 'resolveProjectPath' | 'resolveUserPath'>;
 export function createOnboardingMarkerStorage(surfaceRoot: string) {
     function resolveMarkerPath(shellPaths: OnboardingShellPaths, scope: OnboardingStateScope, fileName = ONBOARDING_CHECK_MARKER_FILE): string {
@@ -103,5 +105,13 @@ export function createOnboardingMarkerStorage(surfaceRoot: string) {
     function writeOnboardingCompletionMarker(shellPaths: OnboardingShellPaths, options: WriteOnboardingCheckMarkerOptions = {}): OnboardingCheckMarkerState {
         return writeOnboardingMarker(shellPaths, options, ONBOARDING_COMPLETION_MARKER_FILE);
     }
-    return { getOnboardingCheckMarkerPath, readOnboardingCheckMarker, writeOnboardingCheckMarker, getOnboardingCompletionMarkerPath, readOnboardingCompletionMarker, writeOnboardingCompletionMarker };
+    /** Whether first run's "Who decides" step was answered or put off on this surface (a readable record). */
+    function readWhoDecidesAsked(shellPaths: OnboardingShellPaths): boolean {
+        return readOnboardingMarker(shellPaths, 'user', WHO_DECIDES_MARKER_FILE).payload !== null;
+    }
+    /** Record that first run's "Who decides" step was answered or put off, so it is not opened again by itself. */
+    function writeWhoDecidesAsked(shellPaths: OnboardingShellPaths, how: 'answered' | 'put-off'): void {
+        writeOnboardingMarker(shellPaths, { source: how }, WHO_DECIDES_MARKER_FILE);
+    }
+    return { getOnboardingCheckMarkerPath, readOnboardingCheckMarker, writeOnboardingCheckMarker, getOnboardingCompletionMarkerPath, readOnboardingCompletionMarker, writeOnboardingCompletionMarker, readWhoDecidesAsked, writeWhoDecidesAsked };
 }

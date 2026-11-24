@@ -219,6 +219,12 @@ export interface CommandShape { readonly name: string; readonly actions: readonl
 /** What the generated handler and the guided path read from a surface's command context. */
 export interface CommandActionContext extends ConfirmationHost {
   readonly print: (message: string) => void;
+  /**
+   * Print a line that later calls replace in place (a progress line), and return what replaces
+   * it; null when the output cannot update a line in place (the line was printed as it is).
+   * Absent where no transcript can.
+   */
+  readonly printLive?: ((message: string) => ((next: string) => void) | null) | undefined;
   readonly invokedByModel?: boolean | undefined;
   readonly openSelection?: OpenSelection | undefined;
   readonly beginConcealedInput?: ((request: ConcealedInputRequest) => void) | undefined;

@@ -1,5 +1,70 @@
 # Changelog
 
+## [3.5.0] - 2026-11-24
+
+The full write-up is in
+[docs/releases/3.5.0.md](https://github.com/mgd34msu/goodvibes/blob/v3.5.0/docs/releases/3.5.0.md).
+
+### Upgrading from 3.4.8
+
+- The daemon's pairing answers changed shape; run every program on 3.5.0.
+- Session switching in the terminal programs is `Alt+N` / `Alt+P` (not `Tab` /
+  `Shift+Tab`); the web app's New chat is `G N` and Toggle theme `G T`.
+- Going back to 3.4.8 keeps sessions, settings, memory, schedules, paired
+  devices, providers and remembered rules; folders trusted for having nothing
+  of their own to run, skipped setup topics and price-change answers wait
+  unused until the next upgrade.
+
+### Added
+
+- First run's "Who decides" step (Jev with a TypeSafe key checked once, another
+  decision model, or Ask me), asked once: Esc puts it off and the status line's
+  mode segment opens it again; a home upgraded from 3.4.8 is shown it once. A
+  usable provider key in the environment is used without a question.
+- `provider.refreshListsAtStart`; `display.mouseCapture`; second default keys
+  for every `Alt` and `Ctrl+Shift` action.
+- `run --output stream-json` opens with a session frame; `--prompt-file` and
+  `-` (standard input) for the prompt; `secrets set <KEY>` asks hidden.
+- Opt-in https on the local network (`webui enable --lan --https`,
+  `controlPlane.lanHttps.*`).
+- Provider sign-in and API keys from the web app; files on native requests.
+- `update.status` `installing` carries `fileReceivedBytes`, `fileTotalBytes`,
+  `fileNumber` and `fileCount`; `SuiteUpdateOptions.onFiles`;
+  `DaemonAutoUpdaterOptions.releasesUrlNow`; `FirstRunDeps.whoDecidesAsked` and
+  `recordWhoDecides`, `openWhoDecides`, `openModeSegment`,
+  `CommandContext.openWhoDecides`;
+  `UpdateRequestOptions.onReceived` is told a file's size; `EmailConnectionTestResult`
+  carries `failure` and `server`; `docs/llms.txt`.
+
+### Changed
+
+- A malformed tool call, and a write refused in a restricted folder, go back to
+  the model as the call's result; the turn goes on.
+- The model is told its environment (folder, system, date, repository), and
+  Jev's reason when Jev refuses.
+- A folder with no hooks or tool servers of its own is trusted without a
+  question; one that has them is asked about as the program opens.
+- A typed command or a submitted form runs at once; asks that weaken a
+  protection open on No and say how long they last; the approval card's reason
+  key is `w`, and numbered choices answer to their numbers.
+- Lists and screens re-read by themselves on change events, on opening and on
+  reconnect; `update.releasesUrl` is read before every check.
+- `/model` opens the full picker; `/update daemon` shows one progress line
+  updated in place; the installer's PATH advice is one notice; the Work view
+  offers stop only once a work was started; Google setup's mail check names
+  the cause it saw.
+- A plugin whose switch-on its tier refused stays switched on, so setting the
+  tier starts it, also after a restart.
+
+### Fixed
+
+- `goodvibes acp` answers prompts and reports a failed run as a failure.
+- A custom provider's key typed at the key prompt is used.
+- Uploads after `~/.goodvibes` went private; `/mcp accept-tools` reading the old
+  tool list; the compaction preview's estimate; checkpoint notices reaching web
+  clients; the relay announcing every reconnect; a machine-group join reported
+  as a lost connection.
+
 ## [3.4.8] - 2026-11-22
 
 The full write-up is in

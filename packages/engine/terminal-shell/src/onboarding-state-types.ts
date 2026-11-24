@@ -3,7 +3,8 @@ export type OnboardingShellPaths = Pick<ShellPathService, 'workingDirectory' | '
 export type OnboardingMode = 'new' | 'edit' | 'reopen';
 export type OnboardingAcknowledgementTarget = 'providers' | 'subscriptions' | 'auth';
 export type OnboardingStateScope = 'user' | 'project';
-export type OnboardingCheckMarkerSource = 'wizard' | 'command' | 'import' | 'unknown';
+/** How a marker was written; 'answered' and 'put-off' only on first run's "Who decides" record. */
+export type OnboardingCheckMarkerSource = 'wizard' | 'command' | 'import' | 'unknown' | 'answered' | 'put-off';
 export interface OnboardingAcknowledgementRuntimeState {
     readonly version: 1;
     readonly updatedAt: number;

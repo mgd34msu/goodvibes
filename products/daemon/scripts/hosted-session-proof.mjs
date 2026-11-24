@@ -8,6 +8,8 @@ import { Agent } from 'undici';
 import { sessionEventDecoder, syntheticSystemOneAnswers } from './hosted-session-protocol.mjs';
 
 const pause = () => new Promise(resolve => setTimeout(resolve, 20));
+/** The opening line of the host's own message (platform/core/host-instructions.ts), which ends every model request. */
+const HOST_MESSAGE_HEADER = '[Host] Written by GoodVibes for this request only; not from the user.';
 async function until(check, label, milliseconds = 20_000) {
   const deadline = Date.now() + milliseconds;
   for (;;) { const result = await check(); if (result) return result;
@@ -68,7 +70,10 @@ export async function runHostedSessionProof({ binary, boundary, env, root }) {
     assert(modelRequests.length < 20, 'Unexpected model replay/request loop');
     modelRequests.push(body);
     if (request.url !== '/v1/chat/completions') { response.writeHead(404); response.end(); return; }
-    const lastUser = body.messages.filter(message => message.role === 'user').at(-1)?.content;
+    // The person's prompt is the last user message that is not the host's own message, which every request now
+    // ends with (HOST_MESSAGE_HEADER in platform/core/host-instructions.ts: the folder, system, date and repository).
+    const lastUser = body.messages.filter(message => message.role === 'user'
+      && !(typeof message.content === 'string' && message.content.startsWith(HOST_MESSAGE_HEADER))).at(-1)?.content;
     if (lastUser === 'owned-failure') { response.writeHead(400, { 'Content-Type': 'application/json' }); response.end(JSON.stringify({ error: { message: 'owned synthetic terminal failure', type: 'invalid_request_error' } })); return; }
     response.writeHead(200, { 'Content-Type': 'text/event-stream' });
     const chunk = (content, finish_reason = null) => `data: ${JSON.stringify({ id: 'owned-stream', object: 'chat.completion.chunk', created: 1, model: 'owned-model', choices: [{ index: 0, delta: { role: 'assistant', content }, finish_reason }] })}\n\n`;

@@ -30,6 +30,8 @@ export interface SuiteUpdateOptions extends UpdateRequestOptions {
   /** The invoking product's actual lifecycle/admission restriction. */
   readonly assertCurrent?: (() => void) | undefined;
   readonly beforeCommit?: (() => void) | undefined;
+  /** The release files this update downloads, in the order it downloads them; told once, before the first request. */
+  readonly onFiles?: ((assetNames: readonly string[]) => void) | undefined;
 }
 export interface SuiteUpdateResult {
   readonly version: string;
@@ -138,6 +140,8 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
   };
   current();
   const plan = resolveSuiteUpdatePlan(options), daemon = nativeDaemon(plan);
+  // The directory archives download first, then the programs' files.
+  options.onFiles?.([...plan.directories.map(directory => directory.assetName), ...plan.files.map(file => file.assetName)]);
   const directories = plan.directories.map(selection => ({ selection, original: retainNativeUpdateTree(selection.path) }));
   const selected = () => { current(); plan.assertCurrent(); for (const directory of directories) directory.original.assertCurrent(); };
   const prepared: NativeUpdateDirectory[] = [];
@@ -161,7 +165,7 @@ export async function applySuiteUpdate(options: SuiteUpdateOptions): Promise<Sui
         signal.throwIfAborted(); selected();
         if (!response.ok) throw new Error(`Suite directory asset download failed: ${selection.assetName}`);
         const bytes = Buffer.from(await response.arrayBuffer()); signal.throwIfAborted(); selected();
-        options.onReceived?.(selection.assetName, bytes.byteLength);
+        options.onReceived?.(selection.assetName, bytes.byteLength, bytes.byteLength);
         // One published archive integrity check at download, never a runtime
         // directory identity or a repeated per-file checksum scan.
         verifyChecksum(selection.assetName, sha256(bytes), expected);

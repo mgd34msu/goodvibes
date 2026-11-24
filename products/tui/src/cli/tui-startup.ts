@@ -3,8 +3,8 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
 import { NOTHING_OF_ITS_OWN_TO_RUN, type WorkspaceRegistrationManager, type WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
-import { readOnboardingCheckMarker, writeOnboardingCheckMarker } from '../runtime/onboarding/index.ts';
-import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
+import { readOnboardingCheckMarker, readWhoDecidesAsked, writeOnboardingCheckMarker, writeWhoDecidesAsked } from '../runtime/onboarding/index.ts';
+import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, openWhoDecides, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/startup-provider-registration.ts';
 import { readLastSessionPointer, type SessionSurface } from '@/runtime/index.ts';
@@ -226,7 +226,8 @@ export function applyInitialTuiCliState(options: {
   };
   // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
   commandContext.openFirstRun = () => {
-    const deps = firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); });
+    // Asked for: "Who decides" follows the model whenever it is needed, answered before or not.
+    const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false };
     if (!deps.pushSurfaceModal) return;
     const modal = new FirstRunModal(deps);
     deps.pushSurfaceModal(modal);
@@ -234,6 +235,8 @@ export function applyInitialTuiCliState(options: {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
+  // The status line's mode segment, while no decision model can be asked: "Who decides", whenever the person wants it.
+  commandContext.openWhoDecides = () => openWhoDecides(firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }));
   // --continue or bare --resume with no saved conversation: say so, then start
   // as a plain launch would rather than opening an unexplained empty session.
   const nothingToContinue = (): void => {
@@ -314,6 +317,8 @@ function firstRunDeps(commandContext: CommandContext, shellPaths: TuiStartupShel
     decisionModel: firstRunDecisionModel(commandContext.platform.configManager, requireSecretsManager(commandContext)),
     // "Another decision model…": Settings, on the decision model.
     openDecisionModelSettings: () => { commandContext.openSettingsModal?.('judgment.model'); },
+    whoDecidesAsked: () => readWhoDecidesAsked(shellPaths),
+    recordWhoDecides: (how) => { writeWhoDecidesAsked(shellPaths, how); },
   };
 }
 

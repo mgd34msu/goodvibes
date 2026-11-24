@@ -5,7 +5,10 @@ import { activeTokens } from './renderer/theme.js';
 export function createBootstrapActionBase(
   options: {
     readonly requestRender: () => void;
-    readonly conversation: { log(message: string, style: { readonly fg: string }): unknown };
+    readonly conversation: {
+      log(message: string, style: { readonly fg: string }): unknown;
+      logLive(message: string, style: { readonly fg: string }): (next: string) => void;
+    };
     readonly activatePlan: (planId: string, task: string) => void;
     readonly requestPermission: PermissionRequestHandler;
     readonly loadSystemPrompt: () => string;
@@ -32,6 +35,15 @@ export function createBootstrapActionBase(
     print: (text: string) => {
       options.conversation.log(text, { fg: activeTokens().text });
       options.requestRender();
+    },
+    /** A progress line the transcript updates where it stands. */
+    printLive: (text: string): ((next: string) => void) => {
+      const set = options.conversation.logLive(text, { fg: activeTokens().text });
+      options.requestRender();
+      return (next: string) => {
+        set(next);
+        options.requestRender();
+      };
     },
     exit: () => unwired('exit'),
     reloadSystemPrompt: options.loadSystemPrompt,

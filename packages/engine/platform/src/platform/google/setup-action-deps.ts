@@ -94,7 +94,16 @@ export interface GoogleSetupActionDeps extends JudgmentReadingOptions {
    * Real IMAP and SMTP sign-in with the stored app password, nothing sent and
    * nothing read: `gmail-verify` runs it as a step of the setup.
    */
-  readonly verifyMail: () => Promise<{ readonly ok: boolean; readonly detail: string }>;
+  readonly verifyMail: () => Promise<{
+    readonly ok: boolean;
+    readonly detail: string;
+    /** Which protocol failed, when one did. */
+    readonly stage?: 'IMAP' | 'SMTP';
+    /** Gmail refused the app password, or the server could not be reached; absent for any other failure. */
+    readonly failure?: 'credentials-rejected' | 'unreachable';
+    /** The `host:port` that failed, when a connection was tried. */
+    readonly server?: string;
+  }>;
   /** Real read of the stored private calendar feed: `calendar-verify` runs it as a step of the setup. */
   readonly verifyCalendar: () => Promise<{ readonly ok: boolean; readonly detail: string }>;
   readonly now?: () => number;

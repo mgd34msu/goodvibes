@@ -23,6 +23,8 @@ export interface TerminalCommandRuntimeState {
 export interface TerminalCommandUiActions<Target extends ModelPickerTarget> {
   renderRequest: () => void;
   print: (text: string) => void;
+  /** A line later calls replace in place (a progress line); null when this output cannot (the line was printed as it is). */
+  printLive?: (text: string) => ((next: string) => void) | null;
   exit: () => void;
   submitSpokenInput?: (text: string, content?: import('@goodvibes/engine/platform/platform/providers').ContentPart[]) => void;
   /**
@@ -88,6 +90,8 @@ export interface TerminalCommandShellUiOpeners<Target extends ModelPickerTarget>
   openSettingsModal?: (target?: string) => SettingsTargetOutcome | 'unreported' | void;
   /** Opens the three-step first run again (`/setup` → Run first-run again), whether or not a model is ready. */
   openFirstRun?: () => void;
+  /** Opens first run's "Who decides" step alone when no decision model can be asked now; false when it is not needed. */
+  openWhoDecides?: () => Promise<boolean>;
   openSessionPicker?: () => void;
   openProfilePicker?: () => void;
   getScrollTop?: () => number;

@@ -24,7 +24,7 @@
  */
 
 import { compareVersions, normalizeVersion } from './self-update.js';
-import { describeShadowReport, type ShadowScanResult } from './path-shadow.js';
+import { describeNotOnPath, describeShadowReport, type ShadowScanResult } from './path-shadow.js';
 
 export type ReachabilityNoticeKind = 'shadowed' | 'not-on-path' | 'behind';
 
@@ -53,17 +53,31 @@ export interface ReachabilityNoticeInput {
 export function buildReachabilityNotices(input: ReachabilityNoticeInput): ReachabilityNotice[] {
   const notices: ReachabilityNotice[] = [];
 
+  // Every command installed in one folder that is not on PATH is one piece of advice: one notice.
+  const offPath = new Map<string, string[]>();
   for (const report of input.scan.shadowed) {
+    if (!report.installDirNotOnPath) continue;
+    const commands = offPath.get(report.installDir) ?? [];
+    commands.push(report.command);
+    offPath.set(report.installDir, commands);
+  }
+  for (const [installDir, commands] of offPath) {
+    notices.push({
+      kind: 'not-on-path',
+      lines: [
+        ...describeNotOnPath(commands, installDir),
+        commands.length === 1 ? 'Until then, run it by its full path.' : 'Until then, run them by their full paths.',
+      ],
+    });
+  }
+
+  for (const report of input.scan.shadowed) {
+    if (report.installDirNotOnPath) continue;
     const lines = describeShadowReport(report);
     if (lines.length === 0) continue;
     notices.push({
-      kind: report.installDirNotOnPath ? 'not-on-path' : 'shadowed',
-      lines: [
-        ...lines,
-        report.installDirNotOnPath
-          ? 'Until then, run it by its full path.'
-          : 'Until then, updating this install changes nothing you can reach by name.',
-      ],
+      kind: 'shadowed',
+      lines: [...lines, 'Until then, updating this install changes nothing you can reach by name.'],
     });
   }
 

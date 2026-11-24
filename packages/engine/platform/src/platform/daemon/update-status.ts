@@ -22,6 +22,14 @@ export interface DaemonUpdateInstallProgress {
   readonly receivedBytes: number;
   /** The release file that last received bytes, or null before the first arrives. */
   readonly file: string | null;
+  /** Bytes of `file` received so far. */
+  readonly fileReceivedBytes?: number;
+  /** The size `file` was sent with, or null when the server did not say. */
+  readonly fileTotalBytes?: number | null;
+  /** Which of the release's files `file` is, counting from 1 in download order, or null when not known. */
+  readonly fileNumber?: number | null;
+  /** How many files the release downloads, or null when not known. */
+  readonly fileCount?: number | null;
 }
 
 /** What an on-demand update check did, so "nothing found" is not confused with "nothing ran". */

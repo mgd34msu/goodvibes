@@ -12,7 +12,7 @@ Terms used here:
 - A provider is a model service (for example OpenRouter or Anthropic).
 - The suite is the three programs plus the web UI bundle, the browser driver and the native libraries, all from one release. When a later step of an install fails, the replaced programs are put back and so is the browser driver the run had replaced, so the programs and the driver stay from one release.
 - The install directory is the directory that holds the programs. It is `~/.local/bin` unless an option changes it.
-- A release is a tagged GoodVibes version such as `v3.4.8`, published at `https://github.com/mgd34msu/goodvibes/releases`.
+- A release is a tagged GoodVibes version such as `v3.5.0`, published at `https://github.com/mgd34msu/goodvibes/releases`.
 
 This part describes release {{release}}.
 
@@ -119,31 +119,31 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 On a new Linux x64 machine where `~/.local/bin` is not on `PATH`, the shell is bash and the user is `alex`, these are the lines the installer prints, in order. Words in angle brackets are filled in at run time.
 
 ```text
-Installing GoodVibes v3.4.8 for linux-x64 into /home/alex/.local/bin
+Installing GoodVibes v3.5.0 for linux-x64 into /home/alex/.local/bin
 
-Installing goodvibes v3.4.8 ...
+Installing goodvibes v3.5.0 ...
   installed  /home/alex/.local/bin/goodvibes
 
-Installing goodvibes-daemon v3.4.8 ...
+Installing goodvibes-daemon v3.5.0 ...
   installed  /home/alex/.local/bin/goodvibes-daemon
-  running:   goodvibes-daemon 3.4.8
+  running:   goodvibes-daemon 3.5.0
 
 Added /home/alex/.local/bin to PATH in /home/alex/.bashrc (installer-managed; uninstall removes it).
 
-Installed: goodvibes 3.4.8
+Installed: goodvibes 3.5.0
   installed  /home/alex/.local/bin/lib/sqlite-vec-linux-x64/vec0.so
 
-Installing the web UI v3.4.8 ...
-  installed  /home/alex/.local/bin/webui/3.4.8
+Installing the web UI v3.5.0 ...
+  installed  /home/alex/.local/bin/webui/3.5.0
   installed  /home/alex/.local/bin/playwright-core
 
-Installing goodvibes-agent v3.4.8 ...
+Installing goodvibes-agent v3.5.0 ...
   installed  /home/alex/.local/bin/goodvibes-agent
-  running:   goodvibes-agent 3.4.8
+  running:   goodvibes-agent 3.5.0
 
 Installing the wake-word model ...
   wake-word model: Wake-word model installed and verified: "hey goodvibes" <model version> (<size>). Turn it on with voice.wake.enabled, nothing further to download.
-  web UI: served by the daemon from /home/alex/.local/bin/webui/3.4.8
+  web UI: served by the daemon from /home/alex/.local/bin/webui/3.5.0
     http://127.0.0.1:3421
     reachable from this machine only (the control-plane listener is bound to loopback).
     To reach it from another device on your network:  goodvibes-daemon webui enable --lan
@@ -198,13 +198,13 @@ When `curl` itself cannot download the script (no network, DNS failure, proxy), 
 Every option can be given as an environment variable on the `sh` side of the pipe:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 GOODVIBES_WEBUI=0 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.5.0 GOODVIBES_WEBUI=0 sh
 ```
 
 Some options also exist as command-line flags. With `curl | sh`, flags follow `sh -s --`:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.8 --no-service
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.5.0 --no-service
 ```
 
 A downloaded copy of the script takes the same flags directly:
@@ -223,7 +223,7 @@ Usage: install.sh [--version VERSION] [--bin-dir DIR] [--from-dir DIR] [--no-ser
 GOODVIBES_VERSION selects one monorepo release (default: latest). No source build is performed.
 
 Options:
-  --version VERSION     Install this release, such as v3.4.8, for every program (default: latest;
+  --version VERSION     Install this release, such as v3.5.0, for every program (default: latest;
                         also GOODVIBES_VERSION).
   --bin-dir|--install-dir DIR  Put the commands in DIR (default: ~/.local/bin; also GOODVIBES_INSTALL_DIR).
   --from-dir DIR        Install from DIR, a directory holding the release files and their SHA256SUMS.txt,
@@ -250,7 +250,7 @@ The complete list of installer options and environment variables, generated from
 
 | Option | Values and default | Effect |
 | --- | --- | --- |
-| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.4.8` or `3.4.8`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
+| `GOODVIBES_VERSION` or `--version VERSION` | `latest` (default) or a release tag | Selects the release for every program. `latest` follows GitHub's "latest release" redirect for `mgd34msu/goodvibes`. A tag may be written `v3.5.0` or `3.5.0`; the installer adds the `v`. A tag must look like `vX.Y.Z`, optionally followed by `-` or `+` and letters, digits, dots or hyphens; anything else is `INSTALL_E009`. `--version` with no value is `INSTALL_E110`. Here `--version` selects a release; it does not print the installer's version. |
 | `GOODVIBES_INSTALL_DIR` or `--bin-dir DIR` (alias `--install-dir DIR`) | `$HOME/.local/bin` | The directory that receives the programs and their support files. It is created when missing. A relative path or a symbolic link is resolved to its physical directory once at the start. The web UI goes to `<dir>/webui`, the browser driver to `<dir>/playwright-core`, native libraries to `<dir>/lib`. |
 | `GOODVIBES_DAEMON_SERVICE=0` or `--no-service` | `1` (default) | Skips first-run service registration and, when no daemon service is installed, records the choice with `goodvibes-daemon config set service.enabled false`. `service.enabled` is a daemon setting, read by the daemon before it would install itself as a service at its first idle moment and by `goodvibes doctor`, so a daemon started by hand stays without a service and doctor does not ask for one. The installer then prints `Daemon service setup skipped (--no-service); ...` followed by the daemon's path. `--service` (or `GOODVIBES_DAEMON_SERVICE=1`) turns it back on. Any value other than `1` means skip. An already installed service is left installed, recorded as it is, and refreshed and restarted on upgrade. The installer starts no daemon. When neither the flag nor the variable is given and `service.enabled` is already `false` (for example after `goodvibes-daemon uninstall-service`), no service is set up: the installer prints `Daemon service: off by your choice (service.enabled is false), so none was set up.` and `goodvibes-daemon install-service` as the way to turn it on. |
 | `GOODVIBES_AUTO_UPDATE=0` or `--no-auto-update` | `1` (default) | Runs `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` before any program starts. Both are daemon settings, kept in `~/.goodvibes/daemon/settings.json` and read by the daemon, the terminal app and the Agent, so none of the three updates itself, from its first launch. The closing lines say `Automatic updates: off for goodvibes, goodvibes-daemon and goodvibes-agent.` If the daemon refuses a write, the install still finishes and says how to turn them off. Update later by running the installer again. Any value other than `0` leaves updates on. |
@@ -281,7 +281,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh
 Install one exact release:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.5.0 sh
 ```
 
 Install into a different directory, for example `~/bin`:
@@ -304,10 +304,10 @@ Install with automatic updates off from the first launch:
 curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --no-auto-update
 ```
 
-Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.4.8 -R mgd34msu/goodvibes -D goodvibes-v3.4.8`), then run the installer from that copy:
+Install on a machine with no route to GitHub: copy the release's assets, its `SHA256SUMS.txt` and `install.sh` into one directory (from another machine, `gh release download v3.5.0 -R mgd34msu/goodvibes -D goodvibes-v3.5.0`), then run the installer from that copy:
 
 ```sh
-sh install.sh --from-dir ./goodvibes-v3.4.8 --no-auto-update
+sh install.sh --from-dir ./goodvibes-v3.5.0 --no-auto-update
 ```
 
 With no service, no daemon runs until one is started by hand (`cd ~ && nohup goodvibes-daemon >/dev/null 2>&1 &`). The terminal app and the Agent never start a daemon that has no service: at start they only start an installed service that is stopped, and otherwise say that no daemon answers.
@@ -327,7 +327,7 @@ curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --decision-policy 'No Deci
 Install unattended (CI, a provisioning script, no terminal). Older copies on `PATH` are then removed only when `GOODVIBES_SHADOW_REMOVE=1`; with the default, an unanswerable question leaves them in place and the install still succeeds:
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 GOODVIBES_SHADOW_REMOVE=1 sh
+curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.5.0 GOODVIBES_SHADOW_REMOVE=1 sh
 ```
 
 Upgrade an existing installation to the newest release: run the same install command again. See [Updating](#updating).
@@ -368,7 +368,7 @@ Paths below use the default install directory `~/.local/bin` and the `linux-x64`
 | `~/.local/bin/lib/sqlite-vec-linux-x64/vec0.so` | The vector-search extension (`vec0.dylib` under `sqlite-vec-darwin-<arch>` on macOS). All three programs load it from here. |
 | `~/.local/bin/lib/sqlite-darwin-<arch>/libsqlite3.dylib` and `libsqlite3.dylib.json` | macOS only. The SQLite library the daemon uses, and its record. |
 | `~/.local/bin/playwright-core/` | The browser driver used by browser tools. Browsers themselves are downloaded later into a separate cache when first needed (`goodvibes-agent browser provision`). Holds `.goodvibes-release.json` naming its release. |
-| `~/.local/bin/webui/<version>/` | The web UI bundle for that release, for example `webui/3.4.8/`. Every release the installer installs gets its own directory; older ones are never deleted by the installer. Holds `.goodvibes-release.json`. |
+| `~/.local/bin/webui/<version>/` | The web UI bundle for that release, for example `webui/3.5.0/`. Every release the installer installs gets its own directory; older ones are never deleted by the installer. Holds `.goodvibes-release.json`. |
 | `~/.local/bin/.goodvibes-reader-requirements.json` | Written by the programs when saved data needs a minimum reader. The installer only reads it. Never delete it to force a downgrade. |
 | `~/.local/bin/<program>.previous` and other `*.previous` files | Rollback copies kept by an automatic update or `/update apply`. See [Rolling back](#rolling-back). |
 | `~/.config/systemd/user/goodvibes.service` | Linux. The daemon's service, written by `goodvibes-daemon install-service`. |
@@ -431,7 +431,7 @@ When a directory earlier on `PATH` holds another `goodvibes`, it prints which co
 ```text
 PROBLEM: typing "goodvibes" does not run the copy this installer maintains.
          wins on PATH: /home/alex/.bun/bin/goodvibes (version 1.18.1)
-         installed here: /home/alex/.local/bin/goodvibes (version 3.4.8)
+         installed here: /home/alex/.local/bin/goodvibes (version 3.5.0)
 ```
 
 Then, for each earlier copy:
@@ -476,7 +476,7 @@ Once replacement has begun, every replaced file is kept as `<file>.goodvibes-pre
 
 ```text
 install.sh: installation did not finish. The previous programs were restored and the installation claims were released; running services were not touched.
-install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.4.8 sh
+install.sh: to try again, re-run the installer: curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_VERSION=v3.5.0 sh
 ```
 
 If the previous files cannot all be put back, the installer keeps the claims, the backups and the journal, and prints one command per file instead:
@@ -876,7 +876,7 @@ Only a release ("binary") installation updates itself. A program run from source
 2. A check asks the release feed named by `update.releasesUrl` for the latest tag. When it is newer than the running daemon, the daemon downloads and checksum-verifies the release.
 3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback. From that last idle check until it restarts, the daemon takes no new work: a request that would start or change something (any method other than `GET` or `HEAD`, and over the WebSocket any call whose method is not a read) is answered `503` with code `DAEMON_ADMISSION_CLOSED` and `Retry-After: 5`, and reads and status still answer. A channel message that arrives meanwhile (Telegram, Slack, Discord, Mattermost, ntfy including its remote-chat topic, Home Assistant chat, the generic webhook and the other chat channels) is accepted and saved but neither read nor started, and no notice is sent: it is answered once, after the restart (a Home Assistant reply arrives as its event). A message in a delegated Telegram review chat is not taken: it stays with Telegram and is read after the restart. A GitHub webhook event is answered `202` with `outcome: waiting-for-restart`, saved, and its agent started once after the restart. A "yes" to a work proposal is kept the same way, with any direction added to it, and its work starts after the restart. Scheduled automation jobs and check-ins, watcher runs, knowledge schedules, trigger actions, memory consolidation, the daily store snapshot and the timed retention sweeps start nothing either. What fell due runs after the restart: an automation occurrence once (within `automation.catchUpWindowMinutes`), a trigger's owed action once (a condition still true fires again), consolidation at its next idle or scheduled pass, and the store snapshot at the first hourly check. When the files are not replaced after all, or the service manager refuses the handover before the daemon stops, it takes work again at once and starts what it held.
 4. The daemon stops in order, then the service manager starts the new version. Under systemd it asks for a service restart. When it was started by hand on Linux, it installs the systemd user unit and hands over to it. On macOS a one-time launchd helper restarts it after the old process exits; a daemon on macOS that launchd does not supervise is not updated this way, so update it with the installer or `/update apply`.
-5. The daemon logs and records a receipt that begins `updated from 3.4.7 to 3.4.8 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
+5. The daemon logs and records a receipt that begins `updated from 3.4.8 to 3.5.0 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
 
 No clock ends an update. The download runs until it finishes, the release server or the connection fails (the transport gives up on a transfer that receives nothing for 300 seconds), the daemon stops, or the loop is stopped; a slow connection only makes it take longer. Release files are written to a private directory beside the installation (`.update-fetch-<pid>-<random>`) as they arrive and copied into place from there, so the daemon holds one piece of a file in memory at a time; the directory is removed when the update ends, and one left by a daemon that was killed mid-download is removed by the next update.
 
@@ -892,10 +892,10 @@ On a machine whose daemon runs, it prints (receipt lines vary):
 
 ```text
 goodvibes daemon updates on this machine
-  version:  3.4.8
+  version:  3.5.0
   updates:  on, checking every 1h 0m
   receipts:
-    2026-11-20T09:12:44.120Z  updated from 3.4.7 to 3.4.8 at 2026-11-20 10:12; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
+    2026-11-20T09:12:44.120Z  updated from 3.4.8 to 3.5.0 at 2026-11-20 10:12; installed suite: goodvibes, goodvibes-daemon, goodvibes-agent, browser/WebUI directories: <paths>; on disk; service handover is pending, already-running goodvibes clients keep their old build until restarted; once the new daemon answers, any client older than <version> stops taking shared-session work until it is restarted
 ```
 
 The first line names `this machine`, or the daemon's address when `--host` points elsewhere. `version:` prints two lines, `<build> (the daemon build)` and `<platform version> (the platform package it reports on /status)`, when the two differ. `receipts:` reads `none written` when there are none, and `could not be read (<reason>)` when the receipts file is there but cannot be read or parsed; likewise `uptime:` reads `the lifecycle marker could not be read (<reason>)` when the marker file is there but cannot be read.
@@ -904,7 +904,7 @@ Inside `goodvibes` or `goodvibes-agent`, `/update daemon` shows the connected da
 
 ```text
 Daemon updates
-  running:  3.4.8
+  running:  3.5.0
   updates:  on, checking every 1h 0m
   next: /update daemon --check runs one check now
 ```
@@ -915,7 +915,7 @@ Both forms can contain these lines between `updates:` and the end:
 | --- | --- |
 | `  updates:  off: <reason>` | The loop is off; the reasons are listed in [Update settings](#update-settings). |
 | `  failing:  <n> checks in a row failed: <error>` (`1 check in a row failed` for one) | Recent checks failed. |
-| `  installing: <version>, downloading for <time>: <size> received (now <file>)` | The release is downloading and installing now; `<size>` is how much of its files has arrived, `<file>` the release file receiving bytes. |
+| `  installing: <version>, downloading for <time>: <size> received (now <file>, <n> of <count>, <percent>% of <file size>)` | The release is downloading and installing now; `<size>` is how much of its files has arrived, `<file>` the release file receiving bytes, `<n> of <count>` which of the release's files that is (the daemon knows the list from its own update plan), and the percentage how much of that file has arrived (left out when the release server sent no size; the count and the percentage are left out when the daemon is older than 3.5.0). |
 | `  pending:  <version> was found (waiting <time>); it downloads and installs when no work is in flight` | A newer release was found and waits for an idle moment. `(waiting <time>)` appears when the daemon knows since when. |
 | `  pending:  <version> was found (waiting <time>); it downloads and installs when this work finishes: <id>, <id>` | The same, naming the work it waits behind. |
 | `  rejected: <version> crash looped and was rolled back; the update loop will not install that version again` | A release rolled back after failed starts. |
@@ -923,7 +923,7 @@ Both forms can contain these lines between `updates:` and the end:
 
 `goodvibes-daemon update` adds `  rollback: an automatic rollback is in force; no fully-started boot has cleared it yet` while a crash-loop rollback has not yet been followed by a complete start, and ends with the receipts.
 
-Run one check now (it never forces an install while work is in flight): `goodvibes-daemon update --check`, or `/update daemon --check` in a terminal program. The check adds one line: `  check:    ran now; the lines above are its result`, `  check:    another check was already running, so none was started; the lines above are as of now`, or `  check:    not run, the update loop is off: <reason>`. When the check finds a release and the daemon has reserved the handover to it, the answer comes at once instead of after the install: `  check:    found <version>; the daemon is installing it now and will restart into it`, followed by `            run this command again to see how much has downloaded; it stops answering for a short while when it restarts, then shows the new version` from `goodvibes-daemon update --check` and when a model runs `/update daemon`. Typed by a person in `goodvibes` or `goodvibes-agent`, `/update daemon` (with or without `--check`) instead stays while a release is installing: the second line is `            the download is followed here until the daemon has restarted into it`, it asks the daemon again every two seconds and prints `  downloading: <size> received` as the download grows, `  restarting: the daemon is not answering while it restarts into <version>` while it restarts, and ends with `  running:  <new version> (updated from <old version>)`; it waits for a slow download however long it takes. An install that fails or is rolled back ends it with `  running:  <version> (not updated)` and the update lines. `/update daemon check` leaves out the `next:` line.
+Run one check now (it never forces an install while work is in flight): `goodvibes-daemon update --check`, or `/update daemon --check` in a terminal program. The check adds one line: `  check:    ran now; the lines above are its result`, `  check:    another check was already running, so none was started; the lines above are as of now`, or `  check:    not run, the update loop is off: <reason>`. When the check finds a release and the daemon has reserved the handover to it, the answer comes at once instead of after the install: `  check:    found <version>; the daemon is installing it now and will restart into it`, followed by `            run this command again to see how much has downloaded; it stops answering for a short while when it restarts, then shows the new version` from `goodvibes-daemon update --check` and when a model runs `/update daemon`. Typed by a person in `goodvibes` or `goodvibes-agent`, `/update daemon` (with or without `--check`) instead stays while a release is installing: the second line is `            the download is followed here until the daemon has restarted into it`, it asks the daemon again every two seconds and shows the download on one line, `  downloading <file> (<n> of <count>): <percent>%`, updated in place as it grows (which of the release's files is downloading, of how many, and how much of that file has arrived; how much of the file has arrived (`12.0 MB received`) in place of the percentage when the release server sends no size; from a daemon older than 3.5.0, which says neither, `  downloading: <size> received (now <file>)`; where the output cannot update a line in place, such as a command run from the Agent workspace, a new line is printed only when that percentage has moved by 5 points or a file finished), `  restarting: the daemon is not answering while it restarts into <version>` while it restarts, and ends with `  running:  <new version> (updated from <old version>)`; it waits for a slow download however long it takes. An install that fails or is rolled back ends it with `  running:  <version> (not updated)` and the update lines. `/update daemon check` leaves out the `next:` line.
 
 `goodvibes-daemon update` takes `--json`, and `--host <name>`, `--port <n>`, `--token <t>` to ask another machine's daemon. When the daemon on this machine does not answer, it exits `1` and prints the failure and its fix, an empty line, `what this machine's files say about the daemon:` and lines read from the daemon's local records: `  uptime:   <time>` (or `  uptime:   not recorded yet on this host`, or `  uptime:   the last daemon on this host shut down cleanly; this is a fresh start or none`, or `  uptime:   the lifecycle marker could not be read (<reason>)`), `  starts:   <n> consecutive start attempts did not finish starting`, the `rejected:` and `rollback:` lines, and the receipts. With no operator token yet it prints `no operator token was found for this machine` and `  start the daemon once so it creates its operator token, or pass --token`, and exits `1`. When the daemon answers but the update question fails, it prints `the daemon answered, but update.status failed: <error>` (or `update.check`) with its fix and exits `1`.
 
@@ -956,7 +956,7 @@ The lines each outcome prints (`<new>` and `<current>` are versions such as `v3.
 
 After `requires recovery`, run the install command again: it recovers a transaction whose process is gone, or stops with `INSTALL_E120` and names the files to put back (see [Installer errors and their fixes](#installer-errors-and-their-fixes)).
 
-A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.4.8, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
+A running Agent also checks while it runs, on the daemon's schedule (`update.firstCheckSeconds`, then `update.intervalMinutes`). It replaces itself only at an idle moment: nothing typed in the composer, no open dialog, no turn, helper or background process running, no channel message in flight and no approval waiting. Then it says `updated to v3.5.0, restarting onto the new version`, exits in order and restarts with `--resume <session>` for the conversation on screen. The terminal app has no while-running updater.
 
 A launch or Agent update replaces the daemon program on disk too, but the running daemon keeps its version until it restarts. Restart it with `goodvibes-daemon restart-service`.
 
@@ -971,7 +971,7 @@ The Agent writes why its while-running updater is off to its activity log (`<wor
 | Program | Settings file | Keys it uses | When a change takes effect |
 | --- | --- | --- | --- |
 | All three | `~/.goodvibes/daemon/settings.json` (the daemon's settings) | `update.auto`, `update.autoUpdateAtLaunch` | The daemon's loop at its next start; launch updates at the next launch; the Agent's while-running updater at its next launch. |
-| The daemon | `~/.goodvibes/daemon-host/settings.json` | `update.releasesUrl`, `update.intervalMinutes`, `update.firstCheckSeconds`, `update.alertAfterFailedChecks`, `update.rollbackAfterFailedStarts` | The loop reads its keys once, when the daemon has finished starting, so a change applies at the next `goodvibes-daemon restart-service`. `update.rollbackAfterFailedStarts` is read at every start. |
+| The daemon | `~/.goodvibes/daemon-host/settings.json` | `update.releasesUrl`, `update.intervalMinutes`, `update.firstCheckSeconds`, `update.alertAfterFailedChecks`, `update.rollbackAfterFailedStarts` | `update.releasesUrl` is read before every check, so a change applies at the next check (`goodvibes-daemon update --check` makes one now), and a loop that was off because it was empty starts when it is set. The other loop keys are read once, when the daemon has finished starting, so a change applies at the next `goodvibes-daemon restart-service`. `update.rollbackAfterFailedStarts` is read at every start. |
 | The terminal app | `~/.goodvibes/tui/settings.json` | `update.launchCheckTimeoutMs`, `update.applyTimeoutMs` | The next launch. |
 | The Agent | `~/.goodvibes/agent/settings.json` | `update.launchCheckTimeoutMs`, `update.applyTimeoutMs`, `update.intervalMinutes`, `update.firstCheckSeconds` | The next launch. |
 
@@ -1067,7 +1067,7 @@ What does not carry over: the `*.previous` rollback copies (so `/update rollback
 To stay on one release and stop every automatic update:
 
 1. Turn off every automatic update: `goodvibes-daemon config set update.auto false` and `goodvibes-daemon config set update.autoUpdateAtLaunch false` (one setting file read by all three programs).
-2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.8 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
+2. Install the release to stay on: `curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.5.0 --no-auto-update` (`--no-auto-update` does step 1 for you). The installer restarts the daemon, which then reads `update.auto false`.
 3. Check: `goodvibes-daemon update` shows `updates:  off: update.auto is not true, so this daemon will not update itself`.
 
 To resume updates, set the same keys back to `true` (or run `goodvibes-daemon config unset update.auto`) and restart the programs.
@@ -1079,7 +1079,7 @@ Installing an older release over a newer one works only when the older programs 
 Install with `--no-auto-update` (or `GOODVIBES_AUTO_UPDATE=0`):
 
 ```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.4.8 --no-auto-update
+curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --version v3.5.0 --no-auto-update
 ```
 
 Before any program starts, the installer writes `update.auto` and `update.autoUpdateAtLaunch` as `false` in the daemon's settings file, which the daemon, the terminal app and the Agent all read, so none of them updates itself from its first launch. Combine it with the other options, for example `--no-service`, `--bin-dir` or `--from-dir`. Behind a proxy, add the variables shown in [Network access, proxies and machines without internet](#network-access-proxies-and-machines-without-internet).
@@ -1540,7 +1540,7 @@ Many ids guard against something changing the install directory, a claim file or
 | `INSTALL_E006` | could not resolve the latest release tag for mgd34msu/goodvibes | `curl` could not reach GitHub. | Check the network and proxy, or set `GOODVIBES_VERSION=vX.Y.Z`. |
 | `INSTALL_E007` | could not resolve the latest release tag | GitHub gave no tag (with `wget`, or an empty redirect). | As `INSTALL_E006`. |
 | `INSTALL_E008` | All products use GOODVIBES_VERSION; remove conflicting per-product version overrides. | `GOODVIBES_DAEMON_VERSION`, `GOODVIBES_AGENT_VERSION` or `GOODVIBES_WEBUI_VERSION` differs from `GOODVIBES_VERSION`. | `unset GOODVIBES_DAEMON_VERSION GOODVIBES_AGENT_VERSION GOODVIBES_WEBUI_VERSION`. |
-| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.4.8`. |
+| `INSTALL_E009` | Invalid release version: `<v>` | The tag is not `vX.Y.Z[-suffix]`. | Use a tag from the releases page, for example `v3.5.0`. |
 | `INSTALL_E010` | Missing or ambiguous checksum: `<file>`. Release `<v>` is incomplete; no source build will be attempted. | The release's checksum list has no line (or more than one line) for a file this platform needs. | Choose another release with `GOODVIBES_VERSION`. |
 | `INSTALL_E011` | Checksum mismatch: `<file>` | The download was corrupted or altered (often a proxy). | Retry; if it persists, check the network path. |
 | `INSTALL_E012` | Could not extract the verified browser driver. | `tar` failed (disk full, `$TMPDIR` problem). | Free space or set `TMPDIR`; retry. |
@@ -1761,7 +1761,7 @@ The terminal app starts that scan of this computer (never the network) when firs
 - The browser: `GoodVibes opened your browser to sign in.`, then `If it didn't open, go to:` and the whole sign-in address, and `Waiting for you to finish in the browser…` while the sign-in page's answer is awaited. When the browser could not be opened, or the provider's sign-in ends on a code, `Paste the code the page shows:` takes the code (or the address the browser ended on). `c` copies the address, Enter continues, Esc or Shift+Tab goes back. A sign-in the provider refused says `<provider> refused the sign-in: <its error>. Press ⏎ to start again.`; one that came back but could not be finished (the code exchange or storing the sign-in failed) says `The sign-in came back but <provider> did not complete it: <reason>. Press ⏎ to start again.`; when the wait for the browser ended (for example it timed out) the line is `The sign-in could not wait for the browser: <reason>. Press ⏎ to start again.` After any of them the code the page shows can still be pasted, or Enter starts again.
 - A model on this computer: `Which model on this computer?` and the models found, each with its server, its size where the server reports one in the model list it already gives (Ollama's parameter size, LM Studio's `params_string`) and its context window; Enter chooses one. With none found, it says so and Enter looks again.
 
-**Who decides (`3 of 4`), when the model is chosen and no decision model can be asked.** With the permission mode `jev-decides` or `just-vibes` (the default is `jev-decides`) and no usable decision model key (none in the environment, the secret store or a fallback target, and "No Decision Model" not chosen), one more step follows the model: `Who decides when GoodVibes would otherwise stop and ask you?` with `Jev decides` (`TypeSafe's decision model, with your key`), `Ask me` (`GoodVibes stops and asks you`) and `Another decision model…` (`Cloudflare and others, in Settings`), and `Chosen once; change it any time in /settings (When GoodVibes asks).` `Jev decides` opens `Paste your TypeSafe key.` with a masked field and `A key comes from your TypeSafe account at console.typesafe.ai. It is kept in the secret store and checked with one request.`; Enter stores it as `TYPESAFE_API_KEY` in the secret store (`judgment.keySource` `secret`) and sends the one request; a refusal shows the decision model's own sentence (for example `jev-latest: its endpoint could not be reached. ...`) and the key can be pasted again. `Ask me` sets `permissions.mode` to `ask-me`. `Another decision model…` opens Settings on the decision model (Cloudflare Workers AI, Laya and the other backends decisions can use, with their endpoint and credential); once one set there is usable, first run goes on by itself. A decision model picked here (the TypeSafe key accepted, or one set through `Another decision model…`) records `jev-decides` as your own choice in `permissions.mode`, so it is in force at once with that model, measured or not, and the status bar reads `Permissions: Jev decides`. Esc leaves it for later. Either way the status bar then reads the mode alone (`Permissions: Jev decides`, `Permissions: Ask me`). When a usable key is already present, nothing is asked and first run has three steps. When the session's model is ready on a first launch, or was taken from a key already there, but no decision model can be asked, first run is this one step, shown with no step count.
+**Who decides (`3 of 4`), when the model is chosen and no decision model can be asked.** With the permission mode `jev-decides` or `just-vibes` (the default is `jev-decides`) and no usable decision model key (none in the environment, the secret store or a fallback target, and "No Decision Model" not chosen), one more step follows the model: `Who decides when GoodVibes would otherwise stop and ask you?` with `Jev decides` (`TypeSafe's decision model, with your key`), `Ask me` (`GoodVibes stops and asks you`) and `Another decision model…` (`Cloudflare and others, in Settings`), and `Chosen once; change it any time in /settings (When GoodVibes asks).` `Jev decides` opens `Paste your TypeSafe key.` with a masked field and `A key comes from your TypeSafe account at console.typesafe.ai. It is kept in the secret store and checked with one request.`; Enter stores it as `TYPESAFE_API_KEY` in the secret store (`judgment.keySource` `secret`) and sends the one request; a refusal shows the decision model's own sentence (for example `jev-latest: its endpoint could not be reached. ...`) and the key can be pasted again. `Ask me` sets `permissions.mode` to `ask-me`. `Another decision model…` opens Settings on the decision model (Cloudflare Workers AI, Laya and the other backends decisions can use, with their endpoint and credential); once one set there is usable, first run goes on by itself. A decision model picked here (the TypeSafe key accepted, or one set through `Another decision model…`) records `jev-decides` as your own choice in `permissions.mode`, so it is in force at once with that model, measured or not, and the status bar reads `Permissions: Jev decides`. Either way the status bar then reads the mode alone (`Permissions: Jev decides`, `Permissions: Ask me`). Esc puts it off: that is recorded (`who-decides-asked.json` beside the first-run marker, one per program) and the step does not open again by itself. The status bar keeps saying what is in force and why (`Permissions: asking you, for now · Jev decides: no decision model set`), and a click on that segment opens the same step, alone; when a decision model can be asked, the segment opens `/permissions` as before. `/setup`'s `Run first-run again` includes the step whenever it is needed. A home whose first run finished before this step existed (an upgrade from 3.4.8 left on `jev-decides` with no decision model) is shown the step once, alone, on its first start with this release; the same rule then applies. When a usable key is already present, nothing is asked and first run has three steps. When the session's model is ready on a first launch, or was taken from a key already there, but no decision model can be asked, first run is this one step, shown with no step count.
 
 **Step 3 is the conversation (`4 of 4` after "Who decides").** The splash (the logo, its lines, the hint and the version) is drawn exactly as on every start, at the same place; under it, on the first run only and only in the rows left free above the composer, GoodVibes adds:
 

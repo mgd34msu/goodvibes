@@ -51,7 +51,8 @@ export function agentReachabilityInput(): ReachabilityCheckInput {
 /**
  * Run the check at launch and print what it found.
  *
- * Returns the lines it printed so main() can re-surface them in-session; the
+ * Returns what it printed, one entry per piece of advice (its lines joined by
+ * newlines), so main() can re-surface each as one notice in-session; the
  * alternate screen wipes these stdout copies a moment later.
  */
 export async function reachabilityAtLaunch(params: {

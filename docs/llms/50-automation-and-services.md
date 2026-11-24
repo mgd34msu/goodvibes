@@ -636,7 +636,8 @@ Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar
 | Symptom | Fix |
 | --- | --- |
 | "This browser or app may not be secure" | Sign in by hand in the window that opened, then re-run. |
-| IMAP `AUTHENTICATIONFAILED` | The app password is wrong or revoked. Delete the `goodvibes-agent` entry at the app passwords page and re-run. |
+| `IMAP: The mail server rejected the credentials for <address>.` or `SMTP: SMTP AUTH PLAIN failed: 535 …` | The app password is wrong or revoked. The failure shows the steps: delete the `goodvibes-agent` entry at the app passwords page, create a new one there, store it with `/mail password`, and run `/google setup` again. |
+| `IMAP: The mail server did not answer.` or another failure naming a server it could not reach | The failure names the server (`imap.gmail.com:993` or `smtp.gmail.com:587`): this machine's network or that address is the cause, and the app password was not checked. Run `/google setup` again once the network is up. |
 | Worked, then broke about a week later | The OAuth app is in Testing. Publish it; the next Google request starts a fresh consent by itself. |
 | Google is not connected, a scope is missing, or the credential is dead | The request that meets it starts a consent asking for every scope at once and shows its link (in the owner inbox from the daemon, on screen in the Agent); approve it and the request is sent again when the consent completes. One consent at a time: other requests join the open one. `/google reauthorize` starts one by hand. |
 | An API is not enabled on the Cloud project | Enabling it is put to your mode (asked under Ask me, decided by Jev under Jev decides as `google.enable-apis`), run with the gcloud signed in on this machine, then the request is sent again. Without gcloud the answer says so and names the command. |

@@ -320,7 +320,7 @@ const APP_PASSWORD_STEPS: readonly GoogleSetupStepSpec[] = [
     manualSteps: [
       'I open a real IMAP session and a real authenticated SMTP session and report both.',
       'A successful run reports both the IMAP and the SMTP stage as connected.',
-      'If IMAP fails with AUTHENTICATIONFAILED, the app password was mistyped. Create a new one and store it again.',
+      'If Gmail refuses the app password, the failure shows the steps to make a new one; if a server cannot be reached, it names the server.',
     ],
     requires: ['gmail-config'],
   },

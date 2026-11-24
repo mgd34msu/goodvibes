@@ -14,6 +14,7 @@ import type { CommandContext } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SurfaceModal } from '@goodvibes/engine/terminal-shell/surface-modal-host';
 import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
+import { openModeSegment } from '@goodvibes/engine/terminal-shell/first-run';
 import type { ShellViews } from '../views/builtin-views.ts';
 import type { ViewPanelAdapter } from '../views/view-panel-adapter.ts';
 import { AgentsModal } from '../input/agents-modal.ts';
@@ -97,8 +98,9 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
   // A click on a status bar segment opens its view; elsewhere on the row, Usage.
   input.onFooterTarget = (target) => {
     if (target === 'usage') commandContext.openUsage?.();
-    // The mode opens /permissions: what is in force and why on its first row, the fix and the mode setting below it.
-    else if (target === 'mode') void runPickedCommand(commandContext.executeCommand, 'permissions', [], (message) => commandContext.print(message)).finally(render);
+    // The mode opens first run's "Who decides" while no decision model can be asked; otherwise /permissions:
+    // what is in force and why on its first row, the fix and the mode setting below it.
+    else if (target === 'mode') void openModeSegment(commandContext).finally(render);
     else if (target === 'notices') commandContext.openNotifications?.();
     else if (target === 'context') commandContext.openContextInspector?.();
     else if (target === 'changes') commandContext.openChanges?.();

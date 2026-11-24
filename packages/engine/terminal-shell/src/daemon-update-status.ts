@@ -26,6 +26,12 @@ export interface DaemonUpdateStatusView {
     readonly since?: number;
     readonly receivedBytes?: number;
     readonly file?: string | null;
+    /** How much of `file` has arrived, and its size (null when the server sent none). */
+    readonly fileReceivedBytes?: number;
+    readonly fileTotalBytes?: number | null;
+    /** Which of the release's files `file` is (from 1, in download order), and how many it downloads; null or missing when not known. */
+    readonly fileNumber?: number | null;
+    readonly fileCount?: number | null;
   } | null;
   /** Since when the pending release has waited for work in flight (epoch ms). */
   readonly pendingSince?: number | null;
@@ -60,6 +66,45 @@ function formatBytes(bytes: number): string {
   return `${bytes} bytes`;
 }
 
+type InstallingView = NonNullable<DaemonUpdateStatusView['installing']>;
+
+/** How much of the file now downloading has arrived, in whole percent, or null when its size is not known. */
+function filePercent(installing: InstallingView): number | null {
+  const total = installing.fileTotalBytes;
+  if (typeof total !== 'number' || total <= 0 || typeof installing.fileReceivedBytes !== 'number') return null;
+  return Math.min(100, Math.floor((installing.fileReceivedBytes / total) * 100));
+}
+
+/** `3 of 12` when the daemon said which of how many release files this is; null otherwise. */
+function fileOfCount(installing: InstallingView): string | null {
+  const { fileNumber, fileCount } = installing;
+  if (typeof fileNumber !== 'number' || typeof fileCount !== 'number' || fileNumber < 1 || fileCount < fileNumber) return null;
+  return `${fileNumber} of ${fileCount}`;
+}
+
+/** ` (now <file>, 3 of 12, 45% of 120.0 MB)`; the count and the size are left out when not known; empty before the first byte. */
+function describeFile(installing: InstallingView): string {
+  if (!installing.file) return '';
+  const percent = filePercent(installing);
+  const ofCount = fileOfCount(installing);
+  const size = percent === null ? '' : `, ${percent}% of ${formatBytes(installing.fileTotalBytes ?? 0)}`;
+  return ` (now ${installing.file}${ofCount ? `, ${ofCount}` : ''}${size})`;
+}
+
+/**
+ * The followed download's line: `downloading <file> (3 of 12): 45%` when the daemon says which file
+ * of how many (the file's own bytes when its size is not known); otherwise the bytes of the release
+ * received so far and the file now downloading.
+ */
+function progressLine(installing: InstallingView): string {
+  const ofCount = fileOfCount(installing);
+  if (installing.file && ofCount) {
+    const percent = filePercent(installing);
+    return `  downloading ${installing.file} (${ofCount}): ${percent === null ? `${formatBytes(installing.fileReceivedBytes ?? 0)} received` : `${percent}%`}`;
+  }
+  return `  downloading: ${formatBytes(installing.receivedBytes ?? 0)} received${describeFile(installing)}`;
+}
+
 /** The daemon's update state in lines: on or off and why, failing checks, a release waiting and what holds it, a rejected release, a recovery fence. */
 export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, now: number = Date.now()): string[] {
   const lines: string[] = [];
@@ -76,8 +121,7 @@ export function formatDaemonUpdateStatusLines(update: DaemonUpdateStatusView, no
   const installing = update.installing;
   if (installing) {
     const elapsed = typeof installing.since === 'number' ? ` for ${formatElapsed(now - installing.since)}` : '';
-    const file = installing.file ? ` (now ${installing.file})` : '';
-    lines.push(`  installing: ${installing.version ?? update.pendingVersion ?? 'a newer release'}, downloading${elapsed}: ${formatBytes(installing.receivedBytes ?? 0)} received${file}`);
+    lines.push(`  installing: ${installing.version ?? update.pendingVersion ?? 'a newer release'}, downloading${elapsed}: ${formatBytes(installing.receivedBytes ?? 0)} received${describeFile(installing)}`);
   }
   // A release being installed now is said by the check line or the installing line; it is not waiting.
   if (update.pendingVersion && update.check !== 'installing' && !installing) {
@@ -127,12 +171,50 @@ export interface DaemonUpdateVerbs {
  */
 export interface DaemonUpdateFollow {
   readonly print: (line: string) => void;
+  /**
+   * Print a line that later progress replaces in place, and return what replaces it; null when
+   * this transcript cannot update a line in place (the line was then printed as it is, and
+   * later progress is printed as new lines only when the file's percentage has moved by
+   * 5 points or a file finished).
+   */
+  readonly printLive?: ((line: string) => ((next: string) => void) | null) | undefined;
   /** How long between two asks for progress; the default is two seconds. */
   readonly everyMs?: number | undefined;
   readonly wait?: ((ms: number) => Promise<void>) | undefined;
 }
 
 const FOLLOW_EVERY_MS = 2_000;
+/** In a transcript that cannot update a line in place, a new progress line once a file's percentage has moved this far. */
+const PRINTED_PERCENT_STEP = 5;
+
+/**
+ * The download's progress as the person sees it: one line updated in place where the transcript
+ * can, otherwise a new line only when the file's percentage moved by 5 points, a file finished,
+ * or (a file whose size is unknown) a new file began.
+ */
+function downloadProgress(follow: DaemonUpdateFollow): (installing: InstallingView) => void {
+  let live: ((next: string) => void) | null | undefined;
+  let printedFile: string | null | undefined;
+  let printedPercent: number | null = null;
+  return (installing) => {
+    const line = progressLine(installing);
+    if (live) { live(line); return; }
+    if (live === undefined && follow.printLive) {
+      live = follow.printLive(line);
+      printedFile = installing.file;
+      printedPercent = filePercent(installing);
+      return;
+    }
+    const file = installing.file;
+    const percent = filePercent(installing);
+    const newFile = file !== printedFile;
+    const moved = percent !== null && (printedPercent === null || percent - printedPercent >= PRINTED_PERCENT_STEP || (percent === 100 && printedPercent < 100));
+    if (printedFile !== undefined && !newFile && !moved) return;
+    follow.print(line);
+    printedFile = file;
+    printedPercent = percent;
+  };
+}
 
 /** Ask `update.status` again until the daemon runs a version other than `from` (the one it installs, when known). */
 async function followDaemonInstall(verbs: DaemonUpdateVerbs, from: string | null | undefined, first: DaemonUpdateStatusView, follow: DaemonUpdateFollow): Promise<string> {
@@ -141,6 +223,7 @@ async function followDaemonInstall(verbs: DaemonUpdateVerbs, from: string | null
   const wait = follow.wait ?? ((ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); }));
   let lastBytes = first.installing?.receivedBytes ?? -1;
   let away = false;
+  const progress = downloadProgress(follow);
   for (;;) {
     await wait(follow.everyMs ?? FOLLOW_EVERY_MS);
     let now: DaemonUpdateStatusView;
@@ -161,7 +244,7 @@ async function followDaemonInstall(verbs: DaemonUpdateVerbs, from: string | null
       const bytes = now.installing.receivedBytes ?? 0;
       if (bytes !== lastBytes) {
         lastBytes = bytes;
-        follow.print(`  downloading: ${formatBytes(bytes)} received${now.installing.file ? ` (now ${now.installing.file})` : ''}`);
+        progress(now.installing);
       }
       continue;
     }

@@ -909,6 +909,20 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public log(text: string, style: Partial<Cell> = {}, indent = '      '): void {
         this.recordDisplayOnly((width) => this.presentation.renderer.logConversationText(this.renderingContext(), width, text, style, indent));
     }
+    /**
+     * Display-only text that later calls replace where it stands (a progress line): returns the
+     * function that sets its new text. The line keeps its place among the messages around it.
+     */
+    public logLive(text: string, style: Partial<Cell> = {}, indent = '      '): (next: string) => void {
+        const shown = { text };
+        this.recordDisplayOnly((width) => this.presentation.renderer.logConversationText(this.renderingContext(), width, shown.text, style, indent));
+        return (next: string) => {
+            if (next === shown.text)
+                return;
+            shown.text = next;
+            this.markDirty();
+        };
+    }
     /** Persistent display-only prose, rewrapped at the current width on every rebuild. */
     public logWrapped(text: string, style: Partial<Cell> = {}): void {
         this.recordDisplayOnly((width) => this.history.addLines(this.presentation.renderer.conversationTextToLines(text, width, style)));

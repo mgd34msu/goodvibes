@@ -4,8 +4,8 @@ import type { InputHandler } from '../input/handler.ts';
 // Startup diagnostics must not initialize the Agent runtime/onboarding barrels:
 // they pull in feature-enablement's eager metadata lookups before boot begins.
 import { isOnboardingComplete } from '../runtime/onboarding/completion.ts';
-import { writeOnboardingCheckMarker } from '../runtime/onboarding/markers.ts';
-import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, setSplashImportCommand, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
+import { readWhoDecidesAsked, writeOnboardingCheckMarker, writeWhoDecidesAsked } from '../runtime/onboarding/markers.ts';
+import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, openWhoDecides, setSplashImportCommand, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
 import { scanThisComputerNow } from '../runtime/lan-scan-consent.ts';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
@@ -157,7 +157,8 @@ export function applyInitialTuiCliState(options: {
   };
   // `/setup` → Run first-run again: the three steps, whether or not a model is ready.
   commandContext.openFirstRun = () => {
-    const deps = firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); });
+    // Asked for: "Who decides" follows the model whenever it is needed, answered before or not.
+    const deps = { ...firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }), whoDecidesAsked: () => false };
     if (!deps.pushSurfaceModal) return;
     const modal = new FirstRunModal(deps);
     deps.pushSurfaceModal(modal);
@@ -165,6 +166,8 @@ export function applyInitialTuiCliState(options: {
       logger.warn('First run could not start', { error: summarizeError(error) });
     });
   };
+  // The status line's mode segment, while no decision model can be asked: "Who decides", whenever the person wants it.
+  commandContext.openWhoDecides = () => openWhoDecides(firstRunDeps(commandContext, shellPaths, render, true, () => { input.conversationManager?.invalidateRenderedLines(); }));
   if (cli.command === 'onboarding') {
     // The setup topics, over the empty conversation.
     void commandContext.executeCommand?.('setup', []);
@@ -259,5 +262,7 @@ function firstRunDeps(
     decisionModel: firstRunDecisionModel(commandContext.platform.configManager, requireSecretsManager(commandContext)),
     // "Another decision model…": Settings, on the decision model.
     openDecisionModelSettings: () => { commandContext.openSettingsModal?.('judgment.model'); },
+    whoDecidesAsked: () => readWhoDecidesAsked(shellPaths),
+    recordWhoDecides: (how) => { writeWhoDecidesAsked(shellPaths, how); },
   };
 }

@@ -83410,6 +83410,39 @@ Run one update check immediately instead of waiting for the next interval, and r
                   "type": "null"
                 }
               ]
+            },
+            "fileReceivedBytes": {
+              "type": "number"
+            },
+            "fileTotalBytes": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fileNumber": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fileCount": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -83551,7 +83584,7 @@ Run one update check immediately instead of waiting for the next interval, and r
 
 #### `update.status`
 
-Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release that was found and waits for a moment when no work is in flight before it is downloaded and installed; `installing` is a release being downloaded and installed now, with `receivedBytes` (bytes of release files received so far), `file` (the release file that last received bytes) and `since` (when the install began, epoch ms), and is null when none runs (no clock ends a download: it runs until it finishes, the connection fails, or the daemon stops); `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.
+Whether this daemon is keeping itself current, and, when it is not, the reason in one line. `armed` is false whenever no loop is running and `offReason` says which gate stopped it: update.auto not set, no artifact identity (a host that manages its own updates), or no release URL to resolve tags from. `failedCheckCount` with `lastCheckFailure` is the case that used to be invisible: checks running on schedule and failing every time, which looks exactly like having nothing to update to. `pendingVersion` is a release that was found and waits for a moment when no work is in flight before it is downloaded and installed; `installing` is a release being downloaded and installed now, with `receivedBytes` (bytes of release files received so far), `file` (the release file that last received bytes), `fileReceivedBytes` and `fileTotalBytes` (how much of that file has arrived, and its size, null when the server did not send one), `fileNumber` and `fileCount` (which of the release's files that is, counting from 1 in download order, and how many it downloads; null when not known) and `since` (when the install began, epoch ms), and is null when none runs (no clock ends a download: it runs until it finishes, the connection fails, or the daemon stops); `pendingSince` says since when a release has waited and `pendingBlockedBy` names the fleet ids of the work it waits behind (the owner is told once after 24 hours). `rejectedVersion` is a release that was installed here, failed to start, and was rolled back, it is deliberately not reinstalled. `recoveryRequired` (true) and `transactionRecovery` appear only while an interrupted update or rollback fences the loop: `transactionRecovery.recoveryPaths` lists the retained files to inspect, `recoveryErrors` what went wrong, and the loop stays off until they are dealt with.
 
 - Title: `Self-Update Status`
 - Source: `builtin`
@@ -83659,6 +83692,39 @@ Whether this daemon is keeping itself current, and, when it is not, the reason i
               "anyOf": [
                 {
                   "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fileReceivedBytes": {
+              "type": "number"
+            },
+            "fileTotalBytes": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fileNumber": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fileCount": {
+              "anyOf": [
+                {
+                  "type": "number"
                 },
                 {
                   "type": "null"

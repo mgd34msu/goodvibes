@@ -284,6 +284,8 @@ export class DaemonLifecycleRuntime {
   private autostartWatch: (() => void) | null = null;
   /** The subscriptions to the settings the service definition is written from. */
   private definitionWatch: (() => void)[] = [];
+  /** The update.releasesUrl subscription: a loop left off for want of an address starts when one is set. */
+  private releasesUrlWatch: (() => void) | null = null;
   /** The promotion handed over and asked the process to exit; nothing about it is stale. */
   private promotionExited = false;
   private rollbackHandover: Promise<void> | null = null;
@@ -874,6 +876,7 @@ export class DaemonLifecycleRuntime {
     if (this.promotionHandover) return this.promotionHandover;
     if (!this.reachedFullyStarted || this.stopping || this.rollbackRecovery || this.rollbackApplied || this.appliedUpdater) return;
     this.startAutoUpdater();
+    this.watchReleasesUrl();
     this.promoteToServiceAtBoot();
     this.watchAutostart();
     this.watchServiceDefinition();
@@ -964,6 +967,21 @@ export class DaemonLifecycleRuntime {
   }
 
   /**
+   * update.releasesUrl is followed while the daemon runs, as `config set` says
+   * a running daemon applies most keys: the running loop reads the setting
+   * before every check (see `releasesUrlNow` in startAutoUpdater), and a loop
+   * that was left off because the setting was empty starts once it is set.
+   * Cost: one setting read per change.
+   */
+  private watchReleasesUrl(): void {
+    if (this.releasesUrlWatch) return;
+    this.releasesUrlWatch = this.options.configManager.subscribe('update.releasesUrl', () => {
+      if (this.stopping || this.autoUpdater || this.promotionTask) return;
+      this.startAutoUpdater();
+    });
+  }
+
+  /**
    * Restart this daemon through its service manager, the path a self-update's
    * restart takes. Decided now, done later: `by-hand` when this daemon was
    * started by hand (no service runs it), `failed` when it cannot restart
@@ -1002,6 +1020,8 @@ export class DaemonLifecycleRuntime {
     this.stopping = true;
     this.autostartWatch?.();
     this.autostartWatch = null;
+    this.releasesUrlWatch?.();
+    this.releasesUrlWatch = null;
     for (const unsubscribe of this.definitionWatch) unsubscribe();
     this.definitionWatch = [];
     if (!forHandover) { this.promotionAbort?.abort(); this.rollbackAbort?.abort(); }
@@ -1121,6 +1141,8 @@ export class DaemonLifecycleRuntime {
       platform: process.platform,
       arch: process.arch,
       releasesLatestUrl: releasesUrl,
+      // Read before every check, so a changed update.releasesUrl is followed without a restart.
+      releasesUrlNow: () => String(configManager.get('update.releasesUrl') ?? '').trim(),
       checkIntervalMs: Math.max(5, intervalMinutes) * 60 * 1000,
       firstCheckDelayMs: Math.max(0, Number.isFinite(firstCheckSeconds) ? firstCheckSeconds : 30) * 1000,
       isIdle: this.options.isIdle,

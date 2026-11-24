@@ -226,6 +226,17 @@ const REGISTRATION_NOUN: Readonly<Record<'register.tool' | 'register.provider' |
   'register.hook': 'an event hook',
 };
 
+/**
+ * A registration refused because of the plugin's trust tier: setting a higher tier is what lets
+ * it start, so a switch-on it refused stays recorded as wanted.
+ */
+export class PluginTierRefusalError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PluginTierRefusalError';
+  }
+}
+
 /** Why a registration outside the plugin's grant is refused, and what changes it. */
 function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'register.tool' | 'register.provider' | 'register.hook', unapplied: PluginUnappliedTier | undefined): Error {
   const what = REGISTRATION_NOUN[capability];
@@ -233,7 +244,7 @@ function grantRefusal(pluginName: string, grant: PluginGrant, capability: 'regis
     return new Error(`plugin '${pluginName}' registered ${what} without declaring '${capability}' in its manifest; `
       + `add "${capability}" to "capabilities" in its manifest.json`);
   }
-  return new Error(unapplied !== undefined
+  return new PluginTierRefusalError(unapplied !== undefined
     ? `plugin '${pluginName}' may not register ${what}: ${describeUnappliedTier(pluginName, unapplied)}; that starts it again at the tier`
     : `plugin '${pluginName}' may not register ${what}: its trust tier is '${grant.tier}', and '${capability}' needs 'limited'. `
       + `Run /plugin trust ${pluginName} limited; that starts it again at that tier`);
@@ -321,10 +332,10 @@ export function createPluginAPI(ctx: PluginAPIContext): PluginAPI {
   const permitOutward = (kind: keyof typeof OUTWARD_REGISTRATION): void => {
     if (grant?.tier !== 'untrusted') return;
     const unapplied = ctx.unappliedTier?.();
-    throw new Error(unapplied !== undefined
-      ? `plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and ${describeUnappliedTier(ctx.pluginName, unapplied)}, then enable or reload it`
+    throw new PluginTierRefusalError(unapplied !== undefined
+      ? `plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and ${describeUnappliedTier(ctx.pluginName, unapplied)}; that starts it again at the tier`
       : `plugin '${ctx.pluginName}' may not register ${OUTWARD_REGISTRATION[kind]}, and its trust tier is 'untrusted'. `
-        + `Run /plugin trust ${ctx.pluginName} limited, then enable or reload it`);
+        + `Run /plugin trust ${ctx.pluginName} limited; that starts it again at that tier`);
   };
   return {
     registerCommand(name, description, handler) {

@@ -227,25 +227,25 @@ export async function boundedLatestRelease(
 
 /**
  * Run the check and hand every line to `emit`, in the order it should be read.
- * Returns the lines emitted so a caller that printed them before its alternate
- * screen took over can re-surface them afterwards. Swallows everything, a
- * reachability check must never block or crash boot.
+ * Returns the notices, one string each (its lines joined by newlines), so a
+ * caller that posts notices posts one per piece of advice, and a caller that
+ * printed the lines before its alternate screen took over can re-surface them
+ * afterwards. Swallows everything, a reachability check must never block or
+ * crash boot.
  */
 export async function announceReachability(
   input: ReachabilityCheckInput,
-  emit: (line: string) => void,
+  emit: (line: string) => void = () => {},
 ): Promise<readonly string[]> {
-  const lines: string[] = [];
+  const notices: string[] = [];
   try {
     const result = await runReachabilityCheck(input);
     for (const notice of result.notices) {
-      for (const line of notice.lines) {
-        lines.push(line);
-        emit(line);
-      }
+      notices.push(notice.lines.join('\n'));
+      for (const line of notice.lines) emit(line);
     }
   } catch {
     // Best-effort, a reachability check must never block or crash boot.
   }
-  return lines;
+  return notices;
 }

@@ -150,7 +150,7 @@ A note on calendar, because it is the one place this path is narrower than it lo
 
 1. I open a real IMAP session and a real authenticated SMTP session and report both.
 2. A successful run reports both the IMAP and the SMTP stage as connected.
-3. If IMAP fails with AUTHENTICATIONFAILED, the app password was mistyped. Create a new one and store it again.
+3. If Gmail refuses the app password, the failure shows the steps to make a new one; if a server cannot be reached, it names the server.
 
 ### 7. Capturing the private calendar address
 
@@ -193,7 +193,7 @@ It is longer because Google exposes no API for two of the steps: the consent scr
 
 Skipping the publishing-status step means this integration silently stops working one week later, and the failure looks like an unrelated auth error. Step 6 is the one that matters most.
 
-**Scopes requested:** `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send`, `https://www.googleapis.com/auth/calendar.events`
+**Scopes requested:** `https://www.googleapis.com/auth/gmail.readonly`, `https://www.googleapis.com/auth/gmail.send`, `https://www.googleapis.com/auth/calendar.readonly`, `https://www.googleapis.com/auth/calendar.events`
 
 **APIs enabled:** `gmail.googleapis.com`, `calendar-json.googleapis.com`
 
@@ -355,7 +355,9 @@ Before it opens, expect a red "Google hasn't verified this app" warning. That is
 
 **"This browser or app may not be secure"**: Google is refusing the automated browser at sign-in. Sign in by hand in the window that opened, then re-run. The session persists after that.
 
-**IMAP fails with `AUTHENTICATIONFAILED`**: the app password is wrong or was revoked. Google never re-displays an existing app password, so delete the `goodvibes-agent` entry at https://myaccount.google.com/apppasswords and re-run to create a fresh one.
+**Gmail refuses the app password (over IMAP or SMTP)**: the app password is wrong or was revoked. Google never re-displays an existing app password, so delete the `goodvibes-agent` entry at https://myaccount.google.com/apppasswords, create a new one there, store it with `/mail password`, and re-run to check it.
+
+**A mail server cannot be reached**: the failure names the server; this machine's network or that address is the cause, and the app password was not checked. Re-run once the network is up.
 
 **Everything worked, then broke about a week later**: this is the Testing-publishing-status trap. Check https://console.cloud.google.com/auth/audience: if publishing status reads "Testing", click PUBLISH APP, then re-authorize. The old token cannot be salvaged.
 

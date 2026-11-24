@@ -13,7 +13,7 @@ disables daemon service registration for the CI account.
 ## Usage
 
 Select an available published suite tag for both the action reference and the
-`version` input. The examples below use the 3.4.8 suite version; check the
+`version` input. The examples below use the 3.5.0 suite version; check the
 [published releases](https://github.com/mgd34msu/goodvibes/releases) for available
 downloads. A full commit SHA can pin the action code independently of the
 release selected by `version`.
@@ -21,17 +21,17 @@ release selected by `version`.
 Install and print the version:
 
 ```yaml
-- uses: mgd34msu/goodvibes/products/tui@v3.4.8
+- uses: mgd34msu/goodvibes/products/tui@v3.5.0
   with:
-    version: v3.4.8
+    version: v3.5.0
 ```
 
 Run a health check:
 
 ```yaml
-- uses: mgd34msu/goodvibes/products/tui@v3.4.8
+- uses: mgd34msu/goodvibes/products/tui@v3.5.0
   with:
-    version: v3.4.8
+    version: v3.5.0
     command: doctor
     args: --json
 ```
@@ -42,9 +42,9 @@ phrase in one word. Nothing is expanded: no `$VARIABLES`, no `*` globs, no
 backslash escapes. Explain one decision, quoting the command it is about:
 
 ```yaml
-- uses: mgd34msu/goodvibes/products/tui@v3.4.8
+- uses: mgd34msu/goodvibes/products/tui@v3.5.0
   with:
-    version: v3.4.8
+    version: v3.5.0
     command: doctor explain
     args: "'rm -rf build'"
 ```
@@ -58,10 +58,10 @@ Run a non-interactive prompt (needs a provider credential in the job env) and
 use its answer in a later step:
 
 ```yaml
-- uses: mgd34msu/goodvibes/products/tui@v3.4.8
+- uses: mgd34msu/goodvibes/products/tui@v3.5.0
   id: goodvibes
   with:
-    version: v3.4.8
+    version: v3.5.0
     prompt: "summarize the changes in this workspace"
     output: json
     timeout: 15m
@@ -83,7 +83,7 @@ later step instead.
 
 | input | default | description |
 | --- | --- | --- |
-| `version` | `latest` | Published suite release tag (for example `v3.4.8`) or `latest`. |
+| `version` | `latest` | Published suite release tag (for example `v3.5.0`) or `latest`. |
 | `prompt` | `""` | Non-interactive prompt for `goodvibes run`. Needs a provider credential. |
 | `command` | `""` | A subcommand to run instead (e.g. `doctor`, `status`, `doctor explain`), split into words as a shell would (quote a word that holds spaces). Ignored when `prompt` is set. |
 | `args` | `""` | Extra arguments appended after the command or prompt, split into words as a shell would: single or double quotes keep a phrase in one argument; nothing is expanded. |

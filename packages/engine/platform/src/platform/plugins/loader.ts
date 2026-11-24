@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, readlinkSync, statSync } from 'fs';
 import { join, resolve, isAbsolute } from 'path';
 import { logger } from '../utils/logger.js';
-import { createPluginAPI, type PluginAPIContext } from './api.js';
+import { createPluginAPI, PluginTierRefusalError, type PluginAPIContext } from './api.js';
 import type { CommandRegistryLike } from '../runtime/host-ui.js';
 import type { ProviderRegistry } from '../providers/registry.js';
 import type { ToolRegistry } from '../tools/registry.js';
@@ -275,8 +275,11 @@ export interface PluginCleanupOptions {
 }
 
 export interface PluginLoadOptions extends PluginCleanupOptions {
-  /** Told why the plugin did not load, in words a person can act on. */
-  readonly onFailure?: ((reason: string) => void) | undefined;
+  /**
+   * Told why the plugin did not load, in words a person can act on, and whether its trust tier
+   * was the reason (a higher tier lets it start).
+   */
+  readonly onFailure?: ((reason: string, refusedByTier: boolean) => void) | undefined;
 }
 
 const registrationLifetimes = new WeakMap<LoadedPlugin, PluginInFlightTracker>();
@@ -295,9 +298,9 @@ export async function loadPlugin(
   options: PluginLoadOptions = {},
 ): Promise<LoadedPlugin | null> {
   const { manifest, pluginDir } = discovered;
-  const fail = (reason: string, level: 'warn' | 'error' = 'warn'): null => {
+  const fail = (reason: string, level: 'warn' | 'error' = 'warn', refusedByTier = false): null => {
     logger[level](`[plugins] ${manifest.name}: ${reason}`);
-    options.onFailure?.(reason);
+    options.onFailure?.(reason, refusedByTier);
     return null;
   };
   const entryFile = manifest.main ?? 'index.js';
@@ -338,7 +341,7 @@ export async function loadPlugin(
     return fail(`not started: it declares ${named}, which only a trusted plugin may use, and `
       + (set !== undefined
         ? describeUnappliedTier(manifest.name, set)
-        : `its trust tier is '${tier}'. Run /plugin trust ${manifest.name} trusted to allow it, or remove ${named} from its manifest`));
+        : `its trust tier is '${tier}'. Run /plugin trust ${manifest.name} trusted to allow it, or remove ${named} from its manifest`), 'warn', true);
   }
 
   // The tier limits what the host hands the plugin; its own code still runs with this process's access.
@@ -416,7 +419,7 @@ export async function loadPlugin(
     logger.info(`[plugins] ${manifest.name} v${manifest.version} activated`);
     return loaded;
   } catch (err) {
-    fail(`start failed: ${summarizeError(err)}`, 'error');
+    fail(`start failed: ${summarizeError(err)}`, 'error', err instanceof PluginTierRefusalError);
     // Stop retained APIs and drain admitted async registrations before cleanup.
     await registrations.close();
     const cleanupErrors: unknown[] = [];

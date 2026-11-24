@@ -116,8 +116,12 @@ export interface UpdateFetchLike {
  */
 export interface UpdateRequestOptions {
   readonly signal?: AbortSignal;
-  /** Told the size of each piece of a release file as it arrives, so a long download can show its progress. */
-  readonly onReceived?: ((assetName: string, bytes: number) => void) | undefined;
+  /**
+   * Told the size of each piece of a release file as it arrives, and the
+   * file's whole size when the server sent one, so a long download can show
+   * its progress.
+   */
+  readonly onReceived?: ((assetName: string, bytes: number, totalBytes?: number) => void) | undefined;
 }
 
 /** End even injected fetch/body implementations that ignore AbortSignal when the caller cancels. */
@@ -299,6 +303,8 @@ async function downloadToFile(
   const reader = body.getReader();
   const fd = openSync(file, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_NOFOLLOW, 0o600);
   const hash = createHash('sha256');
+  const declared = Number(response.headers.get('content-length') ?? '');
+  const totalBytes = Number.isSafeInteger(declared) && declared > 0 ? declared : undefined;
   let size = 0, finished = false;
   try {
     for (let piece = await reader.read(); !piece.done; piece = await reader.read()) {
@@ -307,7 +313,8 @@ async function downloadToFile(
       hash.update(bytes);
       for (let offset = 0; offset < bytes.byteLength;) offset += writeSync(fd, bytes, offset, bytes.byteLength - offset);
       size += bytes.byteLength;
-      onReceived?.(assetName, bytes.byteLength);
+      if (totalBytes === undefined) onReceived?.(assetName, bytes.byteLength);
+      else onReceived?.(assetName, bytes.byteLength, totalBytes);
     }
     finished = true;
   } finally {

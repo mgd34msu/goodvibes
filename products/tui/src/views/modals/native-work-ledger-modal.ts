@@ -47,7 +47,7 @@ export function createNativeWorkLedgerModalSurface(source: NativeWorkLedgerModal
    * What applies to a work as it stands, from its ledger attempt and the host's
    * last answer about its execution:
    *   no attempt, or one that is no longer active: check only (nothing to run here);
-   *   not started yet: start, check, stop (a stop before it is admitted ends the attempt);
+   *   not started yet: start, check (stop is offered once an attempt runs or waits);
    *   waiting to be admitted: check, stop, and resume when the host says recovery is needed;
    *   stopped before admission or cancelled: check only (a new attempt is needed);
    *   admitted: check and resume after it stopped or passed; check and stop while it runs.
@@ -71,7 +71,7 @@ export function createNativeWorkLedgerModalSurface(source: NativeWorkLedgerModal
     if (!attempt) return [];
     if (attempt.state !== 'active') return ['status'];
     const seen = lastExecution.get(workId);
-    if (!seen || seen.attemptId !== attempt.id) return ['start', 'status', 'cancel'];
+    if (!seen || seen.attemptId !== attempt.id) return ['start', 'status'];
     if (seen.kind === 'prevented-before-admission') return ['status'];
     if (seen.kind === 'pending-intent') return seen.recovery === 'required' ? ['status', 'cancel', 'resume'] : ['status', 'cancel'];
     if (seen.state === 'cancelled' || seen.recovery === 'cancelled' || seen.recovery === 'terminal') return ['status'];

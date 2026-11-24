@@ -363,15 +363,26 @@ function describeVersion(copy: CommandCopy): string {
  * each copy is, and the exact command that fixes it. No jargon, no severity
  * words, the user needs to know which file answers when they type the name.
  */
+/**
+ * The commands installed in one folder that is not on PATH, said once for all of them: which
+ * commands, where, and the one line that puts the folder on PATH.
+ */
+export function describeNotOnPath(commands: readonly string[], installDir: string): string[] {
+  const one = commands.length === 1;
+  const names = commands.length <= 2
+    ? commands.join(' and ')
+    : `${commands.slice(0, -1).join(', ')} and ${commands[commands.length - 1]}`;
+  const typed = commands.map((command) => `"${command}"`);
+  const typing = typed.length <= 2 ? typed.join(' or ') : `${typed.slice(0, -1).join(', ')} or ${typed[typed.length - 1]}`;
+  return [
+    `${names} ${one ? 'is' : 'are'} installed in ${installDir}, which is not on your PATH, so typing ${typing} does not reach ${one ? 'it' : 'them'}.`,
+    `  Add ${installDir} to PATH (in your shell profile to keep it): export PATH=${quoteShadowArgument(installDir)}:"$PATH"`,
+  ];
+}
+
 export function describeShadowReport(report: CommandShadowReport): string[] {
   const lines: string[] = [];
-  if (report.installDirNotOnPath) {
-    lines.push(
-      `${report.command} is installed in ${report.installDir}, which is not on your PATH, so typing "${report.command}" does not reach it.`,
-      `  Add ${report.installDir} to PATH (in your shell profile to keep it): export PATH=${quoteShadowArgument(report.installDir)}:"$PATH"`,
-    );
-    return lines;
-  }
+  if (report.installDirNotOnPath) return describeNotOnPath([report.command], report.installDir);
   const winner = report.winner;
   const installed = report.installed;
   if (!winner || !installed) return lines;

@@ -14002,7 +14002,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "version": "sample",
         "since": 0,
         "receivedBytes": 0,
-        "file": "sample"
+        "file": "sample",
+        "fileReceivedBytes": 0,
+        "fileTotalBytes": 0,
+        "fileNumber": 0,
+        "fileCount": 0
       },
       "pendingSince": 0,
       "pendingBlockedBy": [
@@ -14046,7 +14050,11 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "version": "sample",
         "since": 0,
         "receivedBytes": 0,
-        "file": "sample"
+        "file": "sample",
+        "fileReceivedBytes": 0,
+        "fileTotalBytes": 0,
+        "fileNumber": 0,
+        "fileCount": 0
       },
       "pendingSince": 0,
       "pendingBlockedBy": [

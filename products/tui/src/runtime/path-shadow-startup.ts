@@ -31,24 +31,22 @@ function resolveLatestRelease(): Promise<string | undefined> {
 }
 
 /**
- * Boot-time wiring. Prints one high-priority system message per line so the
- * report reads as prose rather than a single wrapped paragraph, and swallows
- * everything, a reachability check must never block or crash boot.
+ * Boot-time wiring. Posts one high-priority notice per piece of advice (its
+ * lines kept as lines), and swallows everything, a reachability check must
+ * never block or crash boot.
  */
 export async function announceInstallReachability(router: SystemMessageRouter): Promise<void> {
   // A private workspace has no binary release channel or package upgrade route.
   // Local install completeness is still checked by announceInstallSelfCheck.
   if (IS_WORKSPACE_DISTRIBUTION) return;
-  await announceReachability(
-    {
-      execPath: process.execPath,
-      pathValue: process.env['PATH'],
-      homeDir: process.env['HOME'] ?? '',
-      runningVersion: VERSION,
-      commandName: TERMINAL_COMMAND_NAME,
-      packageName: TERMINAL_PACKAGE_NAME,
-      resolveLatest: resolveLatestRelease,
-    },
-    (line) => router.high(`[Install] ${line}`),
-  );
+  const notices = await announceReachability({
+    execPath: process.execPath,
+    pathValue: process.env['PATH'],
+    homeDir: process.env['HOME'] ?? '',
+    runningVersion: VERSION,
+    commandName: TERMINAL_COMMAND_NAME,
+    packageName: TERMINAL_PACKAGE_NAME,
+    resolveLatest: resolveLatestRelease,
+  });
+  for (const notice of notices) router.high(`[Install] ${notice}`);
 }

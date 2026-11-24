@@ -9,7 +9,7 @@ Work is a task the daemon (the host) keeps for a project: a goal, the criteria t
 ```
 Fix login redirect: not started
   Checked: unverified, No verification has been recorded.
-  Fix login redirect: you can start, check, stop
+  Fix login redirect: you can start, check
 ```
 
 A work reads as `not started`, `waiting to start` (`: needs a resume` when the host asks for one), `running`, `passed, being checked`, `interrupted: needs a resume`, `stopped before it started`, `stopped`, `ended`, `finished`, `cancelled` or `released`. Choose a work's key row; the hint line shows only the keys that apply to it now:
@@ -18,7 +18,7 @@ A work reads as `not started`, `waiting to start` (`: needs a resume` when the h
 | --- | --- | --- |
 | `Ctrl+S` | Start it | not started |
 | `Ctrl+G` `i` | Check on it: where it stands on the host now | always (the only key once it stopped, finished or was cancelled) |
-| `Ctrl+G` `c` | Stop it (press twice) | not started, waiting to start, running |
+| `Ctrl+G` `c` | Stop it (press twice) | waiting to start, running (not before it was started) |
 | `Ctrl+R` | Resume it | the host says it needs a resume, or it passed and is being checked |
 
 With no attempt the row reads `nothing to run here yet`. A typed `/work start`, `/work status`, `/work cancel` or `/work resume` is sent whatever the row shows; the host decides.

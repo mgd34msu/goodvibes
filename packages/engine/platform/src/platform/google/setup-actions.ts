@@ -7,6 +7,7 @@ import { ownGoogleSetupDeps, ownGoogleSetupRunners } from './setup-reading-scope
 
 import {
   APP_PASSWORD_LABEL,
+  APP_PASSWORD_URL,
   GMAIL_IMAP_HOST,
   GMAIL_IMAP_PORT,
   GMAIL_SMTP_HOST,
@@ -218,16 +219,32 @@ function gmailConfigRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   };
 }
 
+/**
+ * The one next step for a failed mail check, named after what the person saw:
+ * a refused app password gets the steps to make a new one, an unreachable
+ * server says which server and that the network or the address is the cause.
+ */
+function gmailVerifyFix(outcome: Awaited<ReturnType<GoogleSetupActionDeps['verifyMail']>>): string {
+  const protocol = outcome.stage ?? 'IMAP';
+  if (outcome.failure === 'credentials-rejected') {
+    return `Gmail refused the stored app password over ${protocol}. Make a new one: open ${APP_PASSWORD_URL}, delete the "${APP_PASSWORD_LABEL}" entry, `
+      + `type ${APP_PASSWORD_LABEL} in the "App name" box, click "Create" and copy the 16-character password; then run /mail password, `
+      + 'paste it, and run /google setup again to check it.';
+  }
+  if (outcome.failure === 'unreachable') {
+    const server = outcome.server ?? `the ${protocol} server`;
+    return `The ${protocol} server ${server} could not be reached, so this machine's network or that address is the cause; `
+      + 'the app password was not checked. Run /google setup again once the network is up; /mail settings shows the address.';
+  }
+  return 'Put right what the line above names (/mail settings shows every mail setting), then run /google setup again.';
+}
+
 function gmailVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {
   return async () => {
     const outcome = await deps.verifyMail();
     return outcome.ok
       ? done(outcome.detail)
-      : failed(
-        'Could not connect to Gmail.',
-        outcome.detail,
-        'If IMAP reports AUTHENTICATIONFAILED the app password was mistyped, say so and I will walk you through making a new one.',
-      );
+      : failed('Could not connect to Gmail.', outcome.detail, gmailVerifyFix(outcome));
   };
 }
 

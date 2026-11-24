@@ -101,7 +101,7 @@ related to it, and each part left out is replaced by a marker saying it was
 left out of that request. A target that reports it cut the state is treated as
 having given no answer.
 
-**What the hosted service keeps.** [OWNER TO COMPLETE: what TypeSafe keeps of a decision request (state, questions, answers), for how long, and whether it is used for anything else.]
+**What the hosted service keeps.** What the hosted service keeps of a decision request, and for how long, is set by TypeSafe's own terms, not by GoodVibes; this page states only what GoodVibes sends.
 
 ## How much you are asked
 

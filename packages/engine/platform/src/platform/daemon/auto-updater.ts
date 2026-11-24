@@ -150,6 +150,12 @@ export interface DaemonAutoUpdaterOptions {
   readonly arch: string;
   /** GitHub releases/latest URL used for tag resolution. */
   readonly releasesLatestUrl: string;
+  /**
+   * The release address now (the owner's `update.releasesUrl`), read before
+   * every check so a changed setting is followed without a restart. Absent:
+   * `releasesLatestUrl` for the loop's whole life.
+   */
+  readonly releasesUrlNow?: (() => string) | undefined;
   /** `${releasesLatestUrl%/latest}/download/<tag>` builder override for tests. */
   readonly downloadBaseUrl?: ((tag: string) => string) | undefined;
   /** Hourly by default. */
@@ -254,6 +260,8 @@ export const DEFAULT_UPDATE_PERSISTENT_FAILURE_MS = 24 * 60 * 60 * 1000;
 interface PendingSwap {
   readonly tag: string;
   readonly targets: readonly UpdateTarget[];
+  /** The release address the tag was found at: its files are downloaded from the same place. */
+  readonly releasesUrl: string;
 }
 
 /** The live state of one daemon's self-update loop. */
@@ -534,10 +542,15 @@ export class DaemonAutoUpdater {
    * how three releases shipped past a daemon whose checks had been failing for
    * days with nobody able to see it from any surface.
    */
+  /** The release address the next check asks: the setting as it is now, when the host gave a reader for it. */
+  private releasesUrl(): string {
+    return this.options.releasesUrlNow ? this.options.releasesUrlNow() : this.options.releasesLatestUrl;
+  }
+
   snapshot(): DaemonUpdateLoopSnapshot {
     return {
       currentVersion: normalizeVersion(this.options.currentVersion),
-      releasesUrl: this.options.releasesLatestUrl,
+      releasesUrl: this.pendingSwap?.releasesUrl ?? this.releasesUrl(),
       checkIntervalMs: this.loop.checkIntervalMs,
       firstCheckDelayMs: this.loop.firstCheckDelayMs,
       failedCheckCount: this.consecutiveFailures,
@@ -660,7 +673,9 @@ export class DaemonAutoUpdater {
 
     if (!this.pendingSwap) {
       assertCurrent();
-      const latestTag = await resolveLatestReleaseTag(fetchImpl, this.options.releasesLatestUrl, { signal });
+      const releasesUrl = this.releasesUrl();
+      if (releasesUrl.length === 0) throw new Error('update.releasesUrl is empty, so there is nowhere to resolve release tags from');
+      const latestTag = await resolveLatestReleaseTag(fetchImpl, releasesUrl, { signal });
       assertCurrent();
       const comparison = compareVersions(this.options.currentVersion, latestTag);
       if (comparison > 0 || comparison === 0 && (!suiteConfiguration || !installedSuiteNeedsRepair({ execPath: this.options.execPath,
@@ -684,7 +699,7 @@ export class DaemonAutoUpdater {
         });
         return;
       }
-      this.pendingSwap = { tag: latestTag, targets };
+      this.pendingSwap = { tag: latestTag, targets, releasesUrl };
       logger.info('DaemonAutoUpdater: update found', {
         from: normalizeVersion(this.options.currentVersion),
         to: this.pendingSwap.tag,
@@ -724,14 +739,29 @@ export class DaemonAutoUpdater {
     const notice = this.installNotice;
     this.installNotice = null;
     notice?.();
-    const { tag, targets } = this.pendingSwap;
+    const { tag, targets, releasesUrl } = this.pendingSwap;
     const downloadBase = this.options.downloadBaseUrl
       ? this.options.downloadBaseUrl(tag)
-      : defaultDownloadBaseUrl(this.options.releasesLatestUrl, tag);
+      : defaultDownloadBaseUrl(releasesUrl, tag);
     // What `update.status` reports while the release downloads and installs.
-    const installing = { version: normalizeVersion(tag), since: this.now(), receivedBytes: 0, file: null as string | null };
+    const installing = { version: normalizeVersion(tag), since: this.now(), receivedBytes: 0, file: null as string | null,
+      fileReceivedBytes: 0, fileTotalBytes: null as number | null, fileNumber: null as number | null, fileCount: null as number | null };
     this.installing = installing;
-    const onReceived = (file: string, bytes: number) => { installing.receivedBytes += bytes; installing.file = file; };
+    // The release's files in download order, from the update's own plan (no request): which file of how many is downloading.
+    let releaseFiles: readonly string[] = suiteConfiguration ? [] : targets.map(target => target.assetName);
+    const onFiles = (assetNames: readonly string[]) => { releaseFiles = assetNames; };
+    const onReceived = (file: string, bytes: number, totalBytes?: number) => {
+      if (installing.file !== file) {
+        installing.fileReceivedBytes = 0;
+        const index = releaseFiles.indexOf(file);
+        installing.fileNumber = index >= 0 ? index + 1 : null;
+        installing.fileCount = index >= 0 ? releaseFiles.length : null;
+      }
+      installing.receivedBytes += bytes;
+      installing.file = file;
+      installing.fileReceivedBytes += bytes;
+      installing.fileTotalBytes = totalBytes ?? null;
+    };
 
     const busyBeforeCommit = new Error('daemon became busy before update commit');
     let suiteResult: SuiteUpdateResult | undefined;
@@ -747,7 +777,7 @@ export class DaemonAutoUpdater {
     try {
       if (suiteConfiguration) {
         suiteResult = await applySuiteUpdate({ execPath: this.options.execPath, platform: this.options.platform, arch: this.options.arch,
-          version: tag, downloadBaseUrl: downloadBase, fetchImpl, io, signal, onReceived,
+          version: tag, downloadBaseUrl: downloadBase, fetchImpl, io, signal, onReceived, onFiles,
           webuiDirectory: suiteConfiguration.webuiDirectory, ...(this.options.currentReader ? { currentReader: this.options.currentReader } : {}),
           assertCurrent: assertLifecycleCurrent, beforeCommit: admitIdle });
       } else await applyVerifiedUpdate({

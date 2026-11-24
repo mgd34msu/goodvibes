@@ -180,6 +180,7 @@ export function createBootstrapCommandActions(
   | 'jumpToBookmark'
   | 'scrollToLine'
   | 'print'
+  | 'printLive'
   | 'exit'
   | 'reloadSystemPrompt'
   | 'openForensicsView'

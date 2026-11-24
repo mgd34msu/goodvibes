@@ -232,8 +232,14 @@ function verifyMailFor(ctx: CommandContext): GoogleSetupActionDeps['verifyMail']
           : `Signed in to Gmail${who} over IMAP; no SMTP host is set, so sending was not checked.`,
       };
     }
-    const stage = result.stage === 'smtp' ? 'SMTP' : result.stage === 'imap' ? 'IMAP' : 'The mail settings';
-    return { ok: false, detail: `${stage}: ${result.error ?? 'no reason was given'}` };
+    const protocol = result.stage === 'smtp' ? 'SMTP' : result.stage === 'imap' ? 'IMAP' : undefined;
+    return {
+      ok: false,
+      detail: `${protocol ?? 'The mail settings'}: ${result.error ?? 'no reason was given'}`,
+      ...(protocol === undefined ? {} : { stage: protocol }),
+      ...(result.failure === undefined ? {} : { failure: result.failure }),
+      ...(result.server === undefined ? {} : { server: result.server }),
+    };
   };
 }
 

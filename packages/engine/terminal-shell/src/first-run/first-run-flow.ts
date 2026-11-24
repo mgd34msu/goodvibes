@@ -23,6 +23,7 @@ import type { SurfaceModal, SurfaceModalCloseReason, SurfaceModalHost } from '..
 import type { SurfaceLayer } from '../renderer/surface-kit.js';
 import { renderChooseStep, renderDecideStep, renderSignInStep, type SignInStepView } from '../renderer/first-run.js';
 import { copyToClipboard } from '../clipboard.js';
+import { runPickedCommand } from '../command-registry.js';
 import { choosableProviderIds, readFirstRunOffers, readUsableProvider, FIRST_SCREEN_PROVIDERS, INTERNAL_PROVIDER_IDS, LOCAL_OFFER_NAME, type DiscoveryView, type FirstRunOffers, type ProviderFact, type ProviderOffer, type ProviderRegistryView, type UsableProvider } from './offers.js';
 import { setFirstRunScreen } from './splash-state.js';
 
@@ -63,6 +64,57 @@ export interface FirstRunDeps {
    * other backends the judgment port supports). First run goes on once one is usable.
    */
   readonly openDecisionModelSettings?: (() => void) | undefined;
+  /**
+   * Whether "Who decides" was answered or put off (Esc) already: then it is not
+   * opened again by itself; the status line's mode segment opens it.
+   */
+  readonly whoDecidesAsked: () => boolean;
+  /** Record that "Who decides" was answered, or put off for now. */
+  readonly recordWhoDecides: (how: 'answered' | 'put-off') => void;
+}
+
+/** "Who decides" opens by itself: it is needed now and was never answered or put off. */
+async function whoDecidesDue(deps: FirstRunDeps): Promise<boolean> {
+  if (!deps.decisionModel || deps.whoDecidesAsked()) return false;
+  try { return await deps.decisionModel.needsChoice(); } catch { return true; }
+}
+
+/**
+ * Open "Who decides" alone, for the model in use, when it is needed now (the
+ * status line's mode segment; first start). False when it is not needed or
+ * cannot open here.
+ */
+export async function openWhoDecides(deps: FirstRunDeps): Promise<boolean> {
+  if (!deps.decisionModel || !deps.pushSurfaceModal) return false;
+  let needed: boolean;
+  try { needed = await deps.decisionModel.needsChoice(); } catch { needed = true; }
+  if (!needed) return false;
+  pushWhoDecides(deps, deps.pushSurfaceModal);
+  return true;
+}
+
+/**
+ * A click on the status line's mode segment: "Who decides" while no decision
+ * model can be asked (the segment then reads "Jev decides: no decision model
+ * set"); otherwise /permissions, what is in force and why. Always settles.
+ */
+export async function openModeSegment(context: {
+  readonly openWhoDecides?: (() => Promise<boolean>) | undefined;
+  readonly executeCommand?: ((name: string, args: string[]) => Promise<boolean>) | undefined;
+  readonly print: (message: string) => void;
+}): Promise<void> {
+  try {
+    if (await context.openWhoDecides?.()) return;
+  } catch (error) {
+    logger.warn('[first-run] "Who decides" could not open; /permissions instead', { error: summarizeError(error) });
+  }
+  await runPickedCommand(context.executeCommand, 'permissions', [], (message) => context.print(message));
+}
+
+/** "Who decides" alone, for the model in use. */
+function pushWhoDecides(deps: FirstRunDeps, push: (modal: SurfaceModal) => void): void {
+  const current = deps.providerRegistry.getCurrentModel();
+  push(new FirstRunModal(deps, undefined, { id: current.id, provider: current.provider, displayName: current.displayName, registryKey: current.registryKey }));
 }
 
 /** What first run's "Who decides" step reads and writes. */
@@ -217,8 +269,10 @@ export class FirstRunModal implements SurfaceModal {
   private deciderNeeded = false;
   /** The model is already in use (chosen before the "Who decides" step). */
   private modelSelected = false;
-  /** The "Who decides" step was answered (or there was none). */
+  /** The "Who decides" step was answered or put off (or there was none). */
   private decided = false;
+  /** How "Who decides" ended: a choice, or Esc (later). */
+  private decideAnswer: 'answered' | 'put-off' = 'answered';
   /** The decision-models settings were opened from "Who decides": first run goes on once one is usable. */
   private settingsOpened = false;
   /** A readiness read for that is in flight. */
@@ -248,10 +302,8 @@ export class FirstRunModal implements SurfaceModal {
     } catch {
       this.facts = { providers: [] };
     }
-    // A local read: when no decision model can be asked, the model is followed by "Who decides".
-    if (this.deps.decisionModel && this.step.kind !== 'decide') {
-      try { this.deciderNeeded = await this.deps.decisionModel.needsChoice(); } catch { this.deciderNeeded = true; }
-    }
+    // A local read: when no decision model can be asked and "Who decides" was never answered or put off, the model is followed by it.
+    if (this.deps.decisionModel && this.step.kind !== 'decide') this.deciderNeeded = await whoDecidesDue(this.deps);
     if (this.resumeProvider) {
       const offer = this.offers()?.rows.find((row) => row.providerId === this.resumeProvider && row.route !== 'local');
       if (offer) this.openStep2(offer);
@@ -293,6 +345,8 @@ export class FirstRunModal implements SurfaceModal {
     }
     this.finished = true;
     this.selectModel(model);
+    // Answered or put off: "Who decides" is not opened again by itself (the status line's mode segment opens it).
+    if (this.deciderNeeded) this.deps.recordWhoDecides(this.decideAnswer);
     this.deps.markDone();
     setFirstRunScreen({ kind: 'set', model: model.displayName || model.id, signIn, steps: this.deciderNeeded ? 4 : 3, ...(this.using ? { using: this.using } : {}) });
     this.deps.redrawConversation?.();
@@ -674,6 +728,7 @@ export class FirstRunModal implements SurfaceModal {
     if (step.kind === 'jev-key') { this.step = { kind: 'decide', selected: 0, model: step.model, signIn: step.signIn }; return true; }
     if (step.kind === 'decide') {
       this.decided = true;
+      this.decideAnswer = 'put-off';
       // finish() closes the modal through its host when it has one; without one the caller closes it.
       const closesItself = this.host !== undefined;
       this.finish(step.model, step.signIn);
@@ -692,6 +747,8 @@ export class FirstRunModal implements SurfaceModal {
     const step = this.step;
     if (step.kind === 'browser') step.close?.();
     if (!this.finished) {
+      // Closed while "Who decides" showed: put off, as Esc would.
+      if (step.kind === 'decide' || step.kind === 'jev-key') this.deps.recordWhoDecides('put-off');
       // Set up later: nothing is marked and nothing printed; the conversation says it is not set up.
       setFirstRunScreen(sessionModelReady(this.deps) ? undefined : { kind: 'not-ready' });
       if (reason !== 'cleared') this.deps.renderRequest();
@@ -782,11 +839,7 @@ async function useUsableProvider(deps: FirstRunDeps): Promise<'opened' | 'used' 
   const using = `Using ${usable.name} (${model.displayName || model.id}) from ${usable.from}; change it with the model control.`;
   const effort = deps.configManager.get('provider.reasoningEffort');
   deps.completeModelSelection?.({ model, effort: typeof effort === 'string' ? effort : '', quiet: true });
-  let needed = false;
-  if (deps.decisionModel && deps.pushSurfaceModal) {
-    try { needed = await deps.decisionModel.needsChoice(); } catch { needed = true; }
-  }
-  if (needed && deps.pushSurfaceModal) {
+  if (deps.pushSurfaceModal && await whoDecidesDue(deps)) {
     setFirstRunScreen({ kind: 'pending' });
     deps.pushSurfaceModal(new FirstRunModal(deps, undefined, model, using));
     return 'opened';
@@ -815,16 +868,12 @@ export async function startFirstRun(deps: FirstRunDeps): Promise<boolean> {
       const used = await useUsableProvider(deps);
       if (used !== undefined) return used === 'opened';
     }
-    // A ready model on a first launch with no decision model to ask: first run is only "Who decides".
-    if (!deps.isMarkedDone() && deps.pushSurfaceModal && deps.decisionModel) {
-      let needed = false;
-      try { needed = await deps.decisionModel.needsChoice(); } catch { needed = true; }
-      if (needed) {
-        const current = deps.providerRegistry.getCurrentModel();
-        setFirstRunScreen({ kind: 'pending' });
-        deps.pushSurfaceModal(new FirstRunModal(deps, undefined, { id: current.id, provider: current.provider, displayName: current.displayName, registryKey: current.registryKey }));
-        return true;
-      }
+    // A ready model with no decision model to ask, and "Who decides" never answered or put off: it opens alone,
+    // once (on a first launch, and on a home that first ran before this step existed).
+    if (deps.pushSurfaceModal && await whoDecidesDue(deps)) {
+      setFirstRunScreen({ kind: 'pending' });
+      pushWhoDecides(deps, deps.pushSurfaceModal);
+      return true;
     }
     // A ready model on a first launch, and a decision model that can be asked: nothing to ask; recorded as done.
     if (!deps.isMarkedDone()) deps.markDone();

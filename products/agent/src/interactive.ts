@@ -67,8 +67,7 @@ import { terminalAskFacts, type TerminalAskContext } from '@goodvibes/engine/ter
 import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes/engine/terminal-shell/status-line';
 import { newestUnreadNoticeTitle } from '@goodvibes/engine/terminal-shell/shell-footer';
-import { runPickedCommand } from '@goodvibes/engine/terminal-shell/command-registry';
-import { drawSplashAdditions } from '@goodvibes/engine/terminal-shell/first-run';
+import { drawSplashAdditions, openModeSegment } from '@goodvibes/engine/terminal-shell/first-run';
 import { GitStatusProvider, type GitHeaderInfo } from '@goodvibes/engine/terminal-shell/git-status';
 import { describeExecutionModeWords } from './permissions/execution-mode.ts';
 import { footerTargetRows } from './renderer/footer-targets.ts';
@@ -978,8 +977,9 @@ async function main(prepared: PreparedShellCliRuntime) {
   input.surfaceModals.onChange = () => render();
   // A click on a status bar segment opens its view (status-line.ts); the Agent keeps no changes view, so its branch only reads.
   input.onFooterTarget = (target) => {
-    // The mode opens /permissions: what is in force and why on its first row, the fix and the mode setting below it.
-    if (target === 'mode') void runPickedCommand(commandContext.executeCommand, 'permissions', [], (message) => commandContext.print(message)).finally(() => render());
+    // The mode opens first run's "Who decides" while no decision model can be asked; otherwise /permissions:
+    // what is in force and why on its first row, the fix and the mode setting below it.
+    if (target === 'mode') void openModeSegment(commandContext).finally(() => render());
     else if (target === 'notices') commandContext.openNotifications?.();
     else if (target === 'context') commandContext.openContextInspector?.();
     else if (target === 'model') commandContext.openModelPicker?.();

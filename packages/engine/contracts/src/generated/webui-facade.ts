@@ -9,7 +9,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * webui keeps its ergonomic wrappers (route interpolation, per-family typed
  * call sites) hand-written on top of these generated primitives.
  *
- * Contract product version: 3.4.8
+ * Contract product version: 3.5.0
  * Methods: 656 total, 536 REST-routed, 120 ws-only invoke.
  */
 
@@ -17048,7 +17048,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "version": "sample",
         "since": 0,
         "receivedBytes": 0,
-        "file": "sample"
+        "file": "sample",
+        "fileReceivedBytes": 0,
+        "fileTotalBytes": 0,
+        "fileNumber": 0,
+        "fileCount": 0
       },
       "pendingSince": 0,
       "pendingBlockedBy": [
@@ -17090,7 +17094,11 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "version": "sample",
         "since": 0,
         "receivedBytes": 0,
-        "file": "sample"
+        "file": "sample",
+        "fileReceivedBytes": 0,
+        "fileTotalBytes": 0,
+        "fileNumber": 0,
+        "fileCount": 0
       },
       "pendingSince": 0,
       "pendingBlockedBy": [

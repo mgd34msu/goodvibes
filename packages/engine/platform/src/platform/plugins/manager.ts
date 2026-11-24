@@ -607,7 +607,7 @@ export class PluginManager {
       if (failure) return { ok: false, error: `Plugin '${name}' was not enabled, the change could not be saved: ${failure}` };
 
       if (this.deps) {
-        const { loaded, failure } = await this.acquireOrFail(discovered, this.deps);
+        const { loaded, failure, refusedByTier } = await this.acquireOrFail(discovered, this.deps);
         if (loaded) {
           this.plugins.set(name, loaded);
           this.notifySubscribers();
@@ -616,6 +616,13 @@ export class PluginManager {
           // refuse registrations during init; retain that intent for restart.
           if (this.closed) return { ok: false, error: 'Plugin manager closed during enable; enabled preference retained' };
           const reason = failure ?? 'see the log for the reason';
+          // Refused by its trust tier: the owner asked for it on, and setting the tier is what
+          // starts it, so it stays recorded as switched on (here and after a restart) and the
+          // trust change starts it whenever it comes.
+          if (refusedByTier === true) {
+            this.notifySubscribers();
+            return { ok: false, error: `Plugin '${name}' did not start and stays switched on: ${reason}` };
+          }
           // Put back what the state file held before this call: a plugin that
           // was enabled stays enabled, a first enable is left disabled.
           const unsaved = this.updateState((state) => {
@@ -848,9 +855,9 @@ export class PluginManager {
     discovered: Parameters<typeof loadPlugin>[0],
     deps: PluginLoaderDeps,
     cacheBust?: number,
-    onFailure?: (reason: string) => void,
+    onFailure?: (reason: string, refusedByTier: boolean) => void,
   ): Promise<LoadedPlugin | null> {
-    if (this.closed) { onFailure?.('the plugin manager is shutting down'); return null; }
+    if (this.closed) { onFailure?.('the plugin manager is shutting down', false); return null; }
     const tracker = deps.inFlight ?? this.inFlight;
     const names = this.ownedCalls.get(tracker) ?? new Set<string>();
     this.ownedCalls.set(tracker, names);
@@ -861,7 +868,7 @@ export class PluginManager {
     this.emitLifecycle(pluginId, 'loading', (bus, ctx) => emitPluginLoading(bus, ctx, { pluginId, path: discovered.pluginDir }));
     let reason: string | undefined;
     const loaded = await loadPlugin(discovered, deps, cacheBust, { throwOnCleanupError: true,
-      onFailure: (failure) => { reason ??= failure; onFailure?.(failure); } });
+      onFailure: (failure, refusedByTier) => { reason ??= failure; onFailure?.(failure, refusedByTier); } });
     if (loaded) {
       this.acquired.add(loaded);
       this.startFailures.delete(pluginId);
@@ -892,12 +899,16 @@ export class PluginManager {
     discovered: DiscoveredPlugin,
     deps: PluginLoaderDeps,
     cacheBust?: number,
-  ): Promise<{ loaded: LoadedPlugin | null; cleanupError?: PluginCleanupError; failure?: string }> {
+  ): Promise<{ loaded: LoadedPlugin | null; cleanupError?: PluginCleanupError; failure?: string; refusedByTier?: boolean }> {
     let failure: string | undefined;
-    const onFailure = (reason: string): void => { failure ??= reason; };
+    let refusedByTier = false;
+    const onFailure = (reason: string, byTier: boolean): void => {
+      if (failure === undefined) refusedByTier = byTier;
+      failure ??= reason;
+    };
     try {
       const loaded = await this.acquire(discovered, deps, cacheBust, onFailure);
-      return loaded ? { loaded } : { loaded, ...(failure !== undefined ? { failure } : {}) };
+      return loaded ? { loaded } : { loaded, refusedByTier, ...(failure !== undefined ? { failure } : {}) };
     } catch (error) {
       if (!(error instanceof PluginCleanupError)) throw error;
       this.cleanupErrors.add(error);

@@ -2239,7 +2239,7 @@ export { forSession as forSessionRuntime }
 // @public (undocumented)
 export const FOUNDATION_METADATA: {
     readonly productId: "goodvibes";
-    readonly productVersion: "3.4.8";
+    readonly productVersion: "3.5.0";
     readonly operatorMethodCount: 656;
     readonly operatorEventCount: 37;
     readonly peerEndpointCount: 6;
@@ -36629,6 +36629,10 @@ export interface OperatorMethodOutputMap {
             since: number;
             receivedBytes: number;
             file: null | string;
+            fileReceivedBytes?: number;
+            fileTotalBytes?: null | number;
+            fileNumber?: null | number;
+            fileCount?: null | number;
         };
         pendingSince: null | number;
         pendingBlockedBy: readonly string[];
@@ -36661,6 +36665,10 @@ export interface OperatorMethodOutputMap {
             since: number;
             receivedBytes: number;
             file: null | string;
+            fileReceivedBytes?: number;
+            fileTotalBytes?: null | number;
+            fileNumber?: null | number;
+            fileCount?: null | number;
         };
         pendingSince: null | number;
         pendingBlockedBy: readonly string[];

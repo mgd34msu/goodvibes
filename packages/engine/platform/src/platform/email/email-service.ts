@@ -30,7 +30,8 @@ import { readEmailMessage } from './email-message-reader.js';
 import type { EmailMailboxObservation, EmailReplySubjectSourceOwner } from './reply-subject-source.js';
 import { IMAP_ATTACHMENT_LITERAL_BYTES, type ImapAttachmentContent, type ImapDraftSummary, type ImapMessageAction, type ImapMessageActionResult } from './imap-mailbox-actions.js';
 import { withEmailReadConnection } from './email-read-connection.js';
-import { SmtpClient, validateSmtpAddress, validateSmtpSubject, validateSmtpThreadHeader } from './smtp-client.js';
+import { SmtpClient, SmtpReplyError, validateSmtpAddress, validateSmtpSubject, validateSmtpThreadHeader } from './smtp-client.js';
+import { ImapOpenError } from './imap-open.js';
 import {
   EmailCredentialUnavailableError,
   readEmailConfig,
@@ -181,8 +182,38 @@ export interface EmailConnectionTestResult {
   /** Which stage failed, when ok is false. 'config' means validation failed before any connection was attempted. */
   readonly stage?: 'config' | 'imap' | 'smtp';
   readonly error?: string;
+  /**
+   * What the failure was, when it is one a person acts on differently: the
+   * server refused the user name and password, or the server could not be
+   * reached at all (nothing about the credentials was checked). Absent for
+   * every other failure.
+   */
+  readonly failure?: 'credentials-rejected' | 'unreachable';
+  /** The `host:port` of the stage that failed, when a connection was tried. */
+  readonly server?: string;
   /** On success: whether sending was checked, or no SMTP host is configured (a receive-only mailbox). */
   readonly smtp?: 'verified' | 'not-configured';
+}
+
+/** Socket errors that mean the server was never reached: no route, no name, refused, or no answer in time. */
+const UNREACHABLE_SOCKET_CODES: ReadonlySet<string> = new Set([
+  'ECONNREFUSED', 'ENOTFOUND', 'EAI_AGAIN', 'EAI_NONAME', 'ETIMEDOUT', 'EHOSTUNREACH', 'ENETUNREACH', 'ENETDOWN', 'ECONNRESET',
+]);
+
+function isUnreachableSocketError(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as { readonly code?: unknown }).code;
+  if (typeof code === 'string' && UNREACHABLE_SOCKET_CODES.has(code)) return true;
+  return /connect timeout to /.test(err.message);
+}
+
+function imapTestFailure(err: unknown): EmailConnectionTestResult['failure'] {
+  if (err instanceof ImapOpenError) {
+    if (err.reason === 'authentication-rejected') return 'credentials-rejected';
+    if (err.reason === 'connection-failed' || err.reason === 'server-unavailable') return 'unreachable';
+    return undefined;
+  }
+  return isUnreachableSocketError(err) ? 'unreachable' : undefined;
 }
 
 export interface SendMailOptions extends DeliveryLifetime {
@@ -798,12 +829,21 @@ export class EmailService {
       // every path.
       await withEmailReadConnection(this.deps, config, sourceRead, undefined, async () => undefined);
     } catch (err) {
-      const stage = err instanceof EmailCredentialUnavailableError ? 'config' : 'imap';
-      return { ok: false, stage, error: err instanceof Error ? err.message : String(err) };
+      const error = err instanceof Error ? err.message : String(err);
+      if (err instanceof EmailCredentialUnavailableError) return { ok: false, stage: 'config', error };
+      const failure = imapTestFailure(err);
+      return {
+        ok: false,
+        stage: 'imap',
+        error,
+        server: `${config.imapHost}:${String(config.imapPort)}`,
+        ...(failure === undefined ? {} : { failure }),
+      };
     }
     if (!sends) return { ok: true, smtp: 'not-configured' };
 
     let smtpSocket: { destroy(): unknown } | undefined;
+    const smtpServer = `${config.smtpHost}:${String(config.smtpPort)}`;
     try {
       const smtpPassword = await resolveEmailPassword(smtpPasswordRefFor(config), this.deps.secretsManager, smtpSettingFor(config));
       const socketFactory = this.deps.smtpSocketFactory ?? this.defaultSmtpSocketFactory(config.smtpPort, config.smtpSecurity);
@@ -813,7 +853,13 @@ export class EmailService {
       const client = new SmtpClient({ socket, hostname: config.smtpHost, username: config.username, password: smtpPassword });
       await client.verifyAuth();
     } catch (err) {
-      return { ok: false, stage: 'smtp', error: err instanceof Error ? err.message : String(err) };
+      const error = err instanceof Error ? err.message : String(err);
+      if (err instanceof EmailCredentialUnavailableError) return { ok: false, stage: 'config', error };
+      // A 5xx answer to AUTH is a refused sign-in; a socket that never connected is an unreachable server.
+      const failure = err instanceof SmtpReplyError && err.stage.startsWith('AUTH') && err.code >= 500 && err.code < 600
+        ? 'credentials-rejected'
+        : smtpSocket === undefined && isUnreachableSocketError(err) ? 'unreachable' : undefined;
+      return { ok: false, stage: 'smtp', error, server: smtpServer, ...(failure === undefined ? {} : { failure }) };
     } finally {
       smtpSocket?.destroy();
     }

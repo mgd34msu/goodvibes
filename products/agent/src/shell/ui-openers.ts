@@ -296,7 +296,7 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     if (input.prompt.trim().length > 0 || input.commandMode) {
       return false;
     }
-    const nearest = conversation.findNearestBlock(input.getScrollTop());
+    const nearest = conversation.findNearestBlock(conversation.focusedBlockLine() ?? input.getScrollTop());
     if (!nearest) {
       return false;
     }

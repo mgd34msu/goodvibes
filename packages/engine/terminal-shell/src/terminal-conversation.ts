@@ -916,6 +916,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
     /**
      * Display-only prose that is one transcript block: the copy key copies `copy.text`, not the
      * lines shown, and bookmarking or saving it keeps the lines shown. Rewrapped on every rebuild.
+     * The block takes the transcript's focus (focusedBlockLine).
      */
     public logBlock(text: string, copy: BlockCopy, style: Partial<Cell> = {}): void {
         const collapseKey = `display_block_${++this.displayBlockSeq}`;
@@ -925,8 +926,32 @@ export class TerminalConversationManager extends PlatformConversationManager {
             this.history.addLines(lines);
             this.blockRegistry.push({ type: 'tool', rawContent: text, blockIndex: this.blockRegistry.length, startLine, lineCount: lines.length, collapseKey, title: copy.name, copy });
         });
+        this.blockFocus = { key: collapseKey, messageCount: this.getMessageCount() };
     }
     private displayBlockSeq = 0;
+    /** The block printed by logBlock keeps the transcript's focus until the person scrolls or the conversation moves on. */
+    private blockFocus: { readonly key: string; readonly messageCount: number } | null = null;
+    /**
+     * Where block actions (copy, bookmark, save) act while a block holds the transcript's focus:
+     * its first line; null when no block holds it (they act on the block nearest the top line).
+     */
+    public focusedBlockLine(): number | null {
+        const focus = this.blockFocus;
+        if (!focus) return null;
+        if (this.getMessageCount() !== focus.messageCount) {
+            this.blockFocus = null;
+            return null;
+        }
+        this.flushHistory();
+        const block = this.blockRegistry.find((entry) => entry.collapseKey === focus.key);
+        if (!block) {
+            this.blockFocus = null;
+            return null;
+        }
+        return block.startLine;
+    }
+    /** The person moved the transcript: block actions follow the top line again. */
+    public releaseBlockFocus(): void { this.blockFocus = null; }
     /**
      * logToolResultBlock - Append a single tool-call-styled result line to the display
      * history only (never touches the LLM message list), so a slash command's subprocess
@@ -952,6 +977,7 @@ export class TerminalConversationManager extends PlatformConversationManager {
         this.history.clear();
         this.displayOnly.drop();
         this.blockRegistry = [];
+        this.blockFocus = null;
         this.messageLineRegistry = [];
         this.errorLineRegistry = [];
         // messageKindRegistry is NOT cleared here. The underlying messages array is

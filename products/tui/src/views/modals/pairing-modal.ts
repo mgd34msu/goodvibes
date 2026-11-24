@@ -399,12 +399,12 @@ class PairingModalSurface implements ConfigModalSurface {
       thisMachineOnly.forEach((line, i) => rows.push(infoRow(`step:${i}`, line, i === 0 ? { fg: MODAL_TONES.reasoning } : {})));
       rows.push(infoRow('intro', `Press ${actionKeyText('v')} to show the link and the sign-in code, then open the link in a browser here, or paste the code on its sign-in page.`, { fg: MODAL_TONES.dim }));
     } else if (fit === 'none') {
-      // Not even the code alone fits: said in one line, with the address and the key that shows the link.
-      rows.push(infoRow('qr-fit', `Too small for the QR code: open ${url} on the phone, or ${actionKeyText('v')} shows the link.`, { fg: MODAL_TONES.reasoning }));
+      // Not even the code alone fits: said in one line that fits an 80-column window; the address is the row under it.
+      rows.push(infoRow('qr-fit', 'Too small for the QR code: open this address on the phone.', { fg: MODAL_TONES.reasoning }));
     } else if (fit === 'full') {
       rows.push(infoRow('intro', 'Scan with the GoodVibes web app to pair this device; it opens already signed in.', { fg: MODAL_TONES.dim }));
     }
-    if (fit !== 'none') rows.push(infoRow('url', `Web app   ${url}`));
+    rows.push(infoRow('url', `Web app   ${url}`));
     if (fit === 'full') qrRows();
     rows.push(infoRow('name', `Device    ${tokenName}`));
     rows.push(infoRow('token', `Token     ${displayToken}`, { fg: MODAL_TONES.reasoning }));

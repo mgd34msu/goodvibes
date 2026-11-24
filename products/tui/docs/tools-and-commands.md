@@ -711,7 +711,7 @@ A plugin that declares a high-risk capability does not start below `trusted`: it
 
 Plugins receive a sandboxed API:
 
-- `registerCommand()`: add custom slash commands; the handler receives the arguments and a context whose `print(text)` shows text in the session that typed the command, and an error it throws (or a refusal while the plugin reloads) is shown there too
+- `registerCommand()`: add custom slash commands, each named `/plugin-<plugin name>-<command name>`; the handler receives the arguments and a context whose `print(text)` shows text in the session that typed the command, and an error it throws (or a refusal while the plugin reloads) is shown there too
 - `registerProvider()` / `registerProviderInstance()`: add OpenAI-compatible or fully custom LLM providers
 - `registerTool()`: add custom tools available to the LLM; registering a tool name the plugin already registered throws, so the plugin does not start and `/plugin enable` or `/plugin reload` says why
 - `registerGatewayMethod()`: add control-plane/API methods

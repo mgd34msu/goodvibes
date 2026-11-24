@@ -62,12 +62,14 @@ async function restartLine(
   name: string,
   restarting: Promise<{ ok: boolean; error?: string }> | undefined,
   start: PluginStart | undefined,
+  askedOn = false,
 ): Promise<string> {
   const elsewhere = 'Other GoodVibes apps apply it the next time they start the plugin.';
   if (!restarting) {
-    // A switched-on plugin that is not running (its tier kept it from starting) is started now at the new tier.
+    // A switched-on plugin that is not running (its tier kept it from starting) is started now at the new tier,
+    // and so is one the owner just asked to switch on whose tier refused it (the refusal says this starts it).
     const status = manager.list().find((plugin) => plugin.name === name);
-    if (!start || !status?.enabled || status.active || status.quarantined) return `It applies when the plugin next starts. ${elsewhere}`;
+    if (!start || !(status?.enabled || askedOn) || status?.active || status?.quarantined) return `It applies when the plugin next starts. ${elsewhere}`;
     const started = await start(name);
     return started.ok
       ? `It was started at the new tier. ${elsewhere}`
@@ -85,12 +87,24 @@ async function restartLine(
 // ---------------------------------------------------------------------------
 
 /** Record a trust tier; `trusted` uses the signed grant when the signature verifies, else records the owner's override in the note. */
+/**
+ * Plugins whose switch-on in this app was refused by their trust tier, by manager: the refusal tells the owner
+ * that setting the tier starts the plugin, so the trust action does (the enable was the owner's request).
+ */
+const enableRefusedByTier = new WeakMap<object, Set<string>>();
+function noteEnableRefusedByTier(manager: object, name: string, refused: boolean): void {
+  const names = enableRefusedByTier.get(manager) ?? new Set<string>();
+  if (refused) names.add(name); else names.delete(name);
+  enableRefusedByTier.set(manager, names);
+}
+
 export async function trustPlugin(manager: PluginTrustControls, name: string, tier: PluginTrustTierName, userNote: string | undefined, start?: PluginStart): Promise<string> {
+  const askedOn = enableRefusedByTier.get(manager)?.has(name) === true;
   let note = userNote || undefined;
   const effect = PLUGIN_TIER_EFFECT[tier];
   if (tier === 'trusted') {
     const signed = manager.trustSigned(name);
-    if (signed.ok) return `Plugin '${name}' elevated to 'trusted' via signed manifest${signed.fingerprint ? ` (fingerprint: ${signed.fingerprint})` : ''}: ${effect}\n${await restartLine(manager, name, signed.restarting, start)}`;
+    if (signed.ok) return `Plugin '${name}' elevated to 'trusted' via signed manifest${signed.fingerprint ? ` (fingerprint: ${signed.fingerprint})` : ''}: ${effect}\n${await restartLine(manager, name, signed.restarting, start, askedOn)}`;
     // The owner's answer covers a signature that does not verify; a closed manager,
     // an unknown plugin or an unsaved record is not that, and is a refusal.
     if (signed.signatureRejected !== true) throw commandRefusal(signed.error ?? `the trust tier of '${name}' was not saved`, 'Nothing changed; fix the reason and run the line again.');
@@ -98,7 +112,7 @@ export async function trustPlugin(manager: PluginTrustControls, name: string, ti
   }
   const result = manager.trust(name, tier, note);
   if (!result.ok) throw commandRefusal(result.error ?? `the trust tier of '${name}' was not saved`, 'Nothing changed; fix the reason and run the line again.');
-  return `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(manager, name, result.restarting, start)}`;
+  return `Plugin '${name}' trust tier set to '${tier}'${note && tier === 'trusted' ? ' (signature not verified; recorded in the trust note)' : ''}: ${effect}\n${await restartLine(manager, name, result.restarting, start, askedOn)}`;
 }
 
 export function savePluginPublisherKey(manager: PluginTrustControls, name: string, keyPath: string, command = 'plugin'): string {
@@ -313,7 +327,10 @@ function pluginActions<Ctx extends CommandActionContext>(manager: PluginManagerO
       sentence: '{plugin} starts now and at every start, under its trust tier, until you change it.', done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'disable', operator: TERMINAL_ONLY, example: { plugin: 'jira' },
       async run(values, ctx) {
-        const result = await controlsOf(manager, ctx).enable(values.plugin!);
+        const controls = controlsOf(manager, ctx);
+        const result = await controls.enable(values.plugin!);
+        // A refusal by the plugin's tier names /plugin trust as what starts it: remembered, so that line does.
+        noteEnableRefusedByTier(controls, values.plugin!, !result.ok && /trust tier|needs 'limited'|needs 'trusted'/.test(result.error ?? ''));
         if (!result.ok) throw commandRefusal(result.error ?? `Plugin '${values.plugin}' was not switched on.`, `/${command} list shows each plugin and its state`, 'NOT_DONE');
         return `Plugin '${values.plugin}' switched on and started.`;
       },

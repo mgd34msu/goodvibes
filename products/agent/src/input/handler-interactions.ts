@@ -134,7 +134,8 @@ export const {
   handleBlockToggleForHandler,
   handleCtrlCForHandler,
 } = createHandlerContentBindings<InputHandler>({
-  anchor: (host) => host.getScrollTop,
+  // A block that holds the transcript's focus (the pairing lines) is the one acted on; otherwise the block nearest the top line.
+  anchor: (host) => () => host.conversationManager?.focusedBlockLine() ?? host.getScrollTop(),
   emptyClipboard: () => {
     const hint = missingClipboardReaderHint();
     return hint ? '[Paste] ' + hint : '[Paste: clipboard does not contain supported text or image data]';

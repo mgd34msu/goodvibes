@@ -79,6 +79,30 @@ export function clusterGroupRouteExtension(
 }
 
 /**
+ * What a verb's result may carry to run once its reply has been handed to the
+ * connection (a restart through the service, whose stop closes this connection
+ * too). A symbol key, so it is never part of the JSON.
+ */
+export const AFTER_REPLY: unique symbol = Symbol('cluster.afterReply');
+
+/** The JSON reply, then `after`: run when the body has been read out to the connection, or the client went away. */
+function replyThen(body: unknown, after: () => void): Response {
+  const bytes = new TextEncoder().encode(JSON.stringify(body));
+  let written = false;
+  let done = false;
+  const finish = (): void => { if (!done) { done = true; after(); } };
+  const stream = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (!written) { written = true; controller.enqueue(bytes); return; }
+      controller.close();
+      finish();
+    },
+    cancel() { finish(); },
+  });
+  return new Response(stream, { headers: { 'content-type': 'application/json', 'content-length': String(bytes.length) } });
+}
+
+/**
  * A refusal is a 409, not a 500.
  *
  * "This machine is not in a group" and "that machine is not a member" are
@@ -87,6 +111,8 @@ export function clusterGroupRouteExtension(
  * without having to invent one.
  */
 function respond<T>(result: GroupOperationResult<T>): Response {
+  const after = (result as { readonly [AFTER_REPLY]?: () => void })[AFTER_REPLY];
+  if (result.ok && after) return replyThen({ ok: true, data: result.data }, after);
   if (result.ok) return Response.json({ ok: true, data: result.data });
   return Response.json({ ok: false, error: result.error, fix: result.fix,
     ...(result.failure === undefined ? {} : { failure: result.failure }),

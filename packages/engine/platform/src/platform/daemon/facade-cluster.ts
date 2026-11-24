@@ -42,6 +42,7 @@ import {
   telegramSurface,
 } from '../cluster/index.js';
 import { SocketSurfaceSupervisor } from './facade-cluster-sockets.js';
+import { AFTER_REPLY } from './http/cluster-group-routes.js';
 import type { ClusterConsumerGate, ClusterSurfaceKey } from '../cluster/index.js';
 import type { BuiltinChannelRuntime, ChannelProviderRuntimeManager } from '../channels/index.js';
 import type { ConfigManager } from '../config/manager.js';
@@ -155,7 +156,12 @@ export const RESTART_BY_HAND_TO_JOIN = 'Restart this daemon to finish joining: i
 export const RESTART_BY_HAND_TO_FINISH = 'Restart this daemon to finish it: it was started by hand, so GoodVibes cannot restart it.';
 
 type GroupVerbs = import('./http/cluster-group-routes.js').ClusterGroupVerbs;
-type RestartOutcome = { readonly outcome: 'restarting' | 'by-hand' | 'failed'; readonly detail?: string | undefined };
+type RestartOutcome = {
+  readonly outcome: 'restarting' | 'by-hand' | 'failed';
+  readonly detail?: string | undefined;
+  /** Begins the restart; run once the reply is written (the route does it, AFTER_REPLY). */
+  readonly begin?: (() => void) | undefined;
+};
 
 /**
  * The group verbs with the restart a kept action needs: a join, removal, key
@@ -163,15 +169,16 @@ type RestartOutcome = { readonly outcome: 'restarting' | 'by-hand' | 'failed'; r
  * as pending, `cluster.enabled` set) restarts the daemon through its service,
  * and the action finishes at the next start, where the owner is told once. A
  * daemon started by hand answers that it must be restarted by hand and keeps
- * the action for its next start.
+ * the action for its next start. The restart begins after the reply is
+ * written: the service's stop closes every open connection, this one too.
  */
-export function withRestartForPendingGroupAction(verbs: GroupVerbs, restart: () => Promise<RestartOutcome>): GroupVerbs {
+export function withRestartForPendingGroupAction(verbs: GroupVerbs, restart: () => RestartOutcome): GroupVerbs {
   const finish = async <T extends { readonly pending?: true }>(
     result: import('../cluster/index.js').GroupOperationResult<T>,
     join: boolean,
   ): Promise<import('../cluster/index.js').GroupOperationResult<T>> => {
     if (!result.ok || result.data.pending !== true) return result;
-    const restarted = await restart();
+    const restarted = restart();
     const message = restarted.outcome === 'restarting'
       ? join
         ? 'Sharing is on. The daemon is restarting to bring the group up; it joins at its next start and tells you once it has.'
@@ -179,7 +186,8 @@ export function withRestartForPendingGroupAction(verbs: GroupVerbs, restart: () 
       : restarted.outcome === 'by-hand'
         ? (join ? RESTART_BY_HAND_TO_JOIN : RESTART_BY_HAND_TO_FINISH)
         : `Sharing is on and this is kept, but the daemon could not restart itself (${restarted.detail ?? 'no reason given'}). Restart this daemon to finish it.`;
-    return { ok: true, data: { ...result.data, restart: restarted.outcome, warning: message } };
+    const answer: import('../cluster/index.js').GroupOperationResult<T> = { ok: true, data: { ...result.data, restart: restarted.outcome, warning: message } };
+    return restarted.begin ? Object.assign(answer, { [AFTER_REPLY]: restarted.begin }) : answer;
   };
   return {
     ...verbs,

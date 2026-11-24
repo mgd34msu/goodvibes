@@ -17,30 +17,27 @@ import { onListChanged, type ListChange } from '../list-changes.js';
 import type { SessionSpineClient } from './client.js';
 import type { SessionSpineRestConnection } from './rest-transport.js';
 
-const NOTICE_TIMEOUT_MS = 1_500;
-
-/** POST `sessions.checkpoints.changed` through the generic method-invoke route; never throws. */
+/**
+ * POST `sessions.checkpoints.changed` through the generic method-invoke route; never throws.
+ * No limit: nothing waits on it (the forwarder does not await it), so a slow daemon is never a
+ * reason to abandon it.
+ */
 export async function postSessionCheckpointNotice(
   connection: SessionSpineRestConnection,
   sessionId: string,
   change: ListChange,
 ): Promise<boolean> {
   if (connection.unavailable !== undefined || !connection.token) return false;
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), NOTICE_TIMEOUT_MS);
   try {
     const response = await fetch(`${connection.baseUrl}/api/control-plane/methods/sessions.checkpoints.changed/invoke`, {
       method: 'POST',
       headers: { authorization: `Bearer ${connection.token}`, 'content-type': 'application/json' },
       body: JSON.stringify({ body: { sessionId, change: change.change, ...(change.id ? { checkpointId: change.id } : {}) } }),
-      signal: controller.signal,
     });
     await response.arrayBuffer().catch(() => undefined);
     return response.ok;
   } catch {
     return false;
-  } finally {
-    clearTimeout(timer);
   }
 }
 

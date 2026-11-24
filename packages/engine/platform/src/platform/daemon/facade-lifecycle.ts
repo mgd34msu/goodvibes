@@ -965,20 +965,36 @@ export class DaemonLifecycleRuntime {
 
   /**
    * Restart this daemon through its service manager, the path a self-update's
-   * restart takes (the manager's stop is the ordinary graceful stop, so a reply
-   * already being written is finished). `by-hand` when this daemon was started
-   * by hand (no service runs it), with nothing done; `failed` with the
-   * manager's words when it refused.
+   * restart takes. Decided now, done later: `by-hand` when this daemon was
+   * started by hand (no service runs it), `failed` when it cannot restart
+   * itself (already stopping, or no systemd service manager on Linux), with
+   * nothing done; otherwise `restarting` and `begin`, which the caller runs
+   * once its reply is written: the manager's stop closes the listener with
+   * every open connection, so a restart begun before the reply cut it off. A
+   * manager that refuses then is told to the owner with its own words.
    */
-  async restartThroughService(): Promise<{ readonly outcome: 'restarting' | 'by-hand' | 'failed'; readonly detail?: string | undefined }> {
+  restartThroughService(): { readonly outcome: 'restarting' | 'by-hand' | 'failed'; readonly detail?: string | undefined; readonly begin?: (() => void) | undefined } {
     if (this.stopping) return { outcome: 'failed', detail: 'the daemon is already stopping' };
     const actions = this.buildServiceActions(undefined, this.assertArtifactCurrent);
     if (!actions.isSupervised()) return { outcome: 'by-hand' };
-    const requested = await actions.restartService();
-    const status = requested === undefined ? 'accepted' : requested.status;
-    return status === 'accepted'
-      ? { outcome: 'restarting' }
-      : { outcome: 'failed', detail: requested?.detail ?? `the service manager answered ${status}` };
+    // The refusals restartService would give, given here so the reply says them (restartService's own words).
+    const platform = this.options.servicePlatform ?? process.platform;
+    if (platform === 'darwin') return { outcome: 'failed', detail: 'launchd restart-by-exit has no observed manager acknowledgement; loaded KeepAlive policy is unverified' };
+    if (platform !== 'linux') return { outcome: 'failed', detail: 'no supported service restart handover' };
+    if (detectPlatform(String(this.options.configManager.get('service.platform')), platform) !== 'systemd') {
+      return { outcome: 'failed', detail: 'service restart needs the systemd service manager (service.platform)' };
+    }
+    const begin = (): void => {
+      void Promise.resolve(actions.restartService()).then((requested) => {
+        const status = requested === undefined ? 'accepted' : requested.status;
+        if (status !== 'accepted') {
+          this.alertOwner(`The daemon could not restart itself to finish the group action (${requested?.detail ?? `the service manager answered ${status}`}). Restart this daemon to finish it.`);
+        }
+      }).catch((error: unknown) => {
+        this.alertOwner(`The daemon could not restart itself to finish the group action (${summarizeError(error)}). Restart this daemon to finish it.`);
+      });
+    };
+    return { outcome: 'restarting', begin };
   }
 
   /** Fence handovers before the facade awaits any shutdown hooks. Never self-drains. */

@@ -2113,7 +2113,7 @@ The `api` object has exactly these members:
 
 | Member | What it does | Needs |
 | --- | --- | --- |
-| `registerCommand(name, description, handler)` | Adds the slash command `/<name>`. `handler(args, context)` receives the typed words and `context.print(text)`, which shows text in the session that typed the command; an error it throws is shown there. | Any tier. |
+| `registerCommand(name, description, handler)` | Adds the slash command `/plugin-<plugin name>-<name>` (named after the plugin, so two plugins cannot collide). `handler(args, context)` receives the typed words and `context.print(text)`, which shows text in the session that typed the command; an error it throws is shown there. | Any tier. |
 | `registerTool(name, schema, handler)` | Adds a tool the model can call. `schema` is a JSON Schema object for the tool's arguments; `handler(args)` returns `{ success, output?, error? }`. Registering a name twice fails the plugin's start. | `register.tool`, tier `limited`. |
 | `registerProvider(name, { baseURL, apiKey?, models, displayName?, embeddingModel? })` | Adds an OpenAI-compatible provider. Returns a promise. | `register.provider`, tier `limited`. |
 | `registerProviderInstance({ provider, models?, suppressCatalogModelRegistryKeys?, replace? })` | Adds a fully custom provider implementation. | `register.provider`, tier `limited`. |
@@ -2148,7 +2148,7 @@ export function init(api) {
 2. `goodvibes plugin validate .goodvibes/plugins/word-count` must print `PASS`.
 3. If it registers tools, providers or event hooks: `goodvibes plugin trust word-count limited`.
 4. In the app: `/plugin enable word-count`. It prints `Plugin 'word-count' enabled and activated.`, or the reason it did not start (an undeclared capability, a tier too low, an error thrown by `init`).
-5. Confirm: `/plugin list` shows `[active]` before the plugin's name (`[loading]` while it starts, `[disabled]` when it is not enabled); `/plugin inspect word-count` shows `state: active`, its trust tier and the capabilities its tier withheld; `/wc a b c` prints `3 words`; `/tools` lists `word_count`.
+5. Confirm: `/plugin list` shows `[active]` before the plugin's name (`[loading]` while it starts, `[disabled]` when it is not enabled); `/plugin inspect word-count` shows `state: active`, its trust tier and the capabilities its tier withheld; `/plugin-word-count-wc a b c` prints `3 words`; `/tools` lists `word_count`.
 6. After editing the plugin, `/plugin reload` loads it again and names each plugin that did not start, with the reason.
 
 ### Trust tiers

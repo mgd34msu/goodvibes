@@ -338,6 +338,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       sessionViews.scroll(-delta);
       return;
     } // a view scrolls its own lines (up is positive there)
+    conversation.releaseBlockFocus(); // the person moved the transcript: block actions follow the top line again
     transcript.scrollBy(delta, () => Math.max(0, conversation.history.getLineCount() - getViewportHeight()));
   };
 
@@ -757,6 +758,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     conversation,
     getViewportHeight,
     setScrollTop: (line) => {
+      conversation.releaseBlockFocus();
       transcript.jumpTo(line);
     },
     render: () => render(),

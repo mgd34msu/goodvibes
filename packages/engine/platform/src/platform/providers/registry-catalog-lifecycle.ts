@@ -4,6 +4,7 @@ import { fetchCatalogFeedIfChanged, getProviderAccessPath, transformModelsDevRes
 import { summarizeError } from '../utils/error-display.js';
 import { ProviderAccessReadings } from '../routing/catalog-access.js';
 import {
+  isCatalogCacheStale,
   loadCatalogCache,
   notifyCatalogChanges,
   saveCatalogCache,
@@ -35,18 +36,21 @@ export interface CatalogLifecycleContext {
 /**
  * Load the catalog from disk cache on startup, so the program works from it at
  * once, and read it again from its source in the background at every start
- * (an unchanged catalog answers 304 and changes nothing). The caller is never
- * held up; a failed read keeps the cached catalog and is logged.
+ * (an unchanged catalog answers 304 and changes nothing), or, when
+ * `refreshAtStart` is false, only when the cache is absent or stale. The
+ * caller is never held up; a failed read keeps the cached catalog and is logged.
  *
  * Extracted from ProviderRegistry.initCatalog() to isolate catalog
  * initialization logic from provider management concerns.
  */
-export function initProviderCatalog(ctx: CatalogLifecycleContext): void {
+export function initProviderCatalog(ctx: CatalogLifecycleContext, refreshAtStart = true): void {
   const cached = loadCatalogCache(ctx.getCatalogCachePaths().cachePath);
   if (cached) {
     ctx.updateCatalogState(cached.models, cached.fetchedAt);
     ctx.afterCatalogApplied();
   }
+  // With provider.refreshListsAtStart off, a start reads it only when the saved catalog is missing or a day old.
+  if (!refreshAtStart && cached && !isCatalogCacheStale(cached)) return;
   void ctx.refreshCatalog().catch((err) => {
     logger.warn('[model-catalog] Background refresh failed; the saved catalog stays in use', { error: summarizeError(err) });
   });

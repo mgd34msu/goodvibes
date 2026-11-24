@@ -33423,50 +33423,6 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "inputs": []
         },
         {
-          "id": "skip",
-          "label": "Skip a topic for now",
-          "word": "skip",
-          "line": "/setup skip <topic>",
-          "sentence": "{topic} is left off the list of what is left to set up; it stays in /setup.",
-          "done": "",
-          "touches": "this-machine",
-          "lasts": "not-a-change",
-          "risk": "none",
-          "operator": {
-            "terminalOnly": "Done from a terminal app."
-          },
-          "inputs": [
-            {
-              "id": "topic",
-              "label": "Topic",
-              "help": "The topic to leave off the list of what is left",
-              "kind": "choice",
-              "choices": [
-                {
-                  "value": "model",
-                  "label": "Choose a model"
-                },
-                {
-                  "value": "how-it-works",
-                  "label": "How GoodVibes works with you"
-                },
-                {
-                  "value": "safety",
-                  "label": "Safety and sandboxing"
-                },
-                {
-                  "value": "history",
-                  "label": "History and privacy"
-                }
-              ],
-              "required": true,
-              "typed": {
-                "position": 1
-              }
-            }
-          ]
-        },
-        {
           "id": "model",
           "label": "Choose a model",
           "word": "model",

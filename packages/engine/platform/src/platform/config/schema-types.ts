@@ -93,6 +93,7 @@ export interface GoodVibesConfig {
     visionFallbackModel: string; // default: ''. Model that reads an attached image when the session's model cannot
     fallbackModels: string[];   // default: []. The person's fallback order: models a failed turn moves to, in order
     localContextIngestion: boolean; // default: true. Ingest max_context_length from local/custom provider /v1/models
+    refreshListsAtStart: boolean; // default: true. Re-read every provider's model list and the model catalog at each start
   };
   behavior: {
     autoApprove: boolean;       // default: false

@@ -206,18 +206,6 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
         };
       },
     }));
-    if (options.skipped) {
-      const skippable = RECOMMENDED_SETUP_TOPICS.map((id) => ({ value: id, label: SETUP_TOPICS[id].label }));
-      actions.push(doAction<Ctx>({
-        id: 'skip', label: 'Skip a topic for now', word: 'skip',
-        inputs: [{ id: 'topic', label: 'Topic', help: 'The topic to leave off the list of what is left', kind: 'choice', choices: skippable, required: true, typed: { position: 1 } }],
-        sentence: '{topic} is left off the list of what is left to set up; it stays in /setup.', example: { topic: 'safety' },
-        async run(values, ctx) {
-          options.skipped!.skip(ctx, values.topic as SetupTopicId);
-          return `${SETUP_TOPICS[values.topic as SetupTopicId]?.label ?? values.topic} is skipped for now; /setup ${values.topic} still opens it.`;
-        },
-      }));
-    }
   }
   for (const id of Object.keys(SETUP_TOPICS) as SetupTopicId[]) {
     const words = SETUP_TOPICS[id];
@@ -253,7 +241,6 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
     { label: 'Features and switches…', actions: FEATURE_GROUP },
     'history', 'import-settings',
     'pair', 'unpair',
-    ...(options.settings && options.skipped ? ['skip'] : []),
     'first-run',
   ];
   return {

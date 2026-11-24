@@ -28,6 +28,7 @@ export const coreConfigDefaults = {
     visionFallbackModel: '',
     fallbackModels: [] as string[],
     localContextIngestion: true,
+    refreshListsAtStart: true,
   },
   behavior: {
     autoApprove: false,
@@ -316,6 +317,13 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     type: 'string',
     description:
       'Model (provider-qualified, e.g. openai:gpt-4o, or a unique bare id) that reads an image you attach when the current model cannot accept images. Empty (default): such an image is refused and sent nowhere, and the refusal names the models that can read it. Setting this sends those images to the named model\'s provider.',
+  },
+  {
+    key: 'provider.refreshListsAtStart',
+    label: 'Read model lists again at every start',
+    appliesWhen: 'restart',
+    type: 'boolean',
+    description: 'Read every connected provider\'s model list and the model catalog again each time GoodVibes starts. Turn off on a machine with no network.',
   },
   {
     key: 'behavior.autoApprove',

@@ -1658,7 +1658,12 @@ export class ProviderRegistry {
 
   initCatalog(options: ProviderCatalogOptions = {}): void {
     this.catalogManaged = true;
-    initProviderCatalog(this._catalogLifecycleCtx(options.contextWindowEnrichment ?? 'background'));
+    initProviderCatalog(this._catalogLifecycleCtx(options.contextWindowEnrichment ?? 'background'), this.refreshListsAtStart());
+  }
+
+  /** provider.refreshListsAtStart: whether a start reads every list and the catalog again, whatever their age. */
+  private refreshListsAtStart(): boolean {
+    try { return this.configManager.get('provider.refreshListsAtStart') !== false; } catch { return true; }
   }
 
   /**
@@ -1667,15 +1672,17 @@ export class ProviderRegistry {
    * stored list, while the program already works from that stored list; a list
    * that changed is announced (PROVIDERS_CHANGED) when it arrives, and a
    * provider that cannot be reached keeps its stored list with the reason on its
-   * row (modelListReading). Separate from initCatalog() so tests calling that
+   * row (modelListReading). With provider.refreshListsAtStart off, only lists
+   * past their stored age are read. Separate from initCatalog() so tests calling that
    * without mocking a provider API aren't surprised by a live network call.
    */
   initProviderModelDiscovery(): void {
     const host = this.hostModelListings;
+    const force = this.refreshListsAtStart();
     // A borrower waits for the host's own startup sweep, already running, rather than repeating it.
     this.startupDiscovery.start(host
       ? async () => { await host.settled(); return this.refreshLiveModelDiscovery(); }
-      : () => this.refreshLiveModelDiscovery(undefined, { force: true }));
+      : () => this.refreshLiveModelDiscovery(undefined, force ? { force: true } : undefined));
   }
 
   /** When the startup sweep settled (StartupModelDiscovery); at once when none was started. */

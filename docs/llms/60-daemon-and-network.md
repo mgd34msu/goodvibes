@@ -1059,7 +1059,7 @@ When a pairing code is asked for and the daemon is reachable only from this comp
 
 ### Model lists at every start
 
-At every start of the daemon, the terminal app and the Agent, each provider's model list and the shared model catalog are read again in the background, whatever the age of the stored list. Start-up does not wait. A list that changed is announced (`PROVIDERS_CHANGED`) when it arrives, and the check for a model that stopped being free runs on the fresh catalog. A provider that cannot be reached keeps the list it had, and its row in the model lists says why (`error`, `listedAt`).
+At every start of the daemon, the terminal app and the Agent, each provider's model list and the shared model catalog are read again in the background, whatever the age of the stored list. Start-up does not wait. A list that changed is announced (`PROVIDERS_CHANGED`) when it arrives, and the check for a model that stopped being free runs on the fresh catalog. A provider that cannot be reached keeps the list it had, and its row in the model lists says why (`error`, `listedAt`). On a machine with no network, turn `provider.refreshListsAtStart` off ("Read model lists again at every start", default on; read at start): a start then reads a list or the catalog only when its saved copy is missing or a day old. Refreshing a list on request is unchanged.
 
 ### The relay
 

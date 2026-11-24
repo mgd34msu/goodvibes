@@ -309,6 +309,9 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
     },
   };
   e2eHome.setAgentSetting('provider.model', 'e2e-stub:stub-model');
+  // A test home has no network: start-up keeps the saved model lists and catalog seeded below.
+  e2eHome.setAgentSetting('provider.refreshListsAtStart', false);
+  mergeJson(join(daemonHome, 'settings.json'), 'provider.refreshListsAtStart', false);
   // The self-update switches are daemon settings, read by every program from the daemon's file.
   mergeJson(join(daemonHome, 'settings.json'), 'update.auto', false);
   mergeJson(join(daemonHome, 'settings.json'), 'update.autoUpdateAtLaunch', false);

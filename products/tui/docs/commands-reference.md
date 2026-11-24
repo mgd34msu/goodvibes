@@ -566,7 +566,7 @@ GoodVibes ships **96** built-in slash commands across **10** categories. Every c
 | `/helpers` | None | None | The local programming interfaces remote clients and web front ends use |
 | `/managed` | None | `review \| staged \| history \| inspect <bundle file> \| export <profile> <bundle file> \| stage <bundle file> \| apply <bundle file> [--key <only these settings>]... \| apply-staged [--key <only these settings>]... \| rollback <apply> \| lock <setting> <who manages it> <why...> \| unlock <setting>` | Apply settings bundles your organisation manages, lock settings, and roll an apply back |
 | `/release` | None | `review \| checklist \| save <file> [--replace] \| read <file>` | See whether this project is ready to release, and keep the evidence as a file |
-| `/setup` | None | `checklist \| skip <topic> \| model \| sign-in \| add-provider <name> <address> \| store-key \| local-only \| browser \| other-devices \| connect-daemon \| webhooks \| chat-apps \| cloudflare \| who-signs-in \| how-it-works \| safety \| memory \| telemetry \| automation \| devices-voice \| provider-behaviour \| advanced \| history \| import-settings \| first-run \| pair [--name <name>] [--apply] \| unpair` | Set GoodVibes up, one topic at a time |
+| `/setup` | None | `checklist \| model \| sign-in \| add-provider <name> <address> \| store-key \| local-only \| browser \| other-devices \| connect-daemon \| webhooks \| chat-apps \| cloudflare \| who-signs-in \| how-it-works \| safety \| memory \| telemetry \| automation \| devices-voice \| provider-behaviour \| advanced \| history \| import-settings \| first-run \| pair [--name <name>] [--apply] \| unpair` | Set GoodVibes up, one topic at a time |
 | `/startup` | None | `review \| doctor \| services \| hooks \| remote \| sandbox \| support-bundle <folder> [--overwrite] \| support-bundle-inspect <folder> \| export <file> [--overwrite] \| transfer-export <file> [--overwrite] \| transfer-inspect <file> \| transfer-import <file> \| link <view> [<item>] \| open-link <link>` | Check this setup, or save and bring in a setup |
 
 ### /deeplink: Links to views
@@ -634,7 +634,6 @@ GoodVibes ships **96** built-in slash commands across **10** categories. Every c
 | Action | Line | What happens | Risk |
 | --- | --- | --- | --- |
 | See what is set up | `/setup checklist` | Shows which of the things most people set once are done, and the line that sets each one that is not. | None |
-| Skip a topic for now | `/setup skip <topic>` | <topic> is left off the list of what is left to set up; it stays in /setup. | None |
 | Choose a model | `/setup model` | Opens the form for the model new turns use and how hard it thinks. | None |
 | Sign in or out of a provider | `/setup sign-in` | Opens the form for signing in to a provider with your browser, finishing a sign-in, or signing out. | None |
 | Add a provider of your own | `/setup add-provider <name> <address>` | The provider <name> at <address> is added until you change it. | None |

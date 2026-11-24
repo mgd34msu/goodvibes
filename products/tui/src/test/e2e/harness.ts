@@ -305,6 +305,9 @@ export async function makeHome(model: StubModel): Promise<E2EHome> {
     setTuiSetting: (key, value) => mergeJson(settingsPath, key, value),
   };
   e2eHome.setTuiSetting('provider.model', 'e2e-stub:stub-model');
+  // A test home has no network: start-up keeps the saved model lists and catalog seeded below.
+  e2eHome.setTuiSetting('provider.refreshListsAtStart', false);
+  mergeJson(join(daemonDir, 'settings.json'), 'provider.refreshListsAtStart', false);
   // The self-update switch is a daemon setting, read by every program from the daemon's file.
   mergeJson(join(daemonDir, 'settings.json'), 'update.autoUpdateAtLaunch', false);
   e2eHome.setDaemonPort(daemonPort);

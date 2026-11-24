@@ -56,7 +56,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       settingAction({ id: 'setup-connected-host-url', label: 'Address of the daemon to connect to', detail: 'The GoodVibes daemon on another computer this Agent connects to, as https://host:port or http://host:port. Empty means the daemon on this computer.', key: 'daemon.connectedHost.url' }),
       settingAction({ id: 'setup-connected-host-enabled', label: 'Let this Agent reach its connected daemon', detail: 'Whether this Agent may dial the daemon it is connected to at all.', key: 'daemon.connectedHost.enabled' }),
       actRow('setup-pair-host', 'setup pair'),
-      { id: 'import-goodvibes-tui-settings', label: 'Import GoodVibes settings', detail: 'Brings over the display, provider, sign-in, behaviour, permission, speech, channel, tool and schedule settings you made in the terminal app; shows what would change and asks first.', kind: 'settings-import', safety: 'safe' },
+      { id: 'import-goodvibes-tui-settings', label: 'Import GoodVibes settings', detail: 'Brings over the display, provider, sign-in, behaviour, permission, speech, channel, tool and schedule settings you made in the terminal app at once, and says what changed and how to put it back.', kind: 'settings-import', safety: 'safe' },
     ],
   },
   {
@@ -559,7 +559,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('schedule-promote-routine', 'routines promote'),
       actRow('schedule-receipt', 'routines receipt'),
       { id: 'schedule-delivery-targets', label: 'Delivery targets', detail: 'Where reminders and results can be sent: your chat apps and notification addresses.', targetCategoryId: 'onboarding-channels', kind: 'workspace', safety: 'safe' },
-      { id: 'schedule-policy', label: 'Where schedules are kept', detail: 'Every schedule is kept on the connected host, so it runs with or without this Agent open. /schedule makes, runs, pauses, resumes, changes and removes them; removing one asks first.', kind: 'guidance', safety: 'safe' },
+      { id: 'schedule-policy', label: 'Where schedules are kept', detail: 'Every schedule is kept on the connected host, so it runs with or without this Agent open. /schedule makes, runs, pauses, resumes, changes and removes them; a removed one is gone for good (/schedule add makes it again).', kind: 'guidance', safety: 'safe' },
       actRow('health-repair', 'health check'),
     ],
   },

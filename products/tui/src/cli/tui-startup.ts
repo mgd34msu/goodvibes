@@ -14,7 +14,7 @@ import type { GoodVibesCliParseResult } from '@goodvibes/engine/terminal-shell';
 import { openDeepLink, parseDeepLink } from '../input/commands/deep-link.ts';
 import { existsSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
-import { getMcpConfigLocations } from '@goodvibes/engine/platform/platform/mcp';
+import { loadMcpEffectiveConfig, ownerAddedServers } from '@goodvibes/engine/platform/platform/mcp';
 
 export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[0] & {
   readonly workingDirectory: string;
@@ -46,7 +46,9 @@ export function buildFirstOpenItems(folder: FolderTrustFacts): { readonly title:
   // What trusting lets run, named from what the folder has; never a sentence about things it does not have.
   const runs = [
     ...(folder.hooksFile !== null ? [`the hooks in ${folder.hooksFile} run`] : []),
-    ...(folder.mcpFiles.length > 0 ? [`the tool servers (MCP) in ${folder.mcpFiles.join(', ')} start`] : []),
+    ...(folder.mcpFiles.length > 0
+      ? [`the tool ${folder.mcpServers.length === 1 ? 'server' : 'servers'} (MCP) ${folder.mcpServers.length > 0 ? `${folder.mcpServers.join(', ')} ` : ''}in ${folder.mcpFiles.join(', ')} start`]
+      : []),
   ];
   const lets = runs.length > 0
     ? `Trusting it lets ${runs.join(' and ')}, and lets GoodVibes change files and run commands here.`
@@ -76,8 +78,10 @@ export interface FolderTrustFacts {
   readonly shownPath: string;
   /** The folder's own hooks file as shown ("hooks.json"), or null when it has none. */
   readonly hooksFile: string | null;
-  /** Its own MCP server files as shown (".mcp.json"); empty when it has none. */
+  /** Its own MCP server files as shown (".mcp.json") that name a server you did not add yourself; empty when it has none. */
   readonly mcpFiles: readonly string[];
+  /** Those servers, by name: the ones the folder brought (a cloned file, a write from outside), never one you added with /mcp add. */
+  readonly mcpServers: readonly string[];
   /** True when it has a hooks file or MCP server files of its own. */
   readonly hasItsOwn: boolean;
 }
@@ -89,11 +93,11 @@ export function readFolderTrustFacts(workingDirectory: string, homeDirectory: st
   const shownPath = homeDirectory && (real === homeDirectory || real.startsWith(`${homeDirectory}${sep}`)) ? `~${real.slice(homeDirectory.length)}` : real;
   const hooks = isAbsolute(hooksFile) ? hooksFile : join(workingDirectory, hooksFile || 'hooks.json');
   const hooksShown = existsSync(hooks) ? relative(workingDirectory, hooks) || hooks : null;
-  const mcpFiles = getMcpConfigLocations({ workingDirectory, homeDirectory })
-    .filter((location) => location.kind === 'project-mcp' || location.kind === 'project-goodvibes')
-    .filter((location) => existsSync(location.path))
-    .map((location) => relative(workingDirectory, location.path));
-  return { shownPath, hooksFile: hooksShown, mcpFiles, hasItsOwn: hooksShown !== null || mcpFiles.length > 0 };
+  // The servers the folder's own MCP files name that you did not add yourself (with /mcp add or a form): those are its own.
+  const brought = loadMcpEffectiveConfig({ workingDirectory, homeDirectory }, { holdProjectFile: () => true, ownerAdded: ownerAddedServers(homeDirectory) }).held ?? [];
+  const mcpFiles = [...new Set(brought.map((entry) => relative(workingDirectory, entry.source.path)))];
+  const mcpServers = [...new Set(brought.map((entry) => entry.server.name))];
+  return { shownPath, hooksFile: hooksShown, mcpFiles, mcpServers, hasItsOwn: hooksShown !== null || mcpFiles.length > 0 };
 }
 
 /**

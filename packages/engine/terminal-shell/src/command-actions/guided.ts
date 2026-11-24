@@ -1,11 +1,13 @@
 /**
  * The guided path in the terminal: what do you want to do, fill in the
- * blanks, one sentence says what is about to happen, then it is done and the
- * line that does the same is shown. Drawn with what both apps already have:
- * the picker (`openSelection`) for the action list, every choice and typed
- * text, the hidden line (`beginConcealedInput`) for secrets, and the confirm
- * dialog for the sentence. Escape at any step goes back one step; Escape on
- * the action list leaves.
+ * blanks, then it is done (the blanks filled in are the request: nothing is
+ * asked after them) and the line that does the same is shown, with what its
+ * risk did. Only a row with no blank, chosen from the list, says what it does
+ * and asks first. Drawn with what both apps already have: the picker
+ * (`openSelection`) for the action list, every choice and typed text, the
+ * hidden line (`beginConcealedInput`) for secrets, and the confirm dialog for
+ * that one question. Escape at any step goes back one step; Escape on the
+ * action list leaves.
  */
 import type { SelectionItem } from '../selection-modal.js';
 import { readRefusal, formatRefusal } from '@goodvibes/engine/errors';
@@ -17,6 +19,7 @@ import { isCommandReport, renderCommandReport } from './report.js';
 import {
   actionButton,
   actionDoneLine,
+  actionRiskDoneLine,
   actionSentence,
   effectiveRisk,
   renderTypedLine,
@@ -61,8 +64,9 @@ export async function runGuided(
   const single = start.action ? undefined : singleAction(command);
   if (single) {
     start = { ...start, action: single };
+    // Its name typed is the whole line: it runs at once.
     if (single.inputs.length === 0) {
-      if (await askSentence(single, {}, ctx)) await runAndSay(command, single, {}, ctx);
+      await runAndSay(command, single, {}, ctx);
       return;
     }
   }
@@ -85,28 +89,12 @@ export async function runGuided(
       continue;
     }
     values = asked;
-    // An action that asks its own question, with what it read, is asked once: by itself.
-    if (action.lasts !== 'not-a-change' && !action.asksItself) {
-      const risk = effectiveRisk(action, values);
-      const sentence = actionSentence(action, values);
-      if (ctx.confirm) {
-        const go = await ctx.confirm({
-          title: action.label,
-          body: risk === 'none' ? sentence : `${sentence}\n\nThis ${riskWords(risk)}.`,
-          confirmLabel: actionButton(action),
-          cancelLabel: 'Back',
-          tone: risk === 'none' ? 'primary' : 'danger',
-        });
-        if (!go) {
-          // Back to the blanks: the last one asked is asked again.
-          const last = [...action.inputs].reverse().find((input) => !typedFirst.has(input.id));
-          if (!last) { action = undefined; continue; }
-          delete values[last.id];
-          continue;
-        }
-      } else {
-        ctx.print(sentence);
-      }
+    // Filled in and submitted, it is the request: it runs at once. Only a row
+    // chosen from the list with no blank to fill (nothing typed, nothing
+    // submitted) says what it does and asks first; Back is the list again.
+    if (action.inputs.length === 0 && !(await askSentence(action, values, ctx))) {
+      action = undefined;
+      continue;
     }
     await runAndSay(command, action, values, ctx);
     return;
@@ -165,10 +153,12 @@ export async function runAndSay(command: CommandDescription<never>, action: Acti
     const run = action.run as unknown as (values: ActionValues, ctx: CommandActionContext) => Promise<string | CommandReport | void>;
     const detail = await run(values, ctx);
     const doneLine = actionDoneLine(action, values);
+    const riskDone = actionRiskDoneLine(action, values);
     const undo = action.undoneBy ? command.actions.find((candidate) => candidate.id === action.undoneBy) : undefined;
     const lines = [
       ...(doneLine ? [doneLine] : []),
       ...(isCommandReport(detail) ? [renderCommandReport(detail)] : typeof detail === 'string' && detail ? [detail] : []),
+      ...(riskDone ? [riskDone] : []),
       ...(action.lasts === 'not-a-change' && action.inputs.length === 0 ? [] : [`${undo ? `Undo: ${undo.label}    ` : ''}The command for this is: ${renderTypedLine(command, action.id, withoutSecrets(action, values))}`]),
     ];
     if (lines.length > 0) ctx.print(lines.join('\n'));
@@ -179,7 +169,11 @@ export async function runAndSay(command: CommandDescription<never>, action: Acti
   ctx.renderRequest?.();
 }
 
-/** The guided path in the panel: first screen and forms in one modal, then the sentence, then the run. */
+/**
+ * The guided path in the panel: first screen and forms in one modal, then the
+ * run. A submitted form is the request and runs at once; a row with no blank,
+ * chosen from the list, says what it does and asks first (Back: the list again).
+ */
 async function runInPanel(
   command: CommandDescription<never>,
   start: { readonly action?: ActionDescription<never> | undefined; readonly values?: ActionValues | undefined },
@@ -189,9 +183,8 @@ async function runInPanel(
   for (;;) {
     const result = await openGuidedPanel(command, ctx, next);
     if (!result || result.kind === 'cancel') return;
-    if (!(await askSentence(result.action, result.values, ctx))) {
-      // Back: the form again, on its last step, with what was filled in; an action with no blanks has no form, so the list again.
-      next = result.action.inputs.length === 0 ? {} : { action: result.action, values: result.values, step: Number.MAX_SAFE_INTEGER };
+    if (result.action.inputs.length === 0 && !(await askSentence(result.action, result.values, ctx))) {
+      next = {};
       continue;
     }
     await runAndSay(command, result.action, result.values, ctx);

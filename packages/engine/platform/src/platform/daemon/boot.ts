@@ -16,6 +16,7 @@
 
 import { ConfigManager } from '../config/manager.js';
 import { daemonConfigPathForHome } from '../config/daemon-config-tier.js';
+import { resolveSurfaceDirectory } from '../runtime/surface-root.js';
 import type { ApprovalBroker } from '../control-plane/index.js';
 import { DaemonServer } from './facade.js';
 
@@ -32,6 +33,12 @@ export interface BootDaemonOptions {
   readonly token?: string | undefined;
   /** Daemon home dir (identity state). Defaults to the runtime resolution. */
   readonly daemonHomeDir?: string | undefined;
+  /**
+   * The product whose settings files and custom providers this daemon reads
+   * (`tui`: the terminal app's, for `goodvibes acp`). Its own state stays
+   * under `goodvibes`. Omitted: `goodvibes` for both.
+   */
+  readonly settingsSurfaceRoot?: string | undefined;
   /**
    * Optional preconfigured ConfigManager; otherwise one is built from the dirs.
    *
@@ -92,6 +99,10 @@ export async function bootDaemon(options: BootDaemonOptions): Promise<BootedDaem
     workingDir: options.workingDir,
     homeDir: options.homeDirectory,
     surfaceRoot: 'goodvibes',
+    ...(options.settingsSurfaceRoot !== undefined ? {
+      settingsSurfaceRoot: options.settingsSurfaceRoot,
+      providersDir: resolveSurfaceDirectory(options.homeDirectory, options.settingsSurfaceRoot, 'providers'),
+    } : {}),
     // The daemon home passed in decides where its settings file is; without
     // one the manager resolves it as the daemon does (GOODVIBES_DAEMON_HOME).
     ...(options.daemonHomeDir !== undefined ? { daemonTierPath: daemonConfigPathForHome(options.daemonHomeDir) } : {}),

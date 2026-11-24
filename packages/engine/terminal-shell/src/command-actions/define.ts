@@ -3,8 +3,9 @@
  * register. Every field a command used to write by hand is generated here, and
  * so is the handler:
  *
- * - a complete line runs the action (the registry has already asked, when the
- *   action carries a risk);
+ * - a complete line runs the action: the owner's at once, whatever its risk,
+ *   saying what the risk did with the result; a model's after the registry has
+ *   put it to the owner, when the action carries a risk;
  * - a line with a blank missing opens the guided path at that blank where a
  *   dialog can be shown, and is refused naming the blank and its current
  *   choices where none can (a model, a script);
@@ -27,7 +28,7 @@ import {
 import { runGuided } from './guided.js';
 import { isCommandReport, renderCommandReport } from './report.js';
 import { listByName } from './lists.js';
-import { actionDoneLine, fixedChoices, linePattern, parseTypedLine } from './typed-line.js';
+import { actionDoneLine, actionRiskDoneLine, fixedChoices, linePattern, parseTypedLine } from './typed-line.js';
 import type { ActionDescription, ActionValues, CommandActionContext, CommandDescription, InputDescription } from './types.js';
 
 /** What `defineCommand` returns: an ordinary registered command that carries its description. */
@@ -79,7 +80,10 @@ async function runComplete<Ctx extends CommandActionContext>(description: Comman
   if (owner && ctx.invokedByModel === true) throw ownerOnlyActionRefusal(description.name, action as ActionDescription<never>, owner.reason, owner.instead);
   const detail = await action.run(values, ctx);
   const done = actionDoneLine(action as ActionDescription<never>, values);
-  const lines = [...(done ? [done] : []), ...(isCommandReport(detail) ? [renderCommandReport(detail)] : typeof detail === 'string' && detail ? [detail] : [])];
+  // A line that ran unasked says what its risk did, with the result.
+  const riskDone = actionRiskDoneLine(action as ActionDescription<never>, values);
+  const lines = [...(done ? [done] : []), ...(isCommandReport(detail) ? [renderCommandReport(detail)] : typeof detail === 'string' && detail ? [detail] : []),
+    ...(riskDone ? [riskDone] : [])];
   if (lines.length > 0) ctx.print(lines.join('\n'));
 }
 

@@ -91,6 +91,12 @@ export interface McpEffectiveConfig {
 export interface McpEffectiveConfigOptions {
   /** True when this project file waits on the owner's trust of the workspace. */
   readonly holdProjectFile?: ((path: string) => boolean) | undefined;
+  /**
+   * True for a server of a project file that the owner added there himself, as
+   * it now stands (mcp/owner-added.ts): it is not held, and a file holding only
+   * such servers raises no trust question.
+   */
+  readonly ownerAdded?: ((path: string, server: McpServerConfig) => boolean) | undefined;
 }
 
 
@@ -480,12 +486,17 @@ export function loadMcpEffectiveConfig(roots: McpConfigRoots, options: McpEffect
       if (!existsSync(location.path)) continue;
       const config = location.writable ? readMcpConfigAtPath(location.path) : readExternalMcpConfig(location.path);
       const projectScope = location.kind === 'project-mcp' || location.kind === 'project-goodvibes';
-      // A file the repository could have brought starts nothing, and replaces none of the owner's servers, until he trusts the workspace.
-      if (projectScope && options.holdProjectFile?.(location.path) === true) {
-        for (const server of config.servers) held.push({ server, source: location });
-        continue;
+      // A file the repository could have brought starts nothing, and replaces none of the owner's servers, until he trusts the
+      // workspace; the servers he added to it himself are his, and start. A file of only his asks nothing.
+      let servers = config.servers;
+      if (projectScope && options.holdProjectFile !== undefined) {
+        const brought = servers.filter((server) => options.ownerAdded?.(location.path, server) !== true);
+        if (brought.length > 0 && options.holdProjectFile(location.path)) {
+          for (const server of brought) held.push({ server, source: location });
+          servers = servers.filter((server) => !brought.includes(server));
+        }
       }
-      for (const parsed of config.servers) {
+      for (const parsed of servers) {
         const nameProblem = serverNameProblem(parsed.name);
         if (nameProblem) {
           logger.warn('[MCP] Skipped a server entry that cannot be addressed; rename it in the file', { path: location.path, server: parsed.name, problem: nameProblem });

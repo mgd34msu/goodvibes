@@ -84,6 +84,11 @@ export interface ConfigModalView {
   readonly degraded?: string;
   /** Base footer hints (Esc close is always appended by the host). */
   readonly hints?: readonly string[];
+  /**
+   * The rows are seen together or not at all (the pairing QR code with its address): the list
+   * gets every row of the frame, with no search row, no blank rows and no status line.
+   */
+  readonly whole?: boolean;
 }
 
 /** Context handed to a surface's action handler when an action key fires. */
@@ -198,6 +203,11 @@ export interface ConfigModalSurface {
    */
   onOpen?(requestRender: () => void): void;
   onClose?(): void;
+  /**
+   * Optional: how many list rows the open modal shows at once, told on every draw (before the
+   * view it draws is built), for a surface whose rows must fit together (the pairing QR code).
+   */
+  onViewportRows?(rows: number): void;
 }
 
 /** Read-only registry the host consults to resolve a modal name to a surface. */

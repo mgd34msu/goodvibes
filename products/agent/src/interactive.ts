@@ -958,6 +958,12 @@ async function main(prepared: PreparedShellCliRuntime) {
   );
   input.setupPairing = setupPairing;
   commandContext.beginSetupPairing = (request) => setupPairing!.start(request);
+  // The block ends with the line that names its copy key, as bound.
+  commandContext.printBlock = (text, copy) => {
+    transcript.toBottom();
+    conversation.logBlock(`${text}\n\n  ${ctx.services.keybindingsManager.getComboLabel('block-copy')} copies ${copy.name}`, copy);
+    render();
+  };
 
   orchestratorRefs.getViewportHeight = getViewportHeight;
   orchestratorRefs.scrollToEnd = scrollToEnd;

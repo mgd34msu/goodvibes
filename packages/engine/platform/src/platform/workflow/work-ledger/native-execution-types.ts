@@ -39,7 +39,7 @@ export interface NativeWorkExecutionIntent {
   readonly generation: number;
   readonly state: 'admitting' | 'associated' | 'cancelled' | 'refused';
 }
-type NativeWorkExecutionErrorCode = 'unavailable' | 'unsupported-authority' | 'stale' | 'conflict' | 'recovery-required' | 'closed' | 'invalid' | 'refused' | 'not-found' | 'pending-intent' | 'prevented-before-admission';
+type NativeWorkExecutionErrorCode = 'unavailable' | 'unsupported-authority' | 'stale' | 'conflict' | 'recovery-required' | 'closed' | 'invalid' | 'refused' | 'not-found' | 'pending-intent' | 'prevented-before-admission' | 'decision-model-failed';
 /** The allowed next step per code. Every text is fixed, so none can carry an owner's raw failure message across the public boundary. */
 const NEXT_STEP: Record<NativeWorkExecutionErrorCode, string> = {
   unavailable: 'The execution could not be reached or confirmed; read the execution status to see where it stands, then retry, or cancel it.',
@@ -53,6 +53,7 @@ const NEXT_STEP: Record<NativeWorkExecutionErrorCode, string> = {
   'not-found': 'No execution exists for this work and attempt; start it first.',
   'pending-intent': 'An admission is still in flight for this work; read its status and wait for it to finish, or cancel it.',
   'prevented-before-admission': 'This work was cancelled before it was admitted and cannot start; submit new work to run it.',
+  'decision-model-failed': 'The decision model failed before it decided whether to start this work, so nothing was started; check the decision model, then start the work again.',
 };
 export class NativeWorkExecutionError extends Error {
   /** `detail` is fixed text naming the current state and the moves that remain; never an owner's raw failure message. */
@@ -263,6 +264,12 @@ export interface NativeWorkExecutionMutation<T> {
   readonly next: NativeWorkExecutionRecord | null;
   /** Omission or null preserves the current intent, including cancellation tombstones. */
   readonly nextIntent?: NativeWorkExecutionIntent | null;
+  /**
+   * Deletes the current intent. Only an `admitting` intent with no execution record may go: it
+   * admitted nothing, so the attempt is left exactly as it was before Start (used when the set
+   * decision model failed before it decided). Not combined with `next` or `nextIntent`.
+   */
+  readonly removeIntent?: true;
   readonly value: T;
 }
 export interface NativeWorkExecutionStorage {

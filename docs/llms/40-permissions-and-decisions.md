@@ -345,7 +345,7 @@ A record without `project` applies in every project. Rule types and fields are t
 /permissions add <allow|deny|ask> tool <tool>        every call of a tool, in this project
 ```
 
-`/permissions add` writes the rule to the same store as a remembered answer, in both programs, into the one file every program reads (see "Where rules are kept"). It answers `Added rule owner-<kind>-<tool>-<time>-<random>: <description> (in <project>). Remove it with /permissions revoke <id>.`; without a working directory, `There is no working directory to scope the rule to; run this from a project. A never-run rule needs none.`; with words it cannot read, the usage above. `/permissions` alone opens these actions to choose from (a model or script running it alone gets `show`); `add allow ...` and `revoke` are the owner's only, and `add allow ...` asks first.
+`/permissions add` writes the rule to the same store as a remembered answer, in both programs, into the one file every program reads (see "Where rules are kept"). It answers `Added rule owner-<kind>-<tool>-<time>-<random>: <description> (in <project>). Remove it with /permissions revoke <id>.`; without a working directory, `There is no working directory to scope the rule to; run this from a project. A never-run rule needs none.`; with words it cannot read, the usage above. `/permissions` alone opens these actions to choose from (a model or script running it alone gets `show`); `add allow ...` and `revoke` are the owner's only, and `add allow ...` saves the rule at once (`revoke` takes it back).
 
 Each listed rule shows the tool (`any tool` for a never-run rule), what it covers, `allow`, `deny` or `ask`, `remembered <tier>` for an answer, `added <tier>` for a rule added with `/permissions add`, or `never run, every mode`, the project (or `every project`) and when it was made. The web UI lists and revokes the same rules under Settings, Permissions (operator methods `permissions.rules.list` and `permissions.rules.delete`, tier `never-run` for a never-run rule); it does not add one.
 
@@ -412,7 +412,7 @@ Every call Jev decided at the gate (in `jev-decides` and `just-vibes`) is posted
 /decisions keep <decision>            Leave a decision as Jev made it
 /decisions undo <decision>            Undo what a decision did (restores the files the call changed)
 /decisions never <decision>           Never allow calls like a decision's (saves a deny rule)
-/decisions always <decision>          Always allow calls like a decision's without asking (saves an allow rule; asks first)
+/decisions always <decision>          Always allow calls like a decision's without asking (saves an allow rule; /permissions revoke takes it back)
 /decisions ask <decision>             Ask me about calls like a decision's (saves an "always ask me" rule)
 ```
 
@@ -452,7 +452,7 @@ How to reverse a decision:
 
 ```text
 /held list                 list what is held (what /held alone gives a model or script)
-/held approve h3 h4        approve those held calls for this session (asks first)
+/held approve h3 h4        approve those held calls for this session (they run at once; a call that ran is not taken back)
 /held approve all
 /held dismiss h2           set one aside; it is not run
 /held dismiss all
@@ -472,7 +472,7 @@ How to reverse a decision:
 /questions list                open items (what /questions alone gives a model or script)
 /questions all                 every item, newest first
 /questions show <item>
-/questions answer <item> <choice|text> [note]   asks first: an answer cannot be taken back
+/questions answer <item> <choice|text> [note]   answers at once: an answer cannot be taken back
 ```
 
 When the daemon does not answer, `/questions list`, `/questions all` and `/decisions list` show what this machine holds under one line naming it: `The daemon at <address> did not answer (<reason>); showing only what is held on this machine, so its approvals and questions are missing.`
@@ -487,7 +487,7 @@ Plan mode is a separate read-only posture. Reads run; every write, command, netw
 /plan          the list: see whether plan mode is on, turn it on, turn it off
 /plan status   say whether plan mode is on
 /plan on       enter plan mode
-/plan off      leave plan mode and restore the mode you were in (asks first; a model cannot)
+/plan off      leave plan mode and restore the mode you were in (only you; /plan on puts it back)
 ```
 
 - `/plan on` sets plan mode for this session only, as Shift+Tab does, and remembers the mode you were in; `/plan off` restores that mode. Neither changes the saved `permissions.mode` in your settings file, and plan mode ends with the session.
@@ -667,8 +667,8 @@ A managed policy is a versioned bundle of rules the gate reads before the owner'
 /security compare-policy                  rule diff, current against candidate
 /security lint-policy                     lint the active and candidate bundles
 /security preflight                       review proactive policy and MCP risk state
-/security enforce-policy                  enforce the candidate simulate-policy showed (asks first; only you; a candidate loaded or changed since is refused: simulate it first)
-/security restore-policy                  restore the previous active bundle (asks first; only you)
+/security enforce-policy                  enforce the candidate simulate-policy showed (only you; restore-policy puts the previous one back; a candidate loaded or changed since is refused: simulate it first)
+/security restore-policy                  restore the previous active bundle (only you; enforce-policy goes forward again)
 ```
 
 ### Bundle file format
@@ -742,7 +742,7 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 
 ```text
 /security folder                     show the level, whether it is decided, and the registration
-/security trust-folder               trust this folder (loosens a protection: asks first, only you)
+/security trust-folder               trust this folder (loosens a protection: only you; restrict-folder puts it back)
 /security restrict-folder            restrict this folder
 /security trust                      what is trusted: permission mode, secrets, services, plugins, MCP servers
 /security save-trust <file> [--replace]
@@ -795,14 +795,14 @@ The `repl` tool is registered only where the sandbox is available; each evaluati
 /security sandbox-presets                        each preset, what it sets and its notes
 /security sandbox-probe
 /security contain-mcp                            MCP servers run inside their own boundary; running ones restart inside it
-/security host-mcp                               MCP servers run as host processes; running ones restart that way (loosens a protection: asks first, only you)
+/security host-mcp                               MCP servers run as host processes; running ones restart that way (loosens a protection: only you; /security contain-mcp puts it back)
 /health check sandbox                            the boundary on this host, checked
 /security sandbox-sessions
 /security start-sandbox <command|mcp-server> [--host] [name]
 /security sandbox-session <session>
 /security run-in-sandbox <session> <command line>
 /security stop-sandbox <session>
-/security save-sandbox <session> <file> [--replace]  an existing file is kept unless --replace (asks first); a model-run save stays inside the working directory
+/security save-sandbox <session> <file> [--replace]  an existing file is kept unless --replace (which writes over it); a model-run save stays inside the working directory
 /security read-sandbox <file>
 ```
 
@@ -880,7 +880,7 @@ GoodVibes secrets
 /secrets use <NAME>                type a value on a hidden line; kept as an environment variable for this session only
 ```
 
-`project` and `secure` are the defaults; `--storage plaintext` loosens a protection, so it asks first and a model cannot choose it.
+`project` and `secure` are the defaults; `--storage plaintext` loosens a protection, so only your own line chooses it (store it again with `--storage secure` to put it back).
 
 A value with spaces goes inside quotes. A value that starts with `--` goes after a bare `--`.
 

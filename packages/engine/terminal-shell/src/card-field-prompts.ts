@@ -321,6 +321,6 @@ export function renderCardList(list: { readonly cards: readonly CardSummary[]; r
   for (const card of list.cards) lines.push(`  ${card.id === list.defaultCardId ? '*' : ' '} ${describeCard(card)} [id ${stripDangerousAnsi(card.id)}]`);
   lines.push('');
   lines.push('/payments add-card adds a card (each field hidden, sent to the daemon in one request).');
-  if (list.cards.length > 0) lines.push('/payments remove-card deletes one from the daemon; it asks first.');
+  if (list.cards.length > 0) lines.push('/payments remove-card deletes one from the daemon for good; /payments add-card stores it again.');
   return lines;
 }

@@ -596,8 +596,32 @@ export class DaemonServer {
 
   /** The daemon's shared session broker, the SAME broker the HTTP session routes drive. Exposed so an in-process embedder can submit input to a session directly. */
   get sessions(): SharedSessionBroker { return this.sessionBroker; }
-  /** The contracts operator surface, the SAME service the contracts.* methods and their REST paths act through. Exposed so an in-process embedder starts the contract a spawn-mode submit asks for (embed/session.ts). */
+  /** The contracts operator surface, the SAME service the contracts.* methods and their REST paths act through. */
   get contracts(): RuntimeServices['contractOperator'] { return this.runtimeServices.contractOperator; }
+
+  /**
+   * Start the agent that answers one message of a session: one conversational
+   * agent outside any contract, working in `workingDirectory` (else the
+   * daemon's), with the session's conversation as its task. It starts once the
+   * custom providers have loaded, so the model the settings name is known, and
+   * is refused while the daemon takes no new work. Exposed so an in-process
+   * embedder (the ACP adapter) answers an editor's prompt with that agent's own
+   * run: its tool calls, its permission asks and its end, which a contract's
+   * owner record does not have.
+   */
+  async startSessionAgent(input: { readonly sessionId: string; readonly task: string; readonly workingDirectory?: string | undefined }): Promise<AgentRecord> {
+    await this.runtimeServices.providerRegistry.ready();
+    const refusal = this.workAdmission.refusal();
+    if (refusal) throw new Error(refusal.error);
+    return this.agentManager.spawn({
+      mode: 'spawn',
+      task: input.task,
+      sessionId: input.sessionId,
+      outsideContract: true,
+      replyStyle: 'conversational',
+      ...(input.workingDirectory !== undefined ? { workingDirectory: input.workingDirectory } : {}),
+    });
+  }
 
   /**
    * Cancel a running agent by id, the SAME cooperative-plus-abort cancellation

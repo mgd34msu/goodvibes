@@ -49,6 +49,12 @@ export {
   createSessionSpineReceiptConsumer,
   createSessionSpineReceiptAcknowledger,
 } from './rest-transport.js';
+// A checkpoint this terminal program made, passed on to the adopted daemon (sessions.checkpoints.changed).
+export {
+  postSessionCheckpointNotice,
+  forwardCheckpointChangesToDaemon,
+  type CheckpointNoticeForwarderOptions,
+} from './checkpoint-notice.js';
 export type {
   SessionSpineRestConnection,
   SessionSpineRestFailureKind,

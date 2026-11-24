@@ -649,6 +649,13 @@ export function approvalQuestion(request: PermissionPromptRequest, facts: Pick<A
   return `${destroys ?? words.question} ${CANNOT_UNDO}`;
 }
 
+/** Why a price change is asked: "<model> was free when you chose it and now costs about <price>." */
+function modelPriceWhy(args: Record<string, unknown>): string {
+  const model = textArg(args, 'model') ?? 'This model';
+  const price = textArg(args, 'price');
+  return `${model} was free when you chose it and now ${price ? `costs about ${price}` : 'is charged'}.`;
+}
+
 /**
  * The words of a permission ask (an approval request raised by the gate, a
  * sandbox escalation, a command's terminal prompt, an MCP server's question).
@@ -687,7 +694,9 @@ export function presentApprovalAsk(request: PermissionPromptRequest, facts: AskF
   const by = whoAsked(request);
   const origin = originOf(by, facts);
 
-  const why = [
+  // A price change is asked because the price moved, not because of the mode: that is its why.
+  const priceWhy = kind === 'model-price' ? modelPriceWhy(request.args) : undefined;
+  const why = priceWhy ?? [
     modeWhy(facts),
     request.ownerOnly !== undefined ? `Only you decide this: ${ownerOnlyReason(request.ownerOnly)}.` : undefined,
     cannotUndo ? 'It can\'t be undone, so it asks every time; to let it run without asking, add a permission rule with /permissions.' : undefined,

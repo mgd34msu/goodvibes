@@ -42,6 +42,12 @@ export function registerNativeWorkSubmissionGatewayMethods(catalog: GatewayMetho
         authorize(invocation); return nativeWorkSubmissionLookupResultSchema.parse(result);
       } catch (error) {
         if (error instanceof GatewayVerbError) throw error;
+        if (error instanceof NativeWorkSubmissionError && error.code === 'workspace-refused' && error.workspace) {
+          // A definite refusal found before anything was written: the caller keeps no pending request for it.
+          const refusal = error.workspace.refusal;
+          throw new GatewayVerbError(error.message, 'NATIVE_SUBMISSION_WORKSPACE_REFUSED', refusal.status ?? 403, undefined,
+            { state: `Nothing was submitted: ${refusal.state}.`, next: refusal.next });
+        }
         if (error instanceof NativeWorkSubmissionError) {
           const status = ['unsupported-authority', 'forbidden'].includes(error.code) ? 403 : error.code === 'invalid' ? 400
             : ['stale', 'conflict', 'request-conflict'].includes(error.code) ? 409 : 503;

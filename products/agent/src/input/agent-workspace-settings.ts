@@ -4,7 +4,7 @@ import { observeImportFile, assertImportFileCurrent, configKeyFacts, displaySett
 import { captureStrictJudgmentJson, judgmentInputCardProblem, snapshotJudgmentInput } from '@goodvibes/engine/platform/platform/gate';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import { containsIssuerCredential, writeDocument } from '@goodvibes/engine/platform/platform/utils';
-import { readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { getAgentSettingsSchema, readAgentSettingValue, type AgentConfigSetting } from '../config/settings-catalog.ts';
 import type { PendingSubscriptionLogin, ProviderSubscription, SubscriptionGrant } from '@goodvibes/engine/platform/platform/config';
 import { setHarnessSetting } from '../agent/harness-control.ts';
@@ -1051,6 +1051,14 @@ export async function applyAgentWorkspaceTuiSettingsImport(
     }
   }
 
+  // A copy of the Agent's settings file as it was before this import, named in the answer: copying it back puts them back.
+  const settingsPath = configManager.getConfigPath();
+  const before = `${settingsPath}.before-import-${importedAt.replace(/[:.]/g, '-')}`;
+  let keptBefore: string | null = null;
+  if (changing.length > 0 && existsSync(settingsPath)) {
+    try { copyFileSync(settingsPath, before); keptBefore = before; } catch { keptBefore = null; }
+  }
+
   const imported: string[] = [];
   const skipped: string[] = [];
   for (const entry of plan.settings) {
@@ -1100,6 +1108,9 @@ export async function applyAgentWorkspaceTuiSettingsImport(
         unchangedCount > 0 ? `${unchangedCount} item(s) already matched.` : '',
         ...(skipped.length > 0 ? ['Skipped:', ...skipped.map((line) => `  ${line}`)] : []),
         parseErrors.length > 0 ? `Parse issues: ${parseErrors.join('; ')}.` : '',
+        imported.length > 0 && keptBefore !== null
+          ? `To put them back: your settings as they were before this import are kept as ${keptBefore}; copy it over ${settingsPath} and start the Agent again.`
+          : '',
         imported.length > 0 ? `Previous setting values were saved to ${undoPath} (import of ${importedAt}).` : '',
         importedActive.length + importedPending.length > 0 ? 'Replaced provider sign-ins are not kept; sign in again to restore one.' : '',
       ].filter((line) => line.length > 0).join('\n'),

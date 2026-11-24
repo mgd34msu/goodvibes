@@ -15,6 +15,7 @@ function failureMessage(error: unknown, action: NativeWorkExecutionAction): stri
     NATIVE_EXECUTION_NOT_FOUND: 'No admitted native execution exists for this attempt. Start is an explicit separate action.',
     NATIVE_EXECUTION_UNSUPPORTED_AUTHORITY: 'This operation requires an existing live paired operator with native work execution authority.',
     NATIVE_EXECUTION_REFUSED: 'Jev refused this execution. It will not be retried automatically.',
+    NATIVE_EXECUTION_DECISION_MODEL_FAILED: 'Not started: the decision model failed before it decided whether to start this work, so nothing ran. Fix the decision model (its notice says what failed and how), then start the work again.',
     NATIVE_EXECUTION_STALE: 'Native work, attempt or authority changed. Inspect status before choosing a new action.',
     NATIVE_EXECUTION_CONFLICT: 'Native execution conflicts with the recorded admission. Inspect status before choosing a new action.',
     NATIVE_EXECUTION_RECOVERY_REQUIRED: 'Host recovery is required. Inspect status, then use explicit resume only if still appropriate.',

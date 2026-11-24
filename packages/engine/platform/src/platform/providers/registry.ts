@@ -16,6 +16,7 @@ import type { DiscoveredServer } from '../discovery/scanner.js';
 import { createDiscoveredProvider } from './discovered-factory.js';
 import { getDiscoveredTraits } from './discovered-traits.js';
 import { getConfiguredApiKeys, getConfiguredModelId, resolveApiKeys } from '../config/index.js';
+import { revealOrNull } from '../security/secret.js';
 import type { RuntimeEventBus } from '../runtime/events/index.js';
 import { emitProvidersChanged, emitProviderWarning, emitModelChanged } from '../runtime/emitters/index.js';
 import { loadCustomProviders, watchCustomProviders, type CustomProviderFileSkip } from './custom-loader.js';
@@ -347,9 +348,20 @@ export class ProviderRegistry {
     for (const name of new Set([...Object.keys(previous), ...Object.keys(resolved)])) {
       if ((previous[name] ?? '') !== (resolved[name] ?? '')) changed.add(name);
     }
-    if (changed.size === 0) return;
-    this.builtinKeys = { ...resolved };
-    this.rebuildBuiltins(changed);
+    if (changed.size > 0) {
+      this.builtinKeys = { ...resolved };
+      this.rebuildBuiltins(changed);
+    }
+    // A provider from a providers file takes the key stored under its file's key variable: a key
+    // stored (or changed) after its load reloads the files, so it is sent from now on.
+    if (await this.customStoredKeysChanged()) {
+      const result = await this.loadCustomProviders();
+      if (this.runtimeBus) {
+        emitProvidersChanged(this.runtimeBus, { sessionId: 'system', traceId: `providers:credentials:${Date.now()}`, source: 'provider-registry' }, {
+          added: result.added, removed: result.removed, updated: [...new Set([...result.updated, ...this.customProviderNames])],
+        });
+      }
+    }
   }
 
   /** Replace the named builtins with ones built from the current keys and settings, and announce the change. */
@@ -409,7 +421,7 @@ export class ProviderRegistry {
   }
 
   private getCustomProvidersDir(): string {
-    return join(this.getPersistenceRoot(), 'providers');
+    return this.configManager.getCustomProvidersDir?.() ?? join(this.getPersistenceRoot(), 'providers');
   }
 
   private getCatalogCachePaths(): { cachePath: string; tmpPath: string } {
@@ -1378,6 +1390,25 @@ export class ProviderRegistry {
   }
 
   private lastCustomSkips: readonly CustomProviderFileSkip[] = [];
+  /** The stored keys the last custom load read for files whose key variable was not set, by name. */
+  private customStoredKeys = new Map<string, string | null>();
+
+  private async readStoredKey(name: string): Promise<string | null> {
+    try {
+      return revealOrNull(await this.runtimeMetadataDeps.secretsManager.get(name), 'dispatch');
+    } catch {
+      return null;
+    }
+  }
+
+  /** True when a stored key a custom provider read at its last load now reads differently. */
+  private async customStoredKeysChanged(): Promise<boolean> {
+    for (const [name, value] of this.customStoredKeys) {
+      if (process.env[name]) continue;
+      if (await this.readStoredKey(name) !== value) return true;
+    }
+    return false;
+  }
   private customLoadInFlight: Promise<CustomProviderLoadResult> | null = null;
   private customLoadQueued: Promise<CustomProviderLoadResult> | null = null;
 
@@ -1395,13 +1426,21 @@ export class ProviderRegistry {
     // A file may not replace a built-in or runtime provider; names a previous
     // custom load registered stay reloadable.
     const reservedNames = new Set([...this.providers.keys()].filter((name) => !this.customProviderNames.has(name)));
+    // Each stored key a file's key variable was read from, so a later store of it reloads the providers.
+    const storedKeysRead = new Map<string, string | null>();
     const result = await loadCustomProviders({
       providersDir: this.getCustomProvidersDir(),
       reservedNames,
       ingestContextWindows: this.featureFlags?.isEnabled('local-provider-context-ingestion') ?? false,
       contextIngestion: this.localContextIngestionService,
       modelsCachePath: (name) => getProviderModelsCachePath(this.getPersistenceRoot(), name),
+      storedKey: async (name) => {
+        const value = await this.readStoredKey(name);
+        storedKeysRead.set(name, value);
+        return value;
+      },
     });
+    this.customStoredKeys = storedKeysRead;
     const diff = diffCustomModels(this.customModels, result.models, this.getCatalogBuiltins());
     const warnings = [...result.warnings, ...diff.collisionWarnings];
     this.lastCustomSkips = result.skipped;

@@ -55,7 +55,7 @@ import type {
 } from '@agentclientprotocol/sdk';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
-import { resolveGoodVibesHome } from '../config/goodvibes-home.js';
+import { GOODVIBES_TUI_SURFACE_ROOT, resolveGoodVibesHome } from '../config/goodvibes-home.js';
 import {
   createEmbeddedSession,
   type EmbeddedRunEvent,
@@ -284,6 +284,11 @@ export class GoodVibesAcpAgent implements Agent {
           workspace,
           homeDirectory: this.options.homeDirectory ?? resolveGoodVibesHome(),
           requestPermission,
+          // The editor's thread is the person's own, as in the terminal app: its
+          // input is first-party, and the model, providers and permission mode
+          // are the ones the terminal app's settings name.
+          surfaceKind: 'tui',
+          boot: { settingsSurfaceRoot: GOODVIBES_TUI_SURFACE_ROOT },
           ...(servers && servers.length > 0 ? { mcpServers: servers } : {}),
         }));
     const state = await this.#opening.opening(`ACP session ${acpSessionId}`, async (signal): Promise<AcpSessionState> => {
@@ -473,6 +478,13 @@ export class GoodVibesAcpAgent implements Agent {
         this.notify({
           sessionId: acpSessionId,
           update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: event.text } },
+        });
+        return;
+      case 'progress':
+        // Why the answer is late (a provider error being retried): said in the thread, not left as silence.
+        this.notify({
+          sessionId: acpSessionId,
+          update: { sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: event.text } },
         });
         return;
       case 'tool-started':

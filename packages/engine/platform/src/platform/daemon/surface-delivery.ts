@@ -280,7 +280,8 @@ export class DaemonSurfaceDeliveryHelper {
     // 'no-route-binding' for a surface we cannot deliver to at all (a local
     // terminal, a surface with no egress) is not a failure, there was never a
     // conversation to answer into. Everything else is a dropped reply.
-    if (refusal === 'unsupported-delivery-surface' && !binding.routeId) return false;
+    if (!binding.routeId && (refusal === 'unsupported-delivery-surface'
+      || (binding.surfaceKind !== undefined && !isChannelSurfaceKind(binding.surfaceKind)))) return false;
     logger.error('An answer was produced for a channel message but no delivery could be created', {
       surface: binding.surfaceKind ?? resolved?.surfaceKind ?? 'unknown',
       sessionId: binding.sessionId,

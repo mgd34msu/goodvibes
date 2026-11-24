@@ -5,7 +5,11 @@ import type { NativeContinuationGrant } from '../../pairing/pairing-token-store.
 import type { CiWatchSubscription } from '../../ci-watch/types.js';
 import type { ExternalOperationSource } from '../../permissions/external-request.js';
 import { createNativeCiContinuationHost, type NativeCiGrantOwner, type NativeCiContinuationPolicy } from './native-ci-continuation.js';
-import { assertNativeRecordedDecision } from './native-recorded-decision.js';
+import { assertNativeRecordedDecision, OWNER_START_DECISION_PREFIX } from './native-recorded-decision.js';
+import { isDecisionModelFailure } from '@goodvibes/judgment';
+import { captureJevDecisionContext, validateJevDecision, type JevDecisionBinding, type JevVersionRef } from '@goodvibes/judgment/decisions';
+import { JudgmentPortMissingError } from '@goodvibes/engine/errors';
+import { isClassicOperation } from '../../runtime/decision-policy.js';
 import { nativeSelectedDiffEvidence } from './native-diff-evidence.js';
 import { NativeSettlementFailure, verifyNativeWorkExecution } from './native-execution-verifier.js';
 import type { NativeSettlementFailureCode } from './native-execution-wire.js';
@@ -129,6 +133,20 @@ function workFor(current: NativeWorkExecutionTransaction, target: NativeWorkExec
     || work.currentAttemptId !== target.attemptId || attempt.workId !== target.workId || attempt.revision !== target.attemptRevision
     || attempt.ownerId !== principal || attempt.state !== 'active' || work.reportedState === 'cancelled' || work.reportedState === 'complete') throw new NativeWorkExecutionError('stale');
   return work;
+}
+/**
+ * The decision recorded for a start the owner made while no decision model was set. It is not a
+ * reading: its summary says the owner's Start decided, and its one reading id is its own id, which
+ * `assertNativeRecordedDecision` recognises instead of looking it up in the decision log.
+ */
+function ownerStartDecision(binding: JevDecisionBinding, evidence: readonly JevVersionRef[], assertCurrent: () => void) {
+  const decisionId = `${OWNER_START_DECISION_PREFIX}${randomUUID()}`;
+  const context = captureJevDecisionContext({ decisionId, binding: { ...binding }, judgmentDecisionIds: [decisionId],
+    evidence: evidence.map(ref => ({ id: ref.id, revision: ref.revision })), continuations: [], resumeConditions: [] });
+  const decision = validateJevDecision({ schemaVersion: 1, decisionId, binding: { ...context.binding }, judgmentDecisionIds: [decisionId],
+    evidence: context.evidence.map(ref => ({ id: ref.id, revision: ref.revision })),
+    summary: 'Started by the owner. No decision model is set, so the owner\'s Start is the decision.', outcome: 'act' }, context);
+  return { decision, context, recordClaim: assertCurrent };
 }
 interface ActiveOwner { readonly authority: NativePairedExecutionAuthority; readonly expected: NativePairedExecutionSnapshot; readonly scope: NativeExecutionScope; record: NativeWorkExecutionRecord | undefined; payloadRevision: string | undefined; claimed: boolean; contractId?: string; }
 
@@ -314,13 +332,32 @@ export function createNativeWorkExecutionHost(deps: {
       if (latestWork.title !== work.title || latestWork.goal !== work.goal || !isDeepStrictEqual(latestWork.criteria, work.criteria)
         || !isDeepStrictEqual(latestWork.source, work.source)) throw new NativeWorkExecutionError('stale');
     };
-    // No authority, workspace or database lock is held while Jev or its backoff waits.
-    const read = await decideAutonomous({ port: deps.port, site: 'work-ledger.native-start',
-      instructions: 'Decide whether to start exactly this native work attempt from its complete original goal and ordered criteria. Authentication and scope are fixed host constraints. Do not ask for human approval or invent missing requirements.',
-      actionDescription: 'Start the exact bound native work attempt through the durable contract runner.', binding,
-      state: { originalSource: { goal: source.goal, criteria: source.criteria, ...(source.continuation ? { conversationContext: source.continuation.messages, ...(source.continuation.selectedDiff ? { selectedDiffContext: nativeSelectedDiffEvidence(source.continuation.selectedDiff) } : {}) } : {}) }, revisions: { work: target.workRevision, criteria: target.criteriaRevision, attempt: target.attemptRevision }, operation: { kind: 'start-native-work', projectRoot }, ...(request.input.taskEvidence ? { untrustedTaskEvidence: request.input.taskEvidence } : {}), deterministicConstraints: { existingActiveClaim: true } } as unknown as EntryType,
-      evidence: [{ id: 'native-work-source', revision: source.inputRevision }, { id: 'native-work-attempt', revision: nativeExecutionTargetRevision(target) }, ...(intent ? [{ id: 'native-intent-evaluation', revision: String(intent.generation) }] : [])],
-      continuations: [], conditions: [], allowAct: true, assertCurrent, signal });
+    const evidence: JevVersionRef[] = [{ id: 'native-work-source', revision: source.inputRevision }, { id: 'native-work-attempt', revision: nativeExecutionTargetRevision(target) }, ...(intent ? [{ id: 'native-intent-evaluation', revision: String(intent.generation) }] : [])];
+    // The owner pressing Start (not a CI successor the host chains by itself) is the decision
+    // when no decision model is set: the start goes ahead with no reading and no error.
+    const ownerAct = authority.continuationSourceAction === undefined;
+    let read: Pick<Awaited<ReturnType<typeof decideAutonomous>>, 'decision' | 'context' | 'recordClaim'>;
+    if (ownerAct && isClassicOperation()) read = ownerStartDecision(binding, evidence, assertCurrent);
+    else {
+      try {
+        // No authority, workspace or database lock is held while Jev or its backoff waits.
+        read = await decideAutonomous({ port: deps.port, site: 'work-ledger.native-start',
+          instructions: 'Decide whether to start exactly this native work attempt from its complete original goal and ordered criteria. Authentication and scope are fixed host constraints. Do not ask for human approval or invent missing requirements.',
+          actionDescription: 'Start the exact bound native work attempt through the durable contract runner.', binding,
+          state: { originalSource: { goal: source.goal, criteria: source.criteria, ...(source.continuation ? { conversationContext: source.continuation.messages, ...(source.continuation.selectedDiff ? { selectedDiffContext: nativeSelectedDiffEvidence(source.continuation.selectedDiff) } : {}) } : {}) }, revisions: { work: target.workRevision, criteria: target.criteriaRevision, attempt: target.attemptRevision }, operation: { kind: 'start-native-work', projectRoot }, ...(request.input.taskEvidence ? { untrustedTaskEvidence: request.input.taskEvidence } : {}), deterministicConstraints: { existingActiveClaim: true } } as unknown as EntryType,
+          evidence, continuations: [], conditions: [], allowAct: true, assertCurrent, signal });
+      } catch (error) {
+        if (!(error instanceof JudgmentPortMissingError) && !isDecisionModelFailure(error)) throw error;
+        // The set decision model failed before deciding: nothing was admitted. The admitting intent
+        // written before the decision is removed, so the attempt is stored exactly as before Start
+        // (any release reads it), no resume is offered, and Start begins afresh. A crash before this
+        // line leaves the admitting intent, whose resume asks the decision again.
+        if (intent) await authority.withCurrent(expected, async assertAuthority => deps.scopes.withCurrentScope(expectedScope, async assertScope =>
+          deps.storage.transaction(key, current => { assertAuthority(); assertScope(); assertIntent(current, intent);
+            return { next: null, removeIntent: true, value: undefined }; })));
+        throw new NativeWorkExecutionError('decision-model-failed');
+      }
+    }
     assertCurrent();
     if (read.decision.outcome !== 'act') {
       if (intent) await authority.withCurrent(expected, async assertAuthority => deps.scopes.withCurrentScope(expectedScope, async assertScope =>

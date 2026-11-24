@@ -434,6 +434,22 @@ export const builtinGatewayControlCoreMethodDescriptors: readonly GatewayMethodD
     outputSchema: SHARED_SESSION_REGISTER_OUTPUT_SCHEMA,
   }),
   methodDescriptor({
+    id: 'sessions.checkpoints.changed',
+    repeat: 'safe',
+    title: 'Announce a Session Checkpoint Change',
+    description: 'A terminal program that runs its own session (the terminal app, the Agent) tells the daemon it made, pruned or removed a workspace checkpoint for that session, so clients subscribed to the daemon hear of it: the daemon announces it as the runtime event LIST_CHANGED with `list: "checkpoints"`, the `change` given and `checkpointId` as its `id`. Nothing is stored and nothing is read from disk; the notice only announces. The session must be one the daemon knows (registered with sessions.register): another id is refused 404 SESSION_NOT_FOUND and nothing is announced. A repeat announces again, which is harmless: a client reads the checkpoint list again.',
+    category: 'sessions',
+    effects: ['sessions.administer'],
+    events: [runtimeEventId('workspace')],
+    errorCodes: [SESSION_NOT_FOUND],
+    inputSchema: objectSchema({
+      sessionId: STRING_SCHEMA,
+      change: { type: 'string', enum: ['created', 'changed', 'deleted'] },
+      checkpointId: STRING_SCHEMA,
+    }, ['sessionId', 'change']),
+    outputSchema: objectSchema({ announced: BOOLEAN_SCHEMA }, ['announced']),
+  }),
+  methodDescriptor({
     id: 'sessions.get',
     title: 'Get Shared Session',
     description: 'Return a shared session record with its newest 100 messages. It returns conversation text, so it needs read:transcripts, as sessions.list and sessions.search do (titles and participants).',

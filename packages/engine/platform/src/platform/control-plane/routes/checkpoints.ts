@@ -33,6 +33,7 @@ import type { WorkspaceEvent } from '../../../events/workspace.js';
 import { GatewayVerbError } from './gateway-verb-error.js';
 import { readInvocationParams, requireStringValue } from './invocation-params.js';
 import { ReviewTokenStore } from '../review-tokens.js';
+import { noteListChanged, type ListChange } from '../../runtime/list-changes.js';
 import { contentDigest, TargetChangedError, targetRef, type TargetRef } from '../../utils/target-ref.js';
 
 /** Sink for the checkpoints.revertHunk receipt event (adapted onto the RuntimeEventBus by the registrar). */
@@ -496,6 +497,45 @@ export function createCheckpointsRevertHunkHandler(
     }
     return { receipt: { ...receipt, workspaceRoot }, refused: false, refusal: null };
   };
+}
+
+/** The one thing the checkpoint notice needs of the session broker: is the session known. */
+export interface SessionCheckpointNoticeBroker {
+  getSession(sessionId: string): unknown;
+}
+
+const CHECKPOINT_CHANGES: readonly ListChange['change'][] = ['created', 'changed', 'deleted'];
+
+/**
+ * `sessions.checkpoints.changed`: a terminal program that keeps its own checkpoints (the terminal
+ * app, the Agent) made, pruned or removed one for a session this daemon knows. The daemon
+ * announces it as LIST_CHANGED `checkpoints`, as its own checkpoint writes are, so a subscribed
+ * client reads the list again. Nothing is stored; a repeat only announces again.
+ */
+export function createSessionCheckpointNoticeHandler(broker: SessionCheckpointNoticeBroker): GatewayMethodHandler {
+  return (invocation) => {
+    const params = readInvocationParams(invocation);
+    const sessionId = requireStringValue(params.sessionId, 'sessionId');
+    const change = params.change;
+    if (typeof change !== 'string' || !(CHECKPOINT_CHANGES as readonly string[]).includes(change)) {
+      throw new GatewayVerbError('change must be one of created, changed or deleted', 'INVALID_ARGUMENT', 400, 'change');
+    }
+    const checkpointId = params.checkpointId;
+    if (checkpointId !== undefined && (typeof checkpointId !== 'string' || checkpointId.length === 0)) {
+      throw new GatewayVerbError('checkpointId must be a non-empty string when given', 'INVALID_ARGUMENT', 400, 'checkpointId');
+    }
+    if (broker.getSession(sessionId) == null) {
+      throw new GatewayVerbError(`No shared session ${sessionId}: register it with sessions.register first. Nothing was announced.`, 'SESSION_NOT_FOUND', 404);
+    }
+    noteListChanged({ list: 'checkpoints', change: change as ListChange['change'], ...(checkpointId ? { id: checkpointId } : {}) });
+    return { announced: true };
+  };
+}
+
+/** Attach `sessions.checkpoints.changed` to its descriptor; a missing descriptor is a silent no-op. */
+export function registerSessionCheckpointNotice(catalog: GatewayMethodCatalog, broker: SessionCheckpointNoticeBroker): void {
+  const descriptor = catalog.get('sessions.checkpoints.changed');
+  if (descriptor) catalog.register(descriptor, createSessionCheckpointNoticeHandler(broker), { replace: true });
 }
 
 /**

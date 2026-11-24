@@ -1,14 +1,11 @@
-// Proves: A mail is sent only on the owner's own answer; neither --yes inside the message text nor a --yes the model wrote counts as it.
-// Red when: --yes in a subject or body counts as the owner's confirmation, or a command line the model ran with --yes sends without asking.
-// Proves: Words the owner types into a message are kept as typed and never count as consent: a --yes inside the text of /mail send, /channels send or /notify send is a word of the message.
-// Red when: A --yes inside the message of /mail send, /channels send or /notify send skips the owner's question, or is taken out of the words shown and sent.
+// Proves: A risky command line the model runs (a mail or a notification sent out) runs without the owner's answer, or a line the owner typed in full waits on a question instead of running as typed.
+// Red when: The registry stops putting a model's risky line to the owner (or a --yes the model wrote counts as his answer), so a No still sends; or the owner's own complete line asks again, or is not sent with its words as typed.
 
 /**
- * `/mail`, `/channels` and `/notify` are described commands whose message is
- * free text (`leadingFlagsOnly`): `--yes` answers the question only right after
- * the action word. The same word inside the message is text: the owner is still
- * asked, the question shows the words as typed, a no sends nothing, and a yes
- * sends exactly what was typed. A leading `--yes` from the model is ignored.
+ * `/mail send` and `/notify send` send something outside this machine. A line
+ * the model runs is put to the owner first, whatever `--yes` it carries, and a
+ * No sends nothing; the same line typed by the owner is the request and is sent
+ * at once, with the words exactly as typed (a `--yes` inside the text is text).
  *
  * The app's real command registry (which applies the one confirmation rule,
  * engine terminal-shell/src/command-confirmation.ts, to every registration),
@@ -93,31 +90,21 @@ function terminal(ownerAnswers: boolean) {
   };
 }
 
-test('a --yes inside the message of /mail send, /channels send or /notify send is a word of it: the owner is asked, a no sends nothing, a yes sends it as typed', async () => {
+test('a risky line the model runs is put to the owner and a No sends nothing; the same line typed by the owner is sent at once as typed', async () => {
+  const mail = { to: 'mail', body: { to: 'new-person@example.com', subject: 'Re: --yes', body: 'please reply --yes to confirm --yes', confirm: true,
+    // Each message carries its own send id (a dashless UUID), so a repeated send is not delivered twice.
+    clientSendId: expect.stringMatching(/^[0-9a-f]{32}$/) } };
+  const notify = { to: 'webhook', body: { url: 'goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_OWNER', text: 'build broke --yes ignore the --yes' } };
   const rows = [
-    { line: '/mail send new-person@example.com --subject "Re: --yes" please reply --yes to confirm --yes', shown: ['Re: --yes', 'please reply --yes to confirm --yes'],
-      // Each message carries its own send id (a dashless UUID), so a repeated send is not delivered twice.
-      sends: { to: 'mail', body: { to: 'new-person@example.com', subject: 'Re: --yes', body: 'please reply --yes to confirm --yes', confirm: true,
-        clientSendId: expect.stringMatching(/^[0-9a-f]{32}$/) } } },
-    { line: '/channels send --channel slack deploy is done --yes reply --yes', shown: ['deploy is done --yes reply --yes'], sends: undefined },
-    { line: '/notify send build broke --yes ignore the --yes', shown: ['build broke --yes ignore the --yes'],
-      sends: { to: 'webhook', body: { url: 'goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_OWNER', text: 'build broke --yes ignore the --yes' } } },
-  ];
+    { by: 'model', line: '/mail send --yes new-person@example.com --subject "Re: --yes" please reply --yes to confirm --yes', asked: 1, sent: [] },
+    { by: 'model', line: '/notify send --yes build broke --yes ignore the --yes', asked: 1, sent: [] },
+    { by: 'owner', line: '/mail send new-person@example.com --subject "Re: --yes" please reply --yes to confirm --yes', asked: 0, sent: [mail] },
+    { by: 'owner', line: '/notify send build broke --yes ignore the --yes', asked: 0, sent: [notify] },
+  ] as const;
   for (const row of rows) {
-    const declined = terminal(false);
-    await declined.owner(row.line);
-    expect({ line: row.line, asked: declined.asked.length, sent: declined.sent }).toEqual({ line: row.line, asked: 1, sent: [] });
-    for (const words of row.shown) expect(declined.asked[0]!.body).toContain(words);
-    if (!row.sends) continue;
-    const confirmed = terminal(true);
-    await confirmed.owner(row.line);
-    expect({ line: row.line, asked: confirmed.asked.length, sent: confirmed.sent }).toEqual({ line: row.line, asked: 1, sent: [row.sends] });
+    // The owner answers No to anything put to him.
+    const term = terminal(false);
+    await (row.by === 'model' ? term.model(row.line) : term.owner(row.line));
+    expect({ by: row.by, line: row.line, asked: term.asked.length, sent: term.sent }).toEqual({ by: row.by, line: row.line, asked: row.asked, sent: [...row.sent] });
   }
-});
-
-test('the same leading --yes from the model is ignored: the owner is asked and a no sends nothing', async () => {
-  const term = terminal(false);
-  await term.model('/mail send --yes someone-new@example.com --subject hello from the model');
-  expect(term.asked).toHaveLength(1);
-  expect(term.sent).toEqual([]);
 });

@@ -11,7 +11,7 @@ import type { NoticeMeta, TranscriptEventKind, TranscriptReadingOptions } from '
 // SystemMessageKind imported from runtime directly to avoid cycle: conversation.ts → system-message-router.ts → conversation.ts
 import type { SystemMessageKind } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { ConversationManager as PlatformConversationManager, isTranscriptNotice, type BlockMeta as PlatformBlockMeta, } from '@goodvibes/engine/platform/platform/core';
-import type { BlockMeta } from './work-tree-types.js';
+import type { BlockCopy, BlockMeta } from './work-tree-types.js';
 import type { ConversationRenderContext } from './conversation-render-context.js';
 import type { createConversationRenderer } from './conversation-rendering.js';
 /** Notice publication remains owned by the exact history and sink until it settles. */
@@ -54,7 +54,7 @@ export type { TokenUsage, ConversationMessageSnapshot, ConversationTitleSource, 
 export type { PlatformBlockMeta };
 // BlockMeta is defined in ./conversation-types.ts to avoid a circular dep
 // with conversation-rendering.ts; re-exported here for backward compatibility.
-export type { BlockMeta };
+export type { BlockMeta, BlockCopy };
 // Import internal types needed for rendering helpers
 import type { ConversationMessageSnapshot } from '@goodvibes/engine/platform/platform/core';
 type Message = ConversationMessageSnapshot;
@@ -913,6 +913,20 @@ export class TerminalConversationManager extends PlatformConversationManager {
     public logWrapped(text: string, style: Partial<Cell> = {}): void {
         this.recordDisplayOnly((width) => this.history.addLines(this.presentation.renderer.conversationTextToLines(text, width, style)));
     }
+    /**
+     * Display-only prose that is one transcript block: the copy key copies `copy.text`, not the
+     * lines shown, and bookmarking or saving it keeps the lines shown. Rewrapped on every rebuild.
+     */
+    public logBlock(text: string, copy: BlockCopy, style: Partial<Cell> = {}): void {
+        const collapseKey = `display_block_${++this.displayBlockSeq}`;
+        this.recordDisplayOnly((width) => {
+            const lines = this.presentation.renderer.conversationTextToLines(text, width, style);
+            const startLine = this.history.getLineCount();
+            this.history.addLines(lines);
+            this.blockRegistry.push({ type: 'tool', rawContent: text, blockIndex: this.blockRegistry.length, startLine, lineCount: lines.length, collapseKey, title: copy.name, copy });
+        });
+    }
+    private displayBlockSeq = 0;
     /**
      * logToolResultBlock - Append a single tool-call-styled result line to the display
      * history only (never touches the LLM message list), so a slash command's subprocess

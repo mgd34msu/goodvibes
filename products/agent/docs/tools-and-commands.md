@@ -368,7 +368,7 @@ Agent rejects route-selection flags that would target another knowledge space, i
 
 ## Approvals, automation, and schedules
 
-Read views are safe by default. An approval is answered with `/questions answer`; `/approval kinds` says what each kind asks about. A schedule and its runs are changed with `/schedule` (a change that cannot be undone asks first):
+Read views are safe by default. An approval is answered with `/questions answer`; `/approval kinds` says what each kind asks about. A schedule and its runs are changed with `/schedule` (a change you type runs at once; one that cannot be undone says so with its result):
 
 ```text
 /questions answer <approval> <choice> [note]
@@ -398,17 +398,17 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/session bookmarks` | List bookmarked transcript blocks. |
 | `/brief` | Show a concise Agent operator briefing and next actions. |
 | `/bundle` | Save this Agent's settings and setup to a redacted file, check one, or load settings back from one. |
-| `/calendar` | The terminal app's command on the Agent's own events, its calendar feeds and calendar accounts: what is coming up, every event, add or remove one, import or export .ics files, subscribe to feeds, sign in or out of Google or Outlook. Removing asks first. |
+| `/calendar` | The terminal app's command on the Agent's own events, its calendar feeds and calendar accounts: what is coming up, every event, add or remove one, import or export .ics files, subscribe to feeds, sign in or out of Google or Outlook. Removing deletes for good (add it again to bring it back). |
 | `/checkpoint` | The workspace checkpoints: `list` (newest first), `restore <n\|id>` (shows the files that would change, asks, and restores them; files only). `make` and `rewind` are refused: the Agent takes checkpoints by itself in a registered workspace and does not go back to a turn. |
 | `/channels` | The terminal app's command with the connected host's channels: status, setup, repairs, who may reach the assistant, per-channel profiles (`/channels profiles`), a test message; and the Agent's own readiness, setup guide, inbox, confirmed sends and delivery receipts. |
-| `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; removing a watch asks first. |
+| `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; removing a watch stops it (`/ci watch` sets it up again). |
 | `/clear` | Start a fresh conversation; the current one is saved as its own session first. |
 | `/session collapse` | Collapse rendered blocks by type. |
 | `/compact` | Summarize the conversation to free context window. |
-| `/compare` | Blind model comparisons: send one prompt to two to four models with their names hidden (asks first: it spends money), benchmark the local models, judge, switch to the winner or record keeping the model, and save a report, handoff or ZIP. |
+| `/compare` | Blind model comparisons: send one prompt to two to four models with their names hidden (it spends money), benchmark the local models, judge, switch to the winner or record keeping the model, and save a report, handoff or ZIP. |
 | `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
 | `/session events` | Review the conversation's record entry by entry; `/session groups`, `/session hotspots` and `/session composer` show its turns, where it spent most, and what the composer waits on. |
-| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`, which asks first), "Pair something" (`pair device` mints a named, separately revocable device token and shows its link and QR; `pair host` pairs this Agent with its connected host as `/setup pair` does), `host-status` and `unpair-host` (as `/setup pair` preview and `/setup unpair`), the connected host's relay (`pair relay`, `relay-status`, `relay-codes`, `relay-revoke`), and the paired phones: `nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture` (asks first). |
+| `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`, which cuts the device off for good; pair it again to bring it back), "Pair something" (`pair device` mints a named, separately revocable device token and shows its link and QR; `pair host` pairs this Agent with its connected host as `/setup pair` does), `host-status` and `unpair-host` (as `/setup pair` preview and `/setup unpair`), the connected host's relay (`pair relay`, `relay-status`, `relay-codes`, `relay-revoke`), and the paired phones: `nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture` (deleted for good). |
 | `/documents` | Your Markdown drafts: write, revise, comment, take or leave a suggested change, put or attach an artifact, export, and the review packet (readiness, steps, presets, sending it). |
 | `/effort` | See or choose how hard the model thinks (`/effort set <level>`). |
 | `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
@@ -422,16 +422,16 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/knowledge` | Use isolated Agent Knowledge. |
 | `/research` | Research a question or look at a page in the conversation; keep a research run, add a source to the queue, save a sourced report. |
 | `/resume` | Resume a saved Agent session. |
-| `/mail` | The terminal app's command over the Agent's own mail service: whether mail is connected, the unread inbox, read one message, save a draft, send one (asks first), and the mailbox settings and password. |
+| `/mail` | The terminal app's command over the Agent's own mail service: whether mail is connected, the unread inbox, read one message, save a draft, send one (at once, as typed; a sent mail cannot be called back), and the mailbox settings and password. |
 | `/hooks` | The terminal app's hook actions without its screen: `contracts`, `scaffold`, `chain`, `enable`, `disable`, `remove`, `simulate`, `reload`, `export`, `inspect`, `import`. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
-| `/media` | See the media providers (`providers`), make an image or video (`make`, asks first: it may charge), and collect a job that was still being made (`collect <provider> <job> [key=value ...]`). |
+| `/media` | See the media providers (`providers`), make an image or video (`make`: it may charge), and collect a job that was still being made (`collect <provider> <job> [key=value ...]`). |
 | `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory sync-files` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. `/memory snapshots` lists the copies of memory (daily, before an upgrade, before a restore) with their record counts; `/memory restore <name|latest|date>` replaces all memory with one copy after one confirmation, copies the records it replaces first and names that copy so the restore can be undone by that name; `latest` is the newest copy not taken by a restore. |
 | `/verbosity` | Set how much the Agent prints (`/verbosity set quiet\|balanced\|operator`) and each kind of notification's level. |
 | `/model` | Choose the model your conversations use and its backups (`use`, `backup`, `drop-backup`), and read the list of models again (`refresh`). |
 | `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
 | `/session next error` | Jump to the next error message in the conversation. |
-| `/notes` | Your scratchpad notes: list, read, find, write, change, mark reviewed or out of date, delete (asks first), and make a memory record, persona, skill or routine from one, or add its web page to Agent Knowledge. The same description as the terminal app's `/notes`. |
+| `/notes` | Your scratchpad notes: list, read, find, write, change, mark reviewed or out of date, delete (for good), and make a memory record, persona, skill or routine from one, or add its web page to Agent Knowledge. The same description as the terminal app's `/notes`. |
 | `/notifications` | Show every notice and notification in full, newest first. The status bar counts unread notices, and `Ctrl+N` opens them. |
 | `/notify` | Manage and send configured Agent webhook notifications. |
 | `/paste` | Insert clipboard text or image into the prompt. |

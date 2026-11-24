@@ -18,6 +18,10 @@
  *     here even with a forged `owner-direct` claim, because the value appears
  *     verbatim in the ledger's retained page text.
  *
+ *     Layer 2 is for writes a model or an agent originates. The signed-in
+ *     person's own form or command (`ownerSubmitted`, set only by the gateway
+ *     verbs for a call with no Agent credential and no delegation) skips it.
+ *
  *   Layer 3, a verbatim quote must exist. A fact learned from a page has no
  *     owner utterance to quote, so the requirement is itself a filter, and it is
  *     what makes "where did you get that" answerable later.
@@ -44,6 +48,7 @@ import {
   type UntrustedContentLedger,
   type OutwardContentAssessment,
 } from '../security/untrusted-content.js';
+import { isClassicOperation } from '../runtime/decision-policy.js';
 import { canonicalProfileSection, profileFieldById } from './fields.js';
 import { readProfileDelegation, type ProfileMutationOptions } from './delegation.js';
 
@@ -98,6 +103,22 @@ function describeRemovalTarget(fieldId: string | null | undefined): string {
   return `your ${def?.label ?? fieldId}`;
 }
 
+/** Why a model's write could not be compared with what was read from outside, in the owner's terms. */
+function describeUncheckable(reason: Extract<OutwardContentAssessment, { kind: 'incomplete' }>['reason']): string {
+  switch (reason) {
+    case 'missing-sources':
+      return 'a message or page read earlier was not kept whole, so it cannot be checked whether this repeats something a stranger wrote.';
+    case 'protected-input':
+      return 'it holds protected material (such as a secret), which is never sent to the decision model, so it cannot be checked whether this repeats something a stranger wrote.';
+    case 'over-limit':
+      return 'it is too long to check whether it repeats something a stranger wrote; a shorter line can be checked.';
+    case 'missing-content':
+      return 'the write did not say what it is about to save, so it cannot be checked.';
+    case 'decision-model-disabled':
+      return 'it could not be checked whether this repeats something a stranger wrote.';
+  }
+}
+
 /** No-authority refusal wording, shared by both gates so they read alike. */
 function noAuthority(action: string, authority: AuthoritySurface | 'autonomous', verb: string): string {
   return (
@@ -141,10 +162,18 @@ async function findProfileTaint(
   // is one short word, and exact containment of "Notes" against any page that
   // happens to use that word would refuse every legitimate note, while the
   // reading can tell a common heading from a sentence lifted off a page.
-  const recent = await assessOutwardContent(ledger,
-    { value, said, ...(section === undefined ? {} : { section }),
-      ...(autonomousSource === undefined ? {} : { autonomousSource }) }, options, 'since-last-boundary');
-  if (recent.kind !== 'clean') return recent;
+  //
+  // The reading's fallback, when no decision model makes it (none is set, or a set one failed,
+  // which the decision-model notice reports): pass 2's exact containment alone, which asks no
+  // reading and covers the recent window too, because everything recent is retained. With no
+  // decision model set the reading is not attempted, so nothing about it can refuse the write.
+  if (!isClassicOperation()) {
+    const recent = await assessOutwardContent(ledger,
+      { value, said, ...(section === undefined ? {} : { section }),
+        ...(autonomousSource === undefined ? {} : { autonomousSource }) }, options, 'since-last-boundary');
+    const fellBack = recent.kind === 'incomplete' && recent.reason === 'decision-model-disabled';
+    if (recent.kind !== 'clean' && !fellBack) return recent;
+  }
 
   // Pass 2, exact containment, over EVERYTHING retained.
   //
@@ -174,6 +203,19 @@ async function findProfileTaint(
 }
 
 /**
+ * The refusal of a profile write whose value came from something read from outside. It is about
+ * saving, not sending (`describeContentTaint` speaks of what leaves this machine), and says where
+ * the person saves it themselves.
+ */
+function describeProfileTaint(findings: readonly TaintFinding[]): string | undefined {
+  const first = findings[0];
+  if (first === undefined) return undefined;
+  const how = first.kind === 'exact-value' ? 'came word for word from' : 'was taken from';
+  return `Not saved to your profile: this ${how} ${first.surface} (${first.origin}), which arrived from outside. `
+    + 'If it is right, save it yourself in Settings › Account › Owner profile, or with /about-me.';
+}
+
+/**
  * The gate every profile write passes through.
  *
  * Ordered as the design states them, cheapest and most absolute first: a
@@ -192,16 +234,22 @@ export async function evaluateProfileWrite(input: ProfileWriteAttempt, options: 
     );
   }
 
-  // Layer 2, derivation, which does not take the caller's word for layer 1.
-  const ledger = input.ledger ?? getProcessUntrustedContentLedger();
-  const assessment = await findProfileTaint(input.value, input.said, input.section, ledger, options,
-    delegated && JSON.stringify({ goal: delegated.goal, criteria: delegated.criteria }));
-  current();
-  if (assessment.kind === 'incomplete') {
-    return refuse(`Refused ${describeTarget(input.fieldId)}: complete untrusted-source evidence is unavailable for comparison.`);
-  }
-  if (assessment.kind === 'tainted') {
-    return refuse(describeContentTaint(describeTarget(input.fieldId), assessment.findings), assessment.findings);
+  // Layer 2, derivation, which does not take the caller's word for layer 1. It guards writes a
+  // model or an agent originates; the signed-in person's own form or command is their own
+  // words, so it is not compared with what was read.
+  const ownerSubmitted = options.ownerSubmitted === true && !delegated && input.authority === 'owner-direct';
+  if (!ownerSubmitted) {
+    const ledger = input.ledger ?? getProcessUntrustedContentLedger();
+    const assessment = await findProfileTaint(input.value, input.said, input.section, ledger, options,
+      delegated && JSON.stringify({ goal: delegated.goal, criteria: delegated.criteria }));
+    current();
+    if (assessment.kind === 'incomplete') {
+      return refuse(`Refused ${describeTarget(input.fieldId)}: ${describeUncheckable(assessment.reason)} `
+        + 'Nothing was saved. You can add it yourself: Settings › Account › Owner profile, or /about-me.');
+    }
+    if (assessment.kind === 'tainted') {
+      return refuse(describeProfileTaint(assessment.findings) ?? describeContentTaint(describeTarget(input.fieldId), assessment.findings), assessment.findings);
+    }
   }
 
   // Layer 3, a verbatim quote must exist.

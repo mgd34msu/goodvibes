@@ -80,6 +80,8 @@ function isKeyToken(token: string): boolean {
   if (/^\d-\d$/.test(token)) return true;
   if (/^(ctrl|shift|alt|meta)\+\S+$/i.test(token)) return true;
   if (/^f\d{1,2}$/i.test(token)) return true;
+  // Caret chords as a config view writes them: "^v", and a range of them, "^a-^f".
+  if (/^\^[A-Za-z]$/.test(token) || /^\^[a-z]-\^[a-z]$/.test(token)) return true;
   return false;
 }
 
@@ -89,6 +91,9 @@ function hintFromString(text: string): KitHint | null {
   // Legacy "[Enter] Load" style.
   const bracket = /^\[([^\]]+)\]\s+(.+)$/.exec(trimmed);
   if (bracket) return [keycapLabel(bracket[1]!), bracket[2]!];
+  // A two-step key, a caret chord and then one key or a range: "^G c copy link", "^G 1-6 set status".
+  const twoStep = /^(\^[A-Za-z]) (\S|\d-\d) +(\S.*)$/.exec(trimmed);
+  if (twoStep) return [`${twoStep[1]!} ${twoStep[2]!}`, twoStep[3]!];
   const space = trimmed.indexOf(' ');
   if (space <= 0) return null;
   const key = trimmed.slice(0, space);

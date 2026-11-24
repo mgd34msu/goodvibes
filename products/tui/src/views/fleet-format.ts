@@ -111,6 +111,8 @@ export function renderFleetDetailLines(
   palette: ViewPalette = DEFAULT_VIEW_PALETTE,
   observedSteerDraft: string | null = null,
   graphSnapshot: WorkstreamGraphSnapshot | null = null,
+  /** The row's own time text (one clock reading per frame, one rounding), so the row and its detail never disagree. */
+  rowTime = '',
 ): Line[] {
   const C = palette;
   // Observed foreign agents drill into their own detail (facts + steer-or-reason,
@@ -134,7 +136,8 @@ export function renderFleetDetailLines(
   const factLines: Line[] = [];
   if (blocked || stopping) factLines.push(buildViewLine(width, [[' ', C.dim], [stateLabel, color]]));
   if (node.model) factLines.push(fact('model', node.model, C.info));
-  if (node.elapsedMs > 0) factLines.push(fact('time', formatElapsed(node.elapsedMs)));
+  const time = rowTime || (node.elapsedMs > 0 ? formatElapsed(node.elapsedMs) : '');
+  if (time) factLines.push(fact('time', time));
   if (node.progress && (node.progress.filesRead > 0 || node.progress.filesChanged > 0)) {
     factLines.push(fact('files', `${node.progress.filesRead} read · ${node.progress.filesChanged} changed`));
   }

@@ -110,7 +110,7 @@ export function VoiceSettings() {
   // While the install runs, its mutation reads voice.local.status and writes each read
   // here, so the card shows the live installInProgress section; before the first read
   // lands the card keeps its plain busy state.
-  const localStatus = useVoiceLocalStatus(open);
+  const localStatus = useVoiceLocalStatus(open, localInstall.isPending);
   const localUnavailable = localStatus.isError
     && (isMethodUnavailableError(localStatus.error) || isMethodNotInvokableError(localStatus.error));
 
@@ -198,9 +198,23 @@ export function VoiceSettings() {
               {localStatus.isSuccess && (() => {
                 const status = localStatus.data;
                 const needsSetup = voiceLocalNeedsSetup(status);
-                const result = localInstall.isSuccess ? localInstall.data : null;
-                const retriable = result !== null
-                  && (voiceLocalInstallIsRetriable(result.tts.state) || voiceLocalInstallIsRetriable(result.stt.state));
+                // An install is shown from the status whatever started it: this page, the
+                // terminal, the Agent or another browser.
+                const running = status.installInProgress;
+                const busy = localInstall.isPending || running !== undefined;
+                // The last run that ended, from the status; this page's own answer only when
+                // the status has none (an older daemon that answers the install directly).
+                const lastRun = running === undefined ? status.lastInstall : undefined;
+                const result = running !== undefined ? null
+                  : lastRun?.receipt ?? (lastRun === undefined && localInstall.isSuccess ? localInstall.data : null);
+                // A run that ended with no receipt: why it stopped. This page's own failed
+                // run already says so in its alert below.
+                const failedWithoutReceipt = lastRun !== undefined && lastRun.receipt === undefined && !localInstall.isError
+                  ? lastRun.error ?? 'the daemon recorded no reason'
+                  : null;
+                const retriable = (result !== null
+                  && (voiceLocalInstallIsRetriable(result.tts.state) || voiceLocalInstallIsRetriable(result.stt.state)))
+                  || failedWithoutReceipt !== null;
 
                 return (
                   <>
@@ -219,25 +233,25 @@ export function VoiceSettings() {
                     {needsSetup && !retriable && (
                       <Button
                         className="voice-settings-action"
-                        disabled={localInstall.isPending}
+                        disabled={busy}
                         onClick={() => localInstall.mutate()}
                       >
-                        {localInstall.isPending
+                        {busy
                           ? 'Installing…'
                           : `Set up local voice${typeof status.offerBytes === 'number' ? ` (~${formatBytes(status.offerBytes)})` : ''}`}
                       </Button>
                     )}
 
                     {/* Live per-component progress of the ACTIVE install run, from
-                        voice.local.status's installInProgress section (polled while
-                        the mutation is in flight). Absent when it is an older daemon, or the
-                        first poll has not landed yet, the 'Installing…' busy label above
+                        voice.local.status's installInProgress section, whatever started
+                        the run (read while it runs). Absent when it is an older daemon, or the
+                        first read has not landed yet, the 'Installing…' busy label above
                         stays the whole story. Bytes render only where the wire
                         genuinely carries them (completion boundaries; downloads
                         verify whole-file), never a fabricated live percentage. */}
-                    {localInstall.isPending && status.installInProgress && status.installInProgress.components.length > 0 && (
+                    {running && running.components.length > 0 && (
                       <ul className="voice-settings-local-progress" data-testid="voice-local-progress" role="status">
-                        {status.installInProgress.components.map((component) => (
+                        {running.components.map((component) => (
                           <li key={component.component} data-phase={component.phase}>
                             <span className="voice-settings-local-progress__name">{component.component}</span>
                             <span className="voice-settings-local-progress__phase">
@@ -260,11 +274,27 @@ export function VoiceSettings() {
                       <p className="voice-settings-hint" role="alert">{formatError(localInstall.error)}</p>
                     )}
 
+                    {failedWithoutReceipt !== null && (
+                      <div className="voice-settings-local-receipt" role="status">
+                        <p>{`The last install failed: ${failedWithoutReceipt}.`}</p>
+                        {needsSetup && (
+                          <Button
+                            className="voice-settings-action"
+                            disabled={busy}
+                            onClick={() => localInstall.mutate()}
+                          >
+                            {busy ? 'Installing…' : 'Retry'}
+                          </Button>
+                        )}
+                      </div>
+                    )}
+
                     {/* The install receipt. Rendered OUTSIDE the needs-setup gate so a
                         successful attempt's receipt survives the resting-state flip to
                         Installed (the whole point of a receipt). */}
                     {result !== null && (
                       <div className="voice-settings-local-receipt" role="status">
+                        {retriable && <p>The last install did not finish:</p>}
                         <p>
                           TTS ({result.tts.engine}): {voiceLocalInstallStateLabel(result.tts.state)}
                           {result.tts.reason ? `: ${result.tts.reason}` : ''}
@@ -286,10 +316,10 @@ export function VoiceSettings() {
                         {retriable && needsSetup && (
                           <Button
                             className="voice-settings-action"
-                            disabled={localInstall.isPending}
+                            disabled={busy}
                             onClick={() => localInstall.mutate()}
                           >
-                            {localInstall.isPending ? 'Installing…' : 'Retry'}
+                            {busy ? 'Installing…' : 'Retry'}
                           </Button>
                         )}
                       </div>

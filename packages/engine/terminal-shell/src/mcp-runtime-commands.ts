@@ -524,7 +524,8 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
         const server = serverFromValues(values);
         const scope = (values.scope || 'project') as McpConfigScope;
         try {
-          const result = await api.upsertServerConfig(shellPathsOf(ctx), scope, server);
+          // The owner's own line is his request: the server is his, not something the folder brought.
+          const result = await api.upsertServerConfig(shellPathsOf(ctx), scope, server, { byOwner: ctx.invokedByModel !== true });
           const connected = api.listServerSecurity().find((entry) => entry.name === server.name)?.connected ?? false;
           return [
             `Kept in ${scope} MCP config ${result.path}; ${connected ? 'connected' : 'saved, but not connected yet (/mcp servers shows why)'}.`,
@@ -643,8 +644,8 @@ export const MCP_COMMAND: CommandDescription<McpCommandContext> = {
       id: 'accept-tools', label: 'Accept a server\'s changed tools', word: 'accept-tools',
       inputs: [{ ...SERVER, help: 'Servers whose tools are held back', choices: { list: MCP_QUARANTINED_SERVERS } }],
       sentence: '{server}\'s changed tools will be accepted and offered again {lasts}.',
-      done: 'Accepted {server}\'s tools.',
-      touches: 'this-machine', lasts: 'session', risk: 'loosens-a-protection', undoneBy: 'hold-back',
+      done: 'Accepted {server}\'s changed tools.',
+      touches: 'this-machine', lasts: 'session', risk: 'loosens-a-protection', riskDone: 'its tools are no longer held back', undoneBy: 'hold-back',
       ownerOnly: { reason: 'it offers tools that changed since they were last accepted', instead: 'Ask the owner to accept them from /mcp.' },
       operator: { method: 'mcp.servers.quarantine.accept', fields: { serverName: 'server' } },
       example: { server: 'github' },

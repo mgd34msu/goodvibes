@@ -4,7 +4,7 @@ import { registerDevicesCommand } from '@goodvibes/engine/terminal-shell/devices
 import { askToTurnOnRelay } from '@goodvibes/engine/terminal-shell/relay-pairing-ask';
 import { CHANNELS_LIST } from '@goodvibes/engine/terminal-shell/channels-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-import { mintAgentDevicePairing } from '../../agent/device-pairing.ts';
+import { mintAgentDevicePairing, pairingLinkCopy } from '../../agent/device-pairing.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import {
   formatRelayStatus, listRelayCodes, mintRelayPairing, readRelayStatus, relayHostFailure, relayPairingOutcome, revokeRelayCode,
@@ -78,9 +78,14 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
           tone: 'warning',
         })
         : undefined;
-      const outcome = await mintAgentDevicePairing(hostVerbs(ctx), { ...(name ? { name } : {}), pairCommand: '/devices pair device', ...(askToServe ? { askToServe } : {}) });
+      // The conversation keeps every line it prints, so the link and the sign-in code are printed masked
+      // (the address readable), as one block whose copy key copies the real link.
+      const printBlock = ctx.printBlock;
+      const outcome = await mintAgentDevicePairing(hostVerbs(ctx), { ...(name ? { name } : {}), pairCommand: '/devices pair device', ...(askToServe ? { askToServe } : {}), mask: true });
       if (!outcome.ok) throw commandRefusal(outcome.error, outcome.next);
-      return outcome.text;
+      if (!printBlock) return outcome.text;
+      printBlock(outcome.text, pairingLinkCopy(outcome));
+      return undefined;
     },
     pairHost: async (ctx, request) => await runAgentHostPair(ctx, { apply: request.apply, name: request.name }, 'devices'),
     hostStatus: async (ctx) => await readAgentHostPairingStatus(ctx),

@@ -73,17 +73,15 @@ function readBundleFile(sourcePath: string): unknown {
 }
 
 /**
- * Applying changes that can loosen security or hold a credential shows them
- * and asks first; what is applied is exactly what was shown (this one read of
- * the bundle, or the stage id shown). Anything else applies at once.
+ * The owner's own command is the request: changes that loosen security or hold
+ * a credential are applied at once like any other, and said with the result
+ * (the rollback token the apply prints puts the previous values back). What is
+ * applied is exactly what was read (this one read of the bundle, or the stage
+ * id shown).
  */
 async function askBeforeSecurityChanges(ctx: CommandContext, changes: readonly PlannedChange[]): Promise<void> {
   if (!changes.some(isSecurityBearingChange)) return;
-  const body = [...describeSetupTransferChanges(changes), 'Each applied key is locked as managed; /managed rollback <token> puts the previous values back.'].join('\n');
-  if (!ctx.confirm) throw commandRefusal(`These managed settings change security, so they are applied only where you can be asked:\n${body}`);
-  if (!(await ctx.confirm({ title: 'Apply managed settings that change security?', body, confirmLabel: 'Apply', cancelLabel: 'Back', tone: 'danger' }))) {
-    throw commandRefusal('Not applied: nothing was changed.');
-  }
+  ctx.print(['These managed settings change security:', ...describeSetupTransferChanges(changes), 'Each applied key is locked as managed; /managed rollback <token> puts the previous values back.'].join('\n'));
 }
 
 function keysOf(text: string | undefined): ConfigKey[] {
@@ -204,9 +202,8 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
       },
       {
         id: 'apply', label: 'Apply a managed bundle', word: 'apply', inputs: [BUNDLE, ONLY_KEYS],
-        sentence: 'The settings in {path} are applied and locked as managed until you change it (or roll it back); changes that touch security are shown and asked about first.', done: '',
-        // It can loosen a protection; it asks its own question, showing exactly the security changes it read.
-        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true, undoneBy: 'rollback',
+        sentence: 'The settings in {path} are applied and locked as managed until you change it; changes that touch security are listed, and /managed rollback <token> puts the previous values back.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'rollback',
         ownerOnly: { reason: 'a managed bundle can change security settings on this machine', instead: 'Ask the owner to run /managed apply <file>.' },
         operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'managed/team.json' },
         async run(values, ctx) {
@@ -229,9 +226,8 @@ export function registerManagedRuntimeCommands(registry: CommandRegistry): void 
       },
       {
         id: 'apply-staged', label: 'Apply the staged bundle', word: 'apply-staged', inputs: [ONLY_KEYS],
-        sentence: 'The staged settings are applied and locked as managed until you change it (or roll it back); changes that touch security are shown and asked about first.', done: '',
-        // It can loosen a protection; it asks its own question, showing exactly the security changes staged.
-        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true, undoneBy: 'rollback',
+        sentence: 'The staged settings are applied and locked as managed until you change it; changes that touch security are listed, and /managed rollback <token> puts the previous values back.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'rollback',
         ownerOnly: { reason: 'a managed bundle can change security settings on this machine', instead: 'Ask the owner to run /managed apply-staged.' },
         operator: { terminalOnly: TERMINAL_ONLY }, example: {},
         async run(values, ctx) {

@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `655`
+- Methods: `656`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -154481,6 +154481,66 @@ Return the aggregate workspace file changes a session made, joined over its sess
     "files",
     "unifiedDiff",
     "stat"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `sessions.checkpoints.changed`
+
+A terminal program that runs its own session (the terminal app, the Agent) tells the daemon it made, pruned or removed a workspace checkpoint for that session, so clients subscribed to the daemon hear of it: the daemon announces it as the runtime event LIST_CHANGED with `list: "checkpoints"`, the `change` given and `checkpointId` as its `id`. Nothing is stored and nothing is read from disk; the notice only announces. The session must be one the daemon knows (registered with sessions.register): another id is refused 404 SESSION_NOT_FOUND and nothing is announced. A repeat announces again, which is harmless: a client reads the checkpoint list again.
+
+- Title: `Announce a Session Checkpoint Change`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `http`, `ws`
+- HTTP: none
+- Scopes: `write:sessions`
+- Emits events: `runtime.workspace`
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "change": {
+      "type": "string",
+      "enum": [
+        "created",
+        "changed",
+        "deleted"
+      ]
+    },
+    "checkpointId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "change"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "announced": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "announced"
   ],
   "additionalProperties": false
 }

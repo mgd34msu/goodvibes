@@ -405,7 +405,9 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     });
     disposalScope.registry.add('native legacy import', nativeImport.close);
     const nativeSubmission = createNativeWorkSubmissionHost({ projectRoot: workingDirectory, projectId: projectPlanningProjectId,
-      sessionId: `native-work:${projectPlanningProjectId}`, service: workLedgerOwner.service, authority: workLedgerOwner.authority, scopes: nativeScopes });
+      sessionId: `native-work:${projectPlanningProjectId}`, service: workLedgerOwner.service, authority: workLedgerOwner.authority, scopes: nativeScopes,
+      // The owner asked for the work: an unregistered workspace is registered as part of the request.
+      registerScope: async (root: string) => { await nativeScopes.add(root, { origin: 'work-request' }); } });
     disposalScope.registry.add('native work submission', nativeSubmission.close);
     registerNativeWorkSubmissionGatewayMethods(gatewayMethods, nativeSubmission);
     let nativeContinuationOwner: NativeConversationContinuationOwner | undefined;

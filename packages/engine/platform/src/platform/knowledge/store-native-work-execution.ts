@@ -294,6 +294,14 @@ export function createNativeWorkExecutionStorage(sqlite: SQLiteStore, projectId:
         throw new NativeWorkExecutionError('invalid');
       }
       if (!result || !('next' in result)) throw new NativeWorkExecutionError('invalid');
+      if (result.removeIntent === true) {
+        // Only an admission that admitted nothing is removed: no record, and the intent still admitting.
+        if (result.next !== null || result.nextIntent != null) throw new NativeWorkExecutionError('invalid');
+        if (current.record || current.intent?.state !== 'admitting') throw new NativeWorkExecutionError('conflict');
+        db.run('DELETE FROM native_work_execution_intents WHERE project_id=? AND attempt_id=?', [projectId, current.intent.target.attemptId]);
+        publishedOriginal = original;
+        return { changed: true, value: result.value };
+      }
       const next = result.next === null ? null : parseNativeWorkExecutionRecord(result.next, current.record ?? current.intent ?? original);
       const nextIntent = result.nextIntent == null ? null : parseNativeWorkExecutionIntent(result.nextIntent, current.intent ?? current.record ?? original);
       for (const item of [next, nextIntent]) {

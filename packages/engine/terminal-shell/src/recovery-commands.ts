@@ -105,12 +105,12 @@ export function resolveCheckpointRef(checkpoints: readonly WorkspaceCheckpoint[]
 const BUSY = 'A turn is still running, so restoring the checkpoint was not started and nothing changed. Stop it with Esc or let it finish, then retry.';
 
 /**
- * Restores the files of one checkpoint after the owner has seen what changes:
- * on a Changes preview where the app has one, otherwise in a question naming
- * the changed files. `--yes` typed by the owner answers in advance; from the
- * model it is ignored, so a model-run restore is always put to the owner.
- * Files only: the conversation is not touched. A safety checkpoint of the
- * current files is taken first, so the restore can itself be restored.
+ * Restores the files of one checkpoint. The owner's own command restores at
+ * once: a checkpoint of the current files is taken first, and the answer names
+ * it with the line that brings it back. A restore the model runs is put to the
+ * owner first, on a Changes preview where the app has one, otherwise in a
+ * question naming the changed files (`--yes` from the model is ignored). Files
+ * only: the conversation is not touched.
  */
 export async function restoreCheckpointFiles(
   context: CheckpointCommandContext,
@@ -131,8 +131,9 @@ export async function restoreCheckpointFiles(
     note = `Could not load the checkpoint diff: ${summarizeError(error)}`;
   }
   const question = `Restore the files of "${checkpoint.label}"? Files only: the conversation is unchanged, and the current files are kept in a safety checkpoint first.`;
-  const ownerAnswered = options.yes && context.invokedByModel !== true;
-  if (!ownerAnswered) {
+  // The owner's own command is the request: it restores at once, the state before it kept as a checkpoint
+  // he can restore. Only a restore the model asks for is put to him first.
+  if (context.invokedByModel === true) {
     let confirmed: boolean;
     if (context.previewChanges) {
       context.print(`Previewing checkpoint restore: "${checkpoint.label}" (files only). Enter or y restores, n or Esc cancels.`);
@@ -178,6 +179,11 @@ export async function restoreCheckpointFiles(
     context.renderRequest();
     throw commandRefusal(`Checkpoint only partly restored (${failed.length} path${failed.length === 1 ? '' : 's'} failed): ${names}. Files only; the conversation is unchanged.`, undefined, 'PARTIAL');
   }
-  options.record(`[Checkpoint] Restored files from checkpoint ${shortCheckpointId(checkpoint.id)} ("${checkpoint.label}"). Files only: the conversation is unchanged.`);
+  const before = restored.safetyCheckpointId;
+  const beforeLabel = before ? (await manager.list().catch(() => [])).find((entry) => entry.id === before)?.label : undefined;
+  options.record([
+    `[Checkpoint] Restored "${checkpoint.label}" (${shortCheckpointId(checkpoint.id)}). Files only: the conversation is unchanged.`,
+    ...(before ? [`The state before this is kept as "${beforeLabel ?? shortCheckpointId(before)}" (${shortCheckpointId(before)}): /checkpoint restore ${shortCheckpointId(before)} brings it back.`] : []),
+  ].join(' '));
   context.renderRequest();
 }

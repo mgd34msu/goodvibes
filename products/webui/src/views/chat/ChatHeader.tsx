@@ -10,7 +10,6 @@ import { Pencil, RefreshCw, Search } from 'lucide-react';
 import type { KeyboardEvent } from 'react';
 import { Button } from '../../components/ui/Button';
 import { IconButton } from '../../components/ui/IconButton';
-import { formatShortcut } from '../../lib/shortcut-keys';
 
 export interface ChatTitleProps {
   activeSessionId: string;
@@ -63,12 +62,14 @@ export function ChatTitle({
   );
 }
 
-/** The header's find button: opens the glass find bar (also Ctrl F). */
+/**
+ * The header's find button: opens the glass find bar. It names no key: Ctrl+F opens this bar
+ * only in a chat long enough that some messages are not mounted; elsewhere it is the browser's.
+ */
 export function ChatFindButton({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   return (
     <IconButton
       label={open ? 'Close find' : 'Find in chats'}
-      shortcut={formatShortcut('mod+f')}
       icon={<Search />}
       aria-pressed={open}
       onClick={onToggle}

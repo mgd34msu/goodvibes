@@ -76,7 +76,7 @@ A schedule is named by its id, its name or the start of its id (one that names m
 | `--tool <name>` | Allow only these tools (repeat the option). A run limited this way does not get the mail and calendar tool unless `--tool google` is given. |
 | `--deliver <channel>` | Where each run's answer goes: a channel written as in settings, `telegram`, `slack:C123` and so on (`telegram` alone uses `surfaces.telegram.defaultChatId`). Without it the answer goes to the owner inbox. |
 | `--external-source <kind>` | Marks where outside content comes from. |
-| `--allow-unsafe-external-content` | May act on content from outside sources ("Yes" loosens a protection: it asks first, and a model's line is refused). |
+| `--allow-unsafe-external-content` | May act on content from outside sources ("Yes" loosens a protection: only your own line gives it, a model's line is refused; set it back to "No" to undo it). |
 | `--paused` | Kept, but runs only once resumed. |
 | `--light-context` | Run with a small context. |
 | `--tz <zone>`, `--stagger <duration>` | For a pattern, a description or a date and time without a zone: its time zone, and a spread of the start (such as `5m`). |
@@ -107,7 +107,7 @@ Failures:
 
 An Agent routine becomes a schedule on the connected host with `/routines promote <routine> --how <cron|every|at> --when <pattern, interval or time> [--timezone <tz>] [--name <name>] [--delivery-channel <channel[:route]>]... [--delivery-route <route>]... [--delivery-webhook <url>]... [--delivery-link <name>]... [--provider <id>] [--model <id>] [--disabled]` (or the guided form, "Run a routine on a schedule"); `/routines receipts`, `/routines receipt <receipt>` and `/routines reconcile` read what promotion recorded. From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
 
-A schedule's runs, in both programs, are `/schedule` actions: `run <schedule>`, `pause <schedule>`, `resume <schedule>`, `stop-run <run>` (asks first) and `retry-run <run>`.
+A schedule's runs, in both programs, are `/schedule` actions: `run <schedule>`, `pause <schedule>`, `resume <schedule>`, `stop-run <run>` (stops it; `retry-run` runs it again) and `retry-run <run>`.
 
 ### The model's `schedule` tool
 
@@ -339,11 +339,11 @@ Agent and workstream outcomes, approvals waiting and budget alerts are announced
 
 ```text
 /notify add https://ntfy.sh/<your-topic>
-/notify list            each address shown by its site; --show reveals them (asks first, the owner's only)
+/notify list            each address shown by its site; --show reveals them (the owner's only)
 /notify remove 1
-/notify clear           asks first
-/notify test            asks first
-/notify send <message>  asks first
+/notify clear           removes every address for good (/notify add puts one back)
+/notify test            sends a test message to each address (it cannot be called back)
+/notify send <message>  sends it at once, as typed (it cannot be called back)
 /notify failed          notifications this app could not deliver
 /notify resend <id|all> [--to-current]
 /notifications          open the notification history view
@@ -445,7 +445,7 @@ Status failures and fixes:
 | `user` | `surfaces.email.user` | Login name. |
 | `from` | `surfaces.email.from` | From address. |
 
-The settings that decide where and as whom the password is presented (the hosts, ports, TLS switches and user) loosen a protection when changed: `/mail set` asks first for them, and only the owner's own typing counts. `/mail password` is the owner's only.
+The settings that decide where and as whom the password is presented (the hosts, ports, TLS switches and user) loosen a protection when changed: only the owner's own `/mail set` changes them (`/mail set` again puts the old value back). `/mail password` is the owner's only.
 
 Worked example (Fastmail):
 
@@ -533,18 +533,18 @@ The Agent keeps local events, subscribes to ICS feeds, and connects Google or Mi
 /calendar all
 /calendar get <event>
 /calendar add --title "Dentist" --start 2026-12-03T15:00:00 --end 2026-12-03T16:00:00 --location "Main St"
-/calendar delete <event>                          asks first
+/calendar delete <event>                          deletes it for good (/calendar add makes it again)
 /calendar import <path.ics>
 /calendar export [<path.ics>]
 /calendar subscribe <ics-url> --name work --every 30 [--allow-private-host]
 /calendar subscriptions
 /calendar refresh [<feed>]
-/calendar unsubscribe <feed>                      asks first
+/calendar unsubscribe <feed>                      stops reading the feed (/calendar subscribe brings it back)
 /calendar connect google
 /calendar connect outlook --with device
 /calendar connect google --with code              asks for the address the browser landed on, masked
 /calendar accounts
-/calendar disconnect <google|outlook>             asks first
+/calendar disconnect <google|outlook>             removes the stored sign-in (/calendar connect brings it back)
 ```
 
 `/calendar change` and `/calendar status` are the terminal app's (the daemon's calendar) and are refused here saying so.
@@ -719,7 +719,7 @@ Each surface has an ingress policy.
 /channels set-rules matrix --allow-users none
 ```
 
-`/channels set-rules` asks first and counts only when the owner types it (it decides who may reach the assistant). Options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention`, `--open` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channels set-rules telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
+`/channels set-rules` replaces the rules at once and counts only when the owner types it (`set-rules` again changes them back) (it decides who may reach the assistant). Options: `--enabled`, `--require-mention`, `--allow-dms`, `--allow-groups`, `--allow-threads`, `--commands-without-mention`, `--open` take `on` or `off`; `--dm-policy` and `--group-policy` take `allow`, `deny` or `inherit`; `--allow-users`, `--allow-channels`, `--allow-group-ids`, `--allowed-commands` take a comma list or `none`. A list replaces the whole stored list on every surface, so to remove one admitted sender set the list again without him (for example `/channels set-rules telegram --allow-users <your-id>`); include yourself, or you lock yourself out. `--open on` makes a shared channel: while every list is empty, every sender is admitted and no owner claim is raised (off by default); everyone on it talks as a guest. The operator method `channels.policies.update` takes the same field as `open`, and `channels.policies.list` reports it.
 
 A message names a command only when its first word is written as one (`/status`, `!status`, `/status@yourbot`); `allowedCommands` limits those.
 
@@ -740,7 +740,7 @@ Only the channel's owner controls runs: a guest (anyone else the channel admits)
 /channels status          each channel, on or off, ready or not
 /channels setup <channel> what a channel needs (no value shown)
 /channels doctor <channel>  the daemon's checks and the repairs it offers
-/channels test <channel>  a real test message through the daemon (asks first)
+/channels test <channel>  a real test message through the daemon (sent at once; it cannot be called back)
 /channels accounts        the channel accounts, configured, linked and signed in
 /channels profiles        the model, provider and permission mode each channel's sessions get
 /channels profile <channel> [<conversation>]
@@ -1124,7 +1124,7 @@ Purchases are off, and every budget is `0`. With the defaults, a checkout that a
 | Remove a card | `/payments remove-card <card>` (picked from the daemon's cards) | cannot be undone |
 | Set your billing or shipping address | `/payments address <billing\|shipping> [--name ...] [--line1 ...] [--line2 ...] [--city ...] [--region ...] [--postal-code ...] [--country ...]` (blank keeps what is set) | |
 
-Every action is the owner's own: a line a model runs is refused, naming the action. Each needs a paired owner credential with the `read:payments` and `write:payments` scopes. An action marked "spends money" or "cannot be undone" asks first, with the sentence that says what it does. `/payments address` in the terminal app writes this machine's settings; in the Agent it writes the connected host's settings.
+Every action is the owner's own: a line a model runs is refused, naming the action. Each needs a paired owner credential with the `read:payments` and `write:payments` scopes. An action marked "spends money" or "cannot be undone" runs at once when you type it, and its result says what it did (`This spent money.`, `This cannot be undone.`). `/payments address` in the terminal app writes this machine's settings; in the Agent it writes the connected host's settings.
 
 `/payments approve <shop> --most <amount> <item...>`: the shop's domain, the most it may cost (in `payments.currency`), and the item in your words. The approval is used once, for a purchase matching all three that begins within five minutes; such a purchase needs no further answer up to that amount. Approving the same shop, item and amount again while the first approval is unused returns that approval rather than making a second. When recording an approval cannot be confirmed, the answer is `OUTCOME_UNKNOWN` ("The approval may have been recorded ..."), and the web UI says it may have been approved instead of "Nothing was approved". The approval is for that amount in the currency `payments.currency` named when it was given (the reply names it): a begin after `payments.currency` changed is a different purchase, does not spend it, and with `payments.confirmEveryPurchase` on is refused saying the merchant, item, amount or currency differs.
 
@@ -1233,7 +1233,7 @@ Prerequisites: the `gh` CLI installed and signed in (`gh auth login`) on the dae
 /ci watch my-org/my-repo@main slack:C0123456 --fix-session
 /ci watches
 /ci run <watch>
-/ci unwatch <watch>                    asks first
+/ci unwatch <watch>                    stops the watch (/ci watch sets it up again)
 ```
 
 ```sh

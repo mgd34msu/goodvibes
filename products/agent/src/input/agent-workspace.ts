@@ -8,7 +8,7 @@ import { activateAgentWorkspaceSelection } from './agent-workspace-activation.ts
 import { AGENT_WORKSPACE_CATEGORIES } from './agent-workspace-categories.ts';
 import { jumpAgentWorkspaceSelection, moveAgentWorkspaceSelection, selectAgentWorkspaceCategory } from './agent-workspace-navigation.ts';
 import { appendAgentWorkspaceActionSearchText, backspaceAgentWorkspaceActionSearch, beginAgentWorkspaceActionSearch, clearAgentWorkspaceActionSearch, commitAgentWorkspaceActionSearchSelection, searchAgentWorkspaceActions } from './agent-workspace-search.ts';
-import { agentWorkspaceTuiSettingsImportHasChanges, applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, describeAgentWorkspaceTuiSettingsImportPlan, readAgentWorkspaceSettingFacts, type AgentWorkspaceSettingFacts, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
+import { applyAgentWorkspaceSettingValue, applyAgentWorkspaceTuiSettingsImport, buildAgentWorkspaceSettingActionDisplay, buildAgentWorkspaceSettingActionEffect, readAgentWorkspaceSettingFacts, type AgentWorkspaceSettingFacts, isAgentWorkspaceActionVisible, planAgentWorkspaceTuiSettingsImport, type AgentWorkspaceSettingActionDisplay, type TuiSettingsImportPlan } from './agent-workspace-settings.ts';
 import { buildAgentWorkspaceSetupPart } from './agent-workspace-snapshot.ts';
 import { checkAgentWorkspaceHostSetup } from './agent-workspace-setup-host-status.ts';
 import { resolveConnectedHostConnection } from './connected-host-routes.ts';
@@ -733,33 +733,12 @@ export class AgentWorkspace {
   }
 
   /**
-   * The import row reads the sources once into a plan and shows it in the
-   * confirm dialog; nothing is written until the owner confirms, and then
-   * exactly that plan is.
+   * The import row is the request: it reads the sources once into a plan and
+   * imports exactly that plan at once. The answer lists what changed and names
+   * the copy of the settings from before, which puts them back.
    */
   importTuiSettings(requestRender?: () => void): void {
-    const plan = planAgentWorkspaceTuiSettingsImport(this.context);
-    if (!plan || !agentWorkspaceTuiSettingsImportHasChanges(plan)) {
-      void this.applyTuiSettingsImport(plan, requestRender);
-      return;
-    }
-    const detail = describeAgentWorkspaceTuiSettingsImportPlan(plan);
-    this.status = 'Review the GoodVibes settings import.';
-    this.lastActionResult = { kind: 'guidance', title: 'GoodVibes settings import: what would change', detail, safety: 'safe' };
-    const confirm = this.context?.confirm;
-    if (!confirm) {
-      this.status = 'Nothing was imported: this surface cannot ask before importing.';
-      return;
-    }
-    void confirm({ title: 'Import GoodVibes settings', body: detail, confirmLabel: 'Import them', cancelLabel: 'Leave as is', tone: 'primary' }).then((go) => {
-      if (!go) {
-        this.status = 'GoodVibes settings import left as is; nothing was written.';
-        this.lastActionResult = null;
-        requestRender?.();
-        return;
-      }
-      void this.applyTuiSettingsImport(plan, requestRender);
-    });
+    void this.applyTuiSettingsImport(planAgentWorkspaceTuiSettingsImport(this.context), requestRender);
   }
 
   private async applySettingValue(setting: AgentConfigSetting, value: unknown, requestRender?: () => void): Promise<void> {

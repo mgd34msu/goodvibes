@@ -104,14 +104,14 @@ function firstRunWidth(screenW: number): number {
   return screenW < NARROW_MODAL_BREAKPOINT ? standardModalWidth(screenW) : Math.min(76, standardModalWidth(screenW));
 }
 
-function frame(screenW: number, screenH: number, title: string, step: string, contentRows: number, hints: readonly KitHint[]): ModalFrame {
+function frame(screenW: number, screenH: number, title: string, step: string, contentRows: number, hints: readonly KitHint[], width = firstRunWidth(screenW)): ModalFrame {
   const t = activeTokens();
   const f = beginModal(screenW, screenH, {
     title,
     titleGlyph: { char: '', fg: t.text },
     escKey: false,
     hints,
-    width: firstRunWidth(screenW),
+    width,
     height: contentRows + 6,
     center: true,
   });
@@ -318,20 +318,34 @@ const DECIDE_CHOICES: readonly { readonly name: string; readonly how: string }[]
   { name: 'Ask me', how: 'GoodVibes stops and asks you' },
   { name: 'Another decision model…', how: 'Cloudflare and others, in Settings' },
 ];
+/** The name column of "Who decides": its longest name and two spaces. */
+const DECIDE_COLUMN = Math.max(...DECIDE_CHOICES.map((choice) => getDisplayWidth(choice.name))) + 2;
+/** A choice row's width: the name column and the longest description. */
+const DECIDE_ROW = DECIDE_COLUMN + Math.max(...DECIDE_CHOICES.map((choice) => getDisplayWidth(choice.how)));
 
 export function renderDecideStep(screenW: number, screenH: number, view: DecideStepView): SurfaceLayer {
   const t = activeTokens();
-  const width = firstRunWidth(screenW);
+  // Wide enough for a whole choice row inside its selection bar (which runs from three columns
+  // in to the frame's right edge: the text's width less three), where the screen has the room.
+  const width = Math.min(standardModalWidth(screenW), Math.max(firstRunWidth(screenW), 8 + 1 + 3 + DECIDE_ROW));
   const inner = width - 8 - 1;
   const lines: StyledSegment[][] = [];
   const wrap = (segments: StyledSegment[]): void => { lines.push(...wrapSegments(segments, inner)); };
   let hints: KitHint[];
-  let listStart = -1;
+  // Which choice each line belongs to: a choice's text that does not fit beside its name goes on under it.
+  const choiceOfLine = new Map<number, number>();
   if (view.kind === 'decide') {
     wrap([{ text: 'Who decides when GoodVibes would otherwise stop and ask you?' }]);
     lines.push([]);
-    listStart = lines.length;
-    for (const choice of DECIDE_CHOICES) lines.push([{ text: choice.name.padEnd(NAME_COLUMN) }, { text: choice.how, tone: 'dim' }]);
+    // A row runs from three columns in to the frame's right edge, where its selection bar ends; a
+    // description that does not fit there (a narrow screen) goes on under it.
+    const howRoom = Math.max(8, inner - 3 - DECIDE_COLUMN);
+    DECIDE_CHOICES.forEach((choice, index) => {
+      wrapLines(choice.how, howRoom).forEach((part, k) => {
+        choiceOfLine.set(lines.length, index);
+        lines.push([{ text: (k === 0 ? choice.name : '').padEnd(DECIDE_COLUMN) }, { text: part, tone: 'dim' }]);
+      });
+    });
     lines.push([]);
     wrap([{ text: 'Chosen once; change it any time in /settings (When GoodVibes asks).', tone: 'dim' }]);
     if (view.error) { lines.push([]); lines.push(...wrapSegments([{ text: '✕', tone: 'bad' }, { text: ` ${view.error}` }], inner)); }
@@ -347,13 +361,13 @@ export function renderDecideStep(screenW: number, screenH: number, view: DecideS
     hints = [['⏎', 'save and check'], BACK_HINT];
   }
   // The only step first run shows (the model was taken without asking, or was ready): no step count.
-  const f = frame(screenW, screenH, view.kind === 'decide' ? 'Who decides' : 'Jev decides', view.only ? '' : `3 of ${view.total}`, lines.length, hints);
+  const f = frame(screenW, screenH, view.kind === 'decide' ? 'Who decides' : 'Jev decides', view.only ? '' : `3 of ${view.total}`, lines.length, hints, width);
   const x0 = f.l + 1;
   let y = f.top;
   lines.forEach((segments, index) => {
     if (y > f.bottom) return;
-    const row = listStart >= 0 ? index - listStart : -1;
-    if (view.kind === 'decide' && row >= 0 && row < DECIDE_CHOICES.length) {
+    const row = choiceOfLine.get(index);
+    if (view.kind === 'decide' && row !== undefined) {
       if (row === view.selected) {
         f.canvas.grad(x0 + 2, y, f.r - x0 - 1, t.brand, t.brandEnd);
         let x = x0 + 3;

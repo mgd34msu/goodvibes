@@ -5,12 +5,13 @@
  * line the command accepts.
  *
  * Grammar: `/name word [first] [second] [--option value | --switch]... [-- tail...]`.
- * The action word is compared case-folded; `--yes` is the owner's answer to the
- * question in advance and is never a value.
+ * The action word is compared case-folded; `--yes` is never a value (a line the
+ * owner typed in full asks nothing; on a model's line it is ignored).
  */
 import { quoteSlashCommandArg } from '../slash-command-parser.js';
 import {
   LASTS_WORDS,
+  RISK_DONE_WORDS,
   RISK_WORDS,
   type ActionDescription,
   type ActionRisk,
@@ -376,6 +377,16 @@ export function actionSubmitLabel(action: ActionShape, values: ActionValues): st
   if (effectiveRisk(action, values) !== 'spends-money') return button;
   const money = action.inputs.find((input) => input.kind === 'money' && values[input.id]);
   return money ? `${button} (${money.label.toLowerCase()} ${values[money.id]})` : button;
+}
+
+/**
+ * What the risk did, said with the result of an action that ran ("This loosened
+ * a protection: its tools are no longer held back."); empty for no risk.
+ */
+export function actionRiskDoneLine(action: ActionShape & Pick<ActionDescription<never>, 'riskDone'>, values: ActionValues): string {
+  const risk = effectiveRisk(action, values);
+  if (risk === 'none') return '';
+  return `This ${RISK_DONE_WORDS[risk]}${action.riskDone ? `: ${fillSentence(action.riskDone, values, '')}` : ''}.`;
 }
 
 /** What submitting does, in the words the typed line's question uses: the sentence, then its risk. */

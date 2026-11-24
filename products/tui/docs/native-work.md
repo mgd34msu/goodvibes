@@ -40,8 +40,8 @@ The goal and the criteria are kept exactly as written: spaces, line breaks, orde
 A request is saved on this machine before it is sent (`native-work-submission.json`, in the program's own state folder; it holds no token), so a request whose answer was lost can be recovered:
 
 - `/work submission` asks the host whether it has the request, and sends nothing.
-- `/work submission-retry` asks first; only when the host says it does not have it is the same request sent again (the host keeps it once).
-- `/work submission-discard` asks first; when the host does not have it, the saved request is dropped so a corrected one can be sent.
+- `/work submission-retry` runs at once; only when the host says it does not have it is the same request sent again (the host keeps it once).
+- `/work submission-discard` runs at once; when the host does not have it, the saved request is dropped for good so a corrected one can be sent (`/work submit-file` sends it again).
 
 A saved request is tied to the daemon, folder, project and signed-in person it was made for: another one never sends it. It is removed once the host has confirmed it. A saved file that is damaged, too large or cannot be confirmed sends nothing.
 

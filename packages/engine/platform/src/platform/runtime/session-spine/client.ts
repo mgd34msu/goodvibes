@@ -370,6 +370,27 @@ export class SessionSpineClient {
     return new Set(this.records.keys());
   }
 
+  private readonly registeredListeners = new Set<(sessionId: string) => void>();
+
+  /**
+   * Called each time the daemon applies a register or reopen of a session (it holds the
+   * session from then on), with the spine online. Returns the unsubscribe.
+   */
+  onRegistered(listener: (sessionId: string) => void): () => void {
+    this.registeredListeners.add(listener);
+    return () => { this.registeredListeners.delete(listener); };
+  }
+
+  private noteRegistered(sessionId: string): void {
+    for (const listener of [...this.registeredListeners]) {
+      try {
+        listener(sessionId);
+      } catch (error) {
+        this.log.debug('session spine: a registered listener threw', { error: errorMessage(error) });
+      }
+    }
+  }
+
   /**
    * DORMANT-MODE activation: attach the transport once a compatible external daemon
    * has been adopted. Flushes anything queued while dormant, starts the keepalive.
@@ -625,6 +646,7 @@ export class SessionSpineClient {
         this.reachability = 'online';
         this.lastRefusal = null;
         this.registeredOn.set(input.sessionId, transport.targetId?.() ?? null);
+        this.noteRegistered(input.sessionId);
         await this.flush();
       } else if (result.outcome === 'offline') {
         this.reachability = 'offline';
@@ -782,6 +804,7 @@ export class SessionSpineClient {
             }
             if (result.outcome === 'ok') {
               if (!detached) this.reachability = 'online';
+              if (!detached && op.type === 'register') this.noteRegistered(op.sessionId);
             }
             // A durable refusal is dropped (never retried forever on the live path) but
             // is not "taken": a fold whose ops were refused must not write its marker.

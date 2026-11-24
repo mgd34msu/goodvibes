@@ -81,6 +81,8 @@ export interface EmbeddedSessionInput {
 /** What the agent working on one submitted input did, in the order it happened. */
 export type EmbeddedRunEvent =
   | { readonly type: 'text'; readonly text: string }
+  /** A line the agent wrote for the person about its run, such as why its answer is late (`Provider error, retrying in 5s…`). */
+  | { readonly type: 'progress'; readonly text: string }
   | { readonly type: 'tool-started'; readonly callId: string; readonly tool: string }
   | { readonly type: 'tool-settled'; readonly callId: string; readonly tool: string; readonly ok: boolean; readonly error?: string | undefined };
 
@@ -124,10 +126,10 @@ export interface EmbeddedSession {
   /**
    * Submit input to the session. Returns the broker's submission record and a
    * `completion` handle on the work it started. When the broker answers in
-   * spawn mode (nothing is running for the input), the text starts a contract
-   * in this session's workspace and the record's `activeAgentId` is the
-   * contract's owner agent, bound to the session; the handle follows that
-   * agent's stream and terminal event.
+   * spawn mode (nothing is running for the input), one agent starts in this
+   * session's workspace to answer it and the record's `activeAgentId` is that
+   * agent, bound to the session; the handle follows its tool calls and its
+   * terminal event.
    */
   submit(input: string | EmbeddedSessionInput): Promise<EmbeddedSubmission>;
   /**
@@ -156,8 +158,6 @@ interface Member {
   readonly agentIds: Set<string>;
   /** Shared sessions this session's submissions went to; a contract's unit agents carry the one that started it. */
   readonly sessionIds: Set<string>;
-  /** Contracts this session's submissions started; their unit agents ask under their own ids. */
-  readonly contractIds: Set<string>;
   /** Runs still being followed; stopping the session ends each as cancelled. */
   readonly liveRuns: Set<RunWatch>;
 }
@@ -232,7 +232,7 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
   const daemon = running.find((candidate) => fits(candidate, options, workspace)) ?? startDaemon(home, workspace, options);
   const member: Member = {
     workspace, requestPermission: options.requestPermission,
-    agentIds: new Set(), sessionIds: new Set(), contractIds: new Set(), liveRuns: new Set(),
+    agentIds: new Set(), sessionIds: new Set(), liveRuns: new Set(),
   };
   daemon.members.add(member);
 
@@ -351,43 +351,34 @@ export async function createEmbeddedSession(options: EmbedSessionOptions): Promi
             ? watch.follow(agentId)
             : watch.notStarted(submission.state, notStartedReason(submission.mode)) };
         }
-        // Spawn mode: nothing is running for this input yet. The submitted text
-        // is the ask of a new contract (contract runner design 10.2), started
-        // through the daemon's contracts operator surface in this session's
-        // workspace, and its owner agent is bound to the session as the agent
-        // working on it.
-        let started: Awaited<ReturnType<typeof server.contracts.start>>;
+        // Spawn mode: nothing is running for this input yet. One agent answers
+        // it, in this session's workspace, with the session's conversation as
+        // its task, and is bound to the session as the agent working on it. Its
+        // own run is what the handle follows: its tool calls, its permission
+        // asks and how it ended, a model failure included.
+        let started: Awaited<ReturnType<typeof server.startSessionAgent>>;
         try {
-          started = await server.contracts.start({
-            ask: body,
+          started = await server.startSessionAgent({
             sessionId: submission.session.id,
-            ...(workspace === daemon.workingDir ? {} : { workspaceRoot: workspace }),
+            task: submission.task ?? body,
+            ...(workspace === daemon.workingDir ? {} : { workingDirectory: workspace }),
           });
         } catch (error) {
-          // The input was recorded before the contract was refused. Fail it so no
+          // The input was recorded before the agent was refused. Fail it so no
           // queued input is left that nothing will run and a retry does not double up.
           await sessions.failInput(submission.session.id, submission.input.id, error instanceof Error ? error.message : String(error)).catch(() => null);
           throw error;
         }
-        // Stopped while the contract was starting: stop already cancelled this session's work, so this contract is cancelled here.
+        member.agentIds.add(started.id);
+        // Stopped while the agent was starting: stop already cancelled this session's work, so this agent is cancelled here.
         if (stopped) {
-          const reason = 'The embedded session stopped before the input started.';
-          try { server.contracts.cancel(started.contract.id, reason); }
-          catch (error) {
-            logger.warn('createEmbeddedSession: a contract started as the session stopped could not be cancelled', {
-              contractId: started.contract.id,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          }
-          server.cancelAgent(started.ownerAgentId);
-          await sessions.failInput(submission.session.id, submission.input.id, reason).catch(() => null);
+          server.cancelAgent(started.id);
+          await sessions.failInput(submission.session.id, submission.input.id, 'The embedded session stopped before the input started.').catch(() => null);
           throw stoppedError();
         }
-        member.agentIds.add(started.ownerAgentId);
-        member.contractIds.add(started.contract.id);
-        const bound = await sessions.bindAgent(submission.session.id, started.ownerAgentId, submission.input.id);
-        return { ...submission, session: bound ?? submission.session, activeAgentId: started.ownerAgentId,
-          completion: watch.follow(started.ownerAgentId) };
+        const bound = await sessions.bindAgent(submission.session.id, started.id, submission.input.id);
+        return { ...submission, session: bound ?? submission.session, activeAgentId: started.id,
+          completion: watch.follow(started.id) };
       } catch (error) {
         watch.abandon();
         throw error;
@@ -457,8 +448,8 @@ async function releaseIfUnused(daemon: SharedDaemon): Promise<void> {
 /**
  * The session a pending approval belongs to: the one whose submissions went to
  * the approval's shared session; else the one whose submission started the
- * agent that asked, or started the contract that agent works on, or went to the
- * shared session that agent works for. Nothing else names a session: an ask
+ * agent that asked, or went to the shared session that agent works for (a
+ * contract that agent started carries it). Nothing else names a session: an ask
  * with no exact attribution is `undefined`, never guessed onto the session that
  * happens to be running or the only one.
  */
@@ -478,11 +469,7 @@ function memberForApproval(daemon: SharedDaemon, server: AgentOwnershipSource, a
   if (agentId !== undefined) {
     const owner = only((member) => member.agentIds.has(agentId));
     if (owner) return owner;
-    const ownership = server.agentOwnership(agentId);
-    const contractId = ownership?.contractId;
-    const sessionId = ownership?.sessionId;
-    const byContract = contractId === undefined ? undefined : only((member) => member.contractIds.has(contractId));
-    if (byContract) return byContract;
+    const sessionId = server.agentOwnership(agentId)?.sessionId;
     const byAgentSession = sessionId === undefined ? undefined : only((member) => member.sessionIds.has(sessionId));
     if (byAgentSession) return byAgentSession;
   }
@@ -623,6 +610,7 @@ function watchRun(bus: RuntimeEventBus, live: Set<RunWatch>): RunWatch {
       if (event.agentId !== agentId) return;
       switch (event.type) {
         case 'AGENT_STREAM_DELTA': if (event.content) publish({ type: 'text', text: event.content }); return;
+        case 'AGENT_PROGRESS': if (event.audience === 'owner' && event.progress) publish({ type: 'progress', text: event.progress }); return;
         case 'AGENT_AWAITING_TOOL': toolStarted(event.callId, event.tool); return;
         case 'AGENT_COMPLETED': watch.end({ outcome: 'completed', agentId, output: event.output ?? '' }); return;
         case 'AGENT_FAILED': watch.end({ outcome: 'failed', agentId, error: event.error }); return;

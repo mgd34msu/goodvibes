@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.4.8",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 655 cataloged methods: 536 with dedicated REST bindings, 119 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 656 cataloged methods: 536 with dedicated REST bindings, 120 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -172847,6 +172847,7 @@
           "rewind.plan",
           "rewind.undo",
           "sessions.changes.get",
+          "sessions.checkpoints.changed",
           "sessions.hosted.attach",
           "sessions.hosted.create",
           "sessions.hosted.detach",
@@ -177612,6 +177613,14 @@
       "id": "sessions.changes.get",
       "category": "sessions",
       "access": "authenticated",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "sessions.checkpoints.changed",
+      "category": "sessions",
+      "access": "admin",
       "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"

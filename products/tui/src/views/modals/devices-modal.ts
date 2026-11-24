@@ -133,7 +133,8 @@ class DevicesModalSurface implements ConfigModalSurface {
 
     return {
       title: 'Paired Devices',
-      tabs: [{ id: 'devices', label: 'Devices', rows, hints: ['r rename', 'x revoke', 'm migrate off shared', 's revoke shared', ...(this.minted ? ['v reveal minted token', ...(this.deps.copyToClipboard ? ['c copy it'] : [])] : [])] }],
+      // The footer's keys are the actions' own hints (each shown only when it applies); a tab hint list here drew them twice.
+      tabs: [{ id: 'devices', label: 'Devices', rows }],
     };
   }
 

@@ -57,6 +57,8 @@ export interface ConfigModalRenderModel {
   readonly scroll: { readonly offset: number; readonly total: number; readonly visible: number };
   /** The always-live search row: the query and a truthful match count over the active tab's selectable rows. */
   readonly search: { readonly query: string; readonly matched: number; readonly total: number };
+  /** The rows are drawn with every row of the frame: no search row, blank rows or status (ConfigModalView.whole). */
+  readonly whole: boolean;
 }
 
 const DEFAULT_VISIBLE_ROWS = 10;
@@ -211,6 +213,7 @@ export class ConfigModal {
 
   setViewportRows(rows: number): void {
     this.visibleRows = Math.max(3, rows);
+    this.surface?.onViewportRows?.(this.visibleRows);
     this._clampScroll();
   }
 
@@ -514,7 +517,7 @@ export class ConfigModal {
     }
     const frozen = this.frozenView;
     if (!frozen) {
-      return { title: '', tabs: [], header: [], rows: [], hints: [], confirmPending: false, scroll: { offset: 0, total: 0, visible: this.visibleRows }, search: { query: this.filterQuery, matched: 0, total: 0 } };
+      return { title: '', tabs: [], header: [], rows: [], hints: [], confirmPending: false, scroll: { offset: 0, total: 0, visible: this.visibleRows }, search: { query: this.filterQuery, matched: 0, total: 0 }, whole: false };
     }
 
     const tabs: ConfigModalRenderTab[] = frozen.tabs.map((ft) => {
@@ -577,6 +580,7 @@ export class ConfigModal {
         matched: countSelectable(frozenRows),
         total: countSelectable(unfilteredTab?.rows),
       },
+      whole: (live ?? frozen).whole === true,
     };
   }
 

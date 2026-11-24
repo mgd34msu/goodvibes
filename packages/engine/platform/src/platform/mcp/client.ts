@@ -267,6 +267,13 @@ export class McpClient {
 
   get isConnected(): boolean { return this.#isConnected(); }
 
+  /**
+   * Forget the tool catalog, as a `tools/list_changed` notification does, so
+   * the next listing asks the server again (accepting a held-back server's
+   * tools reads them again).
+   */
+  forgetToolCatalog(): void { this.#invalidateToolCatalog(); }
+
   #isConnected(): boolean {
     if (this.http) return this.http.isOpen;
     if (!this.proc) return false;

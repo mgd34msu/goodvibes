@@ -82,12 +82,12 @@ export function drawSplashAdditions(viewport: readonly Line[], height: number, w
       { text: 'The terminal app on this computer has settings.', tone: 'dim' },
       { text: ' ' },
       { text: '⏎', chip: true },
-      { text: ` brings them over, showing what would change first (later: ${view.importCommand}).`, tone: 'dim' },
+      { text: ` brings them over and says what changed (later: ${view.importCommand}).`, tone: 'dim' },
     ] : [
       { text: 'The terminal app on this computer has settings.', tone: 'dim' },
       { text: ' ' },
       { text: view.importCommand, chip: true },
-      { text: ' brings them over, showing what would change first.', tone: 'dim' },
+      { text: ' brings them over and says what changed.', tone: 'dim' },
     ], sentenceWidth);
     blocks.push({ kind: 'b', rows: rows.map((segments) => ({ segments })) });
   }

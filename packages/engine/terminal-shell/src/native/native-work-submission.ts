@@ -191,6 +191,11 @@ export class NativeWorkSubmissionControls {
         result = publish({ status: 'conflict', message: 'Native ledger revision changed. The original request was not rewritten. Inspect its status; an explicitly new submit-file command may capture a fresh revision.', request });
       } else if (code === 'PAIRED_OWNER_REQUIRED' || code === 'NATIVE_SUBMISSION_UNSUPPORTED_AUTHORITY' || code === 'NATIVE_SUBMISSION_FORBIDDEN' || code === 'FORBIDDEN') {
         result = publish({ status: 'unavailable', message: 'Submission runs from the daemon\'s own machine or a paired device with work-ledger read and write access. Run it there, or pair this terminal with the daemon (/devices migrate-shared), then retry. No submission was sent.', request });
+      } else if (code === 'NATIVE_SUBMISSION_WORKSPACE_REFUSED') {
+        // The host refused the workspace before it wrote anything: nothing is pending, so no journal entry is kept.
+        const draft = operationDraft;
+        if (draft) { draft.outcome = 'submitted'; await this.release(selected, scope, draft); if (this.draft === draft) this.draft = undefined; }
+        result = publish({ status: 'unavailable', message: workspaceRefusalMessage(error) });
       } else if (code === 'NATIVE_SUBMISSION_REQUEST_CONFLICT') {
         result = publish({ status: 'unknown', message: 'Submission identity conflicts with recorded input. Inspect the original request; no source or identity was replaced.', request });
       } else result = publish({ status: request ? 'unknown' : 'unavailable', message: request
@@ -225,6 +230,18 @@ export class NativeWorkSubmissionControls {
     if (receipt.projectId !== draft.binding.projectId || receipt.requestId !== draft.command.requestId || receipt.inputId !== draft.command.inputId
       || receipt.goal !== draft.command.goal || JSON.stringify(receipt.criteria) !== JSON.stringify(draft.command.criteria)) throw new Error('Submission receipt differs from durable source');
   }
+}
+
+/**
+ * The host's own words for a workspace it refused before writing: what is true and what to do.
+ * Only this code's text is shown; it is the daemon's fixed refusal naming the local workspace.
+ */
+function workspaceRefusalMessage(error: unknown): string {
+  const fallback = 'Not submitted: native work cannot run in this workspace. Nothing was written.';
+  if (!error || typeof error !== 'object') return fallback;
+  const { message, next } = error as { message?: unknown; next?: unknown };
+  const steps = Array.isArray(next) ? next.filter((step): step is string => typeof step === 'string' && step.trim().length > 0) : [];
+  return [typeof message === 'string' && message.trim() ? message.trim() : fallback, ...steps].join(' ');
 }
 
 export function nativeWorkSubmissionLines(state: NativeWorkSubmissionState | undefined): string[] {

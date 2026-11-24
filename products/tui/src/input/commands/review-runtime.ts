@@ -52,8 +52,8 @@ function errorText(err: unknown): string {
 
 /**
  * Revert one hunk in the working tree: checkpoints.revertHunkPreview (a
- * read-only clean check that returns a token), a confirm dialog naming exactly
- * what reverts, then checkpoints.revertHunk with that token. A hunk that no
+ * read-only clean check that returns a token), then checkpoints.revertHunk with
+ * that token at once (the key pressed is the request; the receipt says how to undo it). A hunk that no
  * longer applies is an honest "changed since captured", never a partial write;
  * a success adds the [Revert] receipt to the transcript. Resolves to the line
  * the Changes modal shows.
@@ -77,12 +77,7 @@ export async function revertReviewHunk(ctx: CommandContext, hunk: ReviewHunk): P
     return `Cannot revert: ${preview.conflict ?? 'this hunk no longer applies'}. The file changed since this diff was captured; the view has been reloaded. Nothing was changed.`;
   }
 
-  const summary = `Restores ${preview.removedLinesRestored} deleted and drops ${preview.addedLinesRemoved} added line(s) in ${path} (${hunk.header}).`;
-  const confirmed = ctx.confirm
-    ? await ctx.confirm({ title: 'Revert this hunk?', body: `${summary}\nThe receipt in the transcript says how to undo it.`, confirmLabel: 'Revert', tone: 'danger' })
-    : false;
-  if (!confirmed) return 'Revert cancelled: nothing changed.';
-
+  // The key the owner pressed is the request: the revert runs at once, and its receipt says how to undo it.
   let result: RevertHunkResult;
   try {
     result = (await gateway.invoke('checkpoints.revertHunk', { ...INVOKE_CONTEXT, body: { path, hunk: hunkText, confirmToken: preview.token, sessionId } })) as RevertHunkResult;
@@ -102,7 +97,7 @@ export async function revertReviewHunk(ctx: CommandContext, hunk: ReviewHunk): P
  * session's file changes (the files the platform SessionChangeTracker recorded) as a
  * working-tree diff, hunk by hunk. c attaches a comment to a hunk and Enter
  * sends the attached comments to the model as one steering message with each
- * hunk's file, line range and patch excerpt; x reverts a hunk (asks first).
+ * hunk's file, line range and patch excerpt; x reverts a hunk (its receipt says how to undo it).
  */
 export function registerReviewRuntimeCommands(registry: CommandRegistry): void {
   registry.register(defineCommand<CommandContext>({
@@ -112,7 +107,7 @@ export function registerReviewRuntimeCommands(registry: CommandRegistry): void {
     group: 'Changes',
     actions: [doAction<CommandContext>({
       id: 'review', label: 'Review this session\'s changes', word: '', touches: 'reads',
-      sentence: 'Opens this session\'s file changes hunk by hunk: c comments on a hunk, Enter sends the comments to the model, x reverts a hunk (it asks first).',
+      sentence: 'Opens this session\'s file changes hunk by hunk: c comments on a hunk, Enter sends the comments to the model, x reverts a hunk at once (its receipt says how to undo it).',
       operator: { terminalOnly: 'It is a terminal screen over this session\'s changes.' },
       async run(_values, ctx) {
         if (!ctx.openChanges) throw commandRefusal('The Changes view is not available in this session.');

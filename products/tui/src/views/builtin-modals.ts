@@ -182,7 +182,7 @@ export function registerBuiltinModals(
     probeTailscale: () => probePairingTailscale(tailscaleGatewayDeps),
     runTailscaleServe: () => runPairingTailscaleServe(tailscaleGatewayDeps),
     stopTailscaleServe: () => stopPairingTailscaleServe(tailscaleGatewayDeps),
-    serveToNetwork: () => servePairingToNetwork(deps),
+    serveToNetwork: (name) => servePairingToNetwork(deps, name),
   }));
   manager.registerModalRedirect('qr-code', 'pairing-modal');
 
@@ -232,7 +232,8 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
   const held = request.held;
   // Reopening shows the same offer while nobody has used it and it has not
   // expired: no new credential, no write. Otherwise the new offer replaces it.
-  if (!request.fresh && held?.tokenId !== undefined && held.url === url && ui.platform.pairingTokens.isOpenOffer(held.tokenId)) {
+  if (!request.fresh && held?.tokenId !== undefined && held.url === url && (request.name === undefined || held.tokenName === request.name)
+    && ui.platform.pairingTokens.isOpenOffer(held.tokenId)) {
     return { ...held, thisMachineOnly };
   }
   const offers = availablePairingOffers({
@@ -245,7 +246,7 @@ export function buildPairingConnectionInfo(deps: ResolvedBuiltinViewDeps, reques
   // the same mint the pairing.handoff.create verb performs, no raw JSON blob.
   const handoff = mintPairingHandoff({
     pairingTokens: ui.platform.pairingTokens,
-    name: defaultPairingTokenName(),
+    name: request.name ?? defaultPairingTokenName(),
     offers,
     webOrigin: webOrigin.origin,
     replacesOffer: held?.tokenId,
@@ -278,13 +279,13 @@ interface PairingHandoffAnswer {
  * for the address phones can open, in one request (pairing.handoff.create
  * `serveToNetwork`). It throws with the daemon's reason when it cannot.
  */
-async function servePairingToNetwork(deps: ResolvedBuiltinViewDeps): Promise<PairingModalConnectionInfo> {
+async function servePairingToNetwork(deps: ResolvedBuiltinViewDeps, name?: string): Promise<PairingModalConnectionInfo> {
   const rpc = resolveOperatorRpc({ configManager: deps.configManager, homeDirectory: deps.uiServices.environment.shellPaths.homeDirectory });
   if (!rpc.available) throw new Error(rpc.reason);
   let answer: PairingHandoffAnswer;
   try {
     answer = await rpc.platformClient.operator.invoke('pairing.handoff.create', {
-      name: defaultPairingTokenName(),
+      name: name ?? defaultPairingTokenName(),
       offers: [...PAIRING_HANDOFF_OFFER_KINDS],
       serveToNetwork: true,
     }) as PairingHandoffAnswer;

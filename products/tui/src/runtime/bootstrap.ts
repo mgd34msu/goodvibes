@@ -54,7 +54,7 @@ import {
   createDeferredStartupCoordinator,
 } from '@/runtime/index.ts';
 import { bindWriteLastSessionPointerToSurface, ProcessTaskAdapter } from '@goodvibes/engine/platform/platform/runtime/operations';
-import { deriveSpineFooterStatus, type SessionSpineClient } from '@goodvibes/engine/platform/platform/runtime/session-spine';
+import { deriveSpineFooterStatus, forwardCheckpointChangesToDaemon, type SessionSpineClient, type SessionSpineRestConnection } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { transportRetryHooks } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { bindControlCommands } from './control-surfaces.ts';
 import { formatWorktreeStartupReport } from '@goodvibes/engine/platform/platform/runtime/shell';
@@ -630,6 +630,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
       return inspectExternalServices();
     }),
   };
+  /** The daemon the spine adopted and its credential, for the checkpoint notice; null when none is adopted. */
+  let adoptedDaemonConnection: SessionSpineRestConnection | null = null;
   // Attaching to a daemon settles both build floors and its undelivered
   // receipts off one /status read, see client/daemon-attach-handshake.ts.
   const daemonHandshake = createDaemonAttachHandshake({
@@ -638,12 +640,24 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     recordRefusal: (status) => {
       externalServices = { ...externalServices, daemonStatus: status };
     },
-    adopt: (status, daemonToken) => syncSessionSpineToHostStatus(status, daemonToken),
+    adopt: (status, daemonToken) => {
+      adoptedDaemonConnection = status.mode === 'external' && status.baseUrl !== '' ? { baseUrl: status.baseUrl, token: daemonToken } : null;
+      syncSessionSpineToHostStatus(status, daemonToken);
+    },
     notify: (text) => {
       systemMessageRouter.high(`[Daemon] ${text}`);
       requestRender();
     },
   });
+  // A checkpoint this terminal makes, prunes or removes is announced only in this process; the
+  // adopted daemon passes it on to its subscribed clients (sessions.checkpoints.changed). Sent while
+  // the spine is online and the daemon holds this session; one made before that (the start-of-session
+  // checkpoint) is announced once the daemon registers the session. With no daemon nothing is sent.
+  bootstrapUnsubs.push(forwardCheckpointChangesToDaemon({
+    spine: sessionSpine,
+    sessionId: () => runtime.sessionId,
+    connection: () => adoptedDaemonConnection,
+  }));
   // A liveness flip is only PAINTED once something calls requestRender(); without
   // this, the footer's spine segment sat correct-but-undrawn until incidental activity redrew it (minutes, during an idle stretch).
   // The same flip is what tells the handshake a daemon came back.

@@ -362,6 +362,12 @@
     box-shadow var(--motion-slow) var(--ease-standard);
 }
 
+/* The words the chat's own search matched, in the message it jumped to (find-highlight.ts). */
+::highlight(gv-chat-find) {
+  background-color: var(--accent);
+  color: var(--on-accent);
+}
+
 /* ── Phone ─────────────────────────────────────────────────── */
 @media (max-width: 899px) {
   .chat-main .messages {

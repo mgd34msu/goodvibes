@@ -76,8 +76,8 @@ The command is `/todo`, the same in the Agent. `/todo` alone opens its list of a
 | `/todo export` | Write that same Markdown rendering to a file under `~/.goodvibes/tui/work-plans/` and print its path |
 | `/todo mark <item> pending\|in_progress\|blocked\|done\|failed\|cancelled` | Set an item's state |
 | `/todo next <item>` | Advance the item to its next state |
-| `/todo remove <item>` | Remove an item (asks first) |
-| `/todo clear-done` | Clear finished (done/cancelled) items (asks first) |
+| `/todo remove <item>` | Remove an item for good (`/todo add` puts it back) |
+| `/todo clear-done` | Clear finished (done/cancelled) items for good |
 
 The work plan is the project's task list, kept in one file for all your GoodVibes programs: `~/.goodvibes/work-plans.sqlite`. The terminal app, the Agent and the daemon all open it, so a project has one plan whichever of them edits it, alone or together, attached to a daemon or not; the web UI shows the same plan through the daemon. Each item is its own row, the same rows the model keeps with the `work_plan` tool, a spawned worker keeps with its own `work_plan`, contracts link their units to, and the daemon serves through the `projectPlanning.workPlan.*` methods. An edit writes only the item it changes, in one transaction, so two GoodVibes programs editing the same project's plan never overwrite each other, and each edit prints one line on where the plan stands. An item can be named by its id or by a unique start of it. A plan an earlier build kept in this program's knowledge database is moved into the shared file the first time the plan is opened. Plan files written by older builds under `~/.goodvibes/tui/work-plans/` are not read; their items do not appear in the plan.
 

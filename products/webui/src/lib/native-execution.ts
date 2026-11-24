@@ -35,6 +35,8 @@ function failure(error: unknown): Error {
       "This pairing lacks the access native execution needs (read:work-ledger and write:fleet). Pair this browser again with that access (Settings, Devices and pairing), then retry.",
     NATIVE_EXECUTION_REFUSED:
       "Jev refused native execution. No automatic retry or legacy execution was requested.",
+    NATIVE_EXECUTION_DECISION_MODEL_FAILED:
+      "Not started: the decision model failed before it decided whether to start this work, so nothing ran. Fix the decision model (its notice says what failed and how), then start the work again.",
     NATIVE_EXECUTION_STALE:
       "The native execution target is stale. Inspect the original attempt; its saved revisions are unchanged.",
     NATIVE_EXECUTION_CONFLICT:

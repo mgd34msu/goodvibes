@@ -27589,6 +27589,14 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "stat": "sample"
     }
   },
+  "sessions.checkpoints.changed": {
+    "methodId": "sessions.checkpoints.changed",
+    "http": null,
+    "status": 200,
+    "body": {
+      "announced": false
+    }
+  },
   "sessions.close": {
     "methodId": "sessions.close",
     "http": {

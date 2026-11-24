@@ -63,7 +63,7 @@ function layoutFor(model: ConfigModalRenderModel): Layout {
   if (model.degraded) topLines.push({ text: `⚠ ${model.degraded}`, style: { fg: t.warning, bold: true } });
   for (const line of model.header) topLines.push({ text: line, style: { fg: t.textMuted } });
   const bottomLines: TextLine[] = notes.map((text) => ({ text, style: { fg: t.textFaint } }));
-  if (model.status) bottomLines.push({ text: model.status, style: { fg: model.confirmPending ? t.warning : t.accent, bold: model.confirmPending } });
+  if (model.status && !model.whole) bottomLines.push({ text: model.status, style: { fg: model.confirmPending ? t.warning : t.accent, bold: model.confirmPending } });
   return { hints, topLines, bottomLines };
 }
 
@@ -96,15 +96,17 @@ export function renderConfigModal(modal: ConfigModal, screenWidth: number, scree
     const active = Math.max(0, model.tabs.findIndex((tab) => tab.active));
     y += drawTabRows(canvas, l, y, model.tabs.map((tab) => tab.label), active, r) + gap;
   }
-  const activeTab = model.tabs.find((tab) => tab.active);
-  const placeholder = `Filter ${(activeTab?.label ?? 'rows').toLowerCase()}`;
-  const count = model.search.total === 0
-    ? ''
-    : model.search.query.length > 0
-      ? `${model.search.matched} of ${model.search.total}`
-      : `${model.search.total} ${model.search.total === 1 ? 'item' : 'items'}`;
-  searchRow(f, y, model.search.query, placeholder, count || undefined);
-  y += 1 + gap;
+  if (!model.whole) {
+    const activeTab = model.tabs.find((tab) => tab.active);
+    const placeholder = `Filter ${(activeTab?.label ?? 'rows').toLowerCase()}`;
+    const count = model.search.total === 0
+      ? ''
+      : model.search.query.length > 0
+        ? `${model.search.matched} of ${model.search.total}`
+        : `${model.search.total} ${model.search.total === 1 ? 'item' : 'items'}`;
+    searchRow(f, y, model.search.query, placeholder, count || undefined);
+    y += 1 + gap;
+  }
 
   if (layout.topLines.length > 0 && !compact.dropTop) {
     y = drawTextBlock(canvas, l, y, r - l + 1, layout.topLines, f.bottom) + 1;
@@ -138,6 +140,8 @@ interface Compaction {
 const MIN_LIST_ROWS = 3;
 
 function compactionFor(model: ConfigModalRenderModel, layout: Layout, f: ModalFrame): Compaction {
+  // A whole view gets every row of the frame.
+  if (model.whole) return { dropTop: true, tight: true };
   const steps: Compaction[] = [
     { dropTop: false, tight: false },
     { dropTop: true, tight: false },
@@ -154,7 +158,7 @@ function listCapacity(model: ConfigModalRenderModel, layout: Layout, f: ModalFra
   const gap = compact.tight ? 0 : 1;
   let y = f.top;
   if (model.tabs.length > 1) y += tabRowCount(model.tabs.map((tab) => tab.label), f.l, f.r) + gap;
-  y += 1 + gap;
+  if (!model.whole) y += 1 + gap;
   if (layout.topLines.length > 0 && !compact.dropTop) y += textBlockHeight(layout.topLines, width) + 1;
   return f.bottom - y + 1 - bottomRowsFor(layout, width);
 }

@@ -141,7 +141,7 @@ Key remote API paths:
 | `/remote dispatch-pool <pool> <task>` | Dispatch work to a runner pool |
 | `/remote export <runner>` | Export a runner's work record |
 | `/remote review <artifact>` | Show a produced artifact |
-| `/remote import <file>` | Import an exported record. It asks first, since it cannot be undone: a different artifact already held under the same id is replaced. The model's import never replaces one: `Not imported: <path> would replace artifact <id>. Nothing was changed; run the import again with --yes to replace it.` |
+| `/remote import <file>` | Import an exported record. Typed, it imports at once; it cannot be undone: a different artifact already held under the same id is replaced (`/remote artifact-export` it first to keep a copy). The model's import never replaces one: `Not imported: <path> would replace artifact <id>. Nothing was changed; run the import again with --yes to replace it.` |
 | `/remote setup`, `/remote setup-export <file>` | Review or export the remote setup |
 
 A dispatched runner is an external agent that runs its own tools, so its tool ceiling is held at the one place this side decides: its permission asks. The runner is told its tools in its prompt, and an ask for a call outside them (a command from a runner without `exec`, an edit from a read-only one; a call of unknown kind counts as a command) is answered with a refusal before you or Jev are asked, and the reason is kept on the runner. A runner given a write scope has an edit outside it, or any command, refused the same way. `/remote contract <runner>` shows the tools and scope it is held to.
@@ -155,7 +155,7 @@ A dispatched runner is an external agent that runs its own tools, so its tool ce
 | `/channels status` | Each channel the daemon has, on or off, ready or not |
 | `/channels setup <channel>` | What a channel needs to be set up (no value shown) |
 | `/channels doctor <channel>` | The daemon's checks on a channel and the repairs it offers |
-| `/channels test <channel>` | A real test message through the daemon, with the delivered or error outcome (asks first) |
+| `/channels test <channel>` | A real test message through the daemon, with the delivered or error outcome (sent at once; it cannot be called back) |
 | `/channels accounts` | The channel accounts: configured, linked, signed in |
 | `/channels rules [<channel>]` | The daemon's rules for who may reach the assistant on each channel (direct messages, groups, threads, mention, lists, allowed commands), with whether the channel is on in settings |
 | `/channels set-rules <channel> [--enabled on\|off] [--require-mention on\|off] [--dm-policy allow\|deny\|inherit] [--group-policy allow\|deny\|inherit] [--allow-users a,b\|none] ...` | Change those rules through the daemon; asks once first, because it changes who has access, and counts only when the owner types it |

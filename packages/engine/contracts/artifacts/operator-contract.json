@@ -154627,6 +154627,71 @@
         "idempotent": true
       },
       {
+        "id": "sessions.checkpoints.changed",
+        "title": "Announce a Session Checkpoint Change",
+        "description": "A terminal program that runs its own session (the terminal app, the Agent) tells the daemon it made, pruned or removed a workspace checkpoint for that session, so clients subscribed to the daemon hear of it: the daemon announces it as the runtime event LIST_CHANGED with `list: \"checkpoints\"`, the `change` given and `checkpointId` as its `id`. Nothing is stored and nothing is read from disk; the notice only announces. The session must be one the daemon knows (registered with sessions.register): another id is refused 404 SESSION_NOT_FOUND and nothing is announced. A repeat announces again, which is harmless: a client reads the checkpoint list again.",
+        "category": "sessions",
+        "source": "builtin",
+        "access": "admin",
+        "transport": [
+          "http",
+          "ws"
+        ],
+        "scopes": [
+          "write:sessions"
+        ],
+        "events": [
+          "runtime.workspace"
+        ],
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "change": {
+              "type": "string",
+              "enum": [
+                "created",
+                "changed",
+                "deleted"
+              ]
+            },
+            "checkpointId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "change"
+          ],
+          "additionalProperties": false
+        },
+        "outputSchema": {
+          "type": "object",
+          "properties": {
+            "announced": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "announced"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "write",
+        "invokable": true,
+        "repeat": "safe",
+        "idempotent": true,
+        "errorCodes": [
+          {
+            "code": "SESSION_NOT_FOUND",
+            "status": 404,
+            "meaning": "No shared session has that id."
+          }
+        ]
+      },
+      {
         "id": "sessions.close",
         "title": "Close Shared Session",
         "description": "Mark a shared session as closed.",
@@ -197161,10 +197226,10 @@
       }
     ],
     "schemaCoverage": {
-      "methods": 655,
-      "typedInputs": 650,
+      "methods": 656,
+      "typedInputs": 651,
       "genericInputs": 5,
-      "typedOutputs": 653,
+      "typedOutputs": 654,
       "genericOutputs": 2
     },
     "eventCoverage": {
@@ -197173,8 +197238,8 @@
       "withWireEvents": 36
     },
     "validationCoverage": {
-      "methods": 655,
-      "validated": 648,
+      "methods": 656,
+      "validated": 649,
       "skippedGeneric": 0,
       "skippedUntyped": 7
     }

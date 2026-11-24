@@ -22,7 +22,9 @@ import {
   renderQrToString,
   type OriginPosture,
   type PairingHandoffOfferKind,
-} from '@goodvibes/engine/platform/platform/pairing';import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+} from '@goodvibes/engine/platform/platform/pairing';
+import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { BlockCopy } from '@goodvibes/engine/terminal-shell/terminal-conversation';
 
 /** What `pairing.handoff.create` answers. */
 interface PairingHandoffCreateResult {
@@ -37,14 +39,44 @@ interface PairingHandoffCreateResult {
 
 export type AgentDevicePairingOutcome =
   /** `forThisMachine`: the link opens only in a browser on the host's machine (a phone could not open it). */
-  | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly forThisMachine: boolean; readonly text: string }
+  /** `qrShown`: the text carries a QR code of the link. */
+  | { readonly ok: true; readonly tokenName: string; readonly tokenId: string; readonly link: string; readonly forThisMachine: boolean; readonly qrShown: boolean; readonly text: string }
   /** `text`, when present, is the whole answer as the numbered list `pair` prints. */
   | { readonly ok: false; readonly error: string; readonly next: string; readonly text?: string };
+
+/**
+ * What the copy key copies from a printed pairing block: the real link, which the block shows
+ * masked. When nothing reaches a clipboard, a block with a QR code says to scan it; one without
+ * (a link only this computer opens) prints the link in clear, once, saying why, and a later
+ * failure points back to it.
+ */
+export function pairingLinkCopy(outcome: { readonly link: string; readonly qrShown: boolean }): BlockCopy {
+  let printed = false;
+  return {
+    text: outcome.link,
+    name: 'the pairing link',
+    whenNotCopied: () => {
+      if (outcome.qrShown) return 'Not copied: nothing could reach a clipboard. Scan the QR code above with the phone instead.';
+      if (printed) return 'Not copied: nothing could reach a clipboard. The link is printed in clear above.';
+      printed = true;
+      return `Not copied: nothing could reach a clipboard, and this link has no QR code, so here it is in clear, once:\n  ${outcome.link}`;
+    },
+  };
+}
 
 /** The origin a deep link opens (`<origin>/#pair=...`). */
 function originOf(link: string): string {
   const cut = link.indexOf('/#');
   return cut === -1 ? link : link.slice(0, cut);
+}
+
+/** Fixed-width mask, not derived from the code's length (the terminal app's pairing view uses the same). */
+const SECRET_MASK = '••••••••••••';
+
+/** The link with its sign-in code replaced: `<origin>/#pair=••••••••••••`; the address stays readable. */
+function maskPairingLink(link: string): string {
+  const cut = link.indexOf('#pair=');
+  return cut === -1 ? SECRET_MASK : `${link.slice(0, cut)}#pair=${SECRET_MASK}`;
 }
 
 function isOfferKind(kind: string): kind is PairingHandoffOfferKind {
@@ -118,6 +150,12 @@ export async function mintAgentDevicePairing(
      * Absent: No.
      */
     readonly askToServe?: ((question: string) => Promise<boolean>) | undefined;
+    /**
+     * Print the link and the sign-in code masked: the address stays visible, the code is replaced.
+     * The conversation keeps its lines, so the code is never written there; `link` in the answer
+     * still carries the real link (for a copy). The QR code is drawn as before.
+     */
+    readonly mask?: boolean | undefined;
   } = {},
 ): Promise<AgentDevicePairingOutcome> {
   const reach = verbs.probe();
@@ -150,19 +188,22 @@ export async function mintAgentDevicePairing(
   const offerKinds = result.offers.map((offer) => offer.kind).filter(isOfferKind);
   const lines: string[] = [];
   const link = result.deepLink ?? result.fragment;
+  const shownLink = options.mask === true ? maskPairingLink(link) : link;
+  const shownCode = options.mask === true ? SECRET_MASK : result.token.token;
+  const qrShown = result.deepLink !== undefined && !thisMachine && options.qr !== false;
   if (result.deepLink === undefined) {
     lines.push(
       `Minted device token "${result.token.name}" on the connected host, but the host has no web address configured, so there is no link a device can open.`,
-      `  pairing fragment: ${result.fragment}`,
+      `  pairing fragment: ${shownLink}`,
       '  Set web.publicBaseUrl on the host, revoke this token in the host\'s device list, then pair again for a scannable link.',
     );
   } else if (thisMachine) {
-    lines.push(...thisMachine, '', `  ${link}`, `  Sign-in code: ${result.token.token}  (to paste on the web UI's sign-in page, under Other ways to sign in)`);
+    lines.push(...thisMachine, '', `  ${shownLink}`, `  Sign-in code: ${shownCode}  (to paste on the web UI's sign-in page, under Other ways to sign in)`);
   } else {
     // What is done and what is next, as one list; the code and its details follow.
     lines.push('Pair a phone', ...pairingReadySteps(result.posture?.origin ?? originOf(link), offerKinds));
-    if (options.qr !== false) lines.push('', renderQrToString(generateQrMatrix(link)));
-    lines.push('', `  ${link}`);
+    if (qrShown) lines.push('', renderQrToString(generateQrMatrix(link)));
+    lines.push('', `  ${shownLink}`);
   }
   lines.push(`  Token name: ${result.token.name}  (rename or revoke it in the host's device list)`);
   if (offerKinds.length > 0) {
@@ -172,5 +213,5 @@ export async function mintAgentDevicePairing(
   if (capabilities.length > 0) lines.push('', 'This device will get:', ...capabilities);
   const notice = pairingPostureNotice(result.posture);
   if (notice) lines.push('', notice);
-  return { ok: true, tokenName: result.token.name, tokenId: result.token.id, link, forThisMachine: thisMachine !== undefined, text: lines.join('\n') };
+  return { ok: true, tokenName: result.token.name, tokenId: result.token.id, link, forThisMachine: thisMachine !== undefined, qrShown, text: lines.join('\n') };
 }

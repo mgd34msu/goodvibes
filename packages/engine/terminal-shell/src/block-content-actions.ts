@@ -35,7 +35,9 @@ export function createBlockContentActions(policy: {
       requestRender();
       return;
     }
-    const outcome = copyToClipboard(nearest.rawContent);
+    // A block whose lines are not the thing to copy (a masked pairing link) names what it copies instead.
+    const copy = nearest.copy;
+    const outcome = copyToClipboard(copy?.text ?? nearest.rawContent);
     const sent = outcome !== 'failed';
     if (sent) onCopied();
     // An explicit action on this block permanently exempts it from the
@@ -43,9 +45,14 @@ export function createBlockContentActions(policy: {
     // copying content the user just had search reveal is a deliberate choice
     // to keep it visible, not an accident of typing a query.
     policy.noteTouch(conversationManager, nearest.collapseKey);
-    if (outcome === 'copied') conversationManager.log(`[Copied ${describeBlockForReceipt(nearest)}]`, { fg: activeTokens().success });
-    else if (sent) conversationManager.log(`[Sent ${describeBlockForReceipt(nearest)} to your terminal's clipboard]`, { fg: activeTokens().success });
-    else conversationManager.log('[Copy failed: nothing was sent to the terminal clipboard]', { fg: activeTokens().error });
+    const what = copy?.name ?? describeBlockForReceipt(nearest);
+    if (outcome === 'copied') conversationManager.log(`[Copied ${what}]`, { fg: activeTokens().success });
+    else if (sent) conversationManager.log(`[Sent ${what} to your terminal's clipboard]`, { fg: activeTokens().success });
+    else {
+      const instead = copy?.whenNotCopied?.();
+      if (instead !== undefined) conversationManager.logWrapped(instead);
+      else conversationManager.log('[Copy failed: nothing was sent to the terminal clipboard]', { fg: activeTokens().error });
+    }
     requestRender();
     setTimeout(() => requestRender(), 2005);
   }

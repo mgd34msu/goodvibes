@@ -271,8 +271,8 @@ GoodVibes ships **96** built-in slash commands across **10** categories. Every c
 | --- | --- | --- | --- |
 | See your checkpoints | `/checkpoint list` | Lists the workspace checkpoints, newest first, with how old each is and how much it added. | None |
 | Make a checkpoint now | `/checkpoint make [<name...>]` | The workspace's files as they are now are kept as a checkpoint, held longer than the automatic ones; nothing changes in the files. | None |
-| Put the files back to a checkpoint | `/checkpoint restore <checkpoint>` | The workspace's files go back to checkpoint <checkpoint> after you see what changes; the current files are kept in a safety checkpoint first, and the conversation is unchanged. | None |
-| Go back to an earlier turn | `/checkpoint rewind <turn> [<what goes back>]` | What changed after turn <turn> is taken back (<what goes back>) once you have seen the plan and said yes: messages after it are dropped and files go back to how they were then. /undo rewind brings them back only while no new message has been added. | cannot be undone |
+| Put the files back to a checkpoint | `/checkpoint restore <checkpoint>` | The workspace's files go back to checkpoint <checkpoint>; the current files are kept as a checkpoint first, which /checkpoint restore brings back, and the conversation is unchanged. | None |
+| Go back to an earlier turn | `/checkpoint rewind <turn> [<what goes back>]` | What changed after turn <turn> is taken back (<what goes back>): messages after it are dropped and files go back to how they were then. /undo rewind brings them back only while no new message has been added. | cannot be undone |
 
 ### /codebase: Code index
 
@@ -325,7 +325,7 @@ GoodVibes ships **96** built-in slash commands across **10** categories. Every c
 
 | Action | Line | What happens | Risk |
 | --- | --- | --- | --- |
-| Review this session's changes | `/review` | Opens this session's file changes hunk by hunk: c comments on a hunk, Enter sends the comments to the model, x reverts a hunk (it asks first). | None |
+| Review this session's changes | `/review` | Opens this session's file changes hunk by hunk: c comments on a hunk, Enter sends the comments to the model, x reverts a hunk at once (its receipt says how to undo it). | None |
 
 ### /worktree: Worktrees
 
@@ -610,8 +610,8 @@ GoodVibes ships **96** built-in slash commands across **10** categories. Every c
 | Look inside a managed bundle | `/managed inspect <bundle file>` | Shows what <bundle file> would change here and how risky it is; nothing is changed. | None |
 | Save a profile as a managed bundle | `/managed export <profile> <bundle file>` | The settings of profile <profile> are written to <bundle file> as a managed bundle. | None |
 | Stage a managed bundle to apply later | `/managed stage <bundle file>` | The changes in <bundle file> are staged, ready to apply, until you change it; nothing is applied yet. | None |
-| Apply a managed bundle | `/managed apply <bundle file> [--key <only these settings>]...` | The settings in <bundle file> are applied and locked as managed until you change it (or roll it back); changes that touch security are shown and asked about first. | loosens a protection |
-| Apply the staged bundle | `/managed apply-staged [--key <only these settings>]...` | The staged settings are applied and locked as managed until you change it (or roll it back); changes that touch security are shown and asked about first. | loosens a protection |
+| Apply a managed bundle | `/managed apply <bundle file> [--key <only these settings>]...` | The settings in <bundle file> are applied and locked as managed until you change it; changes that touch security are listed, and /managed rollback <token> puts the previous values back. | loosens a protection |
+| Apply the staged bundle | `/managed apply-staged [--key <only these settings>]...` | The staged settings are applied and locked as managed until you change it; changes that touch security are listed, and /managed rollback <token> puts the previous values back. | loosens a protection |
 | Put back the values from before an apply | `/managed rollback <apply>` | The settings apply <apply> changed get their earlier values back, until you change it. | None |
 | Lock a setting as managed | `/managed lock <setting> <who manages it> <why...>` | <setting> is locked as managed by <who manages it> ("<why>"), so it cannot be changed here, until you change it. | None |
 | Unlock a managed setting | `/managed unlock <setting>` | The managed lock on <setting> is cleared, so it can be changed here again, until you change it. | loosens a protection |
@@ -1421,7 +1421,7 @@ GoodVibes ships **96** built-in slash commands across **10** categories. Every c
 | See recent sync failures | `/settings-sync failures` | Shows the sync and managed-setting attempts that failed recently and why. | None |
 | Save your settings to a sync bundle | `/settings-sync export <bundle file>` | Your settings are written to <bundle file> as a bundle another machine can pull. | None |
 | Look inside a sync bundle | `/settings-sync inspect <bundle file>` | Shows what <bundle file> holds; nothing is changed. | None |
-| Take the settings from a sync bundle | `/settings-sync pull <bundle file>` | The settings in <bundle file> replace yours until you change it, except keys a managed lock owns; changes that touch security are shown and asked about first. | loosens a protection |
+| Take the settings from a sync bundle | `/settings-sync pull <bundle file>` | The settings in <bundle file> replace yours until you change it, except keys a managed lock owns; what changed is listed, with the copy of your settings from before that puts them back. | loosens a protection |
 
 ### /update: Updates
 
@@ -1573,7 +1573,7 @@ GoodVibes ships **96** built-in slash commands across **10** categories. Every c
 | Check that a service can sign in | `/services check-auth <service>` | Checks that <service>'s stored credentials make its sign-in headers now, and names the headers without their values. | None |
 | Use a service this project defines | `/services trust <service>` | <service> from this project's services file is used, sending the stored key it names to the address it names, until you change it; this loosens a protection, so you are asked with exactly what it sends and where, and only that entry is approved. | loosens a protection |
 | Save your services list to a file | `/services export <file> [--replace]` | Your services list (names, addresses and the names of their keys, never the keys) is written to <file>. | None |
-| Replace your services list from a file | `/services import <file>` | Your services list is replaced by the one in <file>, until you change it; the old one is kept beside it as a.bak file; each service names which stored key it sends and to which host, so this loosens a protection and you are asked first with every new or changed one. | loosens a protection |
+| Replace your services list from a file | `/services import <file>` | Your services list is replaced by the one in <file>, until you change it; every new or changed service is listed with the stored key it sends and its host, and the old list is kept beside it as a.bak file that puts it back. | loosens a protection |
 | Open the services screen | `/services open` | Opens the screen that lists your services, where one can be tested. | None |
 
 ### /skills: Skills

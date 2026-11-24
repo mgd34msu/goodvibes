@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.4.8
- * Methods: 655 total, 536 REST-routed, 119 ws-only invoke.
+ * Methods: 656 total, 536 REST-routed, 120 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -2286,6 +2286,7 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "rewind.plan",
   "rewind.undo",
   "sessions.changes.get",
+  "sessions.checkpoints.changed",
   "sessions.hosted.attach",
   "sessions.hosted.create",
   "sessions.hosted.detach",
@@ -2857,6 +2858,7 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "services.stop": "rest",
   "services.uninstall": "rest",
   "sessions.changes.get": "ws-invoke",
+  "sessions.checkpoints.changed": "ws-invoke",
   "sessions.close": "rest",
   "sessions.contextUsage.get": "rest",
   "sessions.create": "rest",
@@ -30903,6 +30905,16 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "nativeRevision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
       "unifiedDiff": "sample",
       "stat": "sample"
+    }
+  },
+  "sessions.checkpoints.changed": {
+    "input": {
+      "sessionId": "sample",
+      "change": "created",
+      "checkpointId": "sample"
+    },
+    "output": {
+      "announced": false
     }
   },
   "sessions.close": {

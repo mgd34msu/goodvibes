@@ -73,10 +73,12 @@ export interface McpApi {
   getToolSchema?(qualifiedName: string, options?: McpToolCallOptions): Promise<McpToolSchema | null>;
   getEffectiveConfig(roots: McpConfigRoots): McpEffectiveConfig;
   reload(roots: McpConfigRoots): Promise<McpReloadResult>;
+  /** `byOwner`: the owner added it with his own command or form; a project file's entry then starts without the trust question. */
   upsertServerConfig(
     roots: McpConfigRoots,
     scope: McpConfigScope,
     serverConfig: McpServerConfig,
+    options?: { readonly byOwner?: boolean | undefined },
   ): Promise<{ readonly path: string; readonly reload: McpReloadResult }>;
   removeServerConfig(
     roots: McpConfigRoots,
@@ -132,6 +134,7 @@ export interface McpApiRegistry {
     roots: McpConfigRoots,
     scope: McpConfigScope,
     serverConfig: McpServerConfig,
+    options?: { readonly byOwner?: boolean | undefined },
   ): Promise<{ readonly path: string; readonly reload: McpReloadResult }>;
   removeServerConfig(
     roots: McpConfigRoots,
@@ -177,8 +180,8 @@ export function createMcpApi(registry: McpApiRegistry): McpApi {
     reload(roots) {
       return registry.reload(roots);
     },
-    upsertServerConfig(roots, scope, serverConfig) {
-      return registry.upsertServerConfig(roots, scope, serverConfig);
+    upsertServerConfig(roots, scope, serverConfig, options) {
+      return registry.upsertServerConfig(roots, scope, serverConfig, options);
     },
     removeServerConfig(roots, scope, serverName) {
       return registry.removeServerConfig(roots, scope, serverName);

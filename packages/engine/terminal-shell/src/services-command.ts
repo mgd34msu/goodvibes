@@ -284,9 +284,8 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
     }),
     {
       id: 'replace', label: 'Replace your services list from a file', word: 'import', inputs: [FILE('A services list, such as one /services export wrote')],
-      sentence: 'Your services list is replaced by the one in {path}, until you change it; the old one is kept beside it as a .bak file; each service names which stored key it sends and to which host, so this loosens a protection and you are asked first with every new or changed one.', done: '',
-      // It asks its own question, naming each new or changed service's key and host.
-      touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true,
+      sentence: 'Your services list is replaced by the one in {path}, until you change it; every new or changed service is listed with the stored key it sends and its host, and the old list is kept beside it as a .bak file that puts it back.', done: '',
+      touches: 'credential', lasts: 'kept', risk: 'loosens-a-protection',
       ownerOnly: { reason: 'the list names which of your stored keys each service sends and to which host', instead: 'Ask the owner to run /services import <file>.' },
       operator: { terminalOnly: TERMINAL_ONLY },
       example: { path: 'services.json' },
@@ -305,17 +304,12 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
         const before = Object.keys(current);
         const incomingServices = parsed as Record<string, ImportedService>;
         const incoming = Object.keys(incomingServices);
-        const confirm = ctx.confirm;
         const changeLines = importChangeLines(current, incomingServices);
-        if (!confirm || ctx.invokedByModel === true) {
-          throw commandRefusal(`Your services list was not replaced: it is replaced only where you can be asked with what it changes.\n${changeLines.join('\n')}`, 'Type /services import in the terminal app.', 'CONFIRMATION_REQUIRED');
+        // Only the owner's own line replaces it (owner-only): it is the request, so it runs at once, says what
+        // changed, and keeps the old list beside it, which puts it back.
+        if (ctx.invokedByModel === true) {
+          throw commandRefusal(`Your services list was not replaced: only you can replace it.\n${changeLines.join('\n')}`, 'Type /services import in the terminal app.', 'OWNER_ONLY_COMMAND');
         }
-        const approved = await confirm({
-          title: `Replace your services list with the one in ${source}?`,
-          body: `${changeLines.join('\n')}\nEach service sends the stored key it names to its host. This loosens a protection.`,
-          confirmLabel: 'Replace it', cancelLabel: 'Back', tone: 'danger',
-        });
-        if (!approved) throw commandRefusal('Not confirmed: nothing was changed.', undefined, 'CANCELLED');
         const target = registry.userServicesFilePath;
         let backup: string | undefined;
         if (existsSync(target)) {
@@ -327,7 +321,8 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
           `Your services list is now the ${incoming.length} service${incoming.length === 1 ? '' : 's'} in ${source}.`,
           `  replaced: ${incoming.filter((name) => before.includes(name)).join(', ') || 'none'}`,
           `  no longer listed: ${before.filter((name) => !incoming.includes(name)).join(', ') || 'none'}`,
-          backup ? `  the old list is kept at ${backup}` : '  there was no list before',
+          ...changeLines.map((line) => `  ${line}`),
+          backup ? `To put it back: the old list is kept at ${backup}; /services import ${backup} brings it back.` : '  there was no list before',
         ].join('\n');
       },
     },

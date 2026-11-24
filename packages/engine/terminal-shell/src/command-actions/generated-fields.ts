@@ -106,16 +106,19 @@ export function ownerOnlyFor(action: ActionDescription<never>, values: ActionVal
 }
 
 /**
- * The question a complete line asks before it runs: any risk other than none
- * asks; a read or a risk-free change runs at once. A model-run owner-only line
- * is refused here, before anything is asked.
+ * The question a complete line asks before it runs. A line the owner typed in
+ * full is the request: it asks nothing, whatever its risk, and its result says
+ * what the risk did (actionRiskDoneLine). A line a model runs is put to the
+ * owner when its risk is not none; a model-run owner-only line is refused
+ * here, before anything is asked.
  */
 export function generatedConfirm(description: CommandDescription<never>) {
   return (args: readonly string[], context: { readonly invokedByModel?: boolean | undefined }): CommandConfirmation | undefined => {
+    if (context.invokedByModel !== true) return undefined;
     const parsed = parseTypedLine(description, args);
     if (!('action' in parsed) || parsed.problem || parsed.missing.length > 0) return undefined;
     const owner = ownerOnlyFor(parsed.action, parsed.values);
-    if (owner && context.invokedByModel === true) throw ownerOnlyActionRefusal(description.name, parsed.action, owner.reason, owner.instead);
+    if (owner) throw ownerOnlyActionRefusal(description.name, parsed.action, owner.reason, owner.instead);
     const risk = effectiveRisk(parsed.action, parsed.values);
     // An action that asks its own question, with what it read, is asked once: by itself.
     if (risk === 'none' || parsed.action.asksItself) return undefined;

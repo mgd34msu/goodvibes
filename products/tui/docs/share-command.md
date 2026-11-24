@@ -24,11 +24,11 @@ also uploads it as a secret GitHub Gist and prints the link.
 | Option | Description |
 |------------|-------------|
 | `--keep-secrets` | Keep API keys, tokens, and this account's home-directory path and login name as stored. Without it they are hidden, in a local file and in an upload alike |
-| `--replace` | save-file only: write over a file already at the path (asks first); without it an existing file is kept and nothing is written |
+| `--replace` | save-file only: write over a file already at the path (the old file is not kept); without it an existing file is kept and nothing is written |
 | `--then copy` | Copy the output file path to the clipboard (OSC 52; terminal must support it) |
 | `--then open` | Open an HTML export in the default browser (`xdg-open` / `open` / `start`) |
 
-`upload` sends something outside this machine, so it always asks first, and it only counts when you type it (a model cannot run it).
+`upload` sends something outside this machine, so it only counts when you type it (a model cannot run it); typed, it uploads at once and prints the link, and deleting the Gist on GitHub takes it down.
 
 The result line says which happened: `(redacted before upload)` or `(uploaded unredacted, as stored)` when the upload returned a share link; otherwise `(sensitive data redacted)` or `(not redacted)` for the local file, after `(not uploaded)` or `(upload unconfirmed)` when an upload was asked for. `--then copy` adds `(path copied to clipboard)`, or `(could not copy the path)` when the copy failed.
 
@@ -126,9 +126,9 @@ The directory is created automatically.
 /session save-file html                          # web page at the default path, keys and paths hidden
 /session save-file html /tmp/session.html        # to an explicit path
 /session save-file json --keep-secrets           # JSON as stored
-/session upload html                             # redacted Gist link (asks first)
+/session upload html                             # redacted Gist link
 /session upload html --then open                 # link, then open the local copy
-/session upload md --keep-secrets                # unredacted Markdown Gist (asks first)
+/session upload md --keep-secrets                # unredacted Markdown Gist
 ```
 
 ## Related

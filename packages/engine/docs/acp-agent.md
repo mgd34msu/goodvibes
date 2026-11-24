@@ -23,7 +23,10 @@ bun packages/engine/scripts/acp-agent.ts
 ```
 
 Environment: `GOODVIBES_HOME` sets the embedded daemon's home directory
-(default `$HOME`).
+(default `$HOME`). The embedded daemon uses the terminal app's settings and
+provider files (`~/.goodvibes/tui/settings.json`, `~/.goodvibes/tui/providers/`):
+the model, the providers and the permission mode an editor thread runs with are
+the ones the terminal app uses.
 
 Programmatic use (exported from `@goodvibes/engine/platform/platform/acp`):
 
@@ -49,8 +52,9 @@ The adapter is a protocol mapping over that surface:
 | ----------------------------- | ------------------------------------------------------ |
 | `initialize` / `authenticate` | capability report; no auth (process-local daemon)      |
 | `session/new` (cwd)           | an embedded session in the cwd (on the home's running daemon, or booting one) and a new shared session in it |
-| `session/prompt` (text)       | `session.submit({ body, sessionId })`; the submission's `completion` follows the agent that took the input |
-| `agent_message_chunk`         | the agent's streamed text                              |
+| `session/prompt` (text)       | `session.submit({ body, sessionId })`: one agent starts to answer it, with the thread's conversation as its task (never a contract); the submission's `completion` follows that agent |
+| `agent_message_chunk`         | the agent's answer                                     |
+| `agent_thought_chunk`         | a line the agent wrote for the person about its run, such as why the answer is late (`Provider error, retrying in 5s…`) |
 | `tool_call` / `tool_call_update` | the agent's tool calls starting and settling        |
 | stop reason                   | how the agent's run ended (see mapping below)          |
 | `session/request_permission`  | the platform permission callback (allow once / always / reject) |

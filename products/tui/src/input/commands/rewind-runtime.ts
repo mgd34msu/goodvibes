@@ -24,9 +24,10 @@
 // The stacks are written beside the undo snapshots after every change, so
 // /undo rewind still finds a rewind after the TUI restarts.
 //
-// The confirm step is a question on a Changes preview (ctx.previewChanges):
-// the handler resolves the anchor, shows exactly what changes, and waits for
-// the answer; Esc or closing the preview answers no.
+// The owner's own command goes back (or undoes, or redoes) at once: /undo
+// rewind and the safety checkpoint put it back. Only a rewind the model runs
+// is shown on a Changes preview (ctx.previewChanges) with a question first;
+// Esc or closing the preview answers no.
 // ---------------------------------------------------------------------------
 
 import {
@@ -205,6 +206,9 @@ async function confirmFileRestore(
   checkpointId: string,
   question: string,
 ): Promise<'confirmed' | 'cancelled' | 'no-preview'> {
+  // The owner's own /undo rewind or /redo rewind is the request: the restore takes a safety checkpoint first,
+  // so it runs at once. Only one the model runs is shown and asked about.
+  if (ctx.invokedByModel !== true) return 'confirmed';
   if (!ctx.previewChanges) return 'no-preview';
   let diff: string | undefined;
   let note: string | undefined;
@@ -456,7 +460,10 @@ export async function rewindToTurn(ctx: CommandContext, input: { readonly turn: 
   if (wants(scope, 'files') && !ctx.workspace.workspaceCheckpointManager) {
     throw commandRefusal('Checkpoints are not available in this session, so the files cannot go back.', `Take back only the conversation: /checkpoint rewind ${input.turn} conversation`, 'UNAVAILABLE');
   }
-  if (!ctx.previewChanges) {
+  // The owner's own command is the request: it goes back at once, and /undo rewind puts it back. Only a rewind
+  // the model asks for is shown on the Changes preview with a question first.
+  const asked = ctx.invokedByModel === true;
+  if (asked && !ctx.previewChanges) {
     throw commandRefusal('Going back needs the Changes preview to show what would change, and it is not available in this session. Nothing changed.', undefined, 'UNAVAILABLE');
   }
 
@@ -494,21 +501,23 @@ export async function rewindToTurn(ctx: CommandContext, input: { readonly turn: 
   if (wants(scope, 'files')) summaryParts.push(filesAvailable ? `${plan.files?.affectedFileCount ?? 0} file(s)` : 'files: none');
   if (wants(scope, 'conversation')) summaryParts.push(conversationAvailable ? `${plan.conversation?.messagesToDrop ?? 0} message(s)` : 'conversation: unavailable');
 
-  ctx.print(`Previewing going back to turn "${resolved.label}" (${scope}: ${summaryParts.join(', ')}). Enter or y goes back, n or Esc cancels.`);
   for (const w of plan.warnings) ctx.print(`  note: ${w}`);
-  ctx.renderRequest();
-  const confirmed = await ctx.previewChanges({
-    title: `go back to ${resolved.label}`,
-    diff,
-    note,
-    question: { text: `Go back to "${resolved.label}" (${scope}: ${summaryParts.join(', ')})? Dropped messages come back with /undo rewind only while no new message is added.`, confirmLabel: 'Go back', tone: 'warning' },
-  });
-  if (!confirmed) {
+  if (asked && ctx.previewChanges) {
+    ctx.print(`Previewing going back to turn "${resolved.label}" (${scope}: ${summaryParts.join(', ')}). Enter or y goes back, n or Esc cancels.`);
     ctx.renderRequest();
-    return 'Nothing changed: you chose not to go back.';
+    const confirmed = await ctx.previewChanges({
+      title: `go back to ${resolved.label}`,
+      diff,
+      note,
+      question: { text: `Go back to "${resolved.label}" (${scope}: ${summaryParts.join(', ')})? Dropped messages come back with /undo rewind only while no new message is added.`, confirmLabel: 'Go back', tone: 'warning' },
+    });
+    if (!confirmed) {
+      ctx.renderRequest();
+      return 'Nothing changed: you chose not to go back.';
+    }
+    // The preview waits on the owner; a turn may have started meanwhile.
+    if (ctx.isGenerating?.()) throw commandRefusal(BUSY_MESSAGE('going back to the turn'), undefined, 'BUSY');
   }
-  // The preview waits on the owner; a turn may have started meanwhile.
-  if (ctx.isGenerating?.()) throw commandRefusal(BUSY_MESSAGE('going back to the turn'), undefined, 'BUSY');
   let result: Awaited<ReturnType<UnifiedRewindService['apply']>>;
   try {
     // The token binds the apply to the plan shown: a conversation changed since is refused.

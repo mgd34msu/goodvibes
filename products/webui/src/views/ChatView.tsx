@@ -28,7 +28,8 @@ import { Button } from '../components/ui/Button';
 import { IconButton } from '../components/ui/IconButton';
 import { sessionFiles, useSessionFilesPanel } from './chat/ArtifactsPanel';
 import { useHeaderSlots } from '../components/shell/HeaderSlots';
-import { useHotkeys } from '../hooks/useHotkeys';
+import { formatShortcut, isApplePlatform } from '../lib/shortcut-keys';
+import { clearFindMatches, markFindMatches } from './chat/find-highlight';
 import { MessageList } from './chat/MessageList';
 import { Composer } from './chat/Composer';
 import { ChatSearch } from './chat/ChatSearch';
@@ -195,6 +196,8 @@ export function ChatView({
   // isScrollTargetStale).
   const [pendingScrollTarget, setPendingScrollTarget] = useState<{ sessionId: string; messageId: string } | null>(null);
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
+  // What the chat's search last looked for, so the message it jumps to marks the matching words.
+  const findQueryRef = useRef('');
   const scrollTargetSessionShownRef = useRef(false);
   // A failed reply's "Use another model": the reply to try again once a model is chosen in the menu.
   const retryAfterModelRef = useRef('');
@@ -612,6 +615,10 @@ export function ChatView({
     }
   }, [pendingScrollTarget, activeSessionId, lineageNodes, messagesSettled]);
 
+  // The marked words of the last search go when a new search opens or another chat is shown.
+  useEffect(() => { if (showSearch) clearFindMatches(); }, [showSearch]);
+  useEffect(() => () => clearFindMatches(), [activeSessionId]);
+
   // Auto-clear the search jump-to-message highlight after a brief flash. A
   // separate effect (keyed only on highlightedMessageId) so a fresh highlight
   // starting mid-flash restarts its own timer rather than racing the one
@@ -619,6 +626,14 @@ export function ChatView({
   useEffect(() => {
     if (!highlightedMessageId) return;
     const target = highlightedMessageId;
+    // The searched words in the message jumped to stay marked after its flash, until the next search.
+    const query = findQueryRef.current;
+    findQueryRef.current = '';
+    if (query) {
+      window.requestAnimationFrame(() => {
+        markFindMatches(scrollRef.current?.querySelector('.message--search-highlight'), query);
+      });
+    }
     const timer = window.setTimeout(() => {
       setHighlightedMessageId((current) => (current === target ? '' : current));
     }, 2000);
@@ -918,22 +933,27 @@ export function ChatView({
   }
 
 
-  // Ctrl F opens the glass find bar (or refocuses its field when it is already
-  // open). Scoped to the chat: it only exists while this view is mounted.
-  useHotkeys([
-    {
-      combo: 'mod+f',
-      allowInInput: true,
-      handler: (event) => {
-        event.preventDefault();
-        if (showSearch) {
-          findRef.current?.querySelector<HTMLInputElement>('input')?.focus();
-          return;
-        }
-        setShowSearch(true);
-      },
-    },
-  ]);
+  // Ctrl+F (Cmd+F on a Mac) in a chat long enough that some messages are not mounted
+  // (their plain-text rows, `.chat-row--text`) opens the chat's own search, which reaches
+  // every message and marks the match; pressed again while its field has the focus, the
+  // browser's own find opens. In a chat that is mounted whole, the key is the browser's.
+  // Scoped to the chat: it only exists while this view is mounted.
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent): void {
+      const mod = isApplePlatform() ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+      if (!mod || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'f' || event.defaultPrevented) return;
+      // A dialog or menu on top (settings has its own Ctrl+F) keeps the key.
+      if (openOverlayCount() > 0 || document.querySelector('[data-gv-layer]')) return;
+      const field = findRef.current?.querySelector<HTMLInputElement>('input');
+      if (field && document.activeElement === field) return;
+      if (scrollRef.current?.querySelector('.chat-row--text') == null) return;
+      event.preventDefault();
+      if (field) field.focus();
+      else setShowSearch(true);
+    }
+    document.addEventListener('keydown', onKeyDown);
+    return () => document.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   // A new chat: no session yet and nothing sent. The greeting and the centered
   // composer show only here; the first send turns it into a conversation.
@@ -1039,8 +1059,10 @@ export function ChatView({
       {showSearch && (
         <div className="chat-find glass" ref={findRef}>
           <ChatSearch
+            hint={`${formatShortcut('mod+f')} again: the browser's own find`}
             onClose={() => setShowSearch(false)}
             onSelect={(payload) => {
+              findQueryRef.current = payload.messageId ? payload.query ?? '' : '';
               onActiveSessionChange(payload.sessionId);
               setShowSearch(false);
               setPendingScrollTarget(resolveScrollTarget(payload));

@@ -35,7 +35,7 @@ import { runHostedContinuation } from './continuation-spawn.ts';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { CacheRegistry, PauseController, type MemoryGovernor } from '@goodvibes/engine/platform/platform/runtime/memory';
 import type { PermissionManager } from '@goodvibes/engine/platform/platform/permissions';
-import { AGENT_SPINE_PARTICIPANT, SessionSpineClient, createSessionSpineRestProbe, createSessionSpineRestTransport, createSessionSpineReceiptAcknowledger, createSessionSpineReceiptConsumer } from '@goodvibes/engine/platform/platform/runtime/session-spine';
+import { AGENT_SPINE_PARTICIPANT, SessionSpineClient, forwardCheckpointChangesToDaemon, createSessionSpineRestProbe, createSessionSpineRestTransport, createSessionSpineReceiptAcknowledger, createSessionSpineReceiptConsumer } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { createSpineConnectionResolver } from './session-spine-rest-transport.ts';
 import { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
 import type { MemoryTransport } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
@@ -922,6 +922,15 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
           log: logger,
         });
         scope.registry.add('session spine client', () => sessionSpineClient.dispose());
+        // A checkpoint this Agent makes, prunes or removes is announced only in this process; the daemon
+        // passes it on to its subscribed clients (sessions.checkpoints.changed). Sent while the spine is
+        // online and the daemon holds this session; one made before that (the start-of-session checkpoint)
+        // is announced once the daemon registers the session. With no daemon nothing is sent.
+        scope.registry.add('checkpoint notices', forwardCheckpointChangesToDaemon({
+          spine: sessionSpineClient,
+          sessionId: () => options.resolveSessionId?.({}),
+          connection: () => spineResolveConnection(),
+        }));
         // An inbound continuation runs here because this process holds the loop;
         // the build-floor check comes first. Held, not null: null reads as
         // consumed, and the message would be lost instead of waiting for a restart.

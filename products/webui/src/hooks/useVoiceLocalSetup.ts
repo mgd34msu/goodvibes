@@ -14,7 +14,7 @@
  * read as `lastInstall`; it resolves with that receipt or fails with the recorded
  * reason. No request is held open for the download, so a long install is never
  * reported failed because the connection idled out. One poller: the status query
- * itself does not poll.
+ * polls only while a run another client started is in progress.
  *
  * A successful install also invalidates useVoice.ts's ['voice','status'] and the one
  * shared config entry (queryKeys.config), since the install call may newly configure
@@ -40,8 +40,13 @@ const INSTALL_POLL_PATIENCE = 5;
 
 const pause = (ms: number) => new Promise<void>((resolve) => { setTimeout(resolve, ms); });
 
-export function useVoiceLocalStatus(enabled: boolean) {
+/**
+ * `ownRunPending`: this page's install is running, and its mutation is the one poller. An
+ * install another client started is read here while it runs, so its progress and outcome show.
+ */
+export function useVoiceLocalStatus(enabled: boolean, ownRunPending = false) {
   return useQuery({
+    refetchInterval: (query) => (!ownRunPending && query.state.data?.installInProgress ? INSTALL_POLL_MS : false),
     queryKey: queryKeys.voiceLocalStatus,
     queryFn: async () => {
       const raw = await platformClient.operator.voice.local.status();

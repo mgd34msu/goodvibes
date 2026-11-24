@@ -156,7 +156,8 @@ export class McpWorkspace extends McpWorkspaceState<CommandContext, McpWorkspace
       this.setStatus(`Saving ${server.name} to ${this.form.scope} MCP config and reloading runtime...`);
       const api = requireMcpApi(this.context);
       // The form stays open with what was typed until the write succeeds, so a failed save can be corrected and retried.
-      const result = await api.upsertServerConfig(requireShellPaths(this.context), this.form.scope, server);
+      // The owner's own form: the server is his request, not something the folder brought.
+      const result = await api.upsertServerConfig(requireShellPaths(this.context), this.form.scope, server, { byOwner: true });
       this.mode = 'browse';
       this.editingServerName = null;
       this.refreshSnapshot();

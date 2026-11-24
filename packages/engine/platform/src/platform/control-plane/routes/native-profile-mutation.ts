@@ -48,7 +48,10 @@ export function captureOccasionsGatewayTarget(catalog: GatewayMethodCatalog, met
 export function profileMutationOptions(invocation: GatewayMethodInvocation, scopes?: readonly string[]): NativeProfileOptions {
   const retained = mutationOptions.get(invocation) ?? profileMutationOptionsForInvocation(invocation);
   const signal = invocation.signal && retained?.signal ? AbortSignal.any([invocation.signal, retained.signal]) : invocation.signal ?? retained?.signal;
-  return { ...retained, signal, delegation: profileDelegationForInvocation(invocation), assertCurrent: () => {
+  const delegation = profileDelegationForInvocation(invocation);
+  // The signed-in person's own call: no Agent credential, no recorded delegation, nothing retained from a tool.
+  const ownerSubmitted = delegation === undefined && retained === undefined && !isDelegatedCaller(invocation.context ?? {});
+  return { ...retained, signal, delegation, ownerSubmitted, assertCurrent: () => {
     signal?.throwIfAborted();
     if (invocation.isAuthorized?.(scopes) !== true) throw new Error('Profile request is no longer authorized.');
     retained?.assertCurrent?.();

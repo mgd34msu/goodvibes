@@ -3,6 +3,7 @@ import { infoRow } from './modal-surface-helpers.ts';
 import { actionKeyText } from '../../input/config-modal-keys.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import type {
+  ConfigModalAction,
   ConfigModalActionContext,
   ConfigModalRow,
   ConfigModalSurface,
@@ -72,6 +73,18 @@ export interface PairingConnectionRequest {
   readonly held?: PairingModalConnectionInfo | undefined;
   /** A new offer even when `held` is still open (the "new device token" action). */
   readonly fresh?: boolean | undefined;
+  /** The name the person gave the device; the offer is minted with it. Absent: a dated default. */
+  readonly name?: string | undefined;
+}
+
+/**
+ * The name typed for the device the next open of the pairing view mints for
+ * (`/devices pair device --name …`, the Pair something form). Taken once by that open.
+ */
+let pendingDeviceName: string | undefined;
+export function namePairingOffer(name: string): void {
+  const trimmed = name.trim();
+  pendingDeviceName = trimmed.length > 0 ? trimmed : undefined;
 }
 export interface PairingModalControlPlaneSnapshot { readonly activeClientIds: readonly string[]; }
 export interface PairingModalReadModel<T> { getSnapshot(): T; }
@@ -138,7 +151,7 @@ export interface PairingModalDeps {
    * answers with a code for the address phones can open. Throws with the reason.
    * Absent: the this-computer link is shown without the question.
    */
-  readonly serveToNetwork?: () => Promise<PairingModalConnectionInfo>;
+  readonly serveToNetwork?: (name?: string) => Promise<PairingModalConnectionInfo>;
 }
 
 // Fixed-width placeholder, deliberately NOT derived from the real secret's
@@ -184,9 +197,16 @@ class PairingModalSurface implements ConfigModalSurface {
   readonly actions = [
     // The two answers of the serve-to-network question, chosen with Enter (No is first, so it opens on No).
     { key: 'enter', id: 'answerNetwork', label: 'choose', enabledFor: (row: ConfigModalRow | null) => this.network === 'ask' && (row?.id === 'network:no' || row?.id === 'network:yes') },
-    { key: 'v', id: 'toggleReveal', label: 'reveal token', enabledFor: () => this.unreachable === null && !this.asking() },
-    { key: 'c', id: 'copyLink', label: 'copy link', enabledFor: () => Boolean(this.deps.copyToClipboard) && this.unreachable === null && !this.asking() },
-    { key: 'r', id: 'newToken', label: 'new device token', enabledFor: () => this.unreachable === null && !this.asking() },
+    // While the QR code is shown alone, its one key switches to the other rows, and back.
+    ((surface: PairingModalSurface): ConfigModalAction => ({
+      key: 'd',
+      id: 'toggleDetails',
+      get label(): string { return surface.details ? 'QR code' : 'details'; },
+      enabledFor: () => surface.fit === 'qr' && surface.unreachable === null && !surface.asking(),
+    }))(this),
+    { key: 'v', id: 'toggleReveal', label: 'reveal token', enabledFor: () => this.unreachable === null && !this.asking() && !this.qrAlone() },
+    { key: 'c', id: 'copyLink', label: 'copy link', enabledFor: () => Boolean(this.deps.copyToClipboard) && this.unreachable === null && !this.asking() && !this.qrAlone() },
+    { key: 'r', id: 'newToken', label: 'new device token', enabledFor: () => this.unreachable === null && !this.asking() && !this.qrAlone() },
     // The one-action serve affordance, offered ONLY when tailscale is detected
     // and not already serving https; a second 't' press (the standard confirm)
     // runs tailscale.serve.run. Absence keeps this key unadvertised and inert.
@@ -195,7 +215,7 @@ class PairingModalSurface implements ConfigModalSurface {
       id: 'tailscaleServe',
       label: 'serve over tailscale (https)',
       confirm: true,
-      enabledFor: () => this.tailscale?.available === true && !this.serving,
+      enabledFor: () => this.tailscale?.available === true && !this.serving && !this.qrAlone(),
     },
     // A serve stays on in tailscaled until it is stopped; 'x' (confirmed) stops
     // the one this daemon started and puts web.publicBaseUrl back.
@@ -204,7 +224,7 @@ class PairingModalSurface implements ConfigModalSurface {
       id: 'tailscaleStop',
       label: 'stop serving over tailscale',
       confirm: true,
-      enabledFor: () => Boolean(this.deps.stopTailscaleServe) && this.activeServe !== null && !this.serving,
+      enabledFor: () => Boolean(this.deps.stopTailscaleServe) && this.activeServe !== null && !this.serving && !this.qrAlone(),
     },
   ];
 
@@ -239,20 +259,80 @@ class PairingModalSurface implements ConfigModalSurface {
     this.unreachable = null;
     this.infoError = null;
     this.revealed = false;
+    this.deviceName = undefined;
     // A yes in flight finishes on its own and is shown on the next open; otherwise the question is asked again then.
     if (this.network !== 'serving') { this.network = 'answered'; this.networkError = null; }
     this.networkAsked = false;
+    this.fit = 'full';
+    this.fitRows = undefined;
+    this.details = false;
   }
 
   /** Set once the question has been put for this open, so a No is not asked again on the next render. */
   private networkAsked = false;
 
+  /**
+   * How the QR code fits the window: 'full' shows it under the intro and the address with the
+   * other rows below; 'qr' shows the QR code and the address alone, whole, with a key that
+   * switches to the other rows (`details`) and back; 'none' says in one line that the window is
+   * too small, with the address and the key that shows the link.
+   */
+  private fit: 'full' | 'qr' | 'none' = 'full';
+  /** The list rows seen in the current 'qr' or 'none' layout; a change means the window changed. */
+  private fitRows: number | undefined = undefined;
+  /** In the 'qr' fit: the other rows are shown instead of the QR code. */
+  private details = false;
+  /** The QR code's line count from the last view built (0 when none is drawn). */
+  private qrLines = 0;
+
+  /** The QR code and its address are on screen alone. */
+  private qrAlone(): boolean { return this.fit === 'qr' && !this.details; }
+
+  /**
+   * The host tells how many list rows the layout just drawn gets. The full layout needs the
+   * intro, the address and the whole QR code; the QR-alone layout (no search row, status or
+   * blank rows) needs the address and the code. Each layout gets its own count, so the choice
+   * is made again only when the window changes, never because the layout itself changed.
+   */
+  onViewportRows(rows: number): void {
+    if (this.qrLines === 0 || this.details) return;
+    const before = this.fit;
+    if (this.fit === 'full') {
+      if (rows < this.qrLines + 2) { this.fit = 'qr'; this.fitRows = undefined; }
+    } else if (this.fit === 'qr') {
+      if (this.fitRows === undefined) {
+        this.fitRows = rows;
+        if (rows < this.qrLines + 1) { this.fit = 'none'; this.fitRows = undefined; }
+      } else if (rows !== this.fitRows) {
+        this.fit = 'full';
+        this.fitRows = undefined;
+      }
+    } else if (this.fitRows === undefined || rows < this.fitRows) {
+      this.fitRows = rows;
+    } else if (rows > this.fitRows) {
+      // A larger window may hold the code again.
+      this.fit = 'full';
+      this.fitRows = undefined;
+    }
+    if (this.fit !== before) this.requestRender();
+  }
+
+  /** The name given for the device this open pairs, kept for a new token or a network serve in the same open. */
+  private deviceName: string | undefined = undefined;
+
   private ensureInfo(fresh = false): PairingModalConnectionInfo | null {
+    if (pendingDeviceName !== undefined) {
+      this.deviceName = pendingDeviceName;
+      pendingDeviceName = undefined;
+      this.info = undefined;
+    }
     if (this.info === undefined) {
       this.infoError = null;
       this.unreachable = null;
       try {
-        const answer = this.deps.getConnectionInfo(this.held || fresh ? { held: this.held, fresh } : undefined);
+        const name = this.deviceName;
+        const answer = this.deps.getConnectionInfo(this.held || fresh || name !== undefined
+          ? { held: this.held, fresh, ...(name !== undefined ? { name } : {}) } : undefined);
         if (answer !== null && 'kind' in answer) {
           this.unreachable = answer;
           this.info = null;
@@ -267,6 +347,7 @@ class PairingModalSurface implements ConfigModalSurface {
 
   buildView(): ConfigModalView {
     const info = this.ensureInfo();
+    this.qrLines = 0;
     if (this.unreachable) {
       // No code is shown: there is no web UI to open. The steps end in the command that fixes it.
       const rows: ConfigModalRow[] = this.unreachable.lines.map((line, i) => infoRow(`step:${i}`, line, i === 0 ? { fg: MODAL_TONES.reasoning } : {}));
@@ -298,18 +379,38 @@ class PairingModalSurface implements ConfigModalSurface {
     const displayLink = this.revealed ? deepLink : SECRET_MASK;
 
     const rows: ConfigModalRow[] = [];
+    // The QR comes right after the address, before the details and the offers, so it is
+    // on screen when the view opens. None for a link only this computer opens: a QR is for
+    // another device. No raw JSON blob is ever encoded.
+    const qr = thisMachineOnly ? [] : renderQrToString(generateQrMatrix(deepLink)).split('\n');
+    this.qrLines = qr.length;
+    const fit = qr.length === 0 ? 'full' : this.fit;
+    // One non-selectable row per QR line, drawn cell for cell.
+    const qrRows = (): void => qr.forEach((line, i) => rows.push(infoRow(`qr:${i}`, line, { fg: MODAL_TONES.qrDark, bg: MODAL_TONES.qrLight })));
+    if (fit === 'qr' && !this.details) {
+      // The window holds the code only on its own: the address and the code, whole, and the one key to the rest.
+      rows.push(infoRow('url', `Web app   ${url}`));
+      qrRows();
+      return { title: 'Device Pairing', whole: true, tabs: [{ id: 'pairing', label: 'Pairing', rows, hints: [] }] };
+    }
     if (thisMachineOnly) {
       // A phone could not open this link: it is for a browser on this computer,
       // and the steps say how a phone gets one. The Tailscale serve below is the other way.
       thisMachineOnly.forEach((line, i) => rows.push(infoRow(`step:${i}`, line, i === 0 ? { fg: MODAL_TONES.reasoning } : {})));
       rows.push(infoRow('intro', `Press ${actionKeyText('v')} to show the link and the sign-in code, then open the link in a browser here, or paste the code on its sign-in page.`, { fg: MODAL_TONES.dim }));
-    } else {
+    } else if (fit === 'none') {
+      // Not even the code alone fits: said in one line, with the address and the key that shows the link.
+      rows.push(infoRow('qr-fit', `Too small for the QR code: open ${url} on the phone, or ${actionKeyText('v')} shows the link.`, { fg: MODAL_TONES.reasoning }));
+    } else if (fit === 'full') {
       rows.push(infoRow('intro', 'Scan with the GoodVibes web app to pair this device; it opens already signed in.', { fg: MODAL_TONES.dim }));
     }
-    rows.push(infoRow('url', `Web app   ${url}`));
+    if (fit !== 'none') rows.push(infoRow('url', `Web app   ${url}`));
+    if (fit === 'full') qrRows();
     rows.push(infoRow('name', `Device    ${tokenName}`));
     rows.push(infoRow('token', `Token     ${displayToken}`, { fg: MODAL_TONES.reasoning }));
-    rows.push(infoRow('link', `Link      ${displayLink}`, { fg: MODAL_TONES.dim }));
+    // A shown link is a row of its own id: the view takes it as a new row and wraps the whole
+    // link over as many lines as it needs, instead of holding it to the one line the mask used.
+    rows.push(infoRow(this.revealed ? 'link:shown' : 'link', `Link      ${displayLink}`, { fg: MODAL_TONES.dim }));
     if (this.deps.controlPlaneReadModel) {
       const connected = this.deps.controlPlaneReadModel.getSnapshot().activeClientIds.length;
       rows.push(infoRow('companions', `Devices connected: ${connected}`, connected > 0 ? { fg: MODAL_TONES.good } : { fg: MODAL_TONES.dim }));
@@ -335,15 +436,6 @@ class PairingModalSurface implements ConfigModalSurface {
     if (notice) rows.push(infoRow('posture', notice, { fg: MODAL_TONES.reasoning }));
     // The tailscale serve affordance, quiet unless tailscale is detected.
     this.appendTailscaleRows(rows);
-
-    // ASCII QR of the deep link, a camera scan opens the web app already
-    // carrying the one-time token. No raw JSON blob is ever encoded. The
-    // multi-line preformatted string is split into one non-selectable row per row.
-    // None for a link only this computer opens: a QR is for another device.
-    if (!thisMachineOnly) {
-      const qr = renderQrToString(generateQrMatrix(deepLink));
-      qr.split('\n').forEach((line, i) => rows.push(infoRow(`qr:${i}`, line, { fg: MODAL_TONES.qrDark, bg: MODAL_TONES.qrLight })));
-    }
 
     // The keys come from the action table's own hints (reveal, copy, new token, serve, stop).
     const hints: string[] = [];
@@ -387,6 +479,7 @@ class PairingModalSurface implements ConfigModalSurface {
   onAction(id: string, ctx: ConfigModalActionContext): void {
     const info = this.ensureInfo();
     if (id === 'answerNetwork') { this.answerNetwork(ctx.row?.id === 'network:yes', ctx); return; }
+    if (id === 'toggleDetails') { this.details = !this.details; this.requestRender(); return; }
     if (id === 'toggleReveal') { this.revealed = !this.revealed; this.requestRender(); return; }
     if (id === 'tailscaleServe') { this.runTailscaleServe(ctx); return; }
     if (id === 'tailscaleStop') { this.stopTailscaleServe(ctx); return; }
@@ -430,7 +523,7 @@ class PairingModalSurface implements ConfigModalSurface {
     this.network = 'serving';
     this.networkError = null;
     this.requestRender();
-    this.deps.serveToNetwork()
+    this.deps.serveToNetwork(this.deviceName)
       .then((served) => {
         this.info = served;
         this.held = served;

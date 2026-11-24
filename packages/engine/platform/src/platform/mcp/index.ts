@@ -23,6 +23,7 @@ export {
   setMcpServerToolRule,
   upsertMcpServerConfig,
 } from './config.js';
+export { ownerAddedServers } from './owner-added.js';
 export type {
   McpConfig,
   McpConfigLocation,

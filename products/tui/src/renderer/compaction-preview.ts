@@ -3,8 +3,9 @@
  *
  * Pre-compact: shows an honest estimate of what compaction will do
  * (message count and token estimate before → after). The platform has no dry-run
- * API; we derive the after-estimate from the DEFAULT_COMPACTION_CONFIG
- * totalCeiling, clearly labelled as an ESTIMATE.
+ * API; we derive the after-estimate from the totalCeiling compaction uses
+ * for the model's context window (compactionConfigForWindow), never above the
+ * conversation's current size, clearly labelled as an ESTIMATE.
  *
  * Post-compact: shows a before/after notice using the CompactionEvent
  * data returned by compactMessages(), which contains the real
@@ -19,12 +20,9 @@
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { computeContextUsage } from '../core/context-usage.ts';
 import { formatQualityScoreLine } from './compaction-quality.ts';
-import { DEFAULT_COMPACTION_CONFIG, type CompactionEvent } from '@goodvibes/engine/platform/platform/core';
+import { compactionConfigForWindow, type CompactionEvent } from '@goodvibes/engine/platform/platform/core';
 import type { ProviderMessage } from '@goodvibes/engine/platform/platform/providers';
 import type { CompactionQualityScore } from './compaction-quality.ts';
-
-/** The engine's default compaction ceiling. Used only for the pre-compact ESTIMATE; the real figure comes from CompactionEvent. */
-const COMPACTION_OUTPUT_CEILING_ESTIMATE = DEFAULT_COMPACTION_CONFIG.totalCeiling;
 
 export interface CompactionPreviewOptions {
   /** Messages currently in the conversation. */
@@ -54,13 +52,14 @@ export interface CompactionAfterOptions {
  * Build the pre-compaction notice string.
  *
  * Returned as a plain string intended for `ctx.print()` or `systemMessageRouter`.
- * Always labelled as an estimate; uses the platform totalCeiling as the after-estimate.
+ * Always labelled as an estimate; uses the window's totalCeiling (at most the current size) as the after-estimate.
  */
 export function buildCompactionPreview(opts: CompactionPreviewOptions): string {
   const { messages, contextWindow, pinnedMemoryCount, trigger } = opts;
   const msgCount = messages.length;
   const tokensBefore = estimateConversationTokens(messages as ProviderMessage[]);
-  const tokensAfterEstimate = COMPACTION_OUTPUT_CEILING_ESTIMATE;
+  // The ceiling compaction works to for this model's window (the engine's own sizes); never more than there is now.
+  const tokensAfterEstimate = Math.min(tokensBefore, compactionConfigForWindow(contextWindow).totalCeiling);
 
   const contextStr = contextWindow > 0
     ? ` (${Math.round(computeContextUsage(tokensBefore, contextWindow).rawRatio * 100)}% of ${fmtN(contextWindow)} context window)`

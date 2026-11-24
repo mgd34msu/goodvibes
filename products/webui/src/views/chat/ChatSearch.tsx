@@ -35,6 +35,8 @@ import '../../styles/components/chat-search.css';
 export interface ChatSearchSelectPayload {
   sessionId: string;
   messageId: string;
+  /** What was searched for, so the message jumped to can mark the matching words. */
+  query?: string;
 }
 
 export interface ChatSearchProps {
@@ -48,6 +50,8 @@ export interface ChatSearchProps {
    * the field on mount.
    */
   onClose?: () => void;
+  /** A few words under the field, e.g. that the same key again opens the browser's own find. */
+  hint?: string;
 }
 
 /** Relative time label for a result. */
@@ -63,7 +67,7 @@ function relativeTime(ms?: number): string {
   return `${days}d ago`;
 }
 
-export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
+export function ChatSearch({ onSelect, className, onClose, hint }: ChatSearchProps) {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -110,9 +114,9 @@ export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
 
   const handleSelect = useCallback(
     (result: ChatSearchResult) => {
-      onSelect({ sessionId: result.sessionId, messageId: result.messageId });
+      onSelect({ sessionId: result.sessionId, messageId: result.messageId, query: query.trim() });
     },
-    [onSelect],
+    [onSelect, query],
   );
 
   // Session-level result: no specific message to scroll to, open the session.
@@ -210,6 +214,7 @@ export function ChatSearch({ onSelect, className, onClose }: ChatSearchProps) {
           <IconButton size="sm" label="Close find" shortcut="Esc" icon={<X />} onClick={onClose} className="chat-search__close" />
         )}
       </div>
+      {hint && <p className="chat-search__section-caption chat-search__hint">{hint}</p>}
 
       {hasQuery && (
         <section className="chat-search__section" aria-label="Sessions matching your search">

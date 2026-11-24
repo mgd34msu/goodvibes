@@ -115,17 +115,26 @@ export interface LoadCustomProvidersOptions {
    * the fresh read answers.
    */
   modelsCachePath?: ((providerName: string) => string) | undefined;
+  /**
+   * The key stored under a name (the secrets store), read when a file's
+   * `apiKeyEnv` variable is not set in the environment: the key the key
+   * prompt stores under that name is the one the provider sends.
+   */
+  storedKey?: ((name: string) => Promise<string | null>) | undefined;
 }
 
 /**
  * Resolve API key from config.
- * Priority: explicit apiKey > env var (apiKeyEnv) > empty string.
+ * Priority: explicit apiKey > env var (apiKeyEnv) > the key stored under that
+ * variable's name (what the key prompt stores) > empty string.
  */
-function resolveApiKey(config: CustomProviderConfig): string {
+async function resolveApiKey(config: CustomProviderConfig, storedKey: LoadCustomProvidersOptions['storedKey']): Promise<string> {
   if (config.apiKey) return config.apiKey;
   if (config.apiKeyEnv) {
     const val = process.env[config.apiKeyEnv];
     if (val) return val;
+    const stored = storedKey ? await storedKey(config.apiKeyEnv).catch(() => null) : null;
+    if (stored) return stored;
   }
   return '';
 }
@@ -238,7 +247,7 @@ export async function loadCustomProviders(
       continue;
     }
 
-    const apiKey = resolveApiKey(cfg);
+    const apiKey = await resolveApiKey(cfg, options.storedKey);
     const modelIds = cfg.models.map((m) => m.id);
     // The variable the file names is the provider's key route, so its status names
     // that variable (not a name derived from the provider id that nothing sets).

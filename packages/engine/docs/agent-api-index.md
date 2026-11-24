@@ -9,6 +9,7 @@ Auth: `Authorization: Bearer <token>` or the login session cookie. Errors are `{
 | Method id | Route | Scopes | Replay key | Does |
 | --- | --- | --- | --- | --- |
 | `sessions.changes.get` | invoke / WebSocket only | read:checkpoints |  | Return the aggregate workspace file changes a session made, joined over its sessionId-stamped checkpoints: th… |
+| `sessions.checkpoints.changed` | invoke / WebSocket only | write:sessions |  | A terminal program that runs its own session (the terminal app, the Agent) tells the daemon it made, pruned o… |
 | `sessions.close` | `POST /api/sessions/{sessionId}/close` | write:sessions |  | Mark a shared session as closed. |
 | `sessions.contextUsage.get` | `GET /api/sessions/{sessionId}/context-usage` | read:sessions |  | Return the live context-window usage for a session: estimatedContextTokens (the runtime's current estimate, n… |
 | `sessions.create` | `POST /api/sessions` | write:sessions |  | Create a shared session for a surface, route, or web client. |

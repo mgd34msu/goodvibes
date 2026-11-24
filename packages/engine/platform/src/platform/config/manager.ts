@@ -158,6 +158,12 @@ interface ConfigCliOverrides {
    */
   settingsSurfaceRoot?: string | undefined;
   /**
+   * Where the custom provider files are read (absolute). Omitted: `providers`
+   * under this manager's own directory. An embedded daemon that reads the
+   * terminal app's settings reads that app's providers with them.
+   */
+  providersDir?: string | undefined;
+  /**
    * True only in the daemon composition, which OWNS the daemon tier file. A
    * client only READS it; the default is that non-writing answer.
    */
@@ -427,6 +433,7 @@ export class ConfigManager {
   #config: GoodVibesConfig;
   private runtimeState: ConfigRuntimeState;
   private readonly configDir: string;
+  private readonly providersDir: string;
   private readonly configPath: string;
   private readonly projectConfigPath: string | null;
   private readonly workingDirectory: string | null;
@@ -503,6 +510,7 @@ export class ConfigManager {
     const settingsSurfaceRoot = overrides.settingsSurfaceRoot
       ? requireSurfaceRoot(overrides.settingsSurfaceRoot, 'ConfigManager settingsSurfaceRoot') : surfaceRoot;
     this.configDir = base;
+    this.providersDir = requireAbsoluteOwnedPath(overrides.providersDir, 'providersDir') ?? join(base, 'providers');
     this.configPath = !configDir && settingsSurfaceRoot && settingsSurfaceRoot !== surfaceRoot
       ? resolveSurfaceDirectory(homeDirectory!, settingsSurfaceRoot, 'settings.json')
       : join(base, 'settings.json');
@@ -564,6 +572,11 @@ export class ConfigManager {
 
   getControlPlaneConfigDir(): string {
     return this.configDir;
+  }
+
+  /** The folder the custom provider files are read from. */
+  getCustomProvidersDir(): string {
+    return this.providersDir;
   }
 
   /** One owned, synchronous permission frame; no listeners/hooks run while it is copied. */

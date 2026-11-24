@@ -1,6 +1,21 @@
 /** Shared rendered transcript metadata; execution authority stays in platform core. */
 import type { BlockMeta as PlatformBlockMeta } from '@goodvibes/engine/platform/platform/core';
 /**
+ * What the copy key copies from a block whose lines are not the thing to copy: a pairing
+ * block shows its link masked, and copies the real link.
+ */
+export interface BlockCopy {
+    /** The text copied. */
+    readonly text: string;
+    /** How the copy receipt names it ("the pairing link"). */
+    readonly name: string;
+    /**
+     * When nothing reached a clipboard: what to print instead of the plain failure line
+     * (undefined keeps the plain line). Asked on each failed copy.
+     */
+    readonly whenNotCopied?: (() => string | undefined) | undefined;
+}
+/**
  * TUI extends the platform BlockMeta with rendering position fields, plus a
  * TUI-only block type: 'tool_group' is the synthetic header block that folds
  * a run of >=2 consecutive tool-result messages under one collapsible header
@@ -42,6 +57,8 @@ export type BlockMeta = Omit<PlatformBlockMeta, 'type'> & {
      * shows this, never the start of that text.
      */
     title?: string | undefined;
+    /** What the copy key copies instead of the block's raw text (see BlockCopy). */
+    copy?: BlockCopy | undefined;
     /**
      * The collapse key that reveals each entry of groupMemberIndexes (same
      * order): the bead body the result sits behind (work-tree-model.ts

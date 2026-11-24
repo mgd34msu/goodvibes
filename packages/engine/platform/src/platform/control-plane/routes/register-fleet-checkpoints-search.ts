@@ -16,7 +16,7 @@
 import type { GatewayMethodCatalog } from '../method-catalog.js';
 import { registerFleetGatewayMethods, type FleetQueryOnlyRegistry, type FleetSteerApprovals, type FleetSteerCapableRegistry, type FleetAttemptsController } from './fleet.js';
 import { registerFleetControlGatewayMethods, type FleetControlRegistry } from './fleet-control.js';
-import { registerCheckpointGatewayMethods, type CheckpointsGatewayManager, type CheckpointsEventSink } from './checkpoints.js';
+import { registerCheckpointGatewayMethods, registerSessionCheckpointNotice, type CheckpointsGatewayManager, type CheckpointsEventSink, type SessionCheckpointNoticeBroker } from './checkpoints.js';
 import { registerSessionSearchGatewayMethod, type SessionOwnersLookup, type SessionSearchBroker } from './session-search.js';
 import { createEventEnvelope } from '../../runtime/events/index.js';
 import type { RuntimeEventBus, RuntimeEventEnvelope } from '../../runtime/events/index.js';
@@ -27,7 +27,8 @@ import { registerContractGatewayMethods } from './contracts.js';
 export interface FleetCheckpointsSearchGatewayDeps {
   readonly processRegistry: FleetQueryOnlyRegistry & FleetSteerCapableRegistry & FleetControlRegistry;
   readonly workspaceCheckpointManager: CheckpointsGatewayManager;
-  readonly sessionBroker: SessionSearchBroker;
+  /** Searched by sessions.search; asked by sessions.checkpoints.changed whether a session is known. */
+  readonly sessionBroker: SessionSearchBroker & SessionCheckpointNoticeBroker;
   /** The owners of a hosted session, so sessions.search lists a hosted row only to a caller that may read it. */
   readonly sessionOwners?: SessionOwnersLookup | undefined;
   /**
@@ -68,5 +69,6 @@ export function registerFleetCheckpointsSearchGatewayMethods(catalog: GatewayMet
     }
     : undefined;
   registerCheckpointGatewayMethods(catalog, deps.workspaceCheckpointManager, checkpointsEmit);
+  registerSessionCheckpointNotice(catalog, deps.sessionBroker);
   registerSessionSearchGatewayMethod(catalog, deps.sessionBroker, deps.sessionOwners);
 }

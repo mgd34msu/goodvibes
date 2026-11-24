@@ -11,6 +11,14 @@ export interface RecordedProfileMutation { readonly kind: 'recorded-profile-muta
 export interface ProfileMutationOptions extends JudgmentReadingOptions {
   readonly delegation?: RecordedProfileDelegation | undefined;
   readonly admittedMutation?: RecordedProfileMutation | undefined;
+  /**
+   * Set only by the profile and occasions gateway verbs, for a call the signed-in person made
+   * themselves (their own form or command: no Agent credential, no recorded delegation). Such a
+   * write is the person's own words, so the check for content repeated from untrusted sources,
+   * which guards writes a model or an agent originates, does not apply to it. Never read from
+   * the wire.
+   */
+  readonly ownerSubmitted?: boolean | undefined;
   /** Trusted backing mutation receipts. These callbacks never grant authority. */
   readonly onWriteIntent?: (() => void) | undefined;
   readonly onEffect?: ((published?: boolean) => void) | undefined;

@@ -36,6 +36,7 @@ import {
   upsertMcpServerConfig,
   withMcpConfigLock,
 } from './config.js';
+import { forgetOwnerAddedServer, ownerAddedServers, recordOwnerAddedServer } from './owner-added.js';
 import { McpClient } from './client.js';
 import type {
   McpClientNotification,
@@ -476,7 +477,7 @@ export class McpRegistry {
     const gate = this.repositoryGate;
     if (gate === null) return loadMcpEffectiveConfig(roots);
     await gate.load();
-    return loadMcpEffectiveConfig(roots, { holdProjectFile: (path) => gate.holds(path) });
+    return loadMcpEffectiveConfig(roots, { holdProjectFile: (path) => gate.holds(path), ownerAdded: ownerAddedServers(roots.homeDirectory) });
   }
 
   /** The servers a project file names that wait on the owner's trust of the workspace; empty when none wait. */
@@ -484,7 +485,7 @@ export class McpRegistry {
     const gate = this.repositoryGate;
     if (gate === null) return [];
     await gate.load();
-    return (loadMcpEffectiveConfig(roots, { holdProjectFile: (path) => gate.holds(path) }).held ?? []).map((entry) => entry.server.name);
+    return (loadMcpEffectiveConfig(roots, { holdProjectFile: (path) => gate.holds(path), ownerAdded: ownerAddedServers(roots.homeDirectory) }).held ?? []).map((entry) => entry.server.name);
   }
 
   async reload(roots: McpConfigRoots): Promise<McpReloadResult> {
@@ -496,12 +497,27 @@ export class McpRegistry {
     return loadMcpEffectiveConfig(roots);
   }
 
+  /**
+   * Write a server's entry and bring the running servers in line. `byOwner`:
+   * the owner added it with his own command or form, so a project file's entry
+   * is his request and starts without the workspace trust question
+   * (mcp/owner-added.ts); a model's or a script's write is not.
+   */
   async upsertServerConfig(
     roots: McpConfigRoots,
     scope: McpConfigScope,
     serverConfig: McpServerConfig,
+    options: { readonly byOwner?: boolean | undefined } = {},
   ): Promise<{ readonly path: string; readonly reload: McpReloadResult }> {
-    const written = await withMcpConfigLock(roots, scope, () => upsertMcpServerConfig(roots, scope, serverConfig));
+    const written = await withMcpConfigLock(roots, scope, () => {
+      const result = upsertMcpServerConfig(roots, scope, serverConfig);
+      const entry = result.config.servers.find((server) => server.name === serverConfig.name);
+      if (scope === 'project' && entry) {
+        if (options.byOwner === true) recordOwnerAddedServer(roots.homeDirectory, result.path, entry);
+        else forgetOwnerAddedServer(roots.homeDirectory, result.path, entry.name);
+      }
+      return result;
+    });
     return { path: written.path, reload: await this.reload(roots) };
   }
 
@@ -510,7 +526,11 @@ export class McpRegistry {
     scope: McpConfigScope,
     serverName: string,
   ): Promise<{ readonly path: string; readonly removed: boolean; readonly reload: McpReloadResult }> {
-    const written = await withMcpConfigLock(roots, scope, () => removeMcpServerConfig(roots, scope, serverName));
+    const written = await withMcpConfigLock(roots, scope, () => {
+      const result = removeMcpServerConfig(roots, scope, serverName);
+      if (scope === 'project' && result.removed) forgetOwnerAddedServer(roots.homeDirectory, result.path, serverName);
+      return result;
+    });
     return { path: written.path, removed: written.removed, reload: await this.reload(roots) };
   }
 
@@ -1469,6 +1489,8 @@ export class McpRegistry {
   approveSchemaQuarantine(serverName: string, operatorId: string): void {
     this.invalidatePolicyLifetime(serverName, 'its quarantine was approved');
     this.freshness.approveQuarantine(serverName, operatorId);
+    // Accepting a server's changed tools reads them again: the next listing asks the server, not the held catalog.
+    this.clients.get(serverName)?.forgetToolCatalog();
     if (this.runtimeBus) {
       emitMcpSchemaQuarantineApproved(this.runtimeBus, {
         sessionId: 'mcp-registry',

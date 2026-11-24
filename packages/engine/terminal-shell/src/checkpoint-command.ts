@@ -127,7 +127,7 @@ export function createCheckpointCommand<Ctx extends CheckpointCommandShape>(poli
             `Checkpoints (${checkpoints.length}, newest first):`,
             ...checkpoints.map((checkpoint, index) => `  ${String(index + 1).padStart(2)}. ${shortCheckpointId(checkpoint.id).padEnd(12)} ${checkpoint.kind.padEnd(9)} ${checkpoint.label}  ${formatCheckpointAge(checkpoint.createdAt)}  ~${formatBytes(checkpoint.sizeBytes)} new`),
             ...notes,
-            'Put the files back to one: /checkpoint restore <n|id> (shows what changes and asks first; the conversation is unchanged).',
+            'Put the files back to one: /checkpoint restore <n|id> (at once; the files before it are kept as a checkpoint, and the conversation is unchanged).',
             'Go back to an earlier turn, files and conversation: /checkpoint rewind.',
           ].join('\n');
         },
@@ -153,7 +153,7 @@ export function createCheckpointCommand<Ctx extends CheckpointCommandShape>(poli
       {
         id: 'restore', label: 'Put the files back to a checkpoint', word: 'restore',
         inputs: [listInput({ id: 'checkpoint', label: 'Checkpoint', help: 'Your checkpoints, newest first', list: CHECKPOINTS, other: 'a number from the list, newest first, or a checkpoint id' })],
-        sentence: 'The workspace\'s files go back to checkpoint {checkpoint} after you see what changes; the current files are kept in a safety checkpoint first, and the conversation is unchanged.',
+        sentence: 'The workspace\'s files go back to checkpoint {checkpoint}; the current files are kept as a checkpoint first, which /checkpoint restore brings back, and the conversation is unchanged.',
         done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'none', asksItself: true,
         operator: LOCAL, example: { checkpoint: '1' },
         async run(values, ctx) {
@@ -169,8 +169,9 @@ export function createCheckpointCommand<Ctx extends CheckpointCommandShape>(poli
           listInput({ id: 'turn', label: 'Turn', help: 'The turns of this conversation, newest first', list: TURNS, other: 'a number from the list, newest first, or a turn id' }),
           choiceInput({ id: 'scope', label: 'What goes back', help: 'The files, the conversation, or both', choices: SCOPES, typed: { position: 2 }, optional: { default: 'both', means: 'files and conversation' } }),
         ],
-        sentence: 'What changed after turn {turn} is taken back ({scope}) once you have seen the plan and said yes: messages after it are dropped and files go back to how they were then. /undo rewind brings them back only while no new message has been added.',
+        sentence: 'What changed after turn {turn} is taken back ({scope}): messages after it are dropped and files go back to how they were then. /undo rewind brings them back only while no new message has been added.',
         done: '', touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', asksItself: true,
+        riskDone: 'the dropped messages are gone once a new message is added; /undo rewind brings them back until then',
         operator: { terminalOnly: 'It rewinds the conversation open in the terminal app.' }, example: { turn: '2', scope: 'files' },
         async run(values, ctx) {
           if ('refused' in policy.rewind) throw commandRefusal(policy.rewind.refused, '/checkpoint restore puts the files back to a checkpoint.');

@@ -658,7 +658,7 @@ export class AgentsModal implements SurfaceModal {
     this.deps.acts?.ensureGraphFor(node);
     const observedDraft = this.deps.acts?.observedSteerDraftFor(node.id) ?? null;
     const graph = this.deps.acts?.graphFor(node.id) ?? null;
-    return { title: row.title, meta: row.meta.full, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph) }], tail: [] };
+    return { title: row.title, meta: row.meta.full, blocks: [{ kind: 'lines', build: (width) => renderFleetDetailLines(node, width, stopping, blocked, undefined, observedDraft, graph, row.right) }], tail: [] };
   }
 
   private fullBody(width: number, height: number): readonly Line[] {

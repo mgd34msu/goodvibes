@@ -41,7 +41,7 @@ export interface ChangesDeps {
   /** Send text to the model as the next user turn (review comments). */
   readonly submitInput?: (text: string) => void;
   readonly openInEditor?: (path: string, line?: number) => void;
-  /** Revert one hunk in the working tree (checkpoint-backed, asks first). Resolves to a status line. */
+  /** Revert one hunk in the working tree at once (checkpoint-backed; its receipt says how to undo it). Resolves to a status line. */
   readonly revertHunk?: (hunk: ReviewHunk) => Promise<string>;
   readonly confirm?: (options: ConfirmOptions) => Promise<boolean>;
 }

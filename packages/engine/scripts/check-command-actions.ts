@@ -12,9 +12,10 @@
  *  4. an action has no sentence, or its sentence leaves out a required blank;
  *  5. an action that changes something does not say how long (an action that
  *     cannot be undone says so with its risk);
- *  6. an action marked risky does not ask (its line asks, or it asks its own
- *     question: `asksItself`), or one that loosens a protection can be run by a
- *     model;
+ *  6. an action marked risky is not put to the owner when a model runs its
+ *     line (or asks its own question: `asksItself`), or one that loosens a
+ *     protection can be run by a model (the owner's own complete line, or a
+ *     form he submitted, is the request and asks nothing);
  *  7. an action cannot be reached from the guided path (a blank's list depends
  *     on a blank that comes after it, or on none, or the action shows no form
  *     and has a blank that must be filled);
@@ -34,6 +35,7 @@ import {
   type CommandDescription,
 } from '../terminal-shell/src/command-actions/index.ts';
 import { tokenizeSlashCommand } from '../terminal-shell/src/slash-command-parser.ts';
+import { readRefusal } from '@goodvibes/engine/errors';
 
 import { loadCommandRegistries, type RegisteredCommand } from './command-actions-registries.ts';
 
@@ -91,11 +93,15 @@ export function checkDescription(description: CommandDescription<never>, problem
     const example = { ...placeholders(action), ...action.example };
     const line = renderTypedLine(description, action.id, example);
     const args = [...tokenizeSlashCommand(line)].slice(1);
+    // The owner's own line of it runs at once (it is the request); a model's line of it is put to him first,
+    // or refused outright when it is his alone.
     if (action.risk !== 'none' && !action.asksItself) {
-      const question = (() => { try { return generatedConfirm(description)(args, {}); } catch { return undefined; } })();
-      if (!question) at(action, 'it is marked risky and its line does not ask first');
-    }
-    if (action.risk === 'loosens-a-protection' && !action.ownerOnly) at(action, 'it loosens a protection and a model could run it: give it ownerOnly with the reason');
+      const putToOwner = (() => {
+        try { return generatedConfirm(description)(args, { invokedByModel: true }) !== undefined; }
+        catch (error) { return readRefusal(error)?.code === 'OWNER_ONLY_COMMAND'; }
+      })();
+      if (!putToOwner) at(action, 'it is marked risky and a model\'s line of it is not put to the owner first');
+    }    if (action.risk === 'loosens-a-protection' && !action.ownerOnly) at(action, 'it loosens a protection and a model could run it: give it ownerOnly with the reason');
     // 2, 3, 7, 8
     action.inputs.forEach((input, index) => {
       if (!input.label.trim()) at(action, `blank "${input.id}" has no label`);

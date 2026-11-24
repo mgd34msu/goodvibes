@@ -135,6 +135,7 @@ export interface BootDaemonOptions {
     readonly host?: string | undefined;
     readonly port?: number | undefined;
     readonly serveFactory?: typeof Bun.serve | undefined;
+    readonly settingsSurfaceRoot?: string | undefined;
     readonly token?: string | undefined;
     // Warning: (ae-forgotten-export) The symbol "DaemonUpdateArtifact" needs to be exported by the entry point embed.d.ts
     readonly updateArtifact?: DaemonUpdateArtifact | undefined;
@@ -200,6 +201,12 @@ export class DaemonServer {
     get sessions(): SharedSessionBroker;
     // Warning: (ae-forgotten-export) The symbol "NativeHandover" needs to be exported by the entry point embed.d.ts
     start(): Promise<void | NativeHandover>;
+    // Warning: (ae-forgotten-export) The symbol "AgentRecord" needs to be exported by the entry point embed.d.ts
+    startSessionAgent(input: {
+        readonly sessionId: string;
+        readonly task: string;
+        readonly workingDirectory?: string | undefined;
+    }): Promise<AgentRecord>;
     // (undocumented)
     stop(): Promise<void>;
     get triggers(): RuntimeServices['triggerManager'] | undefined;
@@ -217,6 +224,11 @@ export interface EmbeddedCompletion {
 // @public
 export type EmbeddedRunEvent = {
     readonly type: 'text';
+    readonly text: string;
+}
+/** A line the agent wrote for the person about its run, such as why its answer is late (`Provider error, retrying in 5s…`). */
+| {
+    readonly type: 'progress';
     readonly text: string;
 } | {
     readonly type: 'tool-started';

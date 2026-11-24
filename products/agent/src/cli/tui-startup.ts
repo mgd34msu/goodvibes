@@ -218,19 +218,12 @@ async function offerTerminalSettingsImport(commandContext: CommandContext): Prom
     const settings = await import('../input/agent-workspace-settings.ts');
     const plan = settings.planAgentWorkspaceTuiSettingsImport(commandContext);
     if (plan === null || !settings.agentWorkspaceTuiSettingsImportHasChanges(plan)) return;
-    // A one-key choice where it is offered: Enter on the empty composer shows what would
-    // change (the workspace's import row asks the same), and the answer imports exactly that plan.
+    // A one-key choice where it is offered: Enter on the empty composer imports exactly that plan at once
+    // (the key is the request); the answer lists what changed and names the copy that puts it back.
     setSplashImportCommand('/setup import-settings', () => {
       void (async () => {
-        const confirm = commandContext.confirm;
-        if (!confirm) { commandContext.print('Nothing was imported: this surface cannot ask before importing. /setup import-settings does it.'); return; }
-        const go = await confirm({
-          title: 'Import GoodVibes settings', body: settings.describeAgentWorkspaceTuiSettingsImportPlan(plan),
-          confirmLabel: 'Import them', cancelLabel: 'Leave as is', tone: 'primary',
-        });
-        if (!go) { commandContext.print('The terminal app\'s settings were left as they are; /setup import-settings brings them over later.'); return; }
         const outcome = await settings.applyAgentWorkspaceTuiSettingsImport(commandContext, plan);
-        commandContext.print(outcome.status);
+        commandContext.print([outcome.status, ...(outcome.result?.detail ? [outcome.result.detail] : [])].join('\n'));
       })().catch((error: unknown) => {
         commandContext.print(`The terminal app's settings were not imported: ${summarizeError(error)}`);
       });

@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import {
   applySettingsSyncBundle,
@@ -20,7 +20,7 @@ import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/te
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
-import { describeSetupTransferChanges, isSecurityBearingChange } from './local-setup-transfer.ts';
+import { describeSetupTransferChanges } from './local-setup-transfer.ts';
 
 /** Read a settings sync bundle, refusing in words (never a stack) a file that is unreadable, not JSON, or not shaped like a bundle. */
 function readSettingsSyncBundle(sourcePath: string): SettingsSyncBundle {
@@ -151,9 +151,8 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
       }),
       {
         id: 'pull', label: 'Take the settings from a sync bundle', word: 'pull', inputs: [BUNDLE],
-        sentence: 'The settings in {path} replace yours until you change it, except keys a managed lock owns; changes that touch security are shown and asked about first.', done: '',
-        // It can loosen a protection; it asks its own question, showing exactly the security changes it read.
-        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', asksItself: true,
+        sentence: 'The settings in {path} replace yours until you change it, except keys a managed lock owns; what changed is listed, with the copy of your settings from before that puts them back.', done: '',
+        touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection',
         ownerOnly: { reason: 'a sync bundle can change security settings on this machine', instead: 'Ask the owner to run /settings-sync pull <file>.' },
         operator: { terminalOnly: TERMINAL_ONLY }, example: { path: 'settings-sync.json' },
         async run(values, ctx) {
@@ -170,14 +169,21 @@ export function registerSettingsSyncRuntimeCommands(registry: CommandRegistry): 
             .filter(([key]) => CONFIG_KEYS.has(key as ConfigKey))
             .map(([key, next]) => ({ key, previous: config.get(key as ConfigKey), next }))
             .filter((change) => JSON.stringify(change.previous) !== JSON.stringify(change.next));
-          if (changes.some(isSecurityBearingChange)) {
-            const body = [...describeSetupTransferChanges(changes), 'A key a managed lock owns is skipped; /managed history lists what changed.'].join('\n');
-            if (!ctx.confirm) throw commandRefusal(`These synced settings change security, so they are pulled only where you can be asked:\n${body}`);
-            if (!(await ctx.confirm({ title: 'Pull synced settings that change security?', body, confirmLabel: 'Pull', cancelLabel: 'Back', tone: 'danger' }))) throw commandRefusal('Not pulled: nothing was changed.');
+          // The owner's own command is the request: it pulls at once, says what changed, and keeps a copy of the
+          // settings from before that puts them back.
+          const settingsPath = config.getConfigPath();
+          const before = `${settingsPath}.before-pull-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+          let kept: string | null = null;
+          if (changes.length > 0 && existsSync(settingsPath)) {
+            try { copyFileSync(settingsPath, before); kept = before; } catch (error) { return failed(new Error(`the settings from before could not be kept at ${before} (${summarizeError(error)}), so nothing was pulled`)); }
           }
           try {
             const result = applySettingsSyncBundle(config, bundle, sourcePath);
-            return `Pulled the settings sync bundle from ${sourcePath} (${result.appliedCount} applied, ${result.conflictCount} conflicts${result.skippedLockedKeys ? `, ${result.skippedLockedKeys.length} skipped because managed locks own them: ${result.skippedLockedKeys.join(', ')}` : ''}).`;
+            return [
+              `Pulled the settings sync bundle from ${sourcePath} (${result.appliedCount} applied, ${result.conflictCount} conflicts${result.skippedLockedKeys ? `, ${result.skippedLockedKeys.length} skipped because managed locks own them: ${result.skippedLockedKeys.join(', ')}` : ''}).`,
+              ...(changes.length > 0 ? describeSetupTransferChanges(changes) : []),
+              ...(kept ? [`To put them back: your settings as they were before are kept as ${kept}; copy it over ${settingsPath}.`] : []),
+            ].join('\n');
           } catch (error) {
             return failed(error);
           }

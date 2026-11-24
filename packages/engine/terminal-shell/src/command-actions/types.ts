@@ -15,7 +15,12 @@ import type { SurfaceModal } from '../surface-modal-host.js';
 
 /** What running an action reaches. Replaces `effect`, `readVerbs` and the Agent's verb table. */
 export type ActionTouches = 'reads' | 'this-machine' | 'another-machine' | 'credential';
-/** The one risk word an action carries, shown in lists and in the sentence; anything but `none` asks first. */
+/**
+ * The one risk word an action carries, shown in lists, in help and with the
+ * result. A line the owner typed in full, or a form he submitted, is the
+ * request and runs at once whatever its risk, its result saying what the risk
+ * did; a line a model runs is put to the owner first when its risk is not `none`.
+ */
 export type ActionRisk = 'none' | 'loosens-a-protection' | 'cannot-be-undone' | 'spends-money' | 'sends-out';
 /** How long a change lasts; `byInput` names the input whose chosen value decides it. */
 export type ActionLasts = 'session' | 'kept' | { readonly byInput: string };
@@ -93,6 +98,12 @@ export interface ActionDescription<Ctx> {
   readonly touches: ActionTouches;
   readonly lasts: ActionLasts | 'not-a-change';
   readonly risk: ActionRisk;
+  /**
+   * What the risk did, said after the result with {@link RISK_DONE_WORDS}: "its
+   * tools are no longer held back" ("This loosened a protection: its tools are
+   * no longer held back."). Absent: the risk words alone.
+   */
+  readonly riskDone?: string | undefined;
   /** Only counts when the owner types it; a model is refused with the reason and what it may do instead. */
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
   /**
@@ -229,4 +240,12 @@ export const RISK_WORDS: Readonly<Record<Exclude<ActionRisk, 'none'>, string>> =
   'cannot-be-undone': 'cannot be undone',
   'spends-money': 'spends money',
   'sends-out': 'sends something outside this machine',
+};
+
+/** The risk words said with the result of an action that ran: "This loosened a protection." */
+export const RISK_DONE_WORDS: Readonly<Record<Exclude<ActionRisk, 'none'>, string>> = {
+  'loosens-a-protection': 'loosened a protection',
+  'cannot-be-undone': 'cannot be undone',
+  'spends-money': 'spent money',
+  'sends-out': 'sent something outside this machine',
 };

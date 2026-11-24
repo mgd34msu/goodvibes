@@ -4,6 +4,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { realpathSync } from 'node:fs';
 import { holdsNativeOwnership, type NativeExecutionScopeOwner, type NativePairedExecutionAuthority, type NativePairedExecutionSnapshot } from './native-execution.js';
 import type { WorkLedgerAuthority, WorkLedgerEvent, WorkLedgerService } from './types.js';
+import { NativeWorkspaceScopeError } from '../../workspace/registration/types.js';
 import {
   nativeWorkSubmissionRequestSchema, nativeWorkSubmissionLookupRequestSchema,
   nativeWorkSubmissionReceiptSchema,
@@ -12,9 +13,19 @@ import {
 } from './native-submission-wire.js';
 
 export class NativeWorkSubmissionError extends Error {
-  constructor(readonly code: 'invalid' | 'unsupported-authority' | 'forbidden' | 'stale' | 'conflict' | 'request-conflict' | 'indeterminate' | 'unavailable' | 'closed') {
-    super(`Native work submission: ${code}`); this.name = 'NativeWorkSubmissionError';
+  /**
+   * `workspace-refused`: the workspace cannot hold native work (declined, an unreadable register, a
+   * missing root, …), found before anything was written. `workspace` carries its plain state and next steps.
+   */
+  constructor(readonly code: 'invalid' | 'unsupported-authority' | 'forbidden' | 'stale' | 'conflict' | 'request-conflict' | 'indeterminate' | 'unavailable' | 'closed' | 'workspace-refused',
+    readonly workspace?: NativeWorkspaceScopeError) {
+    super(workspace ? `Not submitted: native work cannot run in this workspace: ${workspace.refusal.state}. Nothing was written.` : `Native work submission: ${code}`);
+    this.name = 'NativeWorkSubmissionError';
   }
+}
+/** A workspace refusal found before the submission wrote anything; anything else passes through. */
+function refusedBeforeWrite(error: unknown): unknown {
+  return error instanceof NativeWorkspaceScopeError ? new NativeWorkSubmissionError('workspace-refused', error) : error;
 }
 export interface NativeWorkSubmissionOptions {
   readonly signal?: AbortSignal;
@@ -60,6 +71,12 @@ function receipt(event: WorkLedgerEvent, projectId: string, sessionId: string, p
 export function createNativeWorkSubmissionHost(deps: {
   readonly projectId: string; readonly projectRoot: string; readonly sessionId: string;
   readonly service: WorkLedgerService; readonly authority: WorkLedgerAuthority; readonly scopes: NativeExecutionScopeOwner;
+  /**
+   * Registers the project's workspace for native work. The owner's submission is the request for
+   * the work, so a workspace not registered yet (or registered before native work existed) is
+   * registered as part of it, and the submission goes on in the same step.
+   */
+  readonly registerScope?: ((root: string) => Promise<void>) | undefined;
 }): NativeWorkSubmissionHost {
   const projectRoot = realpathSync(deps.projectRoot);
   const pending = new Set<Promise<unknown>>(); const lifetime = new AbortController();
@@ -79,7 +96,15 @@ export function createNativeWorkSubmissionHost(deps: {
     operation: (actor: Parameters<WorkLedgerService['readSnapshot']>[0], isAuthorized: () => boolean, signal: AbortSignal) => Promise<T>): Promise<T> {
     assertOpen(); const expected = paired(authority);
     if (!authorized(authority, expected, options)) throw new NativeWorkSubmissionError('forbidden');
-    const scope = deps.scopes.currentScope(projectRoot);
+    let scope: ReturnType<NativeExecutionScopeOwner['currentScope']>;
+    try { scope = deps.scopes.currentScope(projectRoot); }
+    catch (error) {
+      const unregistered = error instanceof NativeWorkspaceScopeError && (error.reason === 'not-registered' || error.reason === 'unmigrated');
+      if (!unregistered || !deps.registerScope) throw refusedBeforeWrite(error);
+      await deps.registerScope(projectRoot);
+      assertOpen(); if (!authorized(authority, expected, options)) throw new NativeWorkSubmissionError('forbidden');
+      try { scope = deps.scopes.currentScope(projectRoot); } catch (again) { throw refusedBeforeWrite(again); }
+    }
     if (scope.root !== projectRoot || realpathSync(deps.projectRoot) !== projectRoot) throw new NativeWorkSubmissionError('stale');
     const signal = options.signal ? AbortSignal.any([lifetime.signal, options.signal]) : lifetime.signal;
     signal.throwIfAborted();

@@ -419,11 +419,14 @@ export function createTerminalWakeRuntime(policy: {
       deps.notify(`[Wake] Could not apply the wake settings: ${message}`);
       deps.render();
     };
-    /** The running listener stopped itself (its supervisor gave up): it sits idle with the reason. */
+    /**
+     * The running listener stopped itself: its supervisor gave up after its restarts (latched), or it sits idle
+     * with the reason. Both are what the chip shows as stopped, so both are what "listen again" starts.
+     */
     const gaveUp = (): boolean => {
       if (!listener) return false;
       const state = listener.state();
-      return stoppedWithReason(state, state.phase);
+      return state.phase === 'latched' || stoppedWithReason(state, state.phase);
     };
     const runtime: TerminalWakeRuntime = {
       gaveUp,

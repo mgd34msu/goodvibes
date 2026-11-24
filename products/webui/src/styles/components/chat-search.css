@@ -133,6 +133,12 @@
   white-space: nowrap;
 }
 
+/* Under the field: the same key again opens the browser's own find. */
+.chat-search__hint {
+  margin-top: 4px;
+  padding-left: 24px;
+}
+
 .chat-search__closed-toggle {
   flex: none;
   font-size: var(--text-meta);

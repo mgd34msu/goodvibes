@@ -15,6 +15,7 @@ import { isRelayTunneledRequest } from '@goodvibes/engine/daemon-api';
 import { refusal, refusalErrorBody } from '@goodvibes/engine/errors';
 import { createRelayReachability, type RelayReachability } from './reachability.js';
 import { noteListChanged } from '../runtime/list-changes.js';
+import { describeRelayStatus } from './status-words.js';
 import type { RelayCodeStore } from './relay-codes.js';
 import { RELAY_CODE_HEADER } from '@goodvibes/engine/transport-core/relay';
 import type { StepUpService } from './step-up-service.js';
@@ -266,8 +267,16 @@ export function buildDaemonRelayReachability(
       error: (m, f) => logger.warn(`relay: ${m}`, f),
     },
   });
-  // Each status change (connecting, registered, not answering, refused) is announced, so a screen
-  // waiting on a relay pairing reads relay.reachability.get's words again.
-  reachability.onStatusChange(() => noteListChanged({ list: 'relay', change: 'changed' }));
+  // A change of status or of its words (connecting, registered, not answering, refused) is announced,
+  // so a screen waiting on a relay pairing reads relay.reachability.get's words again. Each reconnect
+  // attempt also reports, with the same status and words: that is not announced.
+  let announced: string | null = null;
+  reachability.onStatusChange(() => {
+    const status = reachability.status;
+    const shown = `${status}\0${describeRelayStatus(status, reachability.relayUrl, reachability.lastRefusal)}`;
+    if (shown === announced) return;
+    announced = shown;
+    noteListChanged({ list: 'relay', change: 'changed' });
+  });
   return reachability;
 }

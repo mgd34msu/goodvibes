@@ -3,6 +3,7 @@ import { shortTokenId, type MintedPairingToken, type PublicPairingToken } from '
 import { readConnectedDaemonOrigin } from '@goodvibes/engine/platform/platform/config/control-plane-base-url';
 import { describeOperatorRpcError } from '../../runtime/client/operator-endpoint.ts';
 import { holdMintedTokenForReveal } from '../../views/modals/devices-modal.ts';
+import { namePairingOffer } from '../../views/modals/pairing-modal.ts';
 import { revokeSharedTokenOnDaemon } from '../../runtime/client/shared-token-revocation.ts';
 import { getOperatorRpc } from './operator-rpc.ts';
 import { registerDevicesCommand, type DeviceTokens, type PairRequest, type PairRequestsHost } from '@goodvibes/engine/terminal-shell/devices-command';
@@ -167,9 +168,10 @@ export function registerDevicesRuntimeCommands(registry: CommandRegistry): void 
     async revoke(ctx, id) { const store = deviceTokenStore(ctx); return await onDaemon(store, 'Revoking the device', () => store.revoke(id)); },
     devices: (ctx) => ctx.platform.devices,
     async pairDevice(ctx, name) {
-      // The pairing view shows a QR of an offer; the device takes its own token when it uses it, and is named there or with /devices rename.
+      // The pairing view shows a QR of an offer, minted with the name given; the device takes that token when it uses it.
+      if (name) namePairingOffer(name);
       openModalCommand(ctx, 'pairing-modal');
-      return name ? `Opened the pairing QR. Once the device has paired, /devices rename names it "${name}".` : 'Opened the pairing QR. Press r in it for a new offer; the one it replaces stops working unless a device already paired with it.';
+      return name ? `Opened the pairing QR for "${name}"; the device is listed by that name once it pairs.` : 'Opened the pairing QR. Press r in it for a new offer; the one it replaces stops working unless a device already paired with it.';
     },
     async pairHost(ctx, request) {
       // Only the owner's own keyboard may begin the shell's cancellable pairing lifetime.

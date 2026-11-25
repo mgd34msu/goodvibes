@@ -11,13 +11,19 @@
  * refuses those actions saying why.
  */
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
-import { SESSION_GATE_PRESET_NAMES, gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
-import { SECRET_STORE_UNREADABLE } from '@goodvibes/engine/platform/platform/config';
+import { SESSION_GATE_PRESET_NAMES } from '@goodvibes/engine/platform/platform/gate/presets';
+import {
+  CHANNELS_ACCOUNTS, CHANNELS_DOCTOR, CHANNELS_PROFILE, CHANNELS_PROFILES, CHANNELS_REMOVE_PROFILE, CHANNELS_RULES, CHANNELS_SETUP,
+  CHANNELS_SET_PROFILE, CHANNELS_SET_RULES, CHANNELS_STATUS, CHANNELS_TEST, CHANNEL_RULE_CHOICES, CHANNEL_RULE_LISTS, CHANNEL_RULE_SWITCHES,
+  type MethodCapabilityDefinition,
+} from '@goodvibes/engine/platform/platform/capabilities';
+import { CHANNEL_STATE_WORDS, channelAccountWords, channelReasonOf, channelStateOf } from './channel-words.js';
+import { capabilityWords } from './command-actions/capability-actions.js';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
-import type { ActionDescription, ActionValues, CommandActionContext, FixedChoice, InputDescription } from './command-actions/types.js';
+import type { ActionDescription, ActionValues, CommandActionContext, InputDescription } from './command-actions/types.js';
 import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
 
 type ChannelsMethod =
@@ -96,13 +102,11 @@ function more(total: number, what: string): string[] {
 
 function formatStatus(body: unknown): string {
   const channels = records(body, 'channels');
-  if (channels.length === 0) return 'The daemon reports no channels. /channels setup <channel> shows what one needs.';
+  if (channels.length === 0) return 'The daemon reports no channels.';
   return ['Channels:', ...channels.slice(0, SHOWN).flatMap((channel) => {
-    const state = str(channel, 'state', str(channel, 'status', 'unknown'));
-    const line = `  ${str(channel, 'surface', 'unknown')}: ${flag(channel, 'enabled') ? 'on' : 'off'}; ${flag(channel, 'ready') ? 'ready' : 'not ready'}; ${state}`;
-    // A credential that does not resolve says why (a secret store this computer could not read included), never only "unresolved".
-    const runtime = isRecord(channel['runtime']) ? channel['runtime'] : {};
-    const reason = state === 'unresolved' ? str(runtime, 'reason') : '';
+    // One true state per channel, and why under every state that is not "working" (channel-words.ts).
+    const line = `  ${str(channel, 'label', str(channel, 'surface', 'unknown'))}: ${CHANNEL_STATE_WORDS[channelStateOf(channel)]}`;
+    const reason = channelReasonOf(channel);
     return reason ? [line, `    ${reason}`] : [line];
   }), ...more(channels.length, 'channels')].join('\n');
 }
@@ -112,11 +116,8 @@ function formatAccounts(body: unknown): string {
   if (accounts.length === 0) return 'The daemon reports no channel accounts.';
   return ['Channel accounts (secret values are never shown):', ...accounts.slice(0, SHOWN).map((account) => {
     const accountId = str(account, 'accountId');
-    const secrets = records(account, 'secrets').map((secret) => str(secret, 'field', 'secret'));
-    const unreadable = records(account, 'secrets').filter((secret) => str(secret, 'source') === 'unreadable').map((secret) => str(secret, 'label', str(secret, 'field', 'secret')));
-    // A secret store this computer could not read is said as such: the secret is not missing and is not asked for again.
-    if (unreadable.length > 0) return `  ${str(account, 'surface', 'unknown')}${accountId ? `/${accountId}` : ''}: ${SECRET_STORE_UNREADABLE}, so ${unreadable.join(', ')} could not be read; nothing already given there is asked for again`;
-    return `  ${str(account, 'surface', 'unknown')}${accountId ? `/${accountId}` : ''}: ${flag(account, 'configured') ? 'configured' : 'not configured'}; ${flag(account, 'linked') ? 'linked' : 'not linked'}; sign-in ${str(account, 'authState', str(account, 'state', 'unknown'))}${secrets.length > 0 ? `; secrets held for ${secrets.join(', ')}` : ''}`;
+    // A secret store this computer could not read is said only for a channel that was set up (channel-words.ts).
+    return `  ${str(account, 'surface', 'unknown')}${accountId && !accountId.startsWith('surface:') ? `/${accountId}` : ''}: ${channelAccountWords(account)}`;
   }), ...more(accounts.length, 'accounts')].join('\n');
 }
 
@@ -124,22 +125,25 @@ function formatDoctor(surface: string, body: unknown): string {
   const root = isRecord(body) ? body : {};
   const checks = records(body, 'checks');
   const repairs = records(body, 'repairActions');
-  const lines = [`Checks for ${str(root, 'surface', surface)}:`];
-  if (checks.length === 0) lines.push('  No checks reported.');
-  for (const check of checks.slice(0, SHOWN)) lines.push(`  ${str(check, 'id', 'check')}: ${str(check, 'status', 'unknown')}`);
-  if (repairs.length > 0) lines.push('Repairs the daemon offers:', ...repairs.slice(0, 12).map((action) => `  ${str(action, 'id', 'repair')}`));
-  return lines.join('\n');
+  // One line each: the checks with how each came out, then the repairs; nothing is repaired.
+  const name = str(root, 'surface', surface);
+  return [
+    checks.length === 0 ? `No checks were reported for ${name}.` : `Checks for ${name}: ${checks.slice(0, SHOWN).map((check) => `${str(check, 'label', str(check, 'id', 'check'))} ${str(check, 'status', 'unknown')}`).join('; ')}.`,
+    ...(repairs.length > 0 ? [`Repairs the daemon offers: ${repairs.slice(0, 12).map((action) => str(action, 'label', str(action, 'id', 'repair'))).join(', ')}; nothing was repaired.`] : []),
+  ].join('\n');
 }
 
 function formatSetup(surface: string, body: unknown): string {
   const root = isRecord(body) ? body : {};
-  const fields = records(body, 'fields');
   const secrets = records(body, 'secretTargets');
-  const lines = [`What ${str(root, 'surface', surface)} needs (no value is shown):`];
-  if (fields.length > 0) lines.push('  Settings:', ...fields.slice(0, SHOWN).map((field) => `    ${str(field, 'id', 'field')}`));
-  if (secrets.length > 0) lines.push('  Secrets:', ...secrets.slice(0, 12).map((target) => `    ${str(target, 'id', 'secret')} (${flag(target, 'required') ? 'required' : 'optional'})`));
-  if (fields.length === 0 && secrets.length === 0) lines.push('  Nothing is declared.');
-  return lines.join('\n');
+  // One line each, settings then secrets, by the words a person reads (no value is shown); a secret is named once.
+  const name = str(root, 'surface', surface);
+  const fields = records(body, 'fields').filter((field) => str(field, 'kind') !== 'secret');
+  if (fields.length === 0 && secrets.length === 0) return `Nothing is declared for ${name}.`;
+  return [
+    ...(fields.length > 0 ? [`${name} needs these settings: ${fields.slice(0, SHOWN).map((field) => str(field, 'label', str(field, 'id', 'field'))).join(', ')}.`] : []),
+    ...(secrets.length > 0 ? [`And these secrets (no value is shown): ${secrets.slice(0, 12).map((target) => `${str(target, 'label', str(target, 'id', 'secret'))}${flag(target, 'required') ? '' : ' (optional)'}`).join(', ')}.`] : []),
+  ].join('\n');
 }
 
 function renderPolicy(policy: ChannelPolicy, enabledInSettings: boolean | undefined): string {
@@ -164,7 +168,7 @@ function ownerPendingText(result: object): string {
   const answer = result as { readonly approvalId?: unknown; readonly state?: unknown };
   const approval = typeof answer.approvalId === 'string' ? ` as approval ${answer.approvalId}` : '';
   const state = typeof answer.state === 'string' ? answer.state : 'nothing was changed yet; this loosens the permission mode, which only the owner does';
-  return `Not applied: ${state}. It was put to the owner${approval}; he approves it from his own app (/approval waiting).`;
+  return `Not applied: ${state}. It was put to the owner${approval}; he approves it from his own app (Waiting for you, under Approvals).`;
 }
 
 function renderProfileBinding(binding: ChannelProfileBinding): string {
@@ -200,12 +204,13 @@ export const CHANNELS_LIST = defineList<unknown>({
     const body = await host().invoke(ctx, 'channels.status', {});
     return records(body, 'channels').map((channel): ListRow => ({
       value: str(channel, 'surface', 'unknown'), label: str(channel, 'surface', 'unknown'),
-      state: flag(channel, 'ready') ? 'ready' : flag(channel, 'enabled') ? 'not ready' : 'off',
+      state: CHANNEL_STATE_WORDS[channelStateOf(channel)],
     }));
   },
   operator: { method: 'channels.status', input: {}, rows: { from: 'channels', value: 'surface', label: 'surface', state: 'state' } },
 });
-const PROFILES = defineList<unknown>({
+/** The channel profiles, the list the profile capabilities' Channel input chooses from (builtin/messages.ts). */
+export const CHANNEL_PROFILES = defineList<unknown>({
   name: 'channels.profiles',
   async read(ctx) {
     const { bindings } = await host().invoke(ctx, 'channels.profiles.list', {});
@@ -219,25 +224,17 @@ const PROFILES = defineList<unknown>({
 
 const SURFACE_OTHER = 'a channel kind the daemon does not report yet (slack, telegram, discord, ntfy, webhook, ...)';
 const CHANNEL: InputDescription = listInput({ id: 'channel', label: 'Channel', help: 'One of the daemon\'s channels', list: CHANNELS_LIST, other: SURFACE_OTHER });
-const PROFILE_CHANNEL: InputDescription = listInput({ id: 'channel', label: 'Channel', help: 'A channel kind; its sessions get the profile', list: PROFILES, other: SURFACE_OTHER });
-const CHANNEL_ID: InputDescription = textInput({ id: 'id', label: 'One conversation', help: 'The id of one conversation in that channel; blank means the whole channel kind', why: 'a conversation id on that channel', typed: { position: 2 }, optional: { default: '', means: 'the whole channel kind' } });
 const LIMIT = (help: string): InputDescription => ({ id: 'limit', label: 'How many', help, kind: 'number', required: { default: '10', defaultMeans: 'ten' }, typed: { flag: '--limit' } });
 
-const ON_OFF: readonly FixedChoice[] = [{ value: 'on', label: 'On' }, { value: 'off', label: 'Off' }];
-const LOOSENING_ON: readonly FixedChoice[] = [{ value: 'on', label: 'On', risk: 'loosens-a-protection' }, { value: 'off', label: 'Off' }];
-const CONVERSATION_POLICIES: readonly FixedChoice[] = [
-  { value: 'allow', label: 'Allow', risk: 'loosens-a-protection' }, { value: 'deny', label: 'Refuse' }, { value: 'inherit', label: 'As the channel says' },
-];
-const UNCHANGED = { default: '', means: 'unchanged' };
-const ruleSwitch = (id: string, label: string, help: string, choices: readonly FixedChoice[]): InputDescription =>
-  ({ id, label, help, kind: 'choice', choices, required: { default: '', defaultMeans: 'unchanged' }, typed: { flag: `--${id}` } });
-const ruleList = (id: string, label: string, help: string): InputDescription =>
-  textInput({ id, label, help: `${help}; a comma list, or none to clear it`, why: 'ids on that channel', typed: { flag: `--${id}` }, optional: UNCHANGED });
+/** Each ingress-rule blank and the daemon field it writes (the capability's own table, builtin/messages.ts). */
+const RULE_SWITCHES = CHANNEL_RULE_SWITCHES;
+const RULE_CHOICES = CHANNEL_RULE_CHOICES;
+const RULE_LISTS = CHANNEL_RULE_LISTS;
 
-/** Each ingress-rule blank and the daemon field it writes. */
-const RULE_SWITCHES = { enabled: 'enabled', 'require-mention': 'requireMention', 'allow-dms': 'allowDirectMessages', 'allow-groups': 'allowGroupMessages', 'allow-threads': 'allowThreadMessages', 'commands-without-mention': 'allowTextCommandsWithoutMention', open: 'open' } as const;
-const RULE_CHOICES = { 'dm-policy': 'dmPolicy', 'group-policy': 'groupPolicy' } as const;
-const RULE_LISTS = { 'allow-users': 'allowlistUserIds', 'allow-channels': 'allowlistChannelIds', 'allow-group-ids': 'allowlistGroupIds', 'allowed-commands': 'allowedCommands' } as const;
+/** A moved action's words and the method its capability runs through (the web UI's sheet calls it the same way). */
+function movedWords<Ctx>(definition: MethodCapabilityDefinition): Omit<ActionDescription<Ctx>, 'run'> {
+  return { ...capabilityWords<Ctx>(definition), operator: { method: definition.method.id, fields: definition.method.fields } };
+}
 
 function ruleFields(values: ActionValues): PolicyUpdateFields {
   const fields: PolicyUpdateFields = {};
@@ -250,10 +247,6 @@ function ruleFields(values: ActionValues): PolicyUpdateFields {
   return fields;
 }
 
-const PERMISSION_MODES: readonly FixedChoice[] = SESSION_GATE_PRESET_NAMES.map((name) => ({
-  value: name, label: gatePresetLabel(name), ...(name === 'just-vibes' || name === 'yolo' ? { risk: 'loosens-a-protection' as const } : {}),
-}));
-
 function profileTarget(values: ActionValues): { surfaceKind: string; channelId?: string } {
   return { surfaceKind: values.channel!, ...(values.id ? { channelId: values.id } : {}) };
 }
@@ -263,12 +256,10 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
   hostOf = channelsHost as unknown as ChannelsHost<unknown>;
   const h = channelsHost;
   const actions: ActionDescription<Ctx>[] = [
-    readAction<Ctx>({
-      id: 'status', label: 'See your channels', word: 'status',
-      sentence: 'Lists each channel the daemon has, whether it is on and whether it is ready.',
-      operator: { method: 'channels.status', fields: {} },
+    {
+      ...movedWords<Ctx>(CHANNELS_STATUS),
       async run(_values, ctx) { return formatStatus(await h.invoke(ctx, 'channels.status', {})); },
-    }),
+    },
     readAction<Ctx>({
       id: 'readiness', label: 'See which channels are set up', word: 'readiness',
       inputs: [{ id: 'show', label: 'Show', help: 'Every channel, only the ready ones, or only those that need something', kind: 'choice',
@@ -291,109 +282,64 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
       operator: { terminalOnly: AGENT_ONLY },
       async run(values, ctx) { return h.guide ? h.guide(ctx, values.channel ?? '') : missing('The channel setup guide', AGENT_ONLY); },
     }),
-    readAction<Ctx>({
-      id: 'setup', label: 'See what a channel needs to be set up', word: 'setup', inputs: [CHANNEL],
-      sentence: 'Lists the settings and secrets {channel} needs; no value is shown.', example: { channel: 'slack' },
-      operator: { method: 'channels.setup.get', fields: { surface: 'channel' } },
+    {
+      ...movedWords<Ctx>(CHANNELS_SETUP),
       async run(values, ctx) { return formatSetup(values.channel!, await h.invoke(ctx, 'channels.setup.get', { surface: values.channel! } as OperatorMethodInput<'channels.setup.get'>)); },
-    }),
-    readAction<Ctx>({
-      id: 'doctor', label: 'Check a channel that isn\'t working', word: 'doctor', inputs: [CHANNEL],
-      sentence: 'Runs the daemon\'s checks on {channel} and lists the repairs it offers; nothing is repaired.', example: { channel: 'slack' },
-      operator: { method: 'channels.doctor.get', fields: { surface: 'channel' } },
+    },
+    {
+      ...movedWords<Ctx>(CHANNELS_DOCTOR),
       async run(values, ctx) { return formatDoctor(values.channel!, await h.invoke(ctx, 'channels.doctor.get', { surface: values.channel! } as OperatorMethodInput<'channels.doctor.get'>)); },
-    }),
-    doAction<Ctx>({
-      id: 'test', label: 'Send a test message through a channel', word: 'test', inputs: [CHANNEL],
-      sentence: 'The daemon sends a real test message through {channel} and reports whether it was delivered.',
-      touches: 'another-machine', risk: 'sends-out', example: { channel: 'slack' },
-      operator: { method: 'channels.test.send', fields: { surface: 'channel' } },
+    },
+    {
+      ...movedWords<Ctx>(CHANNELS_TEST),
       async run(values, ctx) {
         const result = await h.invoke(ctx, 'channels.test.send', { surface: values.channel! } as OperatorMethodInput<'channels.test.send'>);
         return result.delivered
           ? `Delivered${result.responseId ? ` (response ${result.responseId})` : ''}${result.address ? ` to ${result.address}` : ''}.`
           : `Not delivered: ${result.error ?? 'the daemon gave no reason'}.`;
       },
-    }),
-    readAction<Ctx>({
-      id: 'accounts', label: 'See the accounts behind your channels', word: 'accounts',
-      sentence: 'Lists each channel account, whether it is configured, linked and signed in; no secret is shown.',
-      operator: { method: 'channels.accounts.list', fields: {} },
+    },
+    {
+      ...movedWords<Ctx>(CHANNELS_ACCOUNTS),
       async run(_values, ctx) { return formatAccounts(await h.invoke(ctx, 'channels.accounts.list', {})); },
-    }),
-    readAction<Ctx>({
-      id: 'rules', label: 'See who may reach the assistant', word: 'rules',
-      inputs: [{ ...CHANNEL, required: { default: '', defaultMeans: 'every channel' } }],
-      sentence: 'Shows the daemon\'s rules for who may write to the assistant on each channel, or on {channel}.', example: { channel: 'slack' },
-      operator: { method: 'channels.policies.list', fields: {} },
+    },
+    {
+      ...movedWords<Ctx>(CHANNELS_RULES),
       async run(values, ctx) {
         const { policies } = await h.invoke(ctx, 'channels.policies.list', {});
         const shown = values.channel ? policies.filter((policy) => policy.surface === values.channel) : policies;
         if (shown.length === 0) return values.channel ? `No rules are kept for ${values.channel}; it uses the defaults.` : 'No rules are kept; every channel uses the defaults.';
         return ['Who may reach the assistant:', ...shown.map((policy) => renderPolicy(policy, h.enabledInSettings?.(ctx, policy.surface)))].join('\n');
       },
-    }),
+    },
     {
-      id: 'set-rules', label: 'Change who may reach the assistant', word: 'set-rules',
+      ...movedWords<Ctx>(CHANNELS_SET_RULES),
       stepTitles: ['Which channel?', 'What is accepted', 'Who may write'],
-      inputs: [
-        { ...CHANNEL, step: 1 },
-        { ...ruleSwitch('enabled', 'Accept messages', 'Whether messages on this channel are accepted at all', ON_OFF), step: 2 },
-        { ...ruleSwitch('require-mention', 'Only when mentioned', 'Answer only messages that mention the assistant', ON_OFF), step: 2 },
-        { ...ruleSwitch('commands-without-mention', 'Commands without a mention', 'Accept typed commands that do not mention the assistant', LOOSENING_ON), step: 2 },
-        { ...ruleSwitch('allow-dms', 'Direct messages', 'Accept direct messages', LOOSENING_ON), step: 2 },
-        { ...ruleSwitch('allow-groups', 'Group messages', 'Accept messages in groups', LOOSENING_ON), step: 2 },
-        { ...ruleSwitch('allow-threads', 'Thread messages', 'Accept messages in threads', LOOSENING_ON), step: 2 },
-        { ...ruleSwitch('dm-policy', 'Direct messages from others', 'Whether people not on the lists may write directly', CONVERSATION_POLICIES), step: 2 },
-        { ...ruleSwitch('group-policy', 'Groups not on the list', 'Whether groups not on the lists may write', CONVERSATION_POLICIES), step: 2 },
-        { ...ruleSwitch('open', 'Open to anyone', 'With no list set, anyone may write and no owner claim is raised', LOOSENING_ON), step: 3 },
-        { ...ruleList('allow-users', 'Users', 'The users who may write'), step: 3 },
-        { ...ruleList('allow-channels', 'Conversations', 'The conversations the assistant answers in'), step: 3 },
-        { ...ruleList('allow-group-ids', 'Groups', 'The groups the assistant answers in'), step: 3 },
-        { ...ruleList('allowed-commands', 'Commands', 'The commands people may type there'), step: 3 },
-      ],
-      sentence: 'Who may write to the assistant on {channel} changes to what you gave, until you change it.', done: '',
-      touches: 'another-machine', lasts: 'kept', risk: 'loosens-a-protection',
-      ownerOnly: { reason: 'it decides who may reach the assistant', instead: '/channels rules shows the rules in force' },
-      operator: { method: 'channels.policies.update', fields: { surface: 'channel' } },
-      example: { channel: 'slack', 'require-mention': 'on' },
       async run(values, ctx) {
         const fields = ruleFields(values);
-        if (Object.keys(fields).length === 0) throw commandRefusal(`Nothing to change for ${values.channel}: give at least one rule.`, `/channels rules ${values.channel} shows the rules in force`);
+        if (Object.keys(fields).length === 0) throw commandRefusal(`Nothing to change for ${values.channel}: give at least one rule.`);
         const policy = await h.invoke(ctx, 'channels.policies.update', { surface: values.channel!, ...fields } as PolicyUpdateInput);
         return `Changed.\n${renderPolicy(policy, h.enabledInSettings?.(ctx, policy.surface))}`;
       },
     },
-    readAction<Ctx>({
-      id: 'profiles', label: 'See channel profiles', word: 'profiles',
-      sentence: 'Lists the model and permission mode each channel\'s sessions are given.',
-      operator: { method: 'channels.profiles.list', fields: {} },
+    {
+      ...movedWords<Ctx>(CHANNELS_PROFILES),
       async run(_values, ctx) {
         const { bindings } = await h.invoke(ctx, 'channels.profiles.list', {});
         return bindings.length === 0 ? 'No channel has its own profile; sessions get the host\'s defaults.' : ['Channel profiles:', ...bindings.map(renderProfileBinding)].join('\n');
       },
-    }),
-    readAction<Ctx>({
-      id: 'profile', label: 'See what one channel\'s sessions get', word: 'profile', inputs: [PROFILE_CHANNEL, CHANNEL_ID],
-      sentence: 'Shows the profile of {channel} and the model and permission mode its sessions get, with where each comes from.', example: { channel: 'slack' },
-      operator: { method: 'channels.profiles.get', fields: { surfaceKind: 'channel', channelId: 'id' } },
+    },
+    {
+      ...movedWords<Ctx>(CHANNELS_PROFILE),
       async run(values, ctx) {
         const { binding, effective } = await h.invoke(ctx, 'channels.profiles.get', profileTarget(values));
         return `${renderProfileBinding(binding)}\n${renderEffectiveProfile(effective)}`;
       },
-    }),
+    },
     {
-      id: 'set-profile', label: 'Give a channel its own model or permission mode', word: 'set-profile',
-      inputs: [
-        PROFILE_CHANNEL, CHANNEL_ID,
-        textInput({ id: 'model', label: 'Model', help: 'The model its sessions use', why: 'a model id the host knows', typed: { flag: '--model' }, optional: UNCHANGED }),
-        textInput({ id: 'provider', label: 'Provider', help: 'The provider of that model', why: 'a provider id the host knows', typed: { flag: '--provider' }, optional: UNCHANGED }),
-        { id: 'mode', label: 'Permission mode', help: 'How its sessions ask before acting', kind: 'choice', choices: PERMISSION_MODES, required: { default: '', defaultMeans: 'unchanged' }, typed: { flag: '--permission-mode' } },
-      ],
-      sentence: 'Sessions from {channel} get the model and permission mode you gave, until you change it.', done: '',
-      touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove-profile',
+      // A handler capability in the daemon (it keeps what was not changed); the web UI's sheet sets the fields given.
+      ...capabilityWords<Ctx>(CHANNELS_SET_PROFILE),
       operator: { method: 'channels.profiles.set', fields: { surfaceKind: 'channel', channelId: 'id', model: 'model', provider: 'provider', permissionMode: 'mode' } },
-      example: { channel: 'slack', mode: 'ask-me' },
       async run(values, ctx) {
         if (!values.model && !values.provider && !values.mode) throw commandRefusal(`Nothing to give ${values.channel}: name a model, a provider or a permission mode.`);
         // A set replaces the whole binding, so a field left blank ("unchanged") carries the bound value over.
@@ -419,11 +365,7 @@ export function registerChannelsCommand<Ctx extends CommandActionContext>(regist
       },
     },
     {
-      id: 'remove-profile', label: 'Remove a channel\'s profile', word: 'remove-profile', inputs: [PROFILE_CHANNEL, CHANNEL_ID],
-      sentence: 'Sessions from {channel} get the host\'s defaults again, until you change it.', done: '',
-      touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'set-profile',
-      operator: { method: 'channels.profiles.delete', fields: { surfaceKind: 'channel', channelId: 'id' } },
-      example: { channel: 'slack' },
+      ...movedWords<Ctx>(CHANNELS_REMOVE_PROFILE),
       async run(values, ctx) {
         const result = await h.invoke(ctx, 'channels.profiles.delete', profileTarget(values));
         if (!('deleted' in result) || typeof result.deleted !== 'boolean') return ownerPendingText(result);

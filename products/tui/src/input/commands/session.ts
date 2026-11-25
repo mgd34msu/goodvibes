@@ -1,5 +1,5 @@
 /**
- * `/session`, `/resume` and `/save` are one description shared with the other
+ * `/session` and `/resume` are one description shared with the other
  * terminal app (terminal-shell/session-command.ts). This file holds what the
  * terminal app does for them: its resume routine, its file and upload
  * exports, its conversation branches and the cross-session task graph.
@@ -103,4 +103,7 @@ const commands = createSessionCommands<CommandContext>({
 
 export const sessionCommand: SlashCommand = commands.session;
 export const resumeCommand: SlashCommand = commands.resume;
-export const saveCommand: SlashCommand = commands.save;
+/** This app's routines for the conversation's record, as its controls take them (session-capabilities.ts). */
+export const conversationRecord = commands.record;
+/** This app's session routines, as the session capabilities take them (session-capabilities.ts). */
+export const liveSessions = commands.live;

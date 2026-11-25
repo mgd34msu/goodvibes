@@ -8,6 +8,7 @@ import {
 import type { ProviderApi } from '@goodvibes/engine/platform/platform/providers';
 import type { UiReadModels } from '@goodvibes/engine/platform/platform/runtime/ui';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import type { RemoteRunnersHealth } from './remote-health.js';
 /** One setup check: `warn` and `fail` are issues; `pass` and `info` (an optional feature not in use) are not. */
 export interface SetupReviewIssue {
   readonly severity: 'pass' | 'info' | 'warn' | 'fail';
@@ -50,6 +51,10 @@ export interface TerminalSetupReviewSnapshot {
   readonly quarantinedMcpCount: number;
   readonly elevatedMcpCount: number;
   readonly remoteRunnerCount: number;
+  /** Why the daemon's remote runners could not be read; absent when they were. */
+  readonly remoteRunnersUnreadable?: string | undefined;
+  /** The daemon's runners, for a report that names them. */
+  readonly remoteRunners: RemoteRunnersHealth['runners'];
   /** Every check, passes and informational ones included. */
   readonly checks: SetupReviewIssue[];
   /** The checks that need attention (`warn` or `fail`). */
@@ -63,13 +68,6 @@ export function createSetupReviewCollector<
         readonly sessionId: string;
       };
     };
-    readonly ops: {
-      readonly remoteRuntime?:
-        | {
-            listContracts(): readonly unknown[];
-          }
-        | undefined;
-    };
   },
   Extra extends object,
 >(
@@ -81,6 +79,8 @@ export function createSetupReviewCollector<
     readonly requireSubscriptionManager: (context: Context) => Pick<SubscriptionManager, 'list' | 'listPending'>;
     readonly requireHookWorkbench: (context: Context) => Pick<HookWorkbench, 'describeHooksFile'>;
     readonly discoverSkills: (paths: ShellPathService) => Promise<readonly unknown[]>;
+    /** The daemon's remote runners (remote-health.ts `readRemoteRunnersHealth`, through the program's binding). */
+    readonly readRemoteRunners: (context: Context) => Promise<Pick<RemoteRunnersHealth, 'runners' | 'unreadable'>>;
   },
   policy: {
     readonly serviceArea: string;
@@ -98,6 +98,7 @@ export function createSetupReviewCollector<
     requireSubscriptionManager,
     requireHookWorkbench,
     discoverSkills,
+    readRemoteRunners,
   } = bindings;
   async function buildSetupReviewSnapshot(ctx: Context) {
     const shellPaths = requireShellPaths(ctx);
@@ -120,7 +121,8 @@ export function createSetupReviewCollector<
       homeDir: shellPaths.homeDirectory,
     });
     const providerCount = (await requireProviderApi(ctx).listModels()).length;
-    const remoteRunnerCount = ctx.ops.remoteRuntime?.listContracts().length ?? 0;
+    const remote = await readRemoteRunners(ctx);
+    const remoteRunnerCount = remote.runners.length;
     const oauthProviderCount = Object.values(serviceConfigs).filter((service) => service.authType === 'oauth' && service.oauth).length;
     const builtinSubscriptionProviderCount = listBuiltinSubscriptionProviders().length;
     const subscriptionManager = requireSubscriptionManager(ctx);
@@ -201,6 +203,8 @@ export function createSetupReviewCollector<
       quarantinedMcpCount,
       elevatedMcpCount,
       remoteRunnerCount,
+      remoteRunners: remote.runners,
+      ...(remote.unreadable ? { remoteRunnersUnreadable: remote.unreadable } : {}),
       ...extra,
       checks,
       services,

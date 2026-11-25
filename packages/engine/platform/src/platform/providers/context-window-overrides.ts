@@ -4,8 +4,8 @@
  *
  * Three layers, user constraints first:
  *
- * - **User override** (set via the TUI's /context window command or the model
- *   picker's context-cap flow): registryKey -> tokens, applied with
+ * - **User override** (set through the daemon's `context.set-window`: This
+ *   conversation's control, or the model picker's context-cap flow): registryKey -> tokens, applied with
  *   provenance 'configured_cap', which getContextWindowForModel treats as
  *   authoritative. Clearing returns the model to automatic resolution.
  * - **Observed limit**: when a provider rejects a request as too long
@@ -27,8 +27,11 @@
  * older reader still loads the file (it ignores the section) instead of
  * setting the whole file aside.
  *
- * The file lives in the control-plane config dir, so both layers reach every
- * consumer of the same home (TUI, daemon, agent) without extra wiring.
+ * The file is the daemon's (under its state root, `~/.goodvibes/tui/`): the
+ * daemon writes it (a size set through `context.set-window`, a limit its own
+ * turns learn); the terminal programs read the same file (again whenever it
+ * changed, and on the daemon's `context-windows` notice) and never write it,
+ * keeping what their own turns learn in memory (`writes: false`).
  */
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
@@ -148,8 +151,17 @@ export class ContextWindowOverrideStore {
   private state: LoadedContextWindowState | null = null;
   /** Size and mtime of the file when `state` was read or last written; a different value means another process wrote it. */
   private signature: string | null = null;
+  /**
+   * What a store that does not write learned in this process (a terminal program's: the daemon owns the file): kept
+   * over each read of the file, by the same rules as a write would apply, for as long as the process runs.
+   */
+  private readonly learnedHere: { readonly observed: Map<string, number>; readonly accepted: Map<string, number> } = { observed: new Map(), accepted: new Map() };
 
-  constructor(private readonly filePath: string) {}
+  /**
+   * `writes: false`: the file is the daemon's; this process reads it (again whenever it changed) and never writes it.
+   * A size set or cleared here applies to this process only; the daemon's `context.set-window` sets it for every program.
+   */
+  constructor(private readonly filePath: string, private readonly options: { readonly writes: boolean } = { writes: true }) {}
 
   private fileSignature(): string {
     try {
@@ -166,13 +178,42 @@ export class ContextWindowOverrideStore {
     if (this.state === null || signature !== this.signature) {
       this.state = loadContextWindowOverrides(this.filePath);
       this.signature = signature;
+      if (!this.options.writes) this.overlayLearnedHere(this.state);
     }
     return this.state;
+  }
+
+  /** A learned limit or accepted floor this process found, kept over the file's own (a lower limit, a higher floor wins). */
+  private overlayLearnedHere(state: LoadedContextWindowState): void {
+    for (const [key, observed] of this.learnedHere.observed) {
+      const held = state.observed.get(key);
+      const accepted = state.accepted.get(key);
+      if ((held === undefined || observed < held) && (accepted === undefined || observed >= accepted)) state.observed.set(key, observed);
+    }
+    for (const [key, accepted] of this.learnedHere.accepted) {
+      const held = state.accepted.get(key);
+      if (held === undefined || accepted > held) state.accepted.set(key, accepted);
+      const observed = state.observed.get(key);
+      if (observed !== undefined && accepted > observed) state.observed.delete(key);
+    }
+  }
+
+  /**
+   * Read the file again on the next use: the daemon announced that it changed (context-windows-follow.ts). What this
+   * process learned by itself is dropped with it (a size cleared through the daemon also forgets learned limits); a
+   * provider's next refusal teaches it again.
+   */
+  reload(): void {
+    this.signature = null;
+    this.learnedHere.observed.clear();
+    this.learnedHere.accepted.clear();
   }
 
   private persist(): string | null {
     // Writes the state the mutation just changed, not a fresh read that would drop it.
     if (this.state === null) return null;
+    // The daemon owns the file: what this process learned stays in memory (`learnedHere`), over every read of it.
+    if (!this.options.writes) return null;
     const failure = saveContextWindowOverrides(this.filePath, this.state);
     this.signature = this.fileSignature();
     return failure;
@@ -229,6 +270,7 @@ export class ContextWindowOverrideStore {
     const existing = state.observed.get(registryKey);
     if (existing !== undefined && existing <= rounded) return;
     state.observed.set(registryKey, rounded);
+    if (!this.options.writes) this.learnedHere.observed.set(registryKey, rounded);
     this.persist();
     logger.info('[context-window-overrides] Learned context ceiling from provider rejection', {
       registryKey,
@@ -280,6 +322,10 @@ export class ContextWindowOverrideStore {
     state.accepted.set(registryKey, rounded);
     const observed = state.observed.get(registryKey);
     if (observed !== undefined && rounded > observed) state.observed.delete(registryKey);
+    if (!this.options.writes) {
+      this.learnedHere.accepted.set(registryKey, rounded);
+      if (observed !== undefined && rounded > observed) this.learnedHere.observed.delete(registryKey);
+    }
     this.persist();
     logger.info('[context-window-overrides] Recorded accepted context input floor', {
       registryKey,

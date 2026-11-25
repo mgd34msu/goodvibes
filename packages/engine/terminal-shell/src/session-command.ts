@@ -4,20 +4,30 @@
  * rename, search, delete), the conversation's record (events, groups,
  * hotspots), saving it as a file or uploading it for a link, its branches, and
  * the cross-session task graph (link, hand off, accept, take back, cancel).
- * `/resume` and `/save` are their own single-action commands built from the
- * same action definitions `/session` lists. Both terminal apps register this
+ * `/resume` is its own single-action command built from the same action
+ * definition `/session` lists. Both terminal apps register this
  * one description; what each app does differently is its policy, read by the
  * actions' `run`.
  */
 import type { SessionManager, CancellationScope, CrossSessionTaskRef } from '@goodvibes/engine/platform/platform/sessions';
 import { VALID_SCOPES } from '@goodvibes/engine/platform/platform/sessions';
 import type { ShellSessionOrchestrationService } from '@goodvibes/engine/platform/platform/runtime/shell';
+import {
+  SESSION_BRANCHES, SESSION_CURRENT, SESSION_DELETE, SESSION_FORK, SESSION_INFO, SESSION_LIST, SESSION_MERGE_BRANCH, SESSION_RENAME,
+  SESSION_RESUME, SESSION_SAVE_SAVED, SESSION_SEARCH, SESSION_SWITCH_BRANCH, SESSION_UPLOAD,
+  SESSION_BOOKMARKS, SESSION_COMPOSER, SESSION_EVENTS, SESSION_FIND, SESSION_GROUPS, SESSION_HOTSPOTS, SESSION_NEXT, SESSION_PREV, SESSION_RESTORED,
+  type CapabilityDefinition, type LiveSessions, type SessionsCapabilityServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
+import {
+  SESSION_BRANCH, SESSION_COLLAPSE, SESSION_COMPACTIONS, SESSION_EXPAND, SESSION_SAVE, SESSION_SAVE_FILE,
+  type ConversationRecord, type RecordServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from './command-confirmation.js';
+import { sessionCapabilityAction } from './command-actions/capability-actions.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
-import type { ActionDescription, CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
+import type { ActionDescription, CommandActionContext, CommandDescription, InputDescription } from './command-actions/types.js';
 import type { TranscriptFormat } from './session-export-format.js';
-import { TRANSCRIPT_EVENT_KINDS } from './transcript-kinds.js';
 
 interface BranchingConversation {
   listBranches?(): readonly { readonly name: string; readonly messageCount: number; readonly isCurrent: boolean }[];
@@ -30,6 +40,8 @@ export interface SessionCommandContext extends CommandActionContext {
     readonly conversationManager: unknown;
   };
   readonly ops: { readonly sessionOrchestration?: ShellSessionOrchestrationService | null | undefined };
+  /** A turn is running now (the conversation's record controls read it). */
+  readonly isGenerating?: (() => boolean) | undefined;
 }
 
 /** What each app does for the actions whose work is its own. */
@@ -70,6 +82,10 @@ export interface SessionCommandPolicy<Ctx> {
     /** What compaction removed so far; undefined when this app keeps no such record. */
     compactions: ((ctx: Ctx) => void) | undefined;
   };
+  /** False when this app keeps one line of conversation (its branch actions are no controls of the Sessions place). */
+  readonly keepsBranches?: false | undefined;
+  /** False when this app uploads no conversation. */
+  readonly uploads?: false | undefined;
   /** Why this app may only read the cross-session task graph, or undefined when it may change it. */
   readonly graphReadOnly: string | undefined;
   readonly graph: (ctx: Ctx, input: { readonly session: string; readonly format: string }) => void;
@@ -79,7 +95,8 @@ export interface SessionCommandPolicy<Ctx> {
 // Live lists, read only when a guided step or a completion asks
 // ---------------------------------------------------------------------------
 
-const SAVED_SESSIONS = defineList<SessionCommandContext>({
+/** The saved sessions (capabilities/builtin/sessions.ts names it `sessions.saved`). */
+export const SAVED_SESSIONS = defineList<SessionCommandContext>({
   name: 'sessions.saved',
   async read(ctx) {
     const manager = ctx.session.sessionManager;
@@ -93,7 +110,8 @@ const SAVED_SESSIONS = defineList<SessionCommandContext>({
   operator: { method: 'sessions.list', input: {}, rows: { from: 'sessions', value: 'id', label: 'title' } },
 });
 
-const BRANCHES = defineList<SessionCommandContext>({
+/** This conversation's branches (`sessions.branches` in capabilities/builtin/sessions.ts). */
+export const BRANCHES = defineList<SessionCommandContext>({
   name: 'sessions.branches',
   async read(ctx) {
     const conversation = ctx.session.conversationManager as BranchingConversation;
@@ -120,46 +138,6 @@ const WAITING_HANDOFFS = defineList<SessionCommandContext>({
 // Blanks
 // ---------------------------------------------------------------------------
 
-const SAVED: InputDescription = {
-  id: 'session', label: 'Session', help: 'Your saved sessions, newest first', kind: 'choice',
-  choices: { list: SAVED_SESSIONS, allowOther: { reason: 'a session id, the start of one, or its title' } }, required: true, typed: { position: 1 },
-};
-const NAME: InputDescription = {
-  id: 'name', label: 'Name', help: 'A name you choose', kind: 'text', freeTextReason: 'a name you choose',
-  required: { default: '', defaultMeans: 'the conversation\'s title' }, typed: { tail: true },
-};
-const BRANCH: InputDescription = {
-  id: 'branch', label: 'Branch', help: 'This conversation\'s branches', kind: 'choice',
-  choices: { list: BRANCHES }, required: true, typed: { position: 1 },
-};
-const KINDS: readonly FixedChoice[] = [
-  { value: 'all', label: 'Everything' },
-  ...TRANSCRIPT_EVENT_KINDS.map((kind) => ({ value: kind, label: kind.replace(/_/g, ' ').replace(/^./, (first) => first.toUpperCase()) })),
-];
-const KIND: InputDescription = {
-  id: 'kind', label: 'Kind', help: 'Only one kind of entry', kind: 'choice', choices: KINDS,
-  required: { default: 'all', defaultMeans: 'everything' }, typed: { position: 1 },
-};
-const JUMP_KINDS: readonly FixedChoice[] = [{ value: 'error', label: 'Errors' }, ...KINDS.map((choice) => choice.value === 'all' ? { value: 'all', label: 'Any entry' } : choice)];
-const JUMP_KIND: InputDescription = {
-  id: 'kind', label: 'To', help: 'Which kind of entry', kind: 'choice', choices: JUMP_KINDS,
-  required: { default: 'all', defaultMeans: 'any entry' }, typed: { position: 1 },
-};
-const BLOCK_TYPES: readonly FixedChoice[] = [
-  { value: 'all', label: 'Every block' }, { value: 'thinking', label: 'Thinking' }, { value: 'tool', label: 'Tool calls' }, { value: 'code', label: 'Code' },
-];
-const BLOCK_TYPE: InputDescription = {
-  id: 'type', label: 'Blocks', help: 'Which blocks', kind: 'choice', choices: BLOCK_TYPES,
-  required: { default: 'all', defaultMeans: 'every block' }, typed: { position: 1 },
-};
-const START: InputDescription = {
-  id: 'start', label: 'From row', help: 'The first row to show', kind: 'number', freeTextReason: 'a row number from 1',
-  required: { default: '', defaultMeans: 'the newest page' }, typed: { position: 2 },
-};
-const LAST: InputDescription = {
-  id: 'last', label: 'How many', help: 'How many rows to show', kind: 'number', freeTextReason: 'a whole number',
-  required: { default: '', defaultMeans: 'one page' }, typed: { flag: '--last' },
-};
 const TASK_SESSION: InputDescription = {
   id: 'from', label: 'In session', help: 'The session the task belongs to', kind: 'text', freeTextReason: 'a session id',
   required: { default: '', defaultMeans: 'this session' }, typed: { flag: '--session' },
@@ -177,6 +155,68 @@ function parseRef(raw: string, sessionId: string): { sessionId: string; taskId: 
   return parts.length === 2 ? { sessionId: parts[0]!, taskId: parts[1]! } : { sessionId, taskId: raw };
 }
 
+/**
+ * What one of the app's session routines says, as words: what it prints while
+ * it runs is its answer (a line it prints later, such as a resume's assisted
+ * summary arriving afterwards, goes to the screen as before).
+ */
+async function said<Ctx extends SessionCommandContext>(ctx: Ctx, run: (ctx: Ctx) => unknown): Promise<string> {
+  const lines: string[] = [];
+  let answering = true;
+  const print = (message: string): void => { if (answering) lines.push(message); else ctx.print(message); };
+  const answeringCtx = { ...ctx, print, printLive: undefined } as Ctx;
+  try {
+    const returned = await run(answeringCtx);
+    if (typeof returned === 'string' && returned.trim() !== '') lines.push(returned);
+  } finally {
+    answering = false;
+  }
+  return lines.join('\n');
+}
+
+/** The app's session routines as the session capabilities take them (capabilities/builtin/sessions.ts). */
+export function liveSessionsOf<Ctx extends SessionCommandContext>(policy: SessionCommandPolicy<Ctx>, ctx: Ctx): LiveSessions {
+  return {
+    keepsBranches: policy.keepsBranches !== false,
+    uploads: policy.uploads !== false,
+    current: () => said(ctx, (c) => policy.workflow.current(c)),
+    list: () => said(ctx, (c) => policy.workflow.list(c)),
+    info: (target) => said(ctx, (c) => policy.workflow.info(c, target)),
+    search: (words) => said(ctx, (c) => policy.workflow.search(c, words)),
+    remove: (target) => said(ctx, (c) => policy.workflow.remove(c, target)),
+    resume: (target, force) => said(ctx, (c) => policy.resume(c, { target, force })),
+    fork: (name) => said(ctx, (c) => policy.workflow.fork(c, name)),
+    rename: (name) => said(ctx, (c) => policy.workflow.rename(c, name)),
+    exportSaved: (input) => said(ctx, (c) => policy.exportSaved(c, input)),
+    upload: (input) => said(ctx, (c) => policy.upload(c, input)),
+    branches: () => said(ctx, (c) => policy.branches.list(c)),
+    switchBranch: (name) => said(ctx, (c) => policy.branches.switchTo(c, name)),
+    mergeBranch: (name) => said(ctx, (c) => policy.branches.merge(c, name)),
+    review: (view, input) => said(ctx, (c) => policy.workflow.review(c, view, input)),
+    find: (words, kind) => said(ctx, (c) => policy.look.find(c, words, kind)),
+    jump: (direction, kind) => said(ctx, (c) => policy.look.jump(c, direction, kind)),
+    composer: () => said(ctx, (c) => policy.look.composer(c)),
+    restored: () => said(ctx, (c) => policy.look.restored(c)),
+    bookmarks: () => said(ctx, (c) => policy.look.bookmarks(c)),
+  };
+}
+
+/**
+ * The app's routines for the conversation's record, as the conversation's controls take them
+ * (capabilities/builtin/conversation-controls.ts: session.save, save-file, branch, expand, collapse, compactions).
+ */
+export function conversationRecordOf<Ctx extends SessionCommandContext>(policy: SessionCommandPolicy<Ctx>, ctx: Ctx): ConversationRecord {
+  const compactions = policy.look.compactions;
+  return {
+    save: (input) => said(ctx, (c) => policy.workflow.save(c, input)),
+    fileExists: (path) => policy.fileExists(ctx, path),
+    saveFile: (input) => said(ctx, (c) => policy.saveFile(c, input)),
+    branch: (name) => said(ctx, (c) => policy.branches.create(c, name)),
+    blocks: (type, fold) => said(ctx, (c) => policy.look.blocks(c, type, fold)),
+    compactions: compactions ? () => said(ctx, (c) => compactions(c)) : undefined,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // The actions
 // ---------------------------------------------------------------------------
@@ -188,286 +228,55 @@ function sessionActions<Ctx extends SessionCommandContext>(policy: SessionComman
     if (policy.graphReadOnly) throw commandRefusal(policy.graphReadOnly, '/session graph shows the graph.');
     return orchestrationOf(ctx);
   };
-  const resume: SessionAction<Ctx> = {
-    id: 'resume', label: 'Resume a saved session', word: 'resume',
-    inputs: [SAVED, {
-      id: 'force', label: 'If it is open elsewhere', help: 'Another running terminal may have it open', kind: 'choice',
-      choices: [{ value: 'no', label: 'Stop and say so' }, { value: 'yes', label: 'Have it handed over here', help: 'That terminal saves it and lets go first, through the daemon both are attached to.' }],
-      required: { default: 'no', defaultMeans: 'stop and say so' }, typed: { flag: '--force', switchOn: 'yes' },
-    }],
-    sentence: 'This conversation is set aside and {session} continues here, with its messages, model and agent records.', done: '',
-    touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
-    operator: { method: 'sessions.reopen', fields: { sessionId: 'session' } }, example: { session: 'my-notes' },
-    async run(values, ctx) {
-      await policy.resume(ctx, { target: values.session!, force: values.force === 'yes' });
-    },
-  };
-  const save: SessionAction<Ctx> = {
-    id: 'save', label: 'Save this session under a name', word: 'save',
-    inputs: [
-      NAME,
-      { id: 'continue', label: 'Keep working in', help: 'This session, or the saved copy', kind: 'choice', choices: [
-        { value: 'here', label: 'This session' },
-        { value: 'copy', label: 'The saved copy', help: 'Later turns are saved under the new name.' },
-      ], required: { default: 'here', defaultMeans: 'this session' }, typed: { flag: '--switch', switchOn: 'copy' } },
-      { id: 'replace', label: 'If the name is taken', help: 'Another saved conversation may have it', kind: 'choice', choices: [
-        { value: 'no', label: 'Stop and say so' },
-        { value: 'yes', label: 'Replace it', help: 'The conversation saved under that name now is lost.', risk: 'cannot-be-undone' },
-      ], required: { default: 'no', defaultMeans: 'stop and say so' }, typed: { flag: '--replace', switchOn: 'yes' } },
-    ],
-    sentence: 'This conversation will be saved under the name given (or its title), until you change it.', done: '',
-    touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'delete',
-    operator: { terminalOnly: 'The conversation is the terminal app\'s own.' }, example: { name: 'release notes' },
-    async run(values, ctx) {
-      policy.workflow.save(ctx, { name: values.name ?? '', replace: values.replace === 'yes', switchTo: values.continue === 'copy' });
-    },
-  };
+  // The moved actions run their capability (capabilities/builtin/sessions.ts) with this app's session routines.
+  const moved = (definition: CapabilityDefinition<SessionsCapabilityServices>, terminalOnly: string): SessionAction<Ctx> =>
+    sessionCapabilityAction<Ctx, SessionsCapabilityServices>(definition, (ctx) => ({ sessions: liveSessionsOf(policy, ctx) }), { terminalOnly });
+  const OWN_CONVERSATION = 'The conversation is the terminal program\'s own.';
+  const OWN_FILES = 'Saved sessions are files the terminal program keeps in this project.';
+  const OWN_RECORD = 'It is the terminal program\'s open conversation.';
+  const OWN_VIEW = 'It moves the terminal program\'s own view.';
+  const resume: SessionAction<Ctx> = moved(SESSION_RESUME, OWN_CONVERSATION);
+  // The conversation's record is a control on the conversation (capabilities/builtin/conversation-controls.ts), run with this app's routines.
+  const recorded = (definition: CapabilityDefinition<RecordServices>, terminalOnly: string): SessionAction<Ctx> =>
+    sessionCapabilityAction<Ctx, RecordServices>(definition, (ctx) => ({
+      conversation: { isGenerating: () => ctx.isGenerating?.() === true }, record: conversationRecordOf(policy, ctx),
+    }), { terminalOnly });
+  const save: SessionAction<Ctx> = recorded(SESSION_SAVE, OWN_CONVERSATION);
   const actions: SessionAction<Ctx>[] = [
+    { ...moved(SESSION_CURRENT, 'It is the terminal program\'s open session.'), readsOnlyThisMachine: true },
     {
-      id: 'current', label: 'See this session', readsOnlyThisMachine: true, word: 'current', inputs: [],
-      sentence: 'Shows this session\'s id, name, when it started, how many messages it has and its model.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s open session.' }, example: {},
-      async run(_values, ctx) { policy.workflow.current(ctx); },
-    },
-    {
-      id: 'list', label: 'See your saved sessions', word: 'list', inputs: [],
+      ...moved(SESSION_LIST, OWN_FILES),
       async rowValue(ctx) {
         const count = ctx.session.sessionManager?.list().length ?? 0;
         return count === 0 ? 'none saved yet' : `${count} saved`;
       },
-      sentence: 'Lists your saved sessions, newest first, with what each was doing when it was left.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'sessions.list', fields: {} }, example: {},
-      async run(_values, ctx) { policy.workflow.list(ctx); },
     },
     resume,
     save,
-    {
-      id: 'fork', label: 'Continue in a copy of this session', word: 'fork',
-      inputs: [{ ...NAME, required: { default: '', defaultMeans: 'fork-of- and this session\'s id' } }],
-      sentence: 'A copy of this session is saved under the name given and later turns go to the copy; this session stays as it is now, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { terminalOnly: 'The conversation is the terminal app\'s own.' }, example: { name: 'try another way' },
-      async run(values, ctx) { policy.workflow.fork(ctx, values.name ?? ''); },
-    },
-    {
-      id: 'rename', label: 'Rename this session', word: 'rename',
-      inputs: [{ ...NAME, required: true, help: 'Its new name' }],
-      sentence: 'This session will be called {name} until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { terminalOnly: 'The conversation is the terminal app\'s own.' }, example: { name: 'release notes' },
-      async run(values, ctx) { policy.workflow.rename(ctx, values.name!); },
-    },
-    {
-      id: 'info', label: 'See a saved session\'s details', word: 'info',
-      inputs: [{ ...SAVED, required: { default: '', defaultMeans: 'this session' } }],
-      sentence: 'Shows a saved session: its title, model, provider, date, message count, file and what it was doing.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'sessions.get', fields: { sessionId: 'session' } }, example: { session: 'my-notes' },
-      async run(values, ctx) { policy.workflow.info(ctx, values.session ?? ''); },
-    },
-    {
-      id: 'search', label: 'Search saved sessions', word: 'search',
-      inputs: [{ id: 'words', label: 'Words', help: 'What to look for in their messages', kind: 'text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
-      sentence: 'Finds saved sessions whose messages hold {words}, with the matching lines.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'sessions.search', fields: { query: 'words' } }, example: { words: 'release' },
-      async run(values, ctx) { policy.workflow.search(ctx, values.words!); },
-    },
-    {
-      id: 'delete', label: 'Delete a saved session', word: 'delete', inputs: [SAVED],
-      sentence: 'Saved session {session} and its messages will be deleted from this project.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
-      operator: { method: 'sessions.delete', fields: { sessionId: 'session' } }, example: { session: 'my-notes' },
-      async run(values, ctx) { policy.workflow.remove(ctx, values.session!); },
-    },
-    {
-      id: 'events', label: 'See this conversation\'s events', word: 'events', inputs: [KIND, START, LAST],
-      sentence: 'Shows the conversation\'s record entry by entry (messages, tool calls, approvals), newest page first.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: { kind: 'tool_call', last: '20' },
-      async run(values, ctx) { await policy.workflow.review(ctx, 'events', { kind: values.kind ?? '', start: values.start ?? '', last: values.last ?? '' }); },
-    },
-    {
-      id: 'groups', label: 'See this conversation turn by turn', word: 'groups', inputs: [KIND, START, LAST],
-      sentence: 'Shows the conversation\'s record grouped by turn, newest page first.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: { kind: 'all' },
-      async run(values, ctx) { await policy.workflow.review(ctx, 'groups', { kind: values.kind ?? '', start: values.start ?? '', last: values.last ?? '' }); },
-    },
-    {
-      id: 'hotspots', label: 'See where this conversation spent most', word: 'hotspots', inputs: [KIND],
-      sentence: 'Counts the whole record by what took the most entries.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: { kind: 'tool_call' },
-      async run(values, ctx) { await policy.workflow.review(ctx, 'hotspots', { kind: values.kind ?? '', start: '', last: '' }); },
-    },
-    {
-      id: 'find', label: 'Find words in this conversation', word: 'find',
-      inputs: [
-        { id: 'words', label: 'Words', help: 'What to look for', kind: 'text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'search in place, as Ctrl+F does' }, typed: { tail: true } },
-        { ...KIND, typed: { flag: '--kind' } },
-      ],
-      sentence: 'Lists the entries of this conversation that hold the words given; with none, searches in place.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: { words: 'approval', kind: 'approval_request' },
-      async run(values, ctx) { await policy.look.find(ctx, values.words ?? '', values.kind ?? 'all'); },
-    },
-    {
-      id: 'next', label: 'Jump to the next entry', word: 'next', inputs: [JUMP_KIND],
-      sentence: 'Scrolls to the next entry of the kind chosen, after where you are.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It moves the terminal app\'s own view.' }, example: { kind: 'error' },
-      async run(values, ctx) { await policy.look.jump(ctx, 'next', values.kind ?? 'all'); },
-    },
-    {
-      id: 'prev', label: 'Jump to the previous entry', word: 'prev', inputs: [JUMP_KIND],
-      sentence: 'Scrolls to the previous entry of the kind chosen, before where you are.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It moves the terminal app\'s own view.' }, example: { kind: 'tool_result' },
-      async run(values, ctx) { await policy.look.jump(ctx, 'prev', values.kind ?? 'all'); },
-    },
-    {
-      id: 'expand', label: 'Open folded blocks', word: 'expand', inputs: [BLOCK_TYPE],
-      sentence: 'Opens the folded blocks of the kind chosen in this conversation.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It changes the terminal app\'s own view.' }, example: { type: 'tool' },
-      async run(values, ctx) { policy.look.blocks(ctx, values.type || 'all', false); },
-    },
-    {
-      id: 'collapse', label: 'Fold blocks', word: 'collapse', inputs: [BLOCK_TYPE],
-      sentence: 'Folds the blocks of the kind chosen in this conversation to one line each.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It changes the terminal app\'s own view.' }, example: { type: 'thinking' },
-      async run(values, ctx) { policy.look.blocks(ctx, values.type || 'all', true); },
-    },
-    {
-      id: 'bookmarks', label: 'See bookmarked blocks', word: 'bookmarks', inputs: [],
-      sentence: 'Lists the blocks you bookmarked (Ctrl+B) and jumps to one.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'Bookmarks belong to the terminal app\'s open conversation.' }, example: {},
-      async run(_values, ctx) { policy.look.bookmarks(ctx); },
-    },
-    {
-      id: 'composer', label: 'See what the composer waits on', word: 'composer', inputs: [],
-      sentence: 'Shows the composer\'s mode, what it waits on, the turn\'s state and how full the context is.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s composer.' }, example: {},
-      async run(_values, ctx) { policy.look.composer(ctx); },
-    },
-    {
-      id: 'restored', label: 'See what a resume brought back', word: 'restored', inputs: [],
-      sentence: 'Lists the entries a resume restored: approvals, tasks, remote state and notices.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: {},
-      async run(_values, ctx) { await policy.look.restored(ctx); },
-    },
-    {
-      id: 'compactions', label: 'See what compaction removed', word: 'compactions', inputs: [],
-      sentence: 'Lists each compaction of this session: when, how much it removed and what it kept.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the terminal app\'s open conversation.' }, example: {},
-      async run(_values, ctx) {
-        if (!policy.look.compactions) throw commandRefusal('This app keeps no record of compactions.', '/compact says what it removed when it runs.');
-        policy.look.compactions(ctx);
-      },
-    },
-    {
-      id: 'save-file', label: 'Save this conversation as a file', word: 'save-file',
-      inputs: [
-        { id: 'format', label: 'As', help: 'The kind of file', kind: 'choice', choices: [
-          { value: 'markdown', label: 'Markdown' }, { value: 'text', label: 'Plain text' },
-          { value: 'html', label: 'A web page', help: 'Self-contained, with code highlighted' }, { value: 'json', label: 'JSON', help: 'For programs' },
-        ], required: { default: 'markdown', defaultMeans: 'Markdown' }, typed: { position: 1 } },
-        { id: 'path', label: 'File', help: 'Where to write it', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file named for the time' }, typed: { position: 2 } },
-        { id: 'redact', label: 'Keys and paths', help: 'API keys, tokens and your home path and login name', kind: 'choice', choices: [
-          { value: 'hide', label: 'Hide them' }, { value: 'keep', label: 'Keep them as they are' },
-        ], required: { default: 'hide', defaultMeans: 'hide them' }, typed: { flag: '--keep-secrets', switchOn: 'keep' } },
-        { id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', kind: 'choice', choices: [
-          { value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' },
-        ], required: { default: 'no', defaultMeans: 'keep it and stop' }, typed: { flag: '--replace', switchOn: 'yes' } },
-        { id: 'open', label: 'Then', help: 'What to do with the file', kind: 'choice', choices: [
-          { value: 'nothing', label: 'Nothing more' }, { value: 'open', label: 'Open it in the browser', help: 'A web page only' }, { value: 'copy', label: 'Copy its path' },
-        ], required: { default: 'nothing', defaultMeans: 'nothing more' }, typed: { flag: '--then' } },
-      ],
-      sentence: 'This conversation will be written to {path} as {format} on this machine, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { terminalOnly: 'The conversation is the terminal app\'s own.' }, example: { format: 'html', path: 'notes/session.html' },
-      async run(values, ctx) {
-        if (values.path && values.replace !== 'yes' && policy.fileExists(ctx, values.path)) {
-          throw commandRefusal(`${values.path} already exists; nothing was written.`, `Write over it: /session save-file ${values.format || 'markdown'} ${values.path} --replace`);
-        }
-        return policy.saveFile(ctx, {
-          format: (values.format || 'markdown') as 'markdown' | 'text' | 'html' | 'json', path: values.path ?? '',
-          redact: values.redact !== 'keep', open: values.open === 'open', copy: values.open === 'copy',
-        });
-      },
-    },
-    {
-      id: 'save-saved', label: 'Save a saved session as a file', word: 'save-saved',
-      inputs: [
-        { ...SAVED, help: 'Your saved sessions; . is this one' },
-        { id: 'format', label: 'As', help: 'The kind of text', kind: 'choice', choices: [{ value: 'markdown', label: 'Markdown' }, { value: 'text', label: 'Plain text' }], required: { default: 'markdown', defaultMeans: 'Markdown' }, typed: { position: 2 } },
-        { id: 'where', label: 'Where', help: 'A file, or this screen', kind: 'choice', choices: [{ value: 'file', label: 'Write it to a file' }, { value: 'here', label: 'Print it here', help: 'Shown only, never part of this conversation' }], required: { default: 'file', defaultMeans: 'a file' }, typed: { flag: '--print', switchOn: 'here' } },
-        { id: 'path', label: 'File', help: 'Where to write it', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'a new file in ~/goodvibes-exports' }, typed: { flag: '--out' }, showWhen: { input: 'where', is: 'file' } },
-      ],
-      sentence: 'The redacted transcript of {session} will be written out ({format}); an existing file is never replaced.', done: '',
-      touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'Saved sessions are files of the terminal app.' }, example: { session: 'my-notes', format: 'text' },
-      async run(values, ctx) {
-        await policy.exportSaved(ctx, { target: values.session!, format: (values.format || 'markdown') as TranscriptFormat, path: values.where === 'here' ? '' : values.path ?? '', print: values.where === 'here' });
-      },
-    },
-    {
-      id: 'upload', label: 'Upload this conversation and get a link', word: 'upload',
-      inputs: [
-        { id: 'format', label: 'As', help: 'The kind of file', kind: 'choice', choices: [{ value: 'html', label: 'A web page' }, { value: 'md', label: 'Markdown' }, { value: 'json', label: 'JSON' }], required: { default: 'html', defaultMeans: 'a web page' }, typed: { position: 1 } },
-        { id: 'redact', label: 'Keys and paths', help: 'API keys, tokens and your home path and login name', kind: 'choice', choices: [
-          { value: 'hide', label: 'Hide them' },
-          { value: 'keep', label: 'Send them as stored', help: 'Anyone with the link reads them, and copies cannot be recalled.' },
-        ], required: { default: 'hide', defaultMeans: 'hide them' }, typed: { flag: '--keep-secrets', switchOn: 'keep' } },
-        { id: 'open', label: 'Then', help: 'What to do with the local copy', kind: 'choice', choices: [
-          { value: 'nothing', label: 'Nothing more' }, { value: 'open', label: 'Open it in the browser' }, { value: 'copy', label: 'Copy its path' },
-        ], required: { default: 'nothing', defaultMeans: 'nothing more' }, typed: { flag: '--then' } },
-      ],
-      sentence: 'This conversation ({format}) will be written to a file and uploaded as a secret GitHub Gist that anyone with its link can read.', done: '',
-      touches: 'another-machine', lasts: 'not-a-change', risk: 'sends-out',
-      ownerOnly: { reason: 'it sends the conversation outside this machine', instead: 'Save it as a file instead: /session save-file' },
-      operator: { terminalOnly: 'The upload is made with the terminal app\'s GitHub sign-in.' }, example: { format: 'md' },
-      async run(values, ctx) {
-        await policy.upload(ctx, { format: (values.format || 'html') as 'html' | 'json' | 'md', redact: values.redact !== 'keep', open: values.open === 'open', copy: values.open === 'copy' });
-      },
-    },
-    {
-      id: 'branch', label: 'Branch this conversation here', word: 'branch',
-      inputs: [{ ...NAME, help: 'A name for the branch', required: { default: '', defaultMeans: 'a numbered name' } }],
-      sentence: 'A branch is kept of the conversation as it is now, under the name given; you go on in the current one, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { terminalOnly: 'Branches belong to the conversation open in the terminal app.' }, example: { name: 'before refactor' },
-      async run(values, ctx) { policy.branches.create(ctx, values.name ?? ''); },
-    },
-    {
-      id: 'branches', label: 'See this conversation\'s branches', word: 'branches', inputs: [],
-      sentence: 'Lists the branches of this conversation and which one you are on.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'Branches belong to the conversation open in the terminal app.' }, example: {},
-      async run(_values, ctx) { policy.branches.list(ctx); },
-    },
-    {
-      id: 'switch-branch', label: 'Switch to a branch', word: 'switch-branch', inputs: [BRANCH],
-      sentence: 'The conversation goes on from branch {branch} until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { terminalOnly: 'Branches belong to the conversation open in the terminal app.' }, example: { branch: 'main' },
-      async run(values, ctx) { policy.branches.switchTo(ctx, values.branch!); },
-    },
-    {
-      id: 'merge-branch', label: 'Bring a branch\'s new messages in', word: 'merge-branch', inputs: [BRANCH],
-      sentence: 'The messages branch {branch} gained after it was made are added to this conversation, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { terminalOnly: 'Branches belong to the conversation open in the terminal app.' }, example: { branch: 'before refactor' },
-      async run(values, ctx) { policy.branches.merge(ctx, values.branch!); },
-    },
+    moved(SESSION_FORK, OWN_CONVERSATION),
+    moved(SESSION_RENAME, OWN_CONVERSATION),
+    moved(SESSION_INFO, OWN_FILES),
+    moved(SESSION_SEARCH, OWN_FILES),
+    moved(SESSION_DELETE, OWN_FILES),
+    moved(SESSION_EVENTS, OWN_RECORD),
+    moved(SESSION_GROUPS, OWN_RECORD),
+    moved(SESSION_HOTSPOTS, OWN_RECORD),
+    moved(SESSION_FIND, OWN_RECORD),
+    moved(SESSION_NEXT, OWN_VIEW),
+    moved(SESSION_PREV, OWN_VIEW),
+    recorded(SESSION_EXPAND, 'It changes the terminal program\'s own view.'),
+    recorded(SESSION_COLLAPSE, 'It changes the terminal program\'s own view.'),
+    moved(SESSION_BOOKMARKS, 'Bookmarks belong to the terminal program\'s open conversation.'),
+    moved(SESSION_COMPOSER, 'It is the terminal program\'s composer.'),
+    moved(SESSION_RESTORED, OWN_RECORD),
+    recorded(SESSION_COMPACTIONS, OWN_CONVERSATION),
+    recorded(SESSION_SAVE_FILE, OWN_CONVERSATION),
+    moved(SESSION_SAVE_SAVED, OWN_FILES),
+    moved(SESSION_UPLOAD, 'The upload is made with the terminal app\'s GitHub sign-in.'),
+    recorded(SESSION_BRANCH, 'Branches belong to the conversation open in the terminal app.'),
+    moved(SESSION_BRANCHES, 'Branches belong to the conversation open in the terminal app.'),
+    moved(SESSION_SWITCH_BRANCH, 'Branches belong to the conversation open in the terminal app.'),
+    moved(SESSION_MERGE_BRANCH, 'Branches belong to the conversation open in the terminal app.'),
     {
       id: 'graph', label: 'See the cross-session task graph', word: 'graph',
       inputs: [
@@ -581,20 +390,24 @@ function sessionActions<Ctx extends SessionCommandContext>(policy: SessionComman
       },
     },
   ];
-  return { actions, resume, save };
+  return { actions, resume };
 }
 
 /**
- * `/session`, `/resume` and `/save` for one app. `/resume` and `/save` are
- * single-action commands whose one action is the definition `/session` lists
- * (its word left out, since the command name says it).
+ * `/session` and `/resume` for one app. `/resume` is a single-action command
+ * whose one action is the definition `/session` lists (its word left out,
+ * since the command name says it). Saving this session under a name is a
+ * control on the conversation (session.save), not a command of its own.
  */
 export function createSessionCommands<Ctx extends SessionCommandContext>(policy: SessionCommandPolicy<Ctx>): {
   readonly session: DescribedCommand<Ctx>;
   readonly resume: DescribedCommand<Ctx>;
-  readonly save: DescribedCommand<Ctx>;
+  /** The app's session routines for the session capabilities (the model's capability_run and the Sessions place). */
+  readonly live: (ctx: Ctx) => LiveSessions;
+  /** The app's routines for the conversation's record, for its controls (the conversation's list and the model's capability_run). */
+  readonly record: (ctx: Ctx) => ConversationRecord;
 } {
-  const { actions, resume, save } = sessionActions(policy);
+  const { actions, resume } = sessionActions(policy);
   const session: CommandDescription<Ctx> = {
     name: 'session',
     title: 'Sessions',
@@ -617,6 +430,7 @@ export function createSessionCommands<Ctx extends SessionCommandContext>(policy:
   return {
     session: defineCommand(session),
     resume: defineCommand({ name: 'resume', title: 'Resume a session', summary: 'Continue a saved session here', group: 'Sessions', actions: [{ ...resume, word: '' }] }),
-    save: defineCommand({ name: 'save', title: 'Save this session', summary: 'Save this conversation under a name to come back to', group: 'Sessions', actions: [{ ...save, word: '' }] }),
+    live: (ctx) => liveSessionsOf(policy, ctx),
+    record: (ctx) => conversationRecordOf(policy, ctx),
   };
 }

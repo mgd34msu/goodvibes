@@ -280,7 +280,7 @@ function describeHeldForOwner(held: ReadonlyMap<string, { readonly tool: string;
   const lines = [...held].map(([id, call]) => `  ${id}  ${call.tool}: ${call.reason}`);
   return [`Held for you: ${held.size === 1 ? 'this call was' : `these ${String(held.size)} calls were`} not run, and the rest of the work went on without ${held.size === 1 ? 'it' : 'them'}.`,
     ...lines,
-    'Approve with /held approve <id> (or /held approve all) and ask me to carry on; the approved call then runs. /held dismiss <id> sets one aside.'].join('\n');
+    'Each waits in Waiting for you, under Held calls: approve one there and ask me to carry on, and the approved call then runs; set aside one you do not want.'].join('\n');
 }
 
 export function openVerificationStore(workingDirectory: string | undefined, sessionId: string, onNotice: (notice: string) => void): VerificationStore {

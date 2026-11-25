@@ -240,7 +240,7 @@ export async function handleMemory(
     assertNoSecretLikeMemoryText([summary, detail, ...(tags ?? [])]);
     requireUpdateFields('memory record', { summary, detail, tags, scope: args.scope }, [
       ['cls', args.cls, 'a memory class cannot be changed; create a new record with the class and delete the old one.'],
-      ['confidence', args.confidence, 'confidence is set by the owner\'s review: ask the owner to run /memory review <id> reviewed --confidence <0-100>.'],
+      ['confidence', args.confidence, 'confidence is set by the owner\'s review: ask the owner to mark the record reviewed, with its confidence, in Memory and knowledge.'],
     ]);
     const record = await run(() => memorySpine.update(requireId(args), {
       summary: summary || undefined,

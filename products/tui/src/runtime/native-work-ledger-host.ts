@@ -1,6 +1,5 @@
 import { OwnedSelectionObservation } from '@goodvibes/engine/platform/platform/runtime/client/selection-observation';
 import { registerWorkCommand } from '@goodvibes/engine/terminal-shell/native/work-command';
-import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import {
   createBoundNativeWorkLedgerView,
   type NativeLedgerBindingFactory,
@@ -11,8 +10,8 @@ import { TUI_NATIVE_INTAKE_POLICY } from '@goodvibes/engine/terminal-shell/nativ
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { resolveNativeHostCredential } from './client/native-host-credential.ts';
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
-import { openTuiLegacyImport } from '../input/commands/legacy-work-ledger-import-runtime.ts';
 import { workRequestsHost } from '../input/commands/planning-runtime.ts';
+import { capabilityBinding } from '../input/commands/capability-binding.ts';
 
 /** What the /work modal reads: the shared view and one change listener at a time. */
 export interface NativeWorkLedgerModalSource {
@@ -71,18 +70,12 @@ export function createNativeWorkLedgerHost(
   };
 }
 
-/** `/work` (terminal-shell/native/work-command.ts) in the terminal app: its work view, its host's imports, and requests in your own words. */
+/** `/work` (terminal-shell/native/work-command.ts) in the terminal app: its submission journal, requests in your own words, and the daemon it runs work on. */
 export function registerNativeWorkLedgerCommand(registry: CommandRegistry, view: NativeWorkLedgerView): void {
   registerWorkCommand<CommandContext>(registry, {
     view: () => view,
-    open(ctx, project) {
-      if (project) view.selectProject(project);
-      if (!ctx.openModal) throw commandRefusal('The native work view is not available in this shell.');
-      ctx.openModal('native-work-ledger-modal');
-    },
     // The terminal app runs selected diffs; a hosted turn is not resumed here.
     allowHostedDispatch: false,
-    openImport: openTuiLegacyImport,
     requests: workRequestsHost(),
-  });
+  }, capabilityBinding);
 }

@@ -17,6 +17,18 @@ import type { AnyPlace, PlaceAction, PlaceItem } from './place-types.js';
 /** The key that reads every list of a place again at once; its entry in each place's context. */
 export const READ_AGAIN_ACTION = 'read-again';
 const READ_AGAIN_DEFAULT = 'r';
+/**
+ * The key that lists every key of the place that applies now, each runnable from the list; its entry in each
+ * place's context. The hint row ends with it when the place's keys do not fit in two rows.
+ */
+export const MORE_KEYS_ACTION = 'more-keys';
+const MORE_KEYS_DEFAULT = '?';
+
+/**
+ * Capabilities that end the program the person is in: never on a letter of a place. Only Enter on a row the person
+ * selected runs one (the System place's "Close this program" row); a letter declared for one is not bound.
+ */
+export const ENDS_THE_PROGRAM: ReadonlySet<string> = new Set(['system.quit']);
 
 /** The context id of a place's keys. */
 export function placeKeyContextId(place: Pick<AnyPlace, 'id'>): string {
@@ -58,10 +70,12 @@ export function placeKeyContext(place: AnyPlace): KeyContext {
     actions.push({
       name,
       description: label,
-      defaults: [comboOf(action.key)],
+      // `key: ''`: an entry with no default key (This conversation's controls), bound only when a person binds it.
+      defaults: action.key === '' ? [] : [comboOf(action.key)],
       scope: { ...(action.list !== undefined ? { list: action.list } : {}), ...(action.states ? { states: action.states } : {}) },
     });
   }
   actions.push({ name: READ_AGAIN_ACTION, description: 'read every list again', defaults: [{ key: READ_AGAIN_DEFAULT }] });
+  actions.push({ name: MORE_KEYS_ACTION, description: 'list every key of this place', defaults: [{ key: MORE_KEYS_DEFAULT }] });
   return { id: placeKeyContextId(place), title: place.title, actions };
 }

@@ -38,6 +38,8 @@ export interface CapabilityEntry {
   readonly sentence: string;
   readonly done: string;
   readonly risk: ActionRisk;
+  /** What the act did, said after it ran in place of the risk's words (types.ts `riskDone`). */
+  readonly riskDone?: string | undefined;
   readonly touches: ActionTouches;
   readonly lasts: ActionLasts | 'not-a-change';
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
@@ -56,6 +58,7 @@ export interface CatalogActionSource {
   readonly sentence: string;
   readonly done?: string | undefined;
   readonly risk: ActionRisk;
+  readonly riskDone?: string | undefined;
   readonly touches: ActionTouches;
   readonly lasts: ActionLasts | 'not-a-change';
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
@@ -91,6 +94,7 @@ function entryOf(command: Pick<CatalogCommandSource, 'name' | 'title'>, action: 
     sentence: action.sentence,
     done: action.done ?? '',
     risk: action.risk,
+    ...(action.riskDone ? { riskDone: action.riskDone } : {}),
     touches: action.touches,
     lasts: action.lasts,
     ...(action.ownerOnly ? { ownerOnly: action.ownerOnly } : {}),

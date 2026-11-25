@@ -11,6 +11,7 @@ import { readProfilePerson, reuseProfilePerson, type ProfilePersonReadingOptions
 import { basename, dirname } from 'node:path';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { parseProfileDocument, findProfileSectionByHeading } from './document.js';
 import { readProfile, readProfileSync, statOf, type FileStat, type ProfileReadResult } from './store-load.js';
 import { describeProfileWrite } from './disclosure.js';
@@ -334,6 +335,8 @@ export class OwnerProfileStore {
         if (own !== null && own.mtimeMs === observed.mtimeMs && own.size === observed.size) continue;
         const state = await this.load();
         this.options.onReload?.(state);
+        // The owner edited the file by hand: a screen showing the profile reads it again.
+        noteListChanged({ list: 'profile', change: 'changed' });
       } while (this.reloadAgain);
     } finally {
       this.reloading = false;
@@ -738,6 +741,8 @@ export class OwnerProfileStore {
       return started;
     };
     const result = this.commitTail === null ? run() : this.commitTail.then(run);
+    // A screen showing the profile reads it again once a write landed (runtime/list-changes.ts).
+    void result.then((written) => { if (written.ok) noteListChanged({ list: 'profile', change: 'changed' }); }, () => undefined);
     const tail: Promise<void> = result.then(() => undefined, () => undefined);
     this.commitTail = tail;
     void tail.then(() => { if (this.commitTail === tail) this.commitTail = null; });

@@ -6,7 +6,6 @@ import { THEME_MODE_CONFIG_KEY } from '../renderer/theme-mode-config.ts';
 import { GATE_PRESETS } from '@goodvibes/engine/platform/platform/gate/presets';
 
 /** The Work area's one name: its tab and the Home row that opens it say the same words. */
-const WORK_AREA_LABEL = 'Work & Approvals';
 
 /** The "When GoodVibes asks" row: each mode in one line of what it does, from the presets' own short lines. */
 const MODE_ROW_DETAIL = (['ask-me', 'jev-decides', 'just-vibes', 'yolo', 'plan'] as const)
@@ -30,7 +29,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'assistant-automation-lane', label: 'Schedules & automation', detail: 'Reminders, routines, and scheduled work.', targetCategoryId: 'automation', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-messaging-lane', label: 'Messaging & notifications', detail: 'Connect Slack, Discord, Telegram, and more; send messages and notifications.', targetCategoryId: 'onboarding-channels', kind: 'workspace', safety: 'safe' },
       { id: 'assistant-memory-lane', label: 'Memory & personality', detail: 'What the assistant remembers and how it behaves.', targetCategoryId: 'memory', kind: 'workspace', safety: 'safe' },
-      { id: 'assistant-work-lane', label: WORK_AREA_LABEL, detail: 'Pending approvals, background processes, and host tasks.', targetCategoryId: 'work', kind: 'workspace', safety: 'read-only' },
+      { id: 'assistant-work-lane', label: 'Work and agents', detail: 'Your work, its plans and results, the checklist and the tasks running in the background are in Work and agents, in the menu (Ctrl+G then m).', kind: 'guidance', safety: 'read-only' },
       actRow('mode-preset', 'verbosity set'),
     ],
   },
@@ -46,10 +45,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'use-local-model', label: 'Use a local model (no sign-in)', detail: 'Opens the model picker, which recommends models that fit this computer. No account or subscription needed.', kind: 'model-picker', modelPickerFlow: 'model', modelPickerTarget: 'main', safety: 'safe' },
       { id: 'setup-provider-model', label: 'Choose main model', detail: 'Opens the model picker for the model the assistant answers with.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'main', safety: 'safe' },
       settingAction({ id: 'setup-reasoning-effort', label: 'Reasoning effort', detail: 'Cycle reasoning level when the selected model supports it.', key: 'provider.reasoningEffort' }),
-      actRow('subscription-login-start', 'provider sign-in'),
-      actRow('subscription-login-finish', 'provider finish-sign-in'),
-      actRow('subscription-logout', 'provider sign-out'),
-      actRow('subscription-inspect', 'provider see-sign-in'),
+      // Signing in to a provider is a control on the provider in Models and providers (the menu, Ctrl+G m).
       actRow('secret-set-provider', 'secrets set-secret'),
       settingAction({ id: 'setup-secret-policy', label: 'Secret storage policy', detail: 'Choose how strongly Agent prefers secure secret storage.', key: 'storage.secretPolicy' }),
       settingAction({ id: 'setup-save-history', label: 'Save history', detail: 'Toggle local conversation history persistence.', key: 'behavior.saveHistory' }),
@@ -69,9 +65,7 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       // Essentials, chat route + reasoning
       { id: 'provider-use', label: 'Choose provider and model', detail: 'Opens the model picker for the model the assistant answers with.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'main', safety: 'safe' },
       settingAction({ id: 'account-reasoning', label: 'Reasoning effort', detail: 'Cycle the reasoning effort used when supported.', key: 'provider.reasoningEffort' }),
-      actRow('provider-use-form', 'provider use'),
-      actRow('model-pin', 'pin pin-model'),
-      actRow('model-unpin', 'pin unpin-model'),
+      // The default model, pins, backups and providers of your own are controls in Models and providers.
       // Advanced routes, most people can skip these
       { id: 'account-advanced-separator', label: 'Optional models for side jobs (most people skip these)', detail: 'Separate models for small background jobs, tools, speech and embeddings, and the prompt cache. Chat works without any of these.', kind: 'guidance', safety: 'read-only' },
       settingAction({ id: 'account-embedding', label: 'Embedding provider', detail: 'Set the embedding provider for memory and retrieval.', key: 'provider.embeddingProvider' }),
@@ -83,7 +77,6 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       { id: 'account-tts-llm-provider', label: 'Choose the model for spoken replies', detail: 'Opens the model picker for the model that answers when you talk to the assistant.', kind: 'model-picker', modelPickerFlow: 'providerModel', modelPickerTarget: 'tts', safety: 'safe' },
       // System prompt + custom provider plumbing
       settingAction({ id: 'account-system-prompt', label: 'Custom system prompt file', detail: 'Optional local file used as the system prompt for every assistant turn.', key: 'provider.systemPromptFile' }),
-      actRow('provider-remove', 'provider remove'),
       actRow('account-run-local-model-benchmark', 'compare benchmark'),
       // Prompt cache controls (advanced, most users leave defaults)
       settingAction({ id: 'account-cache-enabled', label: 'Prompt cache', detail: 'Toggle prompt caching for eligible providers.', key: 'cache.enabled' }),
@@ -184,7 +177,6 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('personal-ops-calendar-outlook', 'calendar use-app', { provider: 'outlook' }, 'Use your own Outlook calendar app'),
       { id: 'personal-ops-notes', label: 'Scratchpad notes', detail: 'Your scratchpad notes.', targetCategoryId: 'notes', kind: 'workspace', safety: 'safe' },
       actRow('personal-ops-note-create', 'notes create'),
-      actRow('personal-ops-reminder', 'schedule add'),
       { id: 'personal-ops-routines', label: 'Routine library', detail: 'Your routines: workflows you start by name or put on a schedule.', targetCategoryId: 'routines', kind: 'workspace', safety: 'safe' },
       { id: 'personal-ops-schedules', label: 'Schedules', detail: 'Your schedules: what runs on its own, and when.', targetCategoryId: 'automation', kind: 'workspace', safety: 'safe' },
       { id: 'personal-ops-channels', label: 'Delivery channels', detail: 'Your chat apps: connect one before sending summaries, reminders or follow-ups.', targetCategoryId: 'onboarding-channels', kind: 'workspace', safety: 'safe' },
@@ -401,7 +393,6 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('memory-create', 'memory remember'),
       { id: 'notes-workspace', label: 'Scratchpad notes', detail: 'Your scratchpad notes.', targetCategoryId: 'notes', kind: 'workspace', safety: 'safe' },
       actRow('note-create', 'notes create'),
-      actRow('learned-behavior-skill', 'my-skills create'),
       actRow('learned-behavior-routine', 'routines create'),
       actRow('learned-behavior-persona', 'personas create'),
       actRow('memory-edit', 'memory edit'),
@@ -465,26 +456,8 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
     summary: 'Step-by-step procedures the assistant can follow, and bundles of them.',
     detail: 'Skills are local, reviewable procedures with optional env/command requirements. Enabled skills inform the main conversation; secret-looking content is rejected.',
     actions: [
-      actRow('skills-search', 'my-skills search'),
-      actRow('skills-show', 'my-skills show'),
-      actRow('skills-import-discovered', 'my-skills import-discovered'),
-      actRow('skills-import-standard', 'my-skills import-standard'),
-      actRow('skills-export-standard', 'my-skills export-standard'),
-      actRow('skills-create-bundle', 'my-skills bundle-create'),
-      actRow('skills-search-bundle', 'my-skills bundle-search'),
-      actRow('skills-show-bundle', 'my-skills bundle-show'),
-      actRow('skills-update-bundle', 'my-skills bundle-update'),
-      actRow('skills-enable-bundle', 'my-skills bundle-enable'),
-      actRow('skills-disable-bundle', 'my-skills bundle-disable'),
-      actRow('skills-review-bundle', 'my-skills bundle-review'),
-      actRow('skills-stale-bundle', 'my-skills bundle-stale'),
-      actRow('skills-delete-bundle', 'my-skills bundle-delete'),
-      actRow('skills-create', 'my-skills create'),
-      actRow('skills-edit', 'my-skills update'),
-      actRow('skills-enable', 'my-skills enable'),
-      actRow('skills-disable', 'my-skills disable'),
-      actRow('skills-review', 'my-skills review'),
-      actRow('skills-delete', 'my-skills delete'),
+      // The skills are the daemon's one skill store, acted on in the Tools and extensions place (its Skills and Skill bundles tabs).
+      { id: 'skills-place', label: 'Your skills and skill bundles', detail: 'They are in Tools and extensions in the menu: see, make, change, switch on or off, review, import, save and delete them there.', kind: 'guidance', safety: 'safe' },
     ],
   },
   {
@@ -509,39 +482,15 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       actRow('routines-receipt', 'routines receipt'),
     ],
   },
-  {
-    id: 'work',
-    group: 'DAY-TO-DAY',
-    label: WORK_AREA_LABEL,
-    summary: 'What is running, what waits for your answer, and your to-do list.',
-    detail: 'Use this workspace to inspect active operator state and approval posture.',
-    actions: [
-      actRow('work-autonomy-queue', 'questions list'),
-      actRow('work-background-processes', 'tasks processes'),
-      actRow('tasks-filter', 'tasks list'),
-      actRow('task-show', 'tasks show'),
-      actRow('task-output', 'tasks output'),
-      actRow('ci-watches-list', 'ci watches'),
-      actRow('approval-review', 'approval kinds'),
-      actRow('approval-approve', 'questions answer'),
-      actRow('delegate-task', 'agents hand-off'),
-      actRow('workplan-show', 'todo list'),
-      actRow('workplan-add', 'todo add'),
-      actRow('workplan-status', 'todo mark'),
-      actRow('workplan-delete', 'todo remove'),
-      actRow('workplan-clear-completed', 'todo clear-done'),
-      actRow('work-agents', 'agents open'),
-    ],
-  },
   AGENT_WORKSPACE_HOST_CATEGORY,
   {
     id: 'automation',
     group: 'DAY-TO-DAY',
     label: 'Schedules',
     summary: 'Schedules: what runs on its own, when, and the limits on it.',
-    detail: 'Agent keeps no schedule of its own: /schedule keeps each one on the connected host, and reviewed routine promotion (/routines promote) does too.',
+    detail: 'Agent keeps no schedule of its own: each one is kept and run by the connected host, and reviewed routine promotion (/routines promote) puts routines there too.',
     actions: [
-      { id: 'schedule-setup-path', label: 'How to schedule something', detail: 'Make one with "Schedule something to run", or put a routine on a schedule from Routines; each asks before it is kept.', kind: 'guidance', safety: 'safe' },
+      { id: 'schedule-setup-path', label: 'How to schedule something', detail: 'Open Automation from the menu: its Schedules tab makes, runs, pauses, resumes, changes and removes schedules, and its Runs tab stops a run or runs a failed one again. A routine is put on a schedule from Routines.', kind: 'guidance', safety: 'safe' },
       settingAction({ id: 'automation-enabled', label: 'Use automation', detail: 'Toggle the automation subsystem for reminders and scheduled routines.', key: 'automation.enabled' }),
       settingAction({ id: 'automation-max-concurrent', label: 'Concurrent runs', detail: 'Set the maximum automation runs that can execute concurrently.', key: 'automation.maxConcurrentRuns', visibleWhenKey: 'automation.enabled', visibleWhenValue: true }),
       settingAction({ id: 'automation-history-limit', label: 'Run history limit', detail: 'Set the number of run history entries retained per automation job.', key: 'automation.runHistoryLimit', visibleWhenKey: 'automation.enabled', visibleWhenValue: true }),
@@ -549,17 +498,10 @@ export const AGENT_WORKSPACE_CATEGORIES: readonly AgentWorkspaceCategory[] = fre
       settingAction({ id: 'automation-catch-up', label: 'Catch-up window', detail: 'Set how long startup should catch up missed automation runs.', key: 'automation.catchUpWindowMinutes', visibleWhenKey: 'automation.enabled', visibleWhenValue: true }),
       settingAction({ id: 'automation-failure-cooldown', label: 'Failure cooldown', detail: 'Set the cooldown after a failed automation run.', key: 'automation.failureCooldownMs', visibleWhenKey: 'automation.enabled', visibleWhenValue: true }),
       settingAction({ id: 'automation-delete-after-run', label: 'Delete one-shot jobs', detail: 'Toggle deleting one-shot automation jobs after their first successful run.', key: 'automation.deleteAfterRun', visibleWhenKey: 'automation.enabled', visibleWhenValue: true }),
-      actRow('schedule-reminder', 'schedule add'),
-      actRow('schedule-edit', 'schedule change'),
-      actRow('automation-job-run', 'schedule run-now'),
-      actRow('automation-job-pause', 'schedule pause'),
-      actRow('automation-job-resume', 'schedule resume'),
-      actRow('automation-run-cancel', 'schedule stop-run'),
-      actRow('automation-run-retry', 'schedule retry-run'),
       actRow('schedule-promote-routine', 'routines promote'),
       actRow('schedule-receipt', 'routines receipt'),
       { id: 'schedule-delivery-targets', label: 'Delivery targets', detail: 'Where reminders and results can be sent: your chat apps and notification addresses.', targetCategoryId: 'onboarding-channels', kind: 'workspace', safety: 'safe' },
-      { id: 'schedule-policy', label: 'Where schedules are kept', detail: 'Every schedule is kept on the connected host, so it runs with or without this Agent open. /schedule makes, runs, pauses, resumes, changes and removes them; a removed one is gone for good (/schedule add makes it again).', kind: 'guidance', safety: 'safe' },
+      { id: 'schedule-policy', label: 'Where schedules are kept', detail: 'Every schedule is kept on the connected host, so it runs with or without this Agent open. Automation, in the menu, makes, runs, pauses, resumes, changes and removes them; a removed one is gone for good (New schedule makes it again).', kind: 'guidance', safety: 'safe' },
       actRow('health-repair', 'health check'),
     ],
   },
@@ -598,7 +540,6 @@ function freezeDeclaration<T>(value: T, visited = new Set<object>()): T {
  */
 export const AGENT_SETUP_TOPIC_ROWS = {
   'model': ['use-local-model', 'setup-provider-model', 'setup-reasoning-effort'],
-  'sign-in': ['subscription-login-start', 'subscription-login-finish', 'subscription-logout', 'subscription-inspect'],
   'store-key': ['secret-set-provider', 'setup-secret-policy'],
   'connect-daemon': ['setup-connected-host-url', 'setup-connected-host-enabled', 'setup-pair-host'],
   'history': ['setup-save-history'],

@@ -179,7 +179,7 @@ export const CODE_INDEX_ENABLED_SETTING: HostBooleanSetting = Object.freeze({
   label: 'Keep the code index up to date',
   type: 'boolean',
   default: false,
-  description: 'Keep the repo source-tree code index running: build it on startup, reindex files after edits, and (with the agent-passive-code-injection flag) inject code hits into coding turns. Bounded file/size scan; see /codebase status. Off by default: /codebase build builds it on demand, and from then on the session\'s own file writes keep it current; at the next start it is not built or kept current until /codebase build again.',
+  description: 'Keep the repo source-tree code index running: build it on startup, reindex files after edits, and (with the agent-passive-code-injection flag) inject code hits into coding turns. Bounded file/size scan; Code and changes, Code index, shows how it stands. Off by default: "Build it" there builds it on demand, and from then on the session\'s own file writes keep it current; at the next start it is not built or kept current until it is built again.',
 });
 
 /** The TUI's own settings, registered on its config manager before the first load. */

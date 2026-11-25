@@ -88,7 +88,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
     label: 'Ask before every purchase',
     type: 'boolean',
     description:
-      'When true, every purchase needs your approval first, given with /payments approve (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named.',
+      'When true, every purchase needs your approval first, given with "Approve one purchase ahead of time" in the Money place (or payments.checkout.approve) naming the merchant, the item and the most it may cost, before the agent may start it; the approval lasts five minutes and is used once. Default FALSE: the agent buys on your behalf inside your budgets without asking first, and that standing answer is kept here until you change it. Either way, a purchase over a budget or at a shop nobody vouches for still asks you before it is bought, and an approval you give in advance answers that question for a total up to the amount you named.',
   },
   {
     key: 'payments.defaultCardId',
@@ -330,7 +330,7 @@ export const paymentsConfigSettings: ConfigSettingRow[] = [
     label: 'Other places purchase questions are sent',
     type: 'string',
     description:
-      "Comma-separated, ordered list of channels that ALSO receive approval and veto prompts and may answer them. Every purchase notice, window and confirmation is always posted to your owner inbox (/questions in both terminal apps, and the web UI), where it can be answered, whatever this says; these channels reach you away from them. Today only 'telegram' has a delivery path. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means the owner inbox only: an in-budget purchase is announced there and waits its veto window, and an above-budget one is asked there.",
+      "Comma-separated, ordered list of channels that ALSO receive approval and veto prompts and may answer them. Every purchase notice, window and confirmation is always posted to your owner inbox (Waiting for you in both terminal apps and the web UI), where it can be answered, whatever this says; these channels reach you away from them. Today only 'telegram' has a delivery path. EMAIL IS NOT AND WILL NEVER BE ACCEPTED HERE, an inbound email is content anyone can write and cannot authorize spending. An unrecognised name is rejected rather than ignored, because a channel you believe will reach you and does not is worse than none. Empty means the owner inbox only: an in-budget purchase is announced there and waits its veto window, and an above-budget one is asked there.",
     validate: (value: unknown): boolean => {
       if (typeof value !== 'string') return false;
       if (value.trim().length === 0) return true;

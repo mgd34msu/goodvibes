@@ -6,7 +6,7 @@
  */
 import type { OperatorMethodId, OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { createConnectedHost, isHostFailure, type HostCallApplied, type HostRefusal } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
-import { connectedHostOf, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
+import { connectedHostOf, type AgentConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 
 export type OperatorGatewayCallFailureKind =
   | 'auth_required'

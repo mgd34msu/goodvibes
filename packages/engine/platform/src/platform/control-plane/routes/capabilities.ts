@@ -26,9 +26,8 @@ import { findCapabilities } from '../../capabilities/find.js';
 import { checkCapabilityInputs } from '../../capabilities/validate.js';
 import { capabilityOutcomeText } from '../../capabilities/outcome.js';
 import { methodBodyOf } from '../../capabilities/operator-input.js';
-import { daemonCapability, type DaemonCapabilityServices } from '../../capabilities/builtin/index.js';
+import { daemonCapability, methodCapability, type DaemonCapabilityServices } from '../../capabilities/builtin/index.js';
 import { CapabilityRefusal, type CapabilityCaller } from '../../capabilities/types.js';
-
 export interface CapabilityGateRequest {
   readonly entry: CapabilityEntry;
   readonly values: Readonly<Record<string, string>>;
@@ -56,13 +55,16 @@ function personAsked(invocation: GatewayMethodInvocation): boolean {
 function callerOf(params: Record<string, unknown>): CapabilityCaller {
   const workingDirectory = typeof params['workingDirectory'] === 'string' && params['workingDirectory'].trim() ? params['workingDirectory'].trim() : undefined;
   const program = params['program'] === 'tui' || params['program'] === 'agent' ? params['program'] : undefined;
-  return { ...(workingDirectory ? { workingDirectory } : {}), ...(program ? { program } : {}) };
+  // The model of the asking program's conversation (a context window size acts on it unless the call names another).
+  const model = typeof params['model'] === 'string' && params['model'].trim() ? params['model'].trim() : undefined;
+  return { ...(workingDirectory ? { workingDirectory } : {}), ...(program ? { program } : {}), ...(model ? { model } : {}) };
 }
 
 function where(entry: CapabilityEntry): string {
   const line = `/${entry.command}${entry.word ? ` ${entry.word}` : ''}`;
   return entry.home === 'session'
-    ? `${entry.id} acts on a conversation, so it runs in the program holding it (${line} there, or capability_run from its model); nothing ran here.`
+    // A session capability may have no slash command any more: it is named by where it is, never by a line to type.
+    ? `${entry.id} acts on what a terminal program holds (its conversation, its screen or its own records), so it runs in that program (its place there, or capability_run from its model); nothing ran here.`
     : `${entry.id} has not moved to the daemon yet: it runs only inside a terminal program (${line} there, or capability_run from its model); nothing ran here.`;
 }
 
@@ -73,7 +75,9 @@ function createRunHandler(deps: CapabilityRouteDeps): GatewayMethodHandler {
     const catalog = await deps.catalog();
     const entry = id ? catalog.get(id) : undefined;
     if (!entry) throw new GatewayVerbError(`No capability ${id || '(no id given)'}.`, 'CAPABILITY_NOT_FOUND', 404, 'id', { next: ['Say what you need to capabilities.find; it names the capabilities that do it.'] });
-    if (entry.home !== 'daemon') throw new GatewayVerbError(where(entry), 'CAPABILITY_ELSEWHERE', 409, 'id', { next: [`Run it in the terminal app or the Agent: /${entry.command}${entry.word ? ` ${entry.word}` : ''}.`] });
+    if (entry.home !== 'daemon') throw new GatewayVerbError(where(entry), 'CAPABILITY_ELSEWHERE', 409, 'id', {
+      next: [entry.home === 'session' ? 'Run it in the terminal app or the Agent, from its place there.' : `Run it in the terminal app or the Agent: /${entry.command}${entry.word ? ` ${entry.word}` : ''}.`],
+    });
     const checked = checkCapabilityInputs(entry, params['inputs']);
     if (!checked.ok) throw new GatewayVerbError(checked.problem, 'CAPABILITY_INPUT_INVALID', 400, checked.input ? `inputs.${checked.input}` : 'inputs', { next: ['capabilities.find lists each input with its kind and choices.'] });
     const values = checked.values;
@@ -113,10 +117,19 @@ function createRunHandler(deps: CapabilityRouteDeps): GatewayMethodHandler {
     }
     if (definition) {
       try {
-        const result = await definition.run(values, deps.services, caller);
+        // A handler whose act a daemon method does calls that method as this same caller.
+        const result = await definition.run(values, deps.services, {
+          ...caller, personAsked: personAsked(invocation),
+          method: (methodId, body) => deps.invokeMethod(methodId, body, invocation),
+        });
+        // A value the person must see once is returned only to the person who asked (a key pressed, a form submitted,
+        // a line typed); any other caller is told where he sees it, and never gets it.
+        const reveal = definition.reveals && result.reveal ? { ...definition.reveals, ...result.reveal } : undefined;
+        const toPerson = reveal !== undefined && personAsked(invocation);
+        const withheld = reveal && !toPerson ? ` The ${definition.reveals!.label.toLowerCase()} is shown only to the owner, when he asks for it himself.` : '';
         return {
-          id: entry.id, ok: true, text: capabilityOutcomeText(entry, values, result), detail: result.text, risk,
-          ...(result.data ? { data: result.data } : {}), repeat: definition.capability.repeat,
+          id: entry.id, ok: true, text: `${capabilityOutcomeText(entry, values, result)}${withheld}`, detail: `${result.text}${withheld}`, risk,
+          ...(result.data ? { data: result.data } : {}), ...(toPerson ? { reveal } : {}), repeat: definition.capability.repeat,
         };
       } catch (error) {
         if (error instanceof CapabilityRefusal) throw new GatewayVerbError(error.message, 'CAPABILITY_REFUSED', 422, undefined, { next: error.next ? [error.next] : [] });
@@ -133,10 +146,17 @@ function createRunHandler(deps: CapabilityRouteDeps): GatewayMethodHandler {
       throw error;
     }
     const body = await deps.invokeMethod(entry.method.id, input, invocation);
-    const text = capabilityOutcomeText(entry, values, { text: '' });
+    const data = body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : { result: body };
+    // A method capability's own words for what ran and how it came out (builtin/method-capability.ts `said`).
+    let detail = '';
+    try { detail = methodCapability(entry.id)?.said?.(data, values) ?? ''; } catch { detail = ''; }
+    // What this run did about what its risk names, when not every run does it (builtin/method-capability.ts `did`).
+    let did: string | undefined;
+    try { did = methodCapability(entry.id)?.did?.(data, values); } catch { did = undefined; }
+    const text = capabilityOutcomeText(entry, values, { text: detail, ...(did !== undefined ? { riskDone: did } : {}) });
     return {
-      id: entry.id, ok: true, text: text || `${entry.label}: done.`, risk, method: entry.method.id,
-      data: body !== null && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : { result: body },
+      id: entry.id, ok: true, text: text || `${entry.label}: done.`, ...(detail ? { detail } : {}), risk, method: entry.method.id,
+      data,
     };
   };
 }

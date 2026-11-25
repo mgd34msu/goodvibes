@@ -2,13 +2,7 @@ import { createSecretsCommand } from '@goodvibes/engine/terminal-shell/secrets-c
 import { createLocalCommandActions } from '@goodvibes/engine/terminal-shell/local-command-actions';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 
-import { requireProviderApi, requireServiceRegistry, requireShellPaths } from './runtime-services.ts';
-import { registerServicesCommand } from '@goodvibes/engine/terminal-shell/services-command';
-import {
-  credentialWriteScopeWasRelocated,
-  resolveCredentialDeleteScope,
-  resolveCredentialWriteScope,
-} from '../../config/credential-scope.ts';
+import { requireProviderApi, requireShellPaths } from './runtime-services.ts';
 import { createMediaCommand } from '@goodvibes/engine/terminal-shell/media-command';
 import { capabilityBinding } from './capability-binding.ts';
 
@@ -27,29 +21,16 @@ const mediaCommand = createMediaCommand<CommandContext>({
   registry: (ctx) => ctx.platform.mediaProviderRegistry,
   artifactStore: (ctx) => ctx.platform.artifactStore,
   paths: requireShellPaths,
+  binding: capabilityBinding,
 });
 
-// `/secrets` is one description shared with the other terminal app (terminal-shell/secrets-command.ts); a credential the daemon reads is filed in its tier.
-const secretsCommand = createSecretsCommand<CommandContext>({
-  writeScope: resolveCredentialWriteScope,
-  deleteScope: resolveCredentialDeleteScope,
-  relocationNote: (key, requested) =>
-    credentialWriteScopeWasRelocated(key, requested)
-      ? 'Filed in the daemon tier instead of ' + requested + ': the daemon is what reads this credential, and it reads only its own tier.'
-      : '',
-}, capabilityBinding);
+// `/secrets` is one description shared with the other terminal app (terminal-shell/secrets-command.ts); the daemon keeps
+// every secret, and files one it reads itself in its own store whatever scope was asked.
+const secretsCommand = createSecretsCommand<CommandContext>(capabilityBinding);
 
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
-  // `/services` is one description shared with the other terminal app (terminal-shell/services-command.ts).
-  registerServicesCommand<CommandContext>(registry, { requireServiceRegistry, requireShellPaths });
-
   registry.register(secretsCommand);
-
-  registry.register(localActions['image']);
 
   // `/media` is one description shared with the other terminal app (terminal-shell/media-command.ts).
   registry.register(mediaCommand);
-
-  registry.register(localActions['pin']);
-
 }

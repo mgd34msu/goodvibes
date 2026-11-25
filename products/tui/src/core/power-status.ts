@@ -79,33 +79,6 @@ export function keepAwakeHolding(state: Pick<PowerSurfaceState, 'keepAwake' | 'n
   return state.keepAwake && state.note !== KEEP_AWAKE_NOT_HELD;
 }
 
-/**
- * The ops/status detail lines, the honest, plain-language account of sleep
- * ownership. Order: the chip's meaning, then each "held because X" work reason,
- * then the lid-split note VERBATIM when the platform served it. Empty when nothing
- * is held and no note applies.
- */
-export function powerStatusLines(state: PowerSurfaceState): string[] {
-  const lines: string[] = [];
-  // Refused keep-awake says so through its note below, never "will not idle-sleep".
-  if (keepAwakeHolding(state)) {
-    lines.push(`${SLEEP_DISABLED_CHIP}: keep-awake is on (this host will not idle-sleep)`);
-  }
-  for (const reason of state.workReasons) {
-    lines.push(`held because ${reason}`);
-  }
-  if (state.note) {
-    // The platform's honest lid-split line, rendered exactly as served.
-    lines.push(state.note);
-  }
-  if (lines.length === 0) {
-    lines.push('sleep is not being held; the host sleeps on its own schedule');
-  }
-  // The sleep-edge hooks being off is true whatever is held, so it is said either way.
-  if (state.sleepEdgeNote) lines.push(state.sleepEdgeNote);
-  return lines;
-}
-
 /** True when the platform served the honest lid-split note (idle blocked, lid-close is the OS's). */
 export function hasLidSplitNote(state: PowerSurfaceState): boolean {
   return state.note === LID_SWITCH_HONEST_SPLIT;

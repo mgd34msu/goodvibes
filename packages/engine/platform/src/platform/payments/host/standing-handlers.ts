@@ -15,6 +15,7 @@ import { purchaseDisposition } from '../operation-view.js';
 import type { CurrencyCode } from '../types.js';
 import type { TypedHandler } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import type { DurablePaymentOperations } from './operation-store.js';
 import type { PaymentsHandlerDeps } from './register.js';
 import {
@@ -130,6 +131,7 @@ export function standingCreateHandler(deps: PaymentsHandlerDeps, operations: Pic
       ...(expires === undefined ? {} : { expires }),
     };
     const entry = overStore(() => store.add(input, currency));
+    noteListChanged({ list: 'payments', change: 'created', id: entry.id });
     return { created: true, authorization: view(entry, store.spent(entry, standingUseCounter(operations)), (deps.now ?? Date.now)()) };
   };
 }
@@ -139,8 +141,9 @@ export function standingDeleteHandler(deps: PaymentsHandlerDeps): TypedHandler<u
     const store = deps.checkout.standing;
     if (!store) throw unavailable();
     const id = asRecord(body)['id'];
-    if (typeof id !== 'string' || id.trim().length === 0) throw invalid('id', 'is required: the id /payments repeats lists.');
+    if (typeof id !== 'string' || id.trim().length === 0) throw invalid('id', 'is required: the id payments.standing.list answers (the Money place lists them).');
     const removed = overStore(() => store.remove(id.trim()));
+    if (removed) noteListChanged({ list: 'payments', change: 'deleted', id: id.trim() });
     return { id: id.trim(), deleted: removed };
   };
 }

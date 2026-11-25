@@ -563,8 +563,17 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
     },
     async retryUnit(contractId, unitId, caller) {
       const { runner, contract } = holder(contractId, caller);
-      if (runner === nativeRunner) throw new ContractOperatorError(`Contract ${contractId} is native work: its units are run by the native work execution.`, 'CONTRACT_NATIVE', 409);
       if (isTerminalContractStatus(contract.status)) throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); start a new contract for the remaining work.`, 'CONTRACT_ENDED', 409);
+      if (runner === nativeRunner) {
+        // Work's steps are run by its native execution, which decides each of them; a failed step waits on its
+        // retry-or-cancel question, and running it again is answering that question "retry", as the owner may.
+        const pause = contract.escalations.find((item) => item.resolvedAt === undefined && item.failurePause === true && item.scope === 'unit' && item.targetId === unitId);
+        if (pause === undefined) {
+          throw new ContractOperatorError(`Step ${unitId} has not failed, so there is nothing to run again; a step of this work runs again only after it failed.`, 'CONTRACT_NATIVE', 409);
+        }
+        await runner.reply(contractId, pause.id, 'retry');
+        return { outcome: 'restarted', reason: `step ${unitId} failed and starts again with a fresh agent; the steps waiting on it run once it passes` };
+      }
       const retry = (runner as OperatorContractRunner).retryUnit;
       if (retry === undefined) throw new ContractOperatorError(`The runner holding contract ${contractId} cannot run a unit again.`, 'CONTRACT_NOT_RUNNING', 409);
       return retry.call(runner, contractId, unitId);
@@ -575,7 +584,7 @@ export function createContractOperatorService(deps: ContractOperatorServiceDeps)
         throw new ContractOperatorError('Give maxCostUsd, maxTokens or both, each a number of 0 or more.', 'INVALID_ARGUMENT', 400, 'maxCostUsd');
       }
       const { runner, contract } = holder(contractId, caller);
-      if (runner === nativeRunner) throw new ContractOperatorError(`Contract ${contractId} is native work: its budget belongs to the native work execution.`, 'CONTRACT_NATIVE', 409);
+      // Work the daemon runs from the ledger changes its limit through its own runner, as any other run does.
       if (isTerminalContractStatus(contract.status)) throw new ContractOperatorError(`Contract ${contractId} has ended (${contract.status}); its budget can no longer change.`, 'CONTRACT_ENDED', 409);
       const raise = (runner as OperatorContractRunner).raiseBudget;
       if (raise === undefined || !raise.call(runner, contractId, ceiling)) throw notRunning(contractId, contract.status);

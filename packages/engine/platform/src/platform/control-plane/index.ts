@@ -276,6 +276,7 @@ export * from './host-handlers.js';
 
 export { registerWorkLedgerGatewayMethods } from './routes/work-ledger.js';
 export { registerNativeWorkExecutionGatewayMethods } from './routes/native-work-execution.js';
+export { registerWorkGatewayMethods, type WorkItemView, type WorkRunView, type WorkState, type WorkStepView, type WorkQuestionView } from './routes/work.js';
 export { registerNativeWorkSubmissionGatewayMethods } from './routes/native-work-submission.js';
 
 export { registerWorkLedgerImportGatewayMethods } from './routes/work-ledger-import.js';

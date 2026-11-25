@@ -178,22 +178,22 @@ function describeGoogleRoute(inputs: CapabilityStatusInputs): string[] {
   return lines;
 }
 
-/** The separate direct-mailbox verdict, read from the same config `/mail status` reads. */
+/** The separate direct-mailbox verdict, read from the same config the daemon's mail capabilities read. */
 export function readMailboxVerdict(configGet: (key: string) => unknown): MailboxVerdict {
   try {
     const status = readMailboxStatus(configGet);
     if (status.ready) {
-      return { configured: true, detail: 'A direct mailbox is configured and ready. Manage it with: /mail status' };
+      return { configured: true, detail: 'A direct mailbox is configured and ready. It is read and sent from Mail, calendar and channels (capability mail.status says how it is doing).' };
     }
     const started = status.settings.imapHost !== undefined || status.settings.username !== undefined || status.passwordStored;
     return {
       configured: false,
       detail: started
-        ? `A direct mailbox is partly set up (${status.problems.length} setting(s) outstanding). See: /mail status`
-        : 'No direct mailbox is configured. That is a separate feature from Google; set one up with /mail set only if the account is not a Google account.',
+        ? `A direct mailbox is partly set up (${status.problems.length} setting(s) outstanding). Mail settings in Mail, calendar and channels (capability mail.settings) name what is left.`
+        : 'No direct mailbox is configured. That is a separate feature from Google; set one up with "Change a mailbox setting" in Mail, calendar and channels (capability mail.set) only if the account is not a Google account.',
     };
   } catch {
-    return { configured: false, detail: 'The direct-mailbox settings could not be read. See: /mail status' };
+    return { configured: false, detail: 'The direct-mailbox settings could not be read. Mail settings in Mail, calendar and channels (capability mail.settings) say what the daemon holds.' };
   }
 }
 

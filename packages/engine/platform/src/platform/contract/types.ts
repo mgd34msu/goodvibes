@@ -184,6 +184,11 @@ export interface StartContractInput {
   readonly sessionCreatedForDispatch?: true | undefined;
   /** Units proposed by an agent-tool batch or AgentInput.proposedUnits; the planner weighs them. */
   readonly proposedUnits?: readonly { readonly task: string; readonly template?: string | undefined }[] | undefined;
+  /**
+   * The plan a person approved before the work ran (Work's "Show me the plan before it runs"): carried through a
+   * durable request into the contract, so the planner keeps its steps; the stored-run check compares it.
+   */
+  readonly draftPlan?: DraftedPlan | undefined;
   /** The conversation agent that asked, when there is one. */
   readonly parentAgentId?: string | undefined;
   readonly budget?: BudgetCeiling | undefined;
@@ -567,6 +572,8 @@ export interface Contract {
   readonly draftPlan?: DraftedPlan | undefined;
   /** The whole contract's token and cost ceiling; each group's workstream gets what remains of it when the group starts. */
   readonly budget?: BudgetCeiling | undefined;
+  /** The owner changed the spending limit while it ran: `budget` is that one, not the limit it was started with. */
+  readonly budgetSetByOwner?: true | undefined;
   goal: string;
   /** Contract-level criteria; every one has origin 'stated' or 'owner'. */
   criteria: Criterion[];

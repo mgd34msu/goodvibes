@@ -334,11 +334,11 @@ advance (an action grant); only the owner registers grants.
 An agent creates, lists, cancels and resets triggers and reads their runs with
 the `trigger` tool (actions `create`, `list`, `history`, `cancel`, `reset`), in
 daemon-hosted sessions, in the TUI and the Agent (which use the daemon's
-supervisor) and in the workers they start. The owner does the same with
-`/triggers list | watch | history | stop | restart` (`/triggers` alone opens
-the list of them), and
-lets triggers run a command with `/triggers allow-command <name> -- <command>
-...` (`/triggers commands` lists them). Operators call
+supervisor) and in the workers they start. The owner does the same in
+Automation's Triggers tab (the `triggers.list`, `triggers.watch`,
+`triggers.history`, `triggers.stop` and `triggers.restart` capabilities), and
+lets triggers run a command from its Commands tab (`triggers.allow-command`;
+`triggers.commands` lists them). Operators call
 `watchers.triggers.list`, `.history`, `.create`, `.cancel`, `.reset`,
 `.grant.list` and the owner-only `.grant.register`.
 
@@ -391,6 +391,6 @@ kept, and a dropped one is recorded in the trigger's runs.
 
 Condition, stream and process-exit triggers belong to each surface’s native trigger supervisor. They are separate from workflow event triggers.
 
-In the TUI and Agent, `/triggers list` reads the selected paired daemon’s ownership and trigger summaries. In the WebUI, open **Settings → General → Advanced → Supervised triggers**. The administrative operator method is `watchers.triggers.status` (`read:watchers`); it reads the daemon supervisor, not the workflow event-trigger manager, and never claims execution ownership.
+In the TUI and Agent, Automation's Triggers tab reads the daemon's trigger summaries and says when another process supervises them. In the WebUI, open the **Automation** screen. The administrative operator method is `watchers.triggers.status` (`read:watchers`); it reads the daemon supervisor, not the workflow event-trigger manager, and never claims execution ownership.
 
 Another execution owner remains read-only: close that process and this one takes over on its next supervision tick. A newer saved format requires an updated installation; unreadable storage is named, with its cause, in the daemon log.

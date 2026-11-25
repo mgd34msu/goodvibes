@@ -17,7 +17,7 @@ export interface PaymentsSettingEntry {
 }
 /**
  * The one payments row that is not a schema setting: where the cards are. Cards
- * live in the daemon's card store, added and removed with `/payments` (or
+ * live in the daemon's card store, added and removed in the Money place (or
  * the web UI); Settings shows the way there and accepts no card material.
  */
 export const PAYMENTS_CARDS_ROW_KEY = 'payments.cardsOnFile' as ConfigKey;
@@ -28,12 +28,12 @@ export function buildPaymentsCardsRow(): PaymentsSettingEntry {
       label: 'Cards on file',
       type: 'string',
       default: '',
-      description: 'Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); /payments remove-card deletes one. Settings never takes a card number.',
+      description: 'Cards purchases can use. Enter closes Settings, lists the cards on the daemon, and starts "Add a card" (Esc stops it); the Money place removes one. Settings never takes a card number.',
     },
     currentValue: 'Enter: list cards and add one',
     isDefault: true,
     locked: true,
-    lockReason: 'Cards are managed with /payments or the web UI.',
+    lockReason: 'Cards are managed in the Money place or the web UI.',
   };
 }
 
@@ -50,7 +50,7 @@ export interface PaymentsCardsRowContext {
  */
 export async function openPaymentsCardsFromSettings(context: PaymentsCardsRowContext): Promise<void> {
   if (!context.executeCommand) {
-    context.print('Run /payments cards to list your cards and /payments add-card to add one.');
+    context.print('The Money place lists your cards and adds one.');
     return;
   }
   await context.executeCommand('payments', ['cards']);

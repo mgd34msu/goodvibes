@@ -20,6 +20,9 @@ type SelectionTextKey =
   | 'provider.reasoningEffort'
   | 'provider.model';
 
+/** The keys a conversation sets for itself (a runtime override of this program), never the shared default. */
+const CONVERSATION_OWN_KEYS: ReadonlySet<SelectionTextKey> = new Set<SelectionTextKey>(['provider.model', 'provider.reasoningEffort']);
+
 export interface TerminalModelSelection {
   readonly model: {
     readonly id: string;
@@ -42,6 +45,11 @@ export function createModelSelectionAction(
     readonly runtime: { model: string; provider: string; reasoningEffort: string };
     readonly requestRender: () => void;
     readonly completeModelSelectionSideEffect?: (() => void) | undefined;
+    /**
+     * Set a model's context window size where every program reads it: the daemon (`context.set-window`); the
+     * program's own registry never writes the daemon's file. What happened, in words; throws with why it did not.
+     */
+    readonly setContextWindow?: ((registryKey: string, tokens: number) => Promise<string>) | undefined;
   },
   policy: {
     readonly setToolEnabled: () => void;
@@ -71,6 +79,14 @@ export function createModelSelectionAction(
     const undo: Array<() => void> = [];
     const write = (configKey: SelectionTextKey, value: string): void => {
       const previous = configManager.get(configKey);
+      // The main chat's model and effort chosen here are this conversation's own: the shared defaults every program
+      // starts from (the daemon's settings, set in Models and providers or Settings) are not touched. First run's
+      // choice (`quiet`, said under the splash) is the default it sets up.
+      if (!quiet && CONVERSATION_OWN_KEYS.has(configKey)) {
+        configManager.setRuntimeOverride(configKey, value as never);
+        undo.push(() => configManager.setRuntimeOverride(configKey, previous as never));
+        return;
+      }
       configManager.set(configKey, value);
       undo.push(() => configManager.set(configKey, previous));
     };
@@ -100,8 +116,13 @@ export function createModelSelectionAction(
       } else {
         // Default: main provider/model
         if (contextCap != null && contextCap > 0) {
+          // This conversation's next turn uses it at once; the daemon keeps it for every program and announces it.
           providerRegistry.setModelContextCap(key, contextCap, (reason) => {
-            conversation.log(`Context window cap for ${def.displayName} not saved: ${reason}.`, { fg: policy.noteColor() });
+            conversation.log(`Context window cap for ${def.displayName} not applied: ${reason}.`, { fg: policy.noteColor() });
+          });
+          void options.setContextWindow?.(key, contextCap).catch((error: unknown) => {
+            conversation.log(`Context window cap for ${def.displayName} applies to this session only; the daemon did not keep it: ${summarizeError(error)}.`, { fg: policy.noteColor() });
+            requestRender();
           });
         }
         providerRegistry.setCurrentModel(key);

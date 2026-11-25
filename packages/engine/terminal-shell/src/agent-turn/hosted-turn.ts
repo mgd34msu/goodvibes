@@ -54,7 +54,7 @@ import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/s
 import { randomUUID } from 'node:crypto';
 import { registerAgentOperatorActionTool } from './operator-action-tool.js';
 import { registerAgentOperatorBriefingTool } from './operator-briefing-tool.js';
-import { registerCapabilityTools } from './capability-tools.js';
+import { daemonCapabilityRunner, registerCapabilityTools } from './capability-tools.js';
 import { askBoundHiddenValue, boundCapabilityCatalog, boundSessionCapabilities, onBoundCapabilityCatalogChange } from '../capability-host.js';
 import { registerAgentAutonomyScheduleTool } from './autonomy-schedule-tool.js';
 import { registerAgentReminderScheduleTool } from './reminder-schedule-tool.js';
@@ -186,6 +186,11 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
     session: boundSessionCapabilities,
     program: 'agent',
     workingDirectory: () => deps.shellPaths.workingDirectory,
+    // The model this conversation uses: a capability on it (its context window size) acts on it.
+    model: () => {
+      const current = deps.modelCompare.modelCatalog.getCurrentModel?.();
+      return current && !(current instanceof Promise) ? current.registryKey : undefined;
+    },
   }, deps.inProcessHost);
   registerAgentAccountsTool(registry, agentAccountsToolOptions(deps.shellPaths, deps.settings, deps.accountExpectations));
   // Schedules are created and changed through agent_operator_method and agent_operator_action, as nested calls.
@@ -193,7 +198,9 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   registerAgentReminderScheduleTool(registry, deps.shellPaths, deps.settings, deps.artifactStore, deps.inProcessHost);
   registerAgentScheduleEditTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentScheduleTool(registry, deps.shellPaths, deps.settings);
-  registerAgentLocalRegistryTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess);
+  // Its skill and bundle writes run the daemon's skills capabilities, as the Skills tab does, so every program follows them.
+  registerAgentLocalRegistryTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess,
+    daemonCapabilityRunner(deps.shellPaths, deps.settings, 'agent', deps.inProcessHost));
   registerAgentLearningConsolidationTool(registry, deps.shellPaths, deps.memoryRegistry, deps.memoryAccess);
   registerAgentChannelSendTool(registry, deps.channelDeliveryRouter, { shellPaths: deps.shellPaths });
   if (deps.browser) registerAgentBrowserTool(registry, deps.browser);

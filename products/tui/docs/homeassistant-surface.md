@@ -68,7 +68,7 @@ Home Assistant ingress is handled as isolated remote-chat work by the platform d
 
 Home Graph is the Home Assistant-specific knowledge layer for devices, entities, areas, integrations, manuals, generated pages, facts, issues, and refinement tasks. Home Assistant clients should send snapshots, URLs, notes, artifacts, links, and review actions to the daemon rather than duplicating graph storage, source inventory, wiki/export/import behavior, or fact review queues.
 
-Home Graph uses Home Assistant-specific routes and storage. Regular `/api/knowledge/*` and `/knowledge` surfaces are for the default Knowledge/Wiki instance and must not show Home Graph records by default.
+Home Graph uses Home Assistant-specific routes and storage. Regular `/api/knowledge/*` routes and the Memory and knowledge place are for the default Knowledge/Wiki instance and must not show Home Graph records by default.
 
 Runtime stores are intentionally separate:
 

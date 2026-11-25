@@ -143,6 +143,8 @@ export const PERMISSION_USER_RULE_SCHEMA = objectSchema({
   tool: STRING_SCHEMA,
   description: STRING_SCHEMA,
   createdAt: NUMBER_SCHEMA,
+  /** The project a rule is scoped to; absent for a rule of every project (a never-run rule). */
+  project: STRING_SCHEMA,
 }, ['id', 'effect', 'tier', 'tool', 'createdAt'], { additionalProperties: false });
 
 export const PERMISSION_RULES_LIST_INPUT_SCHEMA = objectSchema({}, []);

@@ -12,7 +12,7 @@ import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native
 import { createConnectedHost, isHostFailure } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import { ROUTINE_SCHEDULE_LIST_METHOD, ROUTINE_SCHEDULE_ROUTE } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 import { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, type ScheduleEditCurrentSchedule, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-edit';
-import { connectedHostOf, connectionUnavailableKind, connectionUnavailableMessage, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
+import { connectedHostOf, connectionUnavailableKind, connectionUnavailableMessage, type AgentConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 
 export { SCHEDULE_EDIT_METHOD, SCHEDULE_EDIT_ROUTE, buildScheduleEditPayload, buildScheduleEditPreview, parseScheduleEditArgs, scheduleEditKindFromValue, type ParseScheduleEditOptions, type ParsedScheduleEditArgs, type ScheduleEditCurrentSchedule, type ScheduleEditFailure, type ScheduleEditFieldDiff, type ScheduleEditPreview, type ScheduleEditResult, type ScheduleEditSuccess } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-edit';
 

@@ -8,7 +8,7 @@ import { createAgentArtifactsTool } from '@goodvibes/engine/terminal-shell/agent
 import { createAgentHarnessTool } from './agent-harness-tool.ts';
 import { createAgentResearchReportTool, withRegistryReportSources } from '@goodvibes/engine/terminal-shell/agent-turn/research-report-tool';
 import { createAgentResearchRunsTool } from '@goodvibes/engine/terminal-shell/agent-turn/research-runs-tool';
-import { runAdmittedResearchRunner, runPublicSearch } from './agent-research-runner.ts';
+import { runAdmittedResearchRunner, runPublicSearch } from '@goodvibes/engine/terminal-shell/agent-turn/research-runner';
 import { createAgentResearchSourcesTool } from '@goodvibes/engine/terminal-shell/agent-turn/research-sources-tool';
 import { confirmParameter, requestParameter } from '@goodvibes/engine/terminal-shell/agent-turn/effect-admission';
 import { readString } from '@goodvibes/engine/terminal-shell/agent-turn/tool-args';

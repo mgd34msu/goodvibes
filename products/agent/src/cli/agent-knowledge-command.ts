@@ -453,7 +453,7 @@ export async function handleAgentKnowledgeCommand(runtime: CliCommandRuntime): P
         exitCode: 2,
       };
     }
-    // The same reading as /knowledge import-browser-history: a typo in a flag that
+    // A typo in a flag that
     // narrows the import is refused, never widened to every browser or all time.
     const scope = parseBrowserImportScope(rest, Date.now());
     if (!scope.ok) {

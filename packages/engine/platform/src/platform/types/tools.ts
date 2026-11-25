@@ -109,6 +109,8 @@ export function readModeCategory(readModes: ToolReadModes, args: Record<string, 
 export interface ToolOwnerActs {
   readonly field: ToolArgumentPath;
   readonly values: readonly string[];
+  /** Each value's act in its own words ("Start a remote runner on a task"), for the refusal a model is given. */
+  readonly words?: Readonly<Record<string, string>> | undefined;
 }
 
 /**

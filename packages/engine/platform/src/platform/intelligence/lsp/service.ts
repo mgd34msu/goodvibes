@@ -289,7 +289,7 @@ export class LspService {
     const hint = manualInstallHint(command);
     const next = [
       ...(hint ? [`Install it: ${hint}`] : [`Install ${command} and put it on PATH`]),
-      ...(isInstallableServer(command) ? [`Or let GoodVibes install it into ${this.userBinaryDir()}: type /intelligence install ${langId} in goodvibes or goodvibes-agent`] : []),
+      ...(isInstallableServer(command) ? [`Or let GoodVibes install it into ${this.userBinaryDir()}: in goodvibes or goodvibes-agent, Code and changes, Code intelligence, "install a language server" (${langId})`] : []),
     ];
     const lastAttempt = last && last.status !== 'installed' && last.status !== 'already-installed'
       ? ` The last install attempt (${new Date(last.at).toISOString()}) did not succeed: ${last.reason}.` : '';

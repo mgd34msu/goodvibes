@@ -1,5 +1,6 @@
 import {
   drawModelWorkspaceDetail,
+  modelWorkspaceEmptyLine,
   modelWorkspaceFilterRow,
   modelWorkspaceKey as modelKey,
   modelWorkspaceListAge,
@@ -372,7 +373,8 @@ export function renderModelWorkspace(picker: ModelPickerModal, screenWidth: numb
   // The picker opens on its cached catalog; the rest fills in while this row shows.
   const rows = picker.catalogLoading && picker.mode !== 'effort' ? [LOADING_ROW, ...listed] : listed;
   if (rows.length === 0) {
-    const message = picker.mode === 'provider' ? 'No providers match the search.' : 'No models match the search.';
+    // An empty model list says when it was read (the picker read it again by itself) and why it is empty.
+    const message = picker.mode === 'provider' ? 'No providers match the search.' : modelWorkspaceEmptyLine(picker);
     drawTextBlock(f.canvas, split.x0, split.top, split.x1 - split.x0 + 1, [{ text: message, style: { fg: t.textMuted } }], split.bottom);
     return finishModal(f);
   }

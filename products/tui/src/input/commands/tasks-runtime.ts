@@ -27,17 +27,20 @@ import { reviewWorktreeAttachments } from '@/runtime/index.ts';
 import { requireOperatorClient, requireOpsApi, requireShellPaths } from './runtime-services.ts';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
 
-import { createTasksRuntimeCommands } from '@goodvibes/engine/terminal-shell/tasks-runtime-commands';
-import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({
+import { installTasksPolicy, type TasksPolicy } from '@goodvibes/engine/terminal-shell/tasks-runtime-commands';
+import type { CommandRegistry } from '../command-registry.ts';
+
+/** The terminal app's tasks, shown in the Work place (capabilities/builtin/tasks.ts): it reads and changes its own. */
+export function registerTasksRuntimeCommands(_registry: CommandRegistry): void {
+  installTasksPolicy<CommandContext>(TASKS_POLICY);
+}
+
+const TASKS_POLICY: TasksPolicy<CommandContext> = {
   listTitle: 'Runtime Tasks',
   local: (ctx) => requireOperatorClient(ctx).tasks,
   verbs: (ctx) =>
     createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
   mutations: requireOpsApi,
-  open(ctx) {
-    if (!ctx.openView?.('tasks')) throw commandRefusal('The Agents view is not available in this session.', '/tasks list prints them.');
-  },
   row: ({ task }) => `  ${task.id}  ${task.status.padEnd(9)} ${task.kind.padEnd(11)} ${task.owner}  ${task.title}`,
   detail(ctx, entry) {
     const { task } = entry;
@@ -66,10 +69,10 @@ export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<Comma
         return worktrees.total > 0
           ? [
               `  worktrees: ${worktrees.total} tracked (${worktrees.active} active / ${worktrees.paused} paused / ${worktrees.kept} kept)`,
-              `  worktree next: /worktree attached task ${task.id}`,
+              `  its worktrees: Code and changes, Worktrees ("worktrees of its task")`,
             ]
           : [];
       })(),
     );
   },
-});
+};

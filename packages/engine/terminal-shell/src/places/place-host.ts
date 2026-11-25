@@ -11,10 +11,17 @@
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
 import type { DaemonFrameStreamState } from '@goodvibes/engine/platform/platform/runtime/client';
 import { subscribeDaemonEventFrames } from '@goodvibes/engine/platform/platform/runtime/client';
-import { KEYS_BIND, KEYS_RESET, KEYS_RESET_ALL, capabilityGroupOf, capabilityIdOf, type KeysCapabilityServices } from '@goodvibes/engine/platform/platform/capabilities';
+import {
+  DAEMON_CAPABILITIES, KEYS_BIND, KEYS_RESET, KEYS_RESET_ALL, METHOD_CAPABILITIES, capabilityGroupOf, capabilityIdOf,
+  type CapabilityDefinition, type KeysCapabilityServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
+import { SESSION_CAPABILITIES } from '@goodvibes/engine/platform/platform/capabilities';
+import type { SessionCapabilityServices } from '../agent-turn/capability-tools.js';
 import type { KeyCombo, KeyConflict, KeyContext, KeyContextEntry, KeyToken } from '../keybindings.js';
 import { keysServices } from '../keys-capabilities.js';
-import { sessionCapabilityAction } from '../command-actions/capability-actions.js';
+import {
+  daemonCapabilityAction, runDaemonCapability, sessionCapabilityAction, type CapabilityRevealed, type DaemonCapabilityBinding,
+} from '../command-actions/capability-actions.js';
 import type { SurfaceModal } from '../surface-modal-host.js';
 import { parseSlashCommand } from '../slash-command-parser.js';
 import { describedCommandByName } from '../command-actions/define.js';
@@ -51,7 +58,8 @@ export interface PlaceProgramSource {
 
 /** What running a capability from a place came to. */
 export type PlaceRunOutcome =
-  | { readonly ok: true; readonly lines: readonly string[] }
+  /** `reveal`: a value the person must see once (the capability declares `reveals`), shown in its own pane only. */
+  | { readonly ok: true; readonly lines: readonly string[]; readonly reveal?: CapabilityRevealed | undefined }
   | { readonly ok: false; readonly reason: string };
 
 export interface PlaceHost {
@@ -80,7 +88,8 @@ export interface PlaceHost {
   push(modal: SurfaceModal): void;
   close(modal: SurfaceModal): void;
   requestRender(): void;
-  openPlace(id: string): void;
+  /** Open a place, on its list `start.list` when given (a tab the menu found by name). */
+  openPlace(id: string, start?: { readonly list?: string | undefined }): void;
 }
 
 /** What a program action may ask of the place that runs it. */
@@ -96,6 +105,8 @@ export interface ResolvedCapability {
   readonly action: ActionDescription<never>;
   /** True for a capability no slash command carries: the place runs its action here, never as a typed line. */
   readonly runsHere?: boolean | undefined;
+  /** True for a daemon capability run here: the place asks `capabilities.run` itself, so it reads the whole answer (its reveal). */
+  readonly daemon?: boolean | undefined;
 }
 
 /** The key capabilities (builtin/keys.ts): no slash command carries them; a place runs them on the program's key table. */
@@ -114,6 +125,48 @@ function keyCapabilities(keys: PlaceKeyTable): ReadonlyMap<string, ResolvedCapab
     actions: actions.map((entry) => entry.action),
   };
   return new Map(actions.map((entry) => [entry.id, { command, action: entry.action, runsHere: true }]));
+}
+
+/**
+ * The capabilities that run where the conversation is (SESSION_CAPABILITIES)
+ * as a place resolves one that no slash command of this program carries: its
+ * definition's action, run here with this program's own services, as the
+ * owner's own press.
+ */
+function sessionCapabilities(services: (() => SessionCapabilityServices) | undefined): ReadonlyMap<string, ResolvedCapability> {
+  if (!services) return new Map();
+  const options = { terminalOnly: 'It acts on what this terminal program holds.' };
+  return new Map(SESSION_CAPABILITIES.map((moved) => {
+    const definition = moved.definition as unknown as CapabilityDefinition<SessionCapabilityServices>;
+    const action = sessionCapabilityAction<CommandActionContext, SessionCapabilityServices>(definition, () => services(), options) as unknown as ActionDescription<never>;
+    const command: CommandDescription<never> = {
+      name: moved.command.name, title: moved.command.title, summary: definition.label, group: 'System', actions: [action],
+    };
+    return [definition.capability.id, { command, action, runsHere: true }];
+  }));
+}
+
+/**
+ * The daemon's own capabilities (DAEMON_CAPABILITIES) as a place resolves one
+ * that no slash command of this program carries: its definition's action,
+ * run through `capabilities.run` as the owner's own press, with the program's
+ * binding (its daemon, its project and its name). The same in both programs,
+ * so a capability whose command one program lacks, or whose command is gone,
+ * is still a control.
+ */
+function daemonCapabilities(binding: DaemonCapabilityBinding<never> | undefined): ReadonlyMap<string, ResolvedCapability> {
+  if (!binding) return new Map();
+  // With them the ones that run through a daemon method of their own (METHOD_CAPABILITIES): `capabilities.run` runs that method.
+  const all: readonly { readonly definition: Pick<CapabilityDefinition<never>, 'capability' | 'label'>; readonly command: { readonly name: string; readonly title: string } }[] = [
+    ...DAEMON_CAPABILITIES, ...METHOD_CAPABILITIES,
+  ];
+  return new Map(all.map((moved) => {
+    const action = daemonCapabilityAction<never>(moved.definition as unknown as CapabilityDefinition<never>, binding) as ActionDescription<never>;
+    const command: CommandDescription<never> = {
+      name: moved.command.name, title: moved.command.title, summary: moved.definition.label, group: 'System', actions: [action],
+    };
+    return [moved.definition.capability.id, { command, action, runsHere: true, daemon: true }];
+  }));
 }
 
 /**
@@ -184,18 +237,48 @@ export interface PlaceHostOptions {
   readonly onDaemonBack: (listener: () => void) => () => void;
   readonly sources?: Readonly<Record<string, PlaceProgramSource>> | undefined;
   readonly programActions?: Readonly<Record<string, (itemId: string, place: PlacePrograms) => Promise<string | undefined>>> | undefined;
+  /**
+   * How this program reaches the daemon for a capability (its `capability-binding.ts`): a daemon capability no
+   * slash command of this program carries is run with it, as the owner's own press.
+   */
+  readonly capabilityBinding?: DaemonCapabilityBinding<never> | undefined;
+  /**
+   * This program's services for the capabilities that run where the conversation is (its `session-capabilities.ts`):
+   * a session capability no slash command of this program carries is run with them, as the owner's own press.
+   */
+  readonly sessionServices?: (() => SessionCapabilityServices) | undefined;
   readonly modals: { push(modal: SurfaceModal): void; close(modal: SurfaceModal): void };
   readonly requestRender: () => void;
-  readonly openPlace: (id: string) => void;
+  readonly openPlace: (id: string, start?: { readonly list?: string | undefined }) => void;
 }
 
 /** The one host both terminal programs build for their places. */
 export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
   const keyed = keyCapabilities(options.keys);
-  const resolve = (id: string): ResolvedCapability | undefined => resolveCapability(id) ?? keyed.get(id);
+  const daemonOwn = daemonCapabilities(options.capabilityBinding);
+  const sessionOwn = sessionCapabilities(options.sessionServices);
+  // A session capability whose piece this program lacks (definition `available`: the Agent keeps no code index) is not resolved.
+  // The services are built once for every capability a draw asks about, not once per action.
+  let drawnServices: SessionCapabilityServices | undefined;
+  const servicesNow = (build: () => SessionCapabilityServices): SessionCapabilityServices => {
+    if (!drawnServices) {
+      drawnServices = build();
+      queueMicrotask(() => { drawnServices = undefined; });
+    }
+    return drawnServices;
+  };
+  const sessionUsable = (id: string): boolean => {
+    const definition = SESSION_CAPABILITIES.find((moved) => moved.definition.capability.id === id)?.definition as CapabilityDefinition<SessionCapabilityServices> | undefined;
+    return !definition?.available || (options.sessionServices !== undefined && definition.available(servicesNow(options.sessionServices)));
+  };
+  // Not available is no control, also when a slash command of this program still carries it (the Agent's /session upload).
+  const resolve = (id: string): ResolvedCapability | undefined => !sessionUsable(id) ? undefined
+    : resolveCapability(id) ?? keyed.get(id) ?? daemonOwn.get(id) ?? sessionOwn.get(id);
   const host: PlaceHost = {
     keys: options.keys,
-    invoke: options.invoke,
+    // A list read through `capabilities.run` is this program's: its project and its name go with it (a project's hooks file, its MCP config).
+    invoke: (method, input) => options.invoke(method, method === 'capabilities.run' && options.capabilityBinding && input['workingDirectory'] === undefined
+      ? { ...options.capabilityBinding.caller(options.context as never), ...input } : input),
     follow(interest, onChange, onState) {
       let stop: (() => void) | null = null;
       let stopped = false;
@@ -214,6 +297,17 @@ export function createPlaceHost(options: PlaceHostOptions): PlaceHost {
       if (!resolved) return { ok: false, reason: `${id} is not a capability this program has.` };
       const printed: string[] = [];
       const context: CommandActionContext = { ...options.context, print: (message: string) => { printed.push(message); }, printLive: undefined };
+      if (resolved.daemon && options.capabilityBinding) {
+        // A daemon capability no slash command carries: asked of the daemon here, as the owner's own press, so the
+        // whole answer is read (a value to see once comes back as its reveal, never as a line).
+        try {
+          const answer = await runDaemonCapability(id, values, context as never, options.capabilityBinding);
+          const said = answer.detail ?? '';
+          return { ok: true, lines: said.split('\n').filter((line) => line.trim() !== ''), ...(answer.reveal ? { reveal: answer.reveal } : {}) };
+        } catch (error) {
+          return { ok: false, reason: reasonOf(error) };
+        }
+      }
       if (resolved.runsHere) {
         // No slash command carries it: its action runs here, as the owner's own press.
         try {

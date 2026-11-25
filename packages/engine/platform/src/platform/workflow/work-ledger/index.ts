@@ -8,3 +8,4 @@ export type {
 } from './read-client.js';
 
 export * from './legacy-import.js';
+export { createWorkPlans, WorkPlanRefusal, type WorkPlans, type WorkPlanView, type WorkPlanStep, type WorkPlanState, type WorkPlanGate, type WorkPlanSubject } from './work-plans.js';

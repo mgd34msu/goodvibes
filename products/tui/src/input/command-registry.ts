@@ -40,9 +40,9 @@ import type { UiPlatformServices } from '../runtime/ui-services.ts';
 import type { CommandWorkspaceShellServices } from '@/runtime/index.ts';
 import type { CommandPlatformShellServices } from '@/runtime/index.ts';
 import type { CommandExtensionShellServices } from '@/runtime/index.ts';
-import type { CommandOpsShellServices, RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
+import type { CommandOpsShellServices, RemoteCommandService } from '@/runtime/index.ts';
 
-export type { RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
+export type { RemoteCommandService } from '@/runtime/index.ts';
 
 export interface CommandRuntimeState extends TerminalCommandRuntimeState {
   /**
@@ -60,8 +60,8 @@ export interface CommandRuntimeState extends TerminalCommandRuntimeState {
  * ownership.
  */
 export interface CommandUiActions extends TerminalCommandUiActions<import('./model-picker.ts').ModelPickerTarget> {
-  /** Open the current composer draft in the user's $EDITOR and load back the edited text. */
-  openComposerEditor?: () => void;
+  /** Open the current composer draft in the user's $EDITOR and load back the edited text; what happened, in words. */
+  openComposerEditor?: () => Promise<string>;
   /** Put refused, unsent input back into an empty composer; text typed since is never overwritten. */
   restoreDraft?: (text: string) => void;
   nativeConversationIntake?: NativeConversationIntakeActions;
@@ -180,8 +180,10 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openCommandPalette?: () => void;
   /** Open the menu of every place (Ctrl+G then m; terminal-shell/places). */
   openPlaceMenu?: () => void;
-  /** Open one place by id (`automation`, `waiting`, `keys`). */
-  openPlace?: (placeId: string) => void;
+  /** Open one place by id (`automation`, `waiting`, `keys`), on one of its lists when `start.list` names it. */
+  openPlace?: (placeId: string, start?: { readonly list?: string | undefined }) => void;
+  /** Run what a place's key read in the composer names (`place.conversation-composer.<control>`: This conversation's controls). */
+  runPlaceKey?: (action: string) => void;
   /** Send the failed turn again, when one is on offer (shell/retry-affordance.ts). */
   retryFailedTurn?: () => void;
   /** Open the fix session just started, when one is on offer. */
@@ -262,15 +264,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openSecurityView?: () => void;
   openKnowledgeView?: () => void;
   openMemoryView?: () => void;
-  openRemoteView?: () => void;
   openSubscriptionView?: () => void;
-  /**
-   * Open the local-auth password prompt (a kit modal) for the operation and
-   * user. Keystrokes land in a private buffer that is never drawn; no
-   * plaintext password reaches input history, the transcript, logs, or
-   * recovery files. An empty username for add-user asks for it first.
-   */
-  openLocalAuthMaskedEntry?: (kind: 'add-user' | 'rotate-password', username?: string) => void;
 }
 
 export interface CommandSessionServices extends TerminalCommandSessionServices {
@@ -422,7 +416,6 @@ export const COMMON_COMMAND_NAMES: ReadonlySet<string> = new Set([
   'model',
   'memory',
   'knowledge',
-  'codebase',
   'workstream',
   'checkpoint',
   'media',

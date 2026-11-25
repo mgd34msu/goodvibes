@@ -276,7 +276,7 @@ admitted only from the surface's owner, or when the chat itself is listed.
 
 A surface with every list empty has no owner yet. The first message from an
 unknown sender is not answered; it raises an owner claim in the owner inbox
-(`/questions` in the terminal apps, the web UI inbox, any owned channel) naming
+(Waiting for you in the terminal apps, the web UI inbox, any owned channel) naming
 the sender. Accepting it puts that sender on the user list and records the
 policy's `ownerId` and `ownerSince`; declining it is remembered, so the same
 sender is not asked about again. At most three claims per surface are open at

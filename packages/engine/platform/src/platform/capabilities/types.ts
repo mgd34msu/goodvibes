@@ -38,6 +38,11 @@ export interface FixedChoice {
   readonly help?: string | undefined;
   /** A choice that raises the action's risk (a looser trust mode). */
   readonly risk?: ActionRisk | undefined;
+  /**
+   * What the act did when this choice raised its risk, said after it ran in place of the risk's own words whenever
+   * those would not be true of every run ("Write over it": there may have been nothing to write over). Whole sentences.
+   */
+  readonly riskDone?: string | undefined;
   /** For an input that decides how long the action lasts: what this value means. */
   readonly lasts?: 'session' | 'kept' | undefined;
 }
@@ -108,6 +113,12 @@ export const RISK_DONE_WORDS: Readonly<Record<Exclude<ActionRisk, 'none'>, strin
   'sends-out': 'sent something outside this machine',
 };
 
+/**
+ * What "Write over it" or "Replace it" did, said after it ran (a choice's `riskDone`): true whether or not anything
+ * was there to write over, where "This cannot be undone." would not be when nothing was.
+ */
+export const REPLACED_DONE = 'Whatever was there before, if anything, is gone and cannot be brought back.';
+
 /** Where a capability runs; see the file header. */
 export type CapabilityHome = 'daemon' | 'session';
 
@@ -146,6 +157,25 @@ export class CapabilityRefusal extends Error {
 export interface CapabilityResult {
   readonly text: string;
   readonly data?: Readonly<Record<string, unknown>> | undefined;
+  /**
+   * The value the person must see once (a capability that declares `reveals`): a new device's one-time token, the
+   * group's join key. Never in `text` or `data`: `capabilities.run` returns it only to the person who asked, a place
+   * shows it in its own pane until he leaves it, and nothing writes it to a log, a transcript, a frame or an outcome line.
+   */
+  readonly reveal?: { readonly value: string; readonly qr?: string | undefined } | undefined;
+  /**
+   * What this run did, about what the risk names, when it is not what every run does (a check-in that stayed quiet
+   * sent nothing): said in place of the definition's line (outcome.ts `riskDoneLine`); '' says nothing.
+   */
+  readonly riskDone?: string | undefined;
+}
+
+/** What a capability's revealed value is, as its pane names it (CapabilityDefinition `reveals`). */
+export interface CapabilityReveal {
+  /** What the value is: "One-time token", "Join key". */
+  readonly label: string;
+  /** One sentence under it: what it does and whether it can be seen again. */
+  readonly note: string;
 }
 
 /** Facts about who asked, read by a handler that acts on the caller's project or program. */
@@ -154,6 +184,19 @@ export interface CapabilityCaller {
   readonly workingDirectory?: string | undefined;
   /** The terminal program that asked (`tui` is the terminal app, `agent` the Agent), when one did. */
   readonly program?: 'tui' | 'agent' | undefined;
+  /**
+   * The model the asking program's conversation uses (`provider:model`), when a terminal program asked: a capability
+   * on "the model of this conversation" (its context window size) acts on it unless the call names another.
+   */
+  readonly model?: string | undefined;
+  /** The person asked it himself (a key pressed, a form submitted, a line typed): not a model, not another agent. */
+  readonly personAsked?: boolean | undefined;
+  /**
+   * Run a daemon method as this same caller (its own admission applies; the person's claim travels with it only as
+   * the daemon kept it): a handler whose act a daemon method already does calls that method and words its answer.
+   * Set by the daemon's `capabilities.run`; absent where no daemon dispatch runs the handler.
+   */
+  readonly method?: ((methodId: string, body: Record<string, unknown>) => Promise<unknown>) | undefined;
 }
 
 /**
@@ -177,6 +220,11 @@ export interface CapabilityDefinition<Services> {
   readonly touches: ActionTouches;
   readonly lasts: ActionLasts | 'not-a-change';
   readonly risk: ActionRisk;
+  /**
+   * What the act did, said after it ran in place of the risk's own words ("This spent money.") whenever those would
+   * not be true of what ran (outcome.ts): the risk names what may follow, so approving a purchase ahead says "Nothing
+   * has been bought yet: ...". Whole sentences, with `{input}` blanks. Absent: the risk's words.
+   */
   readonly riskDone?: string | undefined;
   readonly ownerOnly?: { readonly reason: string; readonly instead: string } | undefined;
   /**
@@ -189,6 +237,22 @@ export interface CapabilityDefinition<Services> {
   readonly undoneBy?: string | undefined;
   /** The confirming button's words when the label's verb cannot be read from it ("Put them back"). */
   readonly button?: string | undefined;
+  /**
+   * The action asks its own question, with what it read at that moment, before it does what its risk names (a
+   * restore shown on a preview): a screen that runs it asks nothing first, so the person is asked once.
+   */
+  readonly asksItself?: true | undefined;
+  /**
+   * Its outcome carries a value the person must see once (the result's `reveal`): a place shows it whole in its own
+   * pane, with the copy key, until he leaves it; `capabilities.run` returns it only to the person who asked.
+   */
+  readonly reveals?: CapabilityReveal | undefined;
   readonly example: ActionValues;
+  /**
+   * Whether the program holding the conversation can run it with the services it has (a session capability whose
+   * program lacks the piece it needs: the Agent keeps no code index). Absent: always. A place shows no control for
+   * one that is not available, and the model's run refuses it in words.
+   */
+  readonly available?: ((services: Services) => boolean) | undefined;
   readonly run:(values: ActionValues, services: Services, caller: CapabilityCaller) => Promise<CapabilityResult>;
 }

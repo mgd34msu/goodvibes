@@ -1,8 +1,9 @@
 import { createSecretsCommand } from '@goodvibes/engine/terminal-shell/secrets-command';
 import { createLocalCommandActions } from '@goodvibes/engine/terminal-shell/local-command-actions';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
-import { toolsCommand } from './tools-command.ts';
 import { capabilityBinding } from './capability-binding.ts';
+// The tools the model can call here are in Tools and extensions (capabilities/builtin/tools.ts); no slash command carries them.
+import '@goodvibes/engine/terminal-shell/tools-capabilities';
 
 import { requireProviderApi } from './runtime-services.ts';
 
@@ -16,20 +17,9 @@ export const localActions = createLocalCommandActions<CommandContext>(requirePro
   noteTouch: (conversation, key) => conversation.searchExpansion.noteUserTouch(key),
 });
 
-// `/secrets` is one description shared with the other terminal app (terminal-shell/secrets-command.ts); a credential is kept where it is asked.
-const secretsCommand = createSecretsCommand<CommandContext>({
-  writeScope: (_key, requested) => requested,
-  deleteScope: (_key, requested) => requested,
-  relocationNote: () => '',
-}, capabilityBinding);
+// `/secrets` is one description shared with the other terminal app (terminal-shell/secrets-command.ts); the daemon keeps every secret.
+const secretsCommand = createSecretsCommand<CommandContext>(capabilityBinding);
 
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(toolsCommand);
-
   registry.register(secretsCommand);
-
-  registry.register(localActions['image']);
-
-  registry.register(localActions['pin']);
-
 }

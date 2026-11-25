@@ -3,8 +3,7 @@ import { join } from 'node:path';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 import { markdownRecordName, parseMarkdownFrontmatter, stripMarkdownFrontmatter } from './markdown-frontmatter.ts';
-import { PERSONA_DIRECTORY_MARKERS, getPersonaDirectories } from './persona-discovery.ts';
-import { ROUTINE_DIRECTORY_MARKERS, getRoutineDirectories } from './routine-discovery.ts';
+import { PERSONA_DIRECTORY_MARKERS, ROUTINE_DIRECTORY_MARKERS, getPersonaDirectories, getRoutineDirectories } from '@goodvibes/engine/terminal-shell/agent-turn/record-discovery';
 
 type DiscoveryOrigin = 'project-local' | 'global';
 

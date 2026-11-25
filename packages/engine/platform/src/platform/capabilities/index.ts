@@ -20,6 +20,7 @@ export {
   type CapabilityFindResult, type CapabilityGroupReading, type FoundCapability,
 } from './find.js';
 export * from './builtin/index.js';
+export { capabilityAskWords, presentCapabilityRunAsks } from './ask-words.js';
 export { daemonCapabilityCatalog, loadedDaemonCapabilityCatalog, preloadDaemonCapabilityCatalog } from './daemon-catalog.js';
 export { createDaemonCapabilityServices, type DaemonCapabilityServiceSources } from './daemon-services.js';
 export {

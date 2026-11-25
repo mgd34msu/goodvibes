@@ -1,4 +1,4 @@
-import type { ParsedRoutineSchedulePromotionArgs } from './routine-schedule-promotion.ts';
+import type { ParsedRoutineSchedulePromotionArgs } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 import { parseChannelDeliveryTarget, parseLinkDeliveryTarget, parseRouteDeliveryTarget, parseWebhookDeliveryTarget, readOptionValue as optionValue, validateDeliveryTargets, type RoutineScheduleDeliveryTargetSpec } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';
 
 export { isRoutineScheduleDeliverySurfaceKind } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-delivery-targets';

@@ -15,6 +15,7 @@ import { requireProfileManager, requireSecretsManager, requireShellPaths, requir
 import { VERSION } from '../../version.ts';
 import { resolveAgentBinaryAssetName } from '../../runtime/release-artifacts.ts';
 import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/update-check.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
 const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
 const releaseDownloadBaseUrl = (tag: string) => daemonReleaseDownloadBaseUrl(tag);
@@ -111,6 +112,7 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
   daemon: (ctx) => createAgentDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
+  capability: capabilityBinding,
   install: {
     channel: REPO_RELEASES_LATEST_URL,
     resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),

@@ -5,10 +5,6 @@ import { resolveAndValidatePath, summarizeError } from '@goodvibes/engine/platfo
 import type { TerminalConversationManager } from './terminal-conversation.js';
 import { MAX_IMAGE_ATTACH_BYTES } from './modal-input-routes.js';
 import { commandRefusal } from './command-confirmation.js';
-import { defineCommand } from './command-actions/define.js';
-import { defineList, type ListRow } from './command-actions/lists.js';
-import type { CommandActionContext } from './command-actions/types.js';
-import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
 export interface LocalCommandContext {
   readonly print: (message: string) => void;
   readonly renderRequest: () => void;
@@ -20,23 +16,6 @@ export interface LocalCommandContext {
   readonly session: { readonly conversationManager: TerminalConversationManager };
 }
 /** Shared local operations; products provide presentation and explicit discovery policy. */
-interface PinListContext { readonly clients?: { readonly providerApi?: Pick<ProviderApi, 'getFavorites'> | undefined } | undefined; readonly provider: { readonly providerRegistry: { listModels(): readonly { readonly registryKey: string; readonly displayName: string }[] } } }
-const PIN_MODELS = defineList<PinListContext>({
-  name: 'models.all',
-  async read(ctx) {
-    return ctx.provider.providerRegistry.listModels().map((model): ListRow => ({ value: model.registryKey, label: model.displayName, detail: model.registryKey }));
-  },
-  operator: { terminalOnly: 'The model list is the terminal app\'s.' },
-});
-const PINNED_MODELS = defineList<PinListContext>({
-  name: 'models.pinned',
-  async read(ctx) {
-    const favorites = await ctx.clients?.providerApi?.getFavorites();
-    return (favorites?.pinned ?? []).map((entry): ListRow => ({ value: entry.registryKey ?? entry.modelId, label: entry.registryKey ?? entry.modelId }));
-  },
-  operator: { terminalOnly: 'Pins are kept by the terminal app.' },
-});
-
 export function createLocalCommandActions<Context extends LocalCommandContext>(
   requireProviderApi: (context: Context) => ProviderApi,
   policy: {
@@ -98,103 +77,51 @@ export function createLocalCommandActions<Context extends LocalCommandContext>(
     );
     ctx.renderRequest();
   }
+  /**
+   * Send an image file of the project with a message as a new turn: the conversation's image control
+   * (capabilities/builtin/conversation-controls.ts, conversation.image). What it says, in words.
+   */
+  async function attachImage(ctx: Context, rawPath: string, message: string): Promise<string> {
+    const promptText = message || `Attached image: ${rawPath.split('/').pop() ?? rawPath}`;
+    const projectRoot = ctx.workspace.shellPaths?.workingDirectory ?? ctx.platform.configManager.getWorkingDirectory();
+    if (!projectRoot) throw commandRefusal(policy.error('working directory is unavailable.'));
+    let resolvedPath: string;
+    try {
+      resolvedPath = resolveAndValidatePath(rawPath, projectRoot);
+    } catch (err) {
+      throw commandRefusal(policy.error(summarizeError(err)));
+    }
+    if (!existsSync(resolvedPath)) throw commandRefusal(policy.imageFailure('File not found', rawPath));
+    const ext = resolvedPath.slice(resolvedPath.lastIndexOf('.')).toLowerCase();
+    const mediaType = (
+      { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' } as Record<
+        string,
+        string
+      >
+    )[ext];
+    if (!mediaType) throw commandRefusal(policy.imageFailure('Unsupported image format', ext) + policy.supportedFormats);
+    const stat = statSync(resolvedPath);
+    if (stat.size > MAX_IMAGE_ATTACH_BYTES) throw commandRefusal(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB).`, policy.maximumImageSize);
+    let data: string;
+    try {
+      data = (await readFile(resolvedPath)).toString('base64');
+    } catch (err) {
+      throw commandRefusal(policy.imageFailure('Failed to read image', summarizeError(err)));
+    }
+    const currentModel = await requireProviderApi(ctx).getCurrentModel();
+    const warning = currentModel.capabilities.multimodal ? '' : `Warning: ${currentModel.displayName} does not support image input. The image will be stripped when sending.`;
+    const content: ContentPart[] = [
+      { type: 'text', text: promptText },
+      { type: 'image', data, mediaType },
+    ];
+    if (!ctx.submitTurn) throw commandRefusal('The image was not sent: this surface cannot send a message.');
+    ctx.submitTurn(promptText, content);
+    return warning;
+  }
   return {
     toggleBlocks,
-    // `/image <file> [message]`: a single-action command (command-actions/).
-    image: defineCommand<Context & CommandActionContext>({
-      name: 'image', leadingFlagsOnly: true, title: 'Attach an image', summary: 'Send an image file to the model with your next message', group: 'Conversation',
-      actions: [doAction<Context & CommandActionContext>({
-        id: 'attach', label: 'Send an image with a message', word: '', touches: 'another-machine',
-        inputs: [
-          { id: 'path', label: 'Image file', help: 'A .png, .jpg, .jpeg, .webp or .gif file in this project, up to 20 MB', kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 } },
-          textInput({ id: 'message', label: 'Message', help: 'What to ask about it', why: 'your own words', kind: 'long-text', typed: { tail: true }, optional: { default: '', means: '"Attached image:" and its file name' } }),
-        ],
-        sentence: '{path} is sent to the model with your message, as a new turn.',
-        operator: { terminalOnly: 'It sends a turn in the terminal app\'s open conversation.' }, example: { path: 'screenshots/error.png', message: 'what is wrong here?' },
-        async run(values, ctx) {
-          const rawPath = values.path!;
-          const promptText = values.message || `Attached image: ${rawPath.split('/').pop() ?? rawPath}`;
-          const projectRoot = ctx.workspace.shellPaths?.workingDirectory ?? ctx.platform.configManager.getWorkingDirectory();
-          if (!projectRoot) throw commandRefusal(policy.error('working directory is unavailable.'));
-          let resolvedPath: string;
-          try {
-            resolvedPath = resolveAndValidatePath(rawPath, projectRoot);
-          } catch (err) {
-            throw commandRefusal(policy.error(summarizeError(err)));
-          }
-          if (!existsSync(resolvedPath)) throw commandRefusal(policy.imageFailure('File not found', rawPath));
-          const ext = resolvedPath.slice(resolvedPath.lastIndexOf('.')).toLowerCase();
-          const mediaType = (
-            { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.gif': 'image/gif' } as Record<
-              string,
-              string
-            >
-          )[ext];
-          if (!mediaType) throw commandRefusal(policy.imageFailure('Unsupported image format', ext) + policy.supportedFormats);
-          const stat = statSync(resolvedPath);
-          if (stat.size > MAX_IMAGE_ATTACH_BYTES) throw commandRefusal(`Image too large (${(stat.size / 1024 / 1024).toFixed(1)}MB).`, policy.maximumImageSize);
-          let data: string;
-          try {
-            data = (await readFile(resolvedPath)).toString('base64');
-          } catch (err) {
-            throw commandRefusal(policy.imageFailure('Failed to read image', summarizeError(err)));
-          }
-          const currentModel = await requireProviderApi(ctx).getCurrentModel();
-          if (!currentModel.capabilities.multimodal) {
-            ctx.print(`Warning: ${currentModel.displayName} does not support image input. The image will be stripped when sending.`);
-          }
-          const content: ContentPart[] = [
-            { type: 'text', text: promptText },
-            { type: 'image', data, mediaType },
-          ];
-          if (!ctx.submitTurn) throw commandRefusal('The image was not sent: this surface cannot send a message.');
-          ctx.submitTurn(promptText, content);
-        },
-      })],
-    }),
-    // `/pin`: pin and unpin models in the favourites the model picker shows first (command-actions/).
-    pin: defineCommand<Context & CommandActionContext>({
-      name: 'pin', title: 'Pinned models', summary: 'Keep models you use at the top of the model picker', group: 'Models', report: 'see-pinned',
-      actions: [
-        readAction<Context & CommandActionContext>({
-          id: 'see-pinned', label: 'See pinned models', readsOnlyThisMachine: true, word: 'list',
-          sentence: 'Lists the models pinned to the top of the model picker.',
-          operator: { terminalOnly: 'Pins are kept by the terminal app.' },
-          async run(_values, ctx) {
-            const favorites = await requireProviderApi(ctx).getFavorites();
-            return favorites.pinned.length === 0 ? 'No pinned models yet.' : `Pinned models:\n${favorites.pinned.map((entry) => `  ★ ${entry.registryKey ?? entry.modelId}`).join('\n')}`;
-          },
-        }),
-        {
-          id: 'pin-model', label: 'Pin a model', word: 'add',
-          inputs: [listInput({ id: 'model', label: 'Model', help: 'The models you can use', list: PIN_MODELS, other: 'a model id' })],
-          sentence: '{model} will be kept at the top of the model picker until you change it.', done: 'Pinned {model}.',
-          touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'unpin-model',
-          operator: { terminalOnly: 'Pins are kept by the terminal app.' }, example: { model: 'openrouter:openrouter/free' },
-          async run(values, ctx) {
-            const providerApi = requireProviderApi(ctx);
-            const modelId = values.model!;
-            const favorites = await providerApi.getFavorites();
-            if (favorites.pinned.some((entry) => entry.modelId === modelId || entry.registryKey === modelId)) throw commandRefusal(`${modelId} is pinned already.`);
-            // The model picker undoes its optimistic star only when this fails.
-            await providerApi.pinModel(modelId);
-          },
-        },
-        {
-          id: 'unpin-model', label: 'Unpin a model', word: 'remove',
-          inputs: [listInput({ id: 'model', label: 'Model', help: 'The pinned models', list: PINNED_MODELS })],
-          sentence: '{model} will no longer be kept at the top of the model picker, until you change it.', done: 'Unpinned {model}.',
-          touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'pin-model',
-          operator: { terminalOnly: 'Pins are kept by the terminal app.' }, example: { model: 'openrouter:openrouter/free' },
-          async run(values, ctx) {
-            const providerApi = requireProviderApi(ctx);
-            const modelId = values.model!;
-            const pinned = (await providerApi.getFavorites()).pinned.find((entry) => entry.registryKey === modelId || (policy.unpinByModelId && entry.modelId === modelId));
-            if (!pinned) throw commandRefusal(`${modelId} is not pinned.`, '/pin list shows the pinned models.');
-            await providerApi.unpinModel(pinned.registryKey);
-          },
-        },
-      ],
-    }),
+    attachImage,
+    // Pinning a model is the daemon's (capabilities/builtin/models.ts, pin.*): the Models and providers place and the
+    // model picker's star run it there, for every program.
   };
 }

@@ -1,4 +1,3 @@
-import { createWorkstreamDraftService } from '@goodvibes/engine/platform/platform/orchestration';
 import { chosenSystemMessageTarget, configuredSystemMessageTarget } from '@goodvibes/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import { join } from 'node:path';
@@ -22,7 +21,7 @@ import { createBootstrapCommandContext } from './bootstrap-command-context.ts';
 import { startPlanActivationTurn } from './plan-activation.ts';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
-import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
+import { createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
@@ -163,10 +162,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     remoteRunnerRegistry: services.remoteRunnerRegistry,
     runtimeStore,
   });
-  const planRuntime = createShellPlanRuntime({
-    adaptivePlanner: services.adaptivePlanner,
-    runtimeBus,
-  });
 
   const commandContext: CommandContext = createBootstrapCommandContext({
     ...projectBootstrapShellCommandOptions({
@@ -180,7 +175,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       policyRuntimeState,
       uiServices,
       remoteRuntime,
-      planRuntime,
       providerApi,
       directTransport,
       hookApi,
@@ -191,17 +185,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     }),
     requestPermission: (request) => permissionPromptRef.requestPermission(request),
     contractOperator: services.contractOperator,
-    workstreamDrafts: createWorkstreamDraftService({
-      agentManager: services.agentManager,
-      configManager,
-      adaptivePlanner: services.adaptivePlanner,
-      projectRoot: services.workingDirectory,
-      contractRunner: services.contractRunner,
-      sessionId: () => runtime.sessionId,
-      remoteSupervisor: services.remoteSupervisor,
-      runtimeStore,
-      pricing: services.providerRegistry,
-    }),
     voiceSetup: services.voiceSetup,
     runtimeStore,
     memoryGovernor: services.memoryGovernor,

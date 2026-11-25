@@ -4,66 +4,18 @@ import type { ConfigKey, ConfigManager } from '@goodvibes/engine/platform/platfo
 import { localOwnerActor } from '@goodvibes/engine/platform/platform/config';
 import type { ShellPathService } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
-import type { ActionValues, CommandActionContext, FixedChoice } from './command-actions/types.js';
-import { choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
+import type { ActionDescription, ActionValues, CommandActionContext } from './command-actions/types.js';
+import { doAction, readAction } from './described-command-kit.js';
 import { readRefusal } from '@goodvibes/engine/errors';
 import { commandRefusal } from './command-confirmation.js';
-import { switchAlwaysSpeak } from './tts-runtime-commands.js';
+import { daemonCapabilityAction, runDaemonCapability, sessionCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import {
+  VOICE_OFF, VOICE_ON, VOICE_REVIEW, VOICE_SETUP, VOICE_SPEAK, VOICE_STATUS, VOICE_STOP, VOICE_WAKE_AGAIN, VOICE_WAKE_SETUP, VOICE_WAKE_STATUS,
+  type CapabilityDefinition, type SystemSessionServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
+import { printedText } from './health-command.js';
 import { inspectVoiceBundle, isVoiceBundleKey, readVoiceBundle, type VoiceBundle } from './voice-settings-review.js';
-/** What each kind of approval asks about, the same words in both terminal apps. */
-const APPROVAL_KINDS: readonly FixedChoice[] = [
-  { value: 'shell', label: 'Running a command', help: 'What the command changes, and whether it reads a credential.' },
-  { value: 'file', label: 'Changing a file', help: 'Which file, and whether it is a settings file or a notebook.' },
-  { value: 'network', label: 'Reaching the network', help: 'Which host, and how much of it.' },
-  { value: 'delegate', label: 'Starting agents or handing work on', help: 'How many agents, and how deep they may start more.' },
-  { value: 'mcp', label: 'Trusting a connected tool server more', help: 'Which server, and which hosts and paths it may then reach.' },
-  { value: 'remote', label: 'Sending work to another machine', help: 'Which machine, how far it is trusted, and what comes back.' },
-  { value: 'hook', label: 'Running a hook', help: 'Whether the hook may refuse or change what it sees.' },
-  { value: 'plugin', label: 'Installing or switching on a plugin', help: 'Where it came from, and what it may do.' },
-  { value: 'sandbox', label: 'Changing how commands are contained', help: 'Which isolation, and what leaves it.' },
-];
-
-/**
- * `/approval`, described once (command-actions/) for both terminal apps: what
- * each kind of approval asks about, and where the approvals waiting on you
- * are. An approval is answered with `/questions answer`; this command does not
- * answer one a second way.
- */
-export function createApprovalCommand<Context extends CommandActionContext>(host: {
-  /** Open where this app shows the approvals waiting on you; throws a refusal when it cannot. */
-  readonly openWaiting: (context: Context) => void;
-}): DescribedCommand<Context> {
-  return defineCommand<Context>({
-    name: 'approval',
-    title: 'Approvals',
-    summary: 'What each kind of approval asks about, and the approvals waiting on you',
-    group: 'Permissions',
-    report: 'kinds',
-    actions: [
-      readAction<Context>({
-        id: 'kinds', label: 'See the kinds of approval', word: 'kinds',
-        inputs: [choiceInput({ id: 'kind', label: 'Kind', help: 'One kind only', choices: APPROVAL_KINDS, typed: { position: 1 }, optional: { default: '', means: 'every kind' } })],
-        sentence: 'Shows what each kind of approval asks about {kind}, and what to check before you answer one.', example: { kind: 'shell' },
-        async run(values) {
-          const kinds = values.kind ? APPROVAL_KINDS.filter((kind) => kind.value === values.kind) : APPROVAL_KINDS;
-          return [
-            'Kinds of approval',
-            ...kinds.map((kind) => `  ${kind.label} (${kind.value}): ${kind.help ?? ''}`),
-            '',
-            'Answer one that waits on you: /questions answer. Rules that answer for you: /permissions.',
-          ].join('\n');
-        },
-      }),
-      doAction<Context>({
-        id: 'waiting', label: 'Open the approvals waiting on you', word: 'waiting', touches: 'reads',
-        sentence: 'Opens the list of approvals waiting on your answer.',
-        operator: { method: 'approvals.list', fields: {} },
-        async run(_values, ctx) { host.openWaiting(ctx); },
-      }),
-    ],
-  });
-}
-interface VoiceContext extends CommandActionContext {
+export interface VoiceContext extends CommandActionContext {
   readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'setDynamic' | 'setMany' | 'getSchema'>; readonly voiceService?: unknown };
   /** Returns whether anything was playing; a port that returns nothing is treated as having stopped playback. */
   readonly stopSpokenOutput?: (() => boolean | void) | undefined;
@@ -93,7 +45,10 @@ export function createVoiceExperienceCommand<Context extends VoiceContext>(polic
     ctx: Context,
     shellPaths: ShellPathService,
   ) => void | Promise<void>;
-  readonly review: (enabled: boolean) => string[];
+  /** This program's own services: speaking and listening run here (capabilities/builtin/system-session.ts). */
+  readonly services: (context: Context) => SystemSessionServices;
+  /** How this program reaches the daemon for a capability (its `capability-binding.ts`): the voice runtime is the daemon's. */
+  readonly capability: DaemonCapabilityBinding<Context>;
 }): DescribedCommand<Context> {
   /** A failure that is not a refusal is reported as one, where the app asks for that. */
   const guarded = (work: (values: ActionValues, ctx: Context) => Promise<string | void>) => async (values: ActionValues, ctx: Context): Promise<string | void> => {
@@ -104,11 +59,16 @@ export function createVoiceExperienceCommand<Context extends VoiceContext>(polic
       throw commandRefusal('voice command failed: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
-  const alwaysSpeak = (enabled: boolean) => async (_values: ActionValues, ctx: Context): Promise<string> => {
-    const said = switchAlwaysSpeak(ctx, enabled);
-    ctx.renderRequest();
-    return said;
-  };
+  const speaking = (definition: CapabilityDefinition<SystemSessionServices>): ActionDescription<Context> =>
+    sessionCapabilityAction<Context, SystemSessionServices>(definition, policy.services, VOICE_LOCAL);
+  const runtime = (definition: CapabilityDefinition<never>, sub: 'status' | 'setup'): ActionDescription<Context> => ({
+    ...daemonCapabilityAction<Context>(definition, policy.capability),
+    run: guarded(async (values, ctx) => {
+      if (ctx.invokedByModel !== true && ctx.printLive) { await policy.provision(sub, [], ctx, policy.paths(ctx)); return; }
+      const answer = await runDaemonCapability(definition.capability.id, values, ctx, policy.capability);
+      return answer.detail ?? '';
+    }),
+  });
   return defineCommand<Context>({
     name: 'voice',
     leadingFlagsOnly: true,
@@ -123,76 +83,21 @@ export function createVoiceExperienceCommand<Context extends VoiceContext>(polic
       { label: 'Voice settings as a file…', actions: ['export', 'inspect', 'import'] },
     ],
     actions: [
-      readAction<Context>({
-        id: 'review', label: 'See your voice settings', readsOnlyThisMachine: true, word: 'review', operator: VOICE_LOCAL,
-        sentence: 'Shows whether every answer is spoken aloud and how voice is set up here.',
-        async rowValue(ctx) { return ctx.platform.configManager.get('ui.voiceEnabled') ? 'answers spoken' : 'answers not spoken'; },
-        async run(_values, ctx) { return policy.review(Boolean(ctx.platform.configManager.get('ui.voiceEnabled') ?? false)).join('\n'); },
-      }),
-      doAction<Context>({
-        id: 'speak', label: 'Ask and hear the answer spoken', word: 'speak', touches: 'another-machine', operator: VOICE_LOCAL,
-        inputs: [textInput({ id: 'prompt', label: 'Message', help: 'What to ask', why: 'your own words', kind: 'long-text', typed: { tail: true } })],
-        sentence: '{prompt} is sent as a message and the answer is played aloud.', example: { prompt: 'summarise the last change' },
-        async run(values, ctx) {
-          if (!ctx.submitSpokenInput) throw commandRefusal('Speech output is not available in this session; nothing was sent.', undefined, 'UNAVAILABLE');
-          ctx.submitSpokenInput(values.prompt!);
-        },
-      }),
-      doAction<Context>({
-        id: 'stop', label: 'Stop what is being spoken', word: 'stop', operator: VOICE_LOCAL,
-        sentence: 'Whatever is being played aloud now stops.',
-        async run(_values, ctx) {
-          if (!ctx.stopSpokenOutput) throw commandRefusal('Speech output is not available in this session.', undefined, 'UNAVAILABLE');
-          return ctx.stopSpokenOutput() === false ? 'Nothing is playing.' : 'Stopped speaking.';
-        },
-      }),
-      {
-        id: 'on', label: 'Speak every answer aloud', word: 'on', inputs: [],
-        sentence: 'Every answer will be played aloud until you change it.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'off', operator: VOICE_LOCAL, example: {},
-        run: alwaysSpeak(true),
-      },
-      {
-        id: 'off', label: 'Stop speaking every answer', word: 'off', inputs: [],
-        sentence: 'Answers will no longer be played aloud, until you change it.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'on', operator: VOICE_LOCAL, example: {},
-        run: alwaysSpeak(false),
-      },
-      readAction<Context>({
-        id: 'status', label: 'See the local voice runtime', word: 'status', operator: VOICE_LOCAL,
-        sentence: 'Shows whether speech output and speech-to-text are installed here, and an install in progress.',
-        run: guarded(async (_values, ctx) => { await policy.provision('status', [], ctx, policy.paths(ctx)); }),
-      }),
-      doAction<Context>({
-        id: 'setup', label: 'Install the local voice runtime', word: 'setup', touches: 'another-machine', operator: VOICE_LOCAL,
-        sentence: 'The local speech output and, where this machine has a published bundle, speech-to-text are downloaded and set up; it can be hundreds of megabytes.',
-        run: guarded(async (_values, ctx) => { await policy.provision('setup', [], ctx, policy.paths(ctx)); }),
-      }),
-      readAction<Context>({
-        id: 'wake-status', label: 'See wake-word detection', word: 'wake-status', operator: VOICE_LOCAL,
-        sentence: 'Shows whether the wake-word models are here and how listening for the wake word is set.',
-        run: guarded(async (_values, ctx) => { await policy.wake(['wake', 'status'], ctx, policy.paths(ctx)); }),
-      }),
-      doAction<Context>({
-        id: 'wake-setup', label: 'Set up the wake word', word: 'wake-setup', touches: 'another-machine', operator: VOICE_LOCAL,
-        inputs: [choiceInput({
-          id: 'stt', label: 'Speech-to-text', help: 'What makes a wake word useful', typed: { flag: '--with-speech-to-text', switchOn: 'yes' },
-          choices: [{ value: 'no', label: 'Only say whether it is needed' }, { value: 'yes', label: 'Install it too' }],
-          optional: { default: 'no', means: 'only say whether it is needed' },
-        })],
-        sentence: 'The wake-word models are downloaded and checked, and speech-to-text is installed too when chosen.', example: { stt: 'yes' },
-        run: guarded(async (values, ctx) => { await policy.wake(['wake', 'setup', ...(values.stt === 'yes' ? ['yes'] : [])], ctx, policy.paths(ctx)); }),
-      }),
-      doAction<Context>({
-        id: 'wake-again', label: 'Listen for the wake word again', word: 'wake-again', operator: VOICE_LOCAL,
-        sentence: 'Listening for the wake word starts again after it stopped by itself (it also starts again when this terminal regains focus).',
-        async run(_values, ctx) {
-          if (!ctx.listenForWakeAgain) throw commandRefusal('Wake-word detection is not available in this session.', undefined, 'UNAVAILABLE');
-          const said = await ctx.listenForWakeAgain();
-          ctx.renderRequest();
-          return said;
-        },
-      }),
+      // Speaking and listening are capabilities of this program (capabilities/builtin/system-session.ts).
+      { ...speaking(VOICE_REVIEW), async rowValue(ctx: Context) { return ctx.platform.configManager.get('ui.voiceEnabled') ? 'answers spoken' : 'answers not spoken'; } },
+      speaking(VOICE_SPEAK),
+      speaking(VOICE_STOP),
+      speaking(VOICE_ON),
+      speaking(VOICE_OFF),
+      // The voice runtime is the daemon's (capabilities/builtin/system.ts voice.status, voice.setup). A person typing it at
+      // a terminal that can redraw a line also sees an install's progress (the same voice.local.* methods, followed on
+      // screen); a place, a model and a script get the capability's answer.
+      runtime(VOICE_STATUS, 'status'),
+      runtime(VOICE_SETUP, 'setup'),
+      // The wake word on this terminal's microphone (capabilities/builtin/system-program.ts; `wakeServicesOf` below).
+      speaking(VOICE_WAKE_STATUS),
+      speaking(VOICE_WAKE_SETUP),
+      speaking(VOICE_WAKE_AGAIN),
       doAction<Context>({
         id: 'export', label: 'Save your voice settings to a file', word: 'export', operator: VOICE_LOCAL,
         inputs: [BUNDLE_FILE('Where to write them')],
@@ -241,6 +146,23 @@ export function createVoiceExperienceCommand<Context extends VoiceContext>(polic
       },
     ],
   });
+}
+
+/** What one program supplies for `/voice` (its wake word, its runtime's progress, its services, its daemon binding). */
+export type VoiceExperiencePolicy<Context extends VoiceContext> = Parameters<typeof createVoiceExperienceCommand<Context>>[0];
+
+/**
+ * The wake word on this program's microphone, as the capabilities `voice.wake-status` and `voice.wake-setup` take it
+ * (system-session.ts `speech.wake`): the program's own wake work, its printed lines returned as words.
+ */
+export function wakeServicesOf<Context extends VoiceContext>(
+  policy: { readonly paths: (context: Context) => ShellPathService; readonly wake: (args: string[], ctx: Context, shellPaths: ShellPathService) => void | Promise<void> },
+  ctx: Context,
+): { status(): Promise<string>; setup(withSpeechToText: boolean): Promise<string> } {
+  return {
+    status: () => printedText(ctx, (collecting) => policy.wake(['wake', 'status'], collecting, policy.paths(collecting))),
+    setup: (withSpeechToText) => printedText(ctx, (collecting) => policy.wake(['wake', 'setup', ...(withSpeechToText ? ['yes'] : [])], collecting, policy.paths(collecting))),
+  };
 }
 
 /** A voice settings file as JSON; refused when it is missing or unreadable. */

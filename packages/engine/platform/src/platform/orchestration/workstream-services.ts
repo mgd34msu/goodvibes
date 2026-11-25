@@ -40,7 +40,6 @@ import type { PhaseSpec, WorkItemSpec, WorkstreamIsolation } from './types.js';
 import { getContractCommitScope, type ContractCommitScope } from '../contract/config.js';
 import type { ContractRunner } from '../contract/runner.js';
 import type { DraftedPlan } from '../contract/types.js';
-import { AdaptivePlanner, type PlannerInputs } from '../core/adaptive-planner.js';
 import {
   decomposeGoal,
   type DecompositionServiceConfig,
@@ -59,28 +58,18 @@ import { validateAttempts } from './workstream-attempts-validation.js';
 import { logger } from '../utils/logger.js';
 import { isDeepStrictEqual } from 'node:util';
 import { createHash } from 'node:crypto';
-import { judgmentPort } from '@goodvibes/engine/errors';
-import { requestRisk } from '../routing/batteries/request.js';
-import { requestState } from '../routing/request-reading.js';
-import type { RemoteSupervisor } from '../runtime/remote/supervisor.js';
-import type { RuntimeStore } from '../runtime/store/index.js';
-import { decisionOrClassic, withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
+import { withConfiguredDecisionModelPolicy } from '../runtime/decision-policy.js';
 
 export interface WorkstreamServicesDeps {
   readonly agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel' | 'registerCancellationSignal' | 'releaseCancellationSignal'>
     & Partial<Pick<AgentManager, 'onFleetSlotReleased'>>;
   readonly configManager: Pick<ConfigManager, 'get' | 'getCategory'>;
-  readonly adaptivePlanner: AdaptivePlanner;
   readonly runtimeBus: RuntimeEventBus;
   readonly projectRoot: string;
   /** Starts the contract an approved draft launches as (design 10.4). */
   readonly contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'> & Partial<Pick<ContractRunner, 'startIdempotent' | 'startFromPlanIdempotent'>>;
   /** The session a launched contract belongs to: a fixed id, or read at launch time. */
   readonly sessionId: string | (() => string);
-  /** Reports the remote runner sessions; the planner's remoteAvailable input is read from it for each draft. */
-  readonly remoteSupervisor: Pick<RemoteSupervisor, 'getSnapshot'>;
-  /** The runtime store the remote supervisor reads its connections from. */
-  readonly runtimeStore: RuntimeStore;
   /** What planning and workstream usage is priced with: the runtime's ProviderRegistry. */
   readonly pricing: SessionPricing;
 }
@@ -133,65 +122,6 @@ export type WorkstreamDraftServiceDeps = Omit<WorkstreamServicesDeps, 'runtimeBu
   readonly agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>;
 };
 
-/** The decision site the task's risk reading is logged under. */
-const TASK_RISK_SITE = 'orchestration.workstream.task-risk';
-
-/** Remote transport states in which a runner can take work. */
-const REMOTE_READY_STATES: ReadonlySet<string> = new Set(['connected', 'syncing']);
-
-/** Where the planner inputs other than the task itself come from. */
-interface PlannerInputSources {
-  readonly remoteSupervisor: Pick<RemoteSupervisor, 'getSnapshot'>;
-  readonly runtimeStore: RuntimeStore;
-}
-
-/**
- * The AdaptivePlanner inputs for a workstream task. A registered strategy
- * reading decides whether and how to decompose, from the task, risk and actual
- * capabilities. There is no numeric risk cutoff deciding the answer in code.
- *  - riskScore: `routing.request-risk` (routing/batteries/request.ts) read
- *    over the task as a planner brief: how costly a wrong or careless result
- *    would be, on four levels. The planner takes a 0-1 score, so the reading's
- *    probability-weighted position on those levels (`normalized`) is used as
- *    is; an unsure reading spreads across levels and lands between them.
- *    Without a decision model, this records null (unassessed), never a made-up low-risk score.
- *  - latencyBudgetMs: no wall-clock budget exists for a workstream. A draft
- *    is reviewed and approved before anything runs, and there is no latency
- *    setting in config, so the budget is unbounded.
- *  - isMultiStep: `/workstream create` is a multi-step authoring surface.
- *  - remoteAvailable: the remote supervisor reports a runner whose transport
- *    is connected or syncing and whose heartbeat is fresh.
- *  - backgroundEligible: a launched draft always runs in the background: the
- *    contract runner's start returns at once and runs or queues the contract
- *    (contract.maxActiveContracts, FIFO), with no queue cap to refuse it.
- */
-async function buildPlannerInputs(task: string, sources: PlannerInputSources): Promise<PlannerInputs> {
-  const riskScore = await decisionOrClassic<number | null>(async () => {
-    const run = await requestRisk.run(
-      judgmentPort(TASK_RISK_SITE),
-      requestState({ purpose: 'planner', brief: task }),
-      { site: TASK_RISK_SITE },
-    );
-    const score = run.readings.risk.normalized;
-    run.recordAction(`planner riskScore ${score.toFixed(2)}`);
-    return score;
-  }, () => null);
-  return {
-    riskScore,
-    latencyBudgetMs: Number.POSITIVE_INFINITY,
-    isMultiStep: true,
-    remoteAvailable: remoteRunnerAvailable(sources),
-    backgroundEligible: true,
-    taskDescription: task,
-  };
-}
-
-/** Whether a remote runner is connected (or syncing) with a fresh heartbeat. */
-function remoteRunnerAvailable(sources: PlannerInputSources): boolean {
-  const snapshot = sources.remoteSupervisor.getSnapshot(sources.runtimeStore);
-  return snapshot.sessions.some((session) =>
-    REMOTE_READY_STATES.has(session.transportState) && session.heartbeat.status === 'fresh');
-}
 
 /**
  * Read the planner decomposition config (mode + bounds) from the config
@@ -271,13 +201,11 @@ function draftedPlanFromSpec(goal: string, spec: CreateWorkstreamInput): Drafted
 }
 
 function createDraftFacade(
-  adaptivePlanner: AdaptivePlanner,
   configManager: Pick<ConfigManager, 'get' | 'getCategory'>,
   agentManager: Pick<AgentManager, 'spawn' | 'getStatus' | 'cancel'>,
   projectRoot: string,
   contractRunner: Pick<ContractRunner, 'start' | 'startFromPlan'> & Partial<Pick<ContractRunner, 'startIdempotent' | 'startFromPlanIdempotent'>>,
   sessionId: string | (() => string),
-  plannerSources: PlannerInputSources,
   pricing: SessionPricing,
 ): WorkstreamDraftService {
   const drafts = new Map<string, WorkstreamDraft>();
@@ -332,8 +260,6 @@ function createDraftFacade(
       const runner = createAgentManagerDecompositionRunner({ agentManager });
       return decomposeGoal(
         { goal: task, workingDir: projectRoot, constraints: {} },
-        adaptivePlanner,
-        await buildPlannerInputs(task, plannerSources),
         readDecompositionConfig(configManager),
         runner,
         { estimateCostUsd: makeCostEstimator(configManager, pricing) },
@@ -578,13 +504,11 @@ export function createWorkstreamServices(deps: WorkstreamServicesDeps): Workstre
 /** The draft facade alone (see {@link WorkstreamDraftService}); drafts persist under the project's `.goodvibes/orchestration/drafts/`. */
 export function createWorkstreamDraftService(deps: WorkstreamDraftServiceDeps): WorkstreamDraftService {
   return createDraftFacade(
-    deps.adaptivePlanner,
     deps.configManager,
     deps.agentManager,
     deps.projectRoot,
     deps.contractRunner,
     deps.sessionId,
-    { remoteSupervisor: deps.remoteSupervisor, runtimeStore: deps.runtimeStore },
     deps.pricing,
   );
 }

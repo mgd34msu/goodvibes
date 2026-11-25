@@ -64,7 +64,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { describeCardEntryRefusal, describeCardTransportRefusal, mayCrossWithCardDetails } from '@goodvibes/engine/platform/platform/payments/browser';
 import { cardEntryTransport } from '../../lib/insecure-origin';
 import { client as platformClient, isPressRefused, MAY_HAVE_BEEN_DONE } from '../../lib/goodvibes';
-import { formatError } from '../../lib/errors';
+import { errorCode, formatError } from '../../lib/errors';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { useConfirm } from '../ui/ConfirmDialog';
@@ -185,10 +185,13 @@ export function PaymentCardEntry({ currency = 'USD', surface = WEBUI_CARD_ENTRY_
       toast(
         result.deleted
           ? { title: 'Card removed', description: `"${card.label}" is deleted from the daemon secret store.`, tone: 'success' }
-          : { title: 'Card not found', description: 'The daemon reported no such card; the list is being refreshed.', tone: 'info' },
+          : { title: 'Card removed', description: `No card "${card.label}" was listed any more; what it left behind on the daemon was cleared.`, tone: 'success' },
       );
     } catch (problem) {
-      toast({ title: 'Failed to remove the card', description: formatError(problem), tone: 'danger' });
+      // A card the daemon does not hold (removed already, from here or elsewhere) is not found: nothing was removed.
+      toast(errorCode(problem) === 'NOT_FOUND'
+        ? { title: 'Card not found', description: `The daemon holds no card "${card.label}" (it may have been removed already); nothing was removed. The list is read again.`, tone: 'info' }
+        : { title: 'Failed to remove the card', description: formatError(problem), tone: 'danger' });
     } finally {
       setRemovingId(null);
       await queryClient.invalidateQueries({ queryKey: ['payments', 'cards'] });

@@ -62,6 +62,8 @@ const WorkView = lazy(() => import('./views/work/WorkView').then((module) => ({ 
 const LibraryView = lazy(() => import('./views/library/LibraryView').then((module) => ({ default: module.LibraryView })));
 const PersonalView = lazy(() => import('./views/personal/PersonalView').then((module) => ({ default: module.PersonalView })));
 const PhoneNodeView = lazy(() => import('./views/phone/PhoneNodeView').then((module) => ({ default: module.PhoneNodeView })));
+// Every place the terminal programs draw, from the same declarations (views/places).
+const PlacesView = lazy(() => import('./views/places/PlacesView').then((module) => ({ default: module.PlacesView })));
 const SettingsDialog = lazy(() => import('./components/settings/dialog/SettingsDialog').then((module) => ({ default: module.SettingsDialog })));
 
 /** What a view shows while its script arrives (the first time it is opened). */
@@ -78,7 +80,7 @@ function sessionEndRereadDelay(snapshot: unknown): number | false {
 
 export default function App() {
   const queryClient = useQueryClient();
-  const { view, setView, setTab, tab, session: activeChatSessionId, setSession, setUrlState, settings: settingsSection, chatSelection } = useUrlState();
+  const { view, setView, setTab, tab, session: activeChatSessionId, setSession, setUrlState, settings: settingsSection, chatSelection, filters: urlFilters } = useUrlState();
   const activeView: ViewId = view;
   const [draftChatRequested, setDraftChatRequested] = useState(false);
   // One record of the companion chat sessions this browser knows about (local copies,
@@ -811,6 +813,17 @@ export default function App() {
           {activeView === 'library' && <LibraryView tab={tab} onTabChange={setTab} />}
           {activeView === 'personal' && <PersonalView tab={tab} onTabChange={setTab} />}
           {activeView === 'phone' && <PhoneNodeView />}
+          {activeView === 'places' && (
+            <PlacesView
+              tab={tab}
+              list={urlFilters.list}
+              // Opening a place is a step Back returns from; switching its list replaces the entry.
+              onOpenPlace={(placeId) => setUrlState({ tab: placeId, filters: {} })}
+              onOpenList={(listId) => setUrlState({ filters: { list: listId } }, { replace: true })}
+              onNavigate={(nextView, options) => handleNavigate(nextView, options)}
+              onOpenSettings={openSettings}
+            />
+          )}
         </Suspense>
       )}
     </ShellLayout>

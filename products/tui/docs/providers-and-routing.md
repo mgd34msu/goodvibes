@@ -204,7 +204,7 @@ Depending on the model, offered levels are drawn from a fixed ladder ordered fro
 | `xhigh` | 49152 |
 | `max` | 63999 |
 
-Models that only expose reasoning as an on/off toggle treat any level above `none` as on, at the model's own depth. Models with no configurable reasoning offer no levels at all. `/effort` shows exactly which of these the current model accepts.
+Models that only expose reasoning as an on/off toggle treat any level above `none` as on, at the model's own depth. Models with no configurable reasoning offer no levels at all. "See how hard the model thinks", in This conversation, shows exactly which of these the current model accepts.
 
 ## Per-role routing
 

@@ -6,8 +6,7 @@ import { AgentPersonaRegistry, assertNoSecretLikeText } from '@goodvibes/engine/
 import { AgentRoutineRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
 import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import { discoverVibeFiles } from '@goodvibes/engine/terminal-shell/agent-turn/vibe-file';
-import { discoverPersonas, type DiscoveredPersonaRecord } from './persona-discovery.ts';
-import { discoverRoutines, type DiscoveredRoutineRecord } from './routine-discovery.ts';
+import { discoverPersonas, discoverRoutines, type DiscoveredPersonaRecord, type DiscoveredRoutineRecord } from '@goodvibes/engine/terminal-shell/agent-turn/record-discovery';
 import { discoverSkills, type SkillRecord } from './skill-discovery.ts';
 import type { ShellPathService } from '@/runtime/index.ts';
 import { STARTER_TEMPLATES, type AgentRuntimeProfileStarterTemplate, type AgentRuntimeProfileStarterTemplateFile } from './runtime-profile-starters.ts';
@@ -482,7 +481,7 @@ function discoveredVibeToTemplate(
   if (!shellPaths) throw new Error('Including VIBE.md in a starter template requires shell path context.');
   const snapshot = discoverVibeFiles(profileTemplateVibeShellPaths(shellPaths));
   if (snapshot.blocked.length > 0) {
-    throw new Error(`Cannot include VIBE.md in a starter template while ${snapshot.blocked.length} VIBE.md file is blocked. Run /personas vibe and repair it first.`);
+    throw new Error(`Cannot include VIBE.md in a starter template while ${snapshot.blocked.length} VIBE.md file is blocked. Look at the VIBE.md files (Memory and knowledge, Personas) and repair it first.`);
   }
   if (snapshot.files.length === 0) return undefined;
   const body = snapshot.files.map((file) => [
@@ -777,7 +776,8 @@ function writeTemplateVibe(homeDirectory: string, template: AgentRuntimeProfileS
 export function applyAgentRuntimeProfileTemplate(homeDirectory: string, templateId: AgentRuntimeProfileTemplateId, baseHomeDirectory?: string): AgentRuntimeProfileTemplateApplication {
   const template = resolveAgentRuntimeProfileTemplate(templateId, baseHomeDirectory);
   const personaRegistry = new AgentPersonaRegistry(profileStorePath(homeDirectory, 'personas', 'personas.json'));
-  const skillRegistry = new AgentSkillRegistry(profileStorePath(homeDirectory, 'skills', 'skills.json'));
+  // The profile's home's one skill store (the daemon's skill files there), not a file of the Agent's own.
+  const skillRegistry = AgentSkillRegistry.forHome(homeDirectory);
   const routineRegistry = new AgentRoutineRegistry(profileStorePath(homeDirectory, 'routines', 'routines.json'));
   // Text shipped in this build needs no review before it applies.
   const reviewed = template.source === 'builtin';

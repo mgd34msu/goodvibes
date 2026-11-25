@@ -15,7 +15,7 @@ const BY_COMMAND: Readonly<Record<string, CapabilityGroupId>> = {
   channels: 'messages', checkin: 'automation', checkpoint: 'conversation', ci: 'automation', clear: 'conversation',
   cloudflare: 'devices', cluster: 'devices', codebase: 'code', communication: 'work', compact: 'conversation',
   compare: 'models', context: 'conversation', decisions: 'waiting', deeplink: 'memory', devices: 'devices',
-  documents: 'memory', editor: 'conversation', effort: 'conversation', eval: 'work', git: 'code', google: 'messages',
+  documents: 'memory', editor: 'conversation', effort: 'models', eval: 'work', git: 'code', google: 'messages',
   graph: 'work', guidance: 'conversation', health: 'system', held: 'waiting', help: 'system', helpers: 'tools',
   hooks: 'tools', hosted: 'sessions', image: 'conversation', intelligence: 'code', keys: 'system', knowledge: 'memory',
   'local-auth': 'safety', mail: 'messages', managed: 'tools', marketplace: 'tools', mcp: 'tools', media: 'models',

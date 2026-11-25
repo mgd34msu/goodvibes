@@ -31,10 +31,13 @@ import { NEW_CHAT_KEYS } from '../../lib/shortcut-keys';
 import { CommandPalette } from './CommandPalette';
 import { ShortcutCheatsheet } from './ShortcutCheatsheet';
 import { COMMAND_SCREEN_LIST } from './screens/command-screen-list';
+import { daemonCapabilities } from '../../lib/place-capabilities';
 
 // An action's sheet and a command's screen load when one is opened.
 const ActionSheet = lazy(() => import('./ActionSheet').then((module) => ({ default: module.ActionSheet })));
 const CommandScreenDrawer = lazy(() => import('./screens/CommandScreens').then((module) => ({ default: module.CommandScreenDrawer })));
+// A capability opened from the palette (listed, or found by what it does) runs as a place runs it (views/places).
+const CapabilityRunner = lazy(() => import('../../views/places/CapabilityRunner').then((module) => ({ default: module.CapabilityRunner })));
 
 export type { ViewId };
 
@@ -69,6 +72,8 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
   const [sheet, setSheet] = useState<{ readonly command: string; readonly action: string } | null>(null);
   /** The screen drawn from a command's description (schedules, MCP servers ...) open in a panel. */
   const [screen, setScreen] = useState<string | null>(null);
+  /** A capability opened from the palette: its form, then `capabilities.run`. */
+  const [capability, setCapability] = useState<string | null>(null);
   // The slash commands' actions and the settings sections: loaded the first time the palette opens.
   const catalog = useCommandCatalog(paletteOpen);
 
@@ -185,14 +190,39 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
         });
       }
     }
+    // Every other capability the daemon can run (one moved beside its handler and run through capabilities.run, a
+    // read, one no slash command carries) is one entry too; it opens its form and runs as a place runs it. The
+    // palette's search also asks capabilities.find for what does a need in words (CommandPalette, onRunCapability).
+    if (catalog) {
+      for (const found of daemonCapabilities(catalog.actions)) {
+        if ('method' in found.action.operator && found.action.touches !== 'reads' && catalog.actions.commands.includes(found.command)) continue;
+        defs.push({
+          id: `capability.${found.id}`,
+          title: found.action.label,
+          group: 'system',
+          keywords: [found.command.title, found.id, found.action.word],
+          run: () => setCapability(found.id),
+        });
+      }
+    }
+    // Every place, in the fourteen groups (views/places).
+    defs.push({
+      id: 'nav.places',
+      title: 'Go to Places',
+      group: 'navigation',
+      keywords: ['places', 'automation', 'waiting', 'devices', 'money', 'tools', 'models', 'safety', 'system', 'memory', 'sessions', 'work'],
+      run: () => onNavigate?.('places'),
+    });
     // Each screen drawn from a command's description (its rows carry the command's actions) opens in a panel.
+    // A screen that is a place's (Automation, Money, ...) opens that place: the renderer is the one web view of a group.
     for (const entry of COMMAND_SCREEN_LIST) {
+      const place = entry.place;
       defs.push({
         id: `screen.${entry.id}`,
         title: entry.title,
         group: 'settings',
         keywords: [`/${entry.command}`, ...entry.keywords],
-        run: () => setScreen(entry.id),
+        run: place ? () => onNavigate?.('places', { tab: place }) : () => setScreen(entry.id),
       });
     }
     // Every other settings section is one command in the palette's Settings group
@@ -235,11 +265,12 @@ export default function CommandProvider({ onNavigate, onOpenSettings, children }
   return (
     <>
       {children}
-      <CommandPalette open={paletteOpen} onClose={closePalette} initialQuery={paletteQuery} />
+      <CommandPalette open={paletteOpen} onClose={closePalette} initialQuery={paletteQuery} onRunCapability={setCapability} />
       <ShortcutCheatsheet open={cheatsheetOpen} onClose={closeCheatsheet} />
       <Suspense fallback={null}>
         {screen ? <CommandScreenDrawer screen={screen} onClose={() => setScreen(null)} /> : null}
         {sheet ? <ActionSheet key={`${sheet.command}.${sheet.action}`} open command={sheet.command} action={sheet.action} onClose={() => setSheet(null)} /> : null}
+        {capability ? <CapabilityRunner key={capability} id={capability} onClose={() => setCapability(null)} /> : null}
       </Suspense>
     </>
   );

@@ -183,6 +183,6 @@ export const { currentSettingValue, buildSettingHelp } = createSettingContext<Se
 const buildSubscriptionHelp = createSubscriptionContext<SettingsModal>({
   confirmLogout: (provider) => `Sign out ${provider}? Enter/y to confirm, n/Esc to cancel.`,
   beginLogout: 'Press Enter to begin sign-out for this provider session.',
-  login: (provider) => `Use /provider sign-in ${provider} to begin OAuth sign-in for this provider.`,
+  login: (provider) => `Sign in to ${provider} in Models and providers to begin the browser sign-in for this provider.`,
   route: (value) => value ?? 'n/a',
 });

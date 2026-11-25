@@ -1022,10 +1022,9 @@ export class DaemonHttpRouter {
         remoteBackends: this.context.remoteBackends,
       },
       knowledge: this.knowledgeRouteContext(this.context.knowledgeService, this.context.knowledgeGraphqlService),
-      agentKnowledge: this.knowledgeRouteContext(
-        this.context.agentKnowledgeService,
-        new KnowledgeGraphqlService(this.context.agentKnowledgeService),
-      ),
+      // ONE knowledge store: the Agent's routes (its knowledge tool, its CLI, its workspace) serve the daemon's own
+      // knowledge, into which the Agent's earlier store was carried once (knowledge/agent-knowledge-carry.ts).
+      agentKnowledge: this.knowledgeRouteContext(this.context.knowledgeService, this.context.knowledgeGraphqlService),
       media: {
         ...buildMediaRouteContext({
           artifactStore: this.context.artifactStore,

@@ -250,8 +250,8 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'Knowledge Panel',
     kind: 'workspace',
     summary: 'Operator Knowledge surface for isolated status, search, and ingest.',
-    command: '/knowledge',
-    preferredModelRoute: `Use agent_knowledge, agent_knowledge_ingest, mode:"workspace_actions", or ${agentHarnessModes('run_command')} for confirmed /knowledge operation.`,
+    command: '/memory',
+    preferredModelRoute: 'Use agent_knowledge, agent_knowledge_ingest, mode:"workspace_actions", or capability_run with a knowledge.* capability (capability_find names them).',
     available: (context) => typeof context.openAgentWorkspace === 'function' || typeof context.openKnowledgeWorkspace === 'function',
     open: (context, args, assertCurrent) => {
       assertCurrent?.();
@@ -268,8 +268,8 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'Subscription Panel',
     kind: 'workspace',
     summary: 'Operator subscription surface for provider review, auth, and bundles.',
-    command: '/provider',
-    preferredModelRoute: `Use mode:"workspace_actions" or ${agentHarnessModes('run_command')} for confirmed /provider sign-in lines.`,
+    command: '/model',
+    preferredModelRoute: 'Sign-ins are capabilities of Models and providers: capability_run id:"provider.sign-in", then id:"provider.finish".',
     available: (context) => typeof context.openAgentWorkspace === 'function' || typeof context.openSubscriptionWorkspace === 'function',
     open: (context, args, assertCurrent) => {
       assertCurrent?.();
@@ -346,7 +346,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'Provider Picker',
     kind: 'picker',
     summary: 'Interactive provider picker for model route setup.',
-    command: '/provider',
+    command: '/model',
     preferredModelRoute: `Use ${settingsActions('get', 'set')} for direct provider routing changes, or confirmed mode:"run_command" mirrors for concrete provider changes.`,
     parameters: ['target'],
     available: (context) => typeof context.openProviderPicker === 'function' || typeof context.openProviderModelPickerWithTarget === 'function',
@@ -371,7 +371,7 @@ const UI_SURFACES: readonly UiSurfaceDefinition[] = [
     label: 'Reasoning Effort Picker',
     kind: 'picker',
     summary: 'Reasoning-effort selector for models that expose effort levels.',
-    command: '/effort',
+    command: 'This conversation, in the menu: Choose how hard the model thinks (the capability effort.set)',
     preferredModelRoute: `Use ${settingsActions('get', 'set')} for provider.reasoningEffort when a concrete level is known, or mode:"run_workspace_action" setup-reasoning-effort with confirmation.`,
     available: (context) => typeof context.openReasoningEffortPicker === 'function',
     open: (context, _args, assertCurrent) => {

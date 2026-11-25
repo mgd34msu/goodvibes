@@ -49,9 +49,12 @@ export interface ActionDescription<Ctx> {
   readonly lasts: ActionLasts | 'not-a-change';
   readonly risk: ActionRisk;
   /**
-   * What the risk did, said after the result with {@link RISK_DONE_WORDS}: "its
-   * tools are no longer held back" ("This loosened a protection: its tools are
-   * no longer held back."). Absent: the risk words alone.
+   * What the act did, said after the result in place of the risk's own words
+   * ({@link RISK_DONE_WORDS}, "This spent money."), whenever those would not be
+   * true of what ran: the risk names what may follow, so approving a purchase
+   * ahead says "Nothing has been bought yet: ...", never "This spent money.".
+   * One or more whole sentences, with `{input}` blanks. Absent: the risk's words,
+   * which must then be true of every run.
    */
   readonly riskDone?: string | undefined;
   /** Only counts when the owner types it; a model is refused with the reason and what it may do instead. */
@@ -64,6 +67,11 @@ export interface ActionDescription<Ctx> {
    * and in the catalogue.
    */
   readonly asksItself?: true | undefined;
+  /**
+   * Its outcome carries a value the person must see once (platform capabilities/types.ts `reveals`): a place shows
+   * it whole in its own pane with the copy key, until the person leaves it, and nowhere else.
+   */
+  readonly reveals?: { readonly label: string; readonly note: string } | undefined;
   /** The action id that undoes this one. */
   readonly undoneBy?: string | undefined;
   /**
@@ -126,6 +134,13 @@ export interface CommandDescription<Ctx> {
    */
   readonly bareOpens?: string | undefined;
   /**
+   * Opens place: the id of the place (places/index.ts `PLACES`) a bare command opens where a screen can be shown,
+   * in place of the action list. A typed command that stays only to open its place (`/checkpoint` opens This
+   * conversation) declares it here, with no action for it: the place is how its actions are reached. A model or a
+   * script typing it bare still gets the `report` action.
+   */
+  readonly opens?: string | undefined;
+  /**
    * The last blank of an action is text a person wrote (a message, a note):
    * `--yes` confirms only right after the action word, and the same word inside
    * the text is text. Words after `--` are text for every command.
@@ -182,4 +197,6 @@ export interface CommandActionContext extends ConfirmationHost {
   readonly renderRequest?: (() => void) | undefined;
   /** Push a kit modal on the surface's modal stack (the guided panel draws there). */
   readonly pushSurfaceModal?: ((modal: SurfaceModal) => void) | undefined;
+  /** Open a place of this program by id (a command's `opens`); absent where the surface has no places. */
+  readonly openPlace?: ((placeId: string) => void) | undefined;
 }

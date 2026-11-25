@@ -52,18 +52,18 @@ export function localModelProviderRoutes(recipe: LocalModelRecipe): readonly str
   }
   if (recipe.id === 'llama-cpp') {
     return [
-      'agent_harness mode:"run_command" command:"/provider add llama-cpp-local http://127.0.0.1:8080/v1" explicitUserRequest:"<the user request, in their own words>"',
+      'capability_run id:"provider.add" inputs:{"name":"llama-cpp-local","address":"http://127.0.0.1:8080/v1"}',
       'agent_harness mode:"run_command" command:"/model refresh" explicitUserRequest:"<the user request, in their own words>"',
     ];
   }
   if (recipe.id === 'vllm') {
     return [
-      'agent_harness mode:"run_command" command:"/provider add vllm-local http://127.0.0.1:8000/v1" explicitUserRequest:"<the user request, in their own words>"',
+      'capability_run id:"provider.add" inputs:{"name":"vllm-local","address":"http://127.0.0.1:8000/v1"}',
       'agent_harness mode:"run_command" command:"/model refresh" explicitUserRequest:"<the user request, in their own words>"',
     ];
   }
   return [
-    'agent_harness mode:"run_command" command:"/provider add local-openai http://127.0.0.1:1234/v1" explicitUserRequest:"<the user request, in their own words>"',
+    'capability_run id:"provider.add" inputs:{"name":"local-openai","address":"http://127.0.0.1:1234/v1"}',
     'agent_harness mode:"run_command" command:"/model refresh" explicitUserRequest:"<the user request, in their own words>"',
   ];
 }

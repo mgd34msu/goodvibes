@@ -14,10 +14,9 @@
  * settled reading selects that strategy; transport failure never changes it.
  */
 
-import { AdaptivePlanner } from './adaptive-planner.js';
 // Type only: the routing policy shape a route carries. No agent machinery is loaded.
 import type { AgentProviderRoutingPolicy } from '../tools/agent/schema.js';
-import type { PlannerInputs, DecompositionGate } from './adaptive-planner.js';
+import type { DecompositionGate } from './adaptive-planner.js';
 import {
   assemblePlanProposal,
   singleItemProposal,
@@ -496,13 +495,12 @@ function buildUserPrompt(request: DecomposeGoalRequest, repairErrors?: string[])
  */
 export async function decomposeGoal(
   request: DecomposeGoalRequest,
-  planner: AdaptivePlanner,
-  inputs: PlannerInputs,
   config: DecompositionServiceConfig,
   runner: DecompositionRunner | null,
   deps: DecomposeGoalDeps = {},
 ): Promise<DecomposeGoalResult> {
-  const gate = await planner.shouldDecompose(inputs);
+  // A piece of work always has its plan written: the planning agent splits the goal into steps (one step is a plan too).
+  const gate: DecompositionGate = { decompose: true, strategy: 'cohort', reasonCode: 'COHORT_CAPABLE' };
 
   const heuristicResult = (outcome: DecompositionOutcome): DecomposeGoalResult => {
     const base = singleItemProposal(request.goal);

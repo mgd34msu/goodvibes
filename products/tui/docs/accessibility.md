@@ -60,6 +60,6 @@ background (a transparent one) depends on that background colour.
   protection, so Enter never allows those.
 - `?` or `Ctrl+P` lists every command and key, searchable by words.
 - `/help keys` shows the current key bindings; every key but `?` and `@` can be
-  rebound, in the Keys place or in
+  rebound, in the System place's Keys tab or in
   `~/.goodvibes/tui/keybindings.json`. Places, rows and tabs can also be
   clicked.

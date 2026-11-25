@@ -10,5 +10,14 @@ import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.t
 
 export const capabilityBinding: DaemonCapabilityBinding<CommandContext> = {
   daemon: (ctx) => createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
-  caller: (ctx) => ({ workingDirectory: requireShellPaths(ctx).workingDirectory, program: 'tui' }),
+  caller: (ctx) => ({ workingDirectory: requireShellPaths(ctx).workingDirectory, program: 'tui', ...modelOf(ctx) }),
 };
+
+/** The model this app's conversation uses, for a capability on it (its context window size); nothing when it cannot be read. */
+function modelOf(ctx: CommandContext): { readonly model?: string } {
+  try {
+    return { model: ctx.provider.providerRegistry.getCurrentModel().registryKey };
+  } catch {
+    return {};
+  }
+}

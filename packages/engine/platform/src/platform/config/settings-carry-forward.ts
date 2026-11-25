@@ -50,6 +50,8 @@ export const RETIRED_SETTING_KEYS: readonly string[] = [
   'notifications.burstCooldownMs',
   'notifications.burstWindowMs',
   'permissions.backgroundAgents',
+  // The adaptive planner's switch, which changed nothing: the planner is gone (a piece of work has its plan).
+  'planner.adaptive',
   'push.subscriptions.sweepIntervalMinutes',
   'release.channel',
   'sandbox.replIsolation',

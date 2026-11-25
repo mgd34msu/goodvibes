@@ -729,7 +729,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'batch.queueBackend',
     label: 'Where batched requests wait',
     type: 'enum',
-    description: 'Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare sends them through the provisioned Worker\'s queue. /cloudflare provision switches this to cloudflare only after the Worker reaches the daemon.',
+    description: 'Queue backend for daemon batch signals. local stores jobs under the daemon config directory; cloudflare sends them through the provisioned Worker\'s queue. Deploying on Cloudflare (the Devices place) switches this to cloudflare only after the Worker reaches the daemon.',
     enumValues: ['local', 'cloudflare'],
   },
   {
@@ -764,7 +764,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'batch.maxQueueMessagesPerDay',
     label: 'Most Cloudflare queue messages per day',
     type: 'number',
-    description: 'Daily Cloudflare queue message budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets, and nothing more is queued. 0 means no limit. Takes effect at the next /cloudflare provision.',
+    description: 'Daily Cloudflare queue message budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets, and nothing more is queued. 0 means no limit. Takes effect at the next deploy on Cloudflare (the Devices place).',
     ...intRange(0, 10_000_000),
   },
   {
@@ -777,7 +777,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.freeTierMode',
     label: "Stay within Cloudflare's free plan",
     type: 'boolean',
-    description: 'Keep job bodies out of Cloudflare Queues: the provisioned Worker stores each body in R2 and queues only its key, and refuses a job when R2 is not provisioned (409 QUEUE_PAYLOADS_NEED_R2). Off, a body up to batch.maxQueuePayloadBytes travels in the queue message. Takes effect at the next /cloudflare provision.',
+    description: 'Keep job bodies out of Cloudflare Queues: the provisioned Worker stores each body in R2 and queues only its key, and refuses a job when R2 is not provisioned (409 QUEUE_PAYLOADS_NEED_R2). Off, a body up to batch.maxQueuePayloadBytes travels in the queue message. Takes effect at the next deploy on Cloudflare (the Devices place).',
   },
   {
     key: 'cloudflare.accountId',
@@ -958,7 +958,7 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     key: 'cloudflare.maxQueueOpsPerDay',
     label: 'Most Cloudflare queue operations per day',
     type: 'number',
-    description: 'Daily Cloudflare queue operation budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets. 0 means no limit. Takes effect at the next /cloudflare provision.',
+    description: 'Daily Cloudflare queue operation budget, enforced by the provisioned Worker (its Durable Object coordinator counts per UTC day): past it, the Worker answers 429 QUEUE_BUDGET_EXHAUSTED with the use so far and when it resets. 0 means no limit. Takes effect at the next deploy on Cloudflare (the Devices place).',
     ...intRange(0, 10_000_000),
   },
 ];

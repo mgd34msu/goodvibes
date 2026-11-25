@@ -128,11 +128,11 @@ const ONBOARDING_DETAIL_CATEGORIES_BASE: readonly AgentWorkspaceCategory[] = [
       actRow('context-last-turns', 'context given'),
       actRow('context-profile-from-discovered', 'agent-home create-learned'),
       actRow('context-persona-discovery', 'personas import'),
-      actRow('context-skill-discovery', 'my-skills import-discovered'),
       actRow('context-routine-discovery', 'routines import'),
       actRow('context-create-persona', 'personas create'),
       actRow('context-create-memory', 'memory remember'),
-      actRow('context-create-skill', 'my-skills create'),
+      // Skills are made and taken in from disk in Tools and extensions (the menu), the daemon's one skill store.
+      { id: 'context-skills', label: 'Skills', detail: 'Make a skill, or take in a skill file found on disk, on the Skills tab of Tools and extensions in the menu.', kind: 'guidance', safety: 'safe' },
       actRow('context-create-routine', 'routines create'),
       actRow('context-create-note', 'notes create'),
       actRow('context-knowledge-url', 'knowledge ingest-url'),

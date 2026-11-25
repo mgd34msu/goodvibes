@@ -191,7 +191,6 @@ export function projectBootstrapShellCommandOptions<
       readonly sessionLineageTracker: unknown;
       readonly sessionChangeTracker: unknown;
       readonly planManager: unknown;
-      readonly adaptivePlanner: unknown;
       readonly sessionOrchestration: unknown;
       readonly worktreeRegistry: unknown;
       readonly sandboxSessionRegistry: unknown;
@@ -204,7 +203,6 @@ export function projectBootstrapShellCommandOptions<
     readonly policyRuntimeState: unknown;
     readonly uiServices: { readonly readModels: unknown };
     readonly remoteRuntime: unknown;
-    readonly planRuntime: unknown;
     readonly providerApi: unknown;
     readonly directTransport: { readonly operator: unknown; readonly peer: unknown };
     readonly hookApi: unknown;
@@ -232,7 +230,6 @@ export function projectBootstrapShellCommandOptions<
     shellPaths: input.services.shellPaths,
     surface: input.services.surface,
     remoteRuntime: input.remoteRuntime,
-    planRuntime: input.planRuntime,
     fileUndoManager: input.services.fileUndoManager,
     memoryRegistry: input.services.memoryRegistry,
     integrationHelpers: input.services.integrationHelpers,
@@ -262,7 +259,6 @@ export function projectBootstrapShellCommandOptions<
     sessionLineageTracker: input.services.sessionLineageTracker,
     changeTracker: input.services.sessionChangeTracker,
     planManager: input.services.planManager,
-    adaptivePlanner: input.services.adaptivePlanner,
     sessionOrchestration: input.services.sessionOrchestration,
     operatorClient: input.directTransport.operator,
     peerClient: input.directTransport.peer,
@@ -292,7 +288,6 @@ export function projectBootstrapShellCommandOptions<
     shellPaths: Input['services']['shellPaths'];
     surface: Input['services']['surface'];
     remoteRuntime: Input['remoteRuntime'];
-    planRuntime: Input['planRuntime'];
     fileUndoManager: Input['services']['fileUndoManager'];
     memoryRegistry: Input['services']['memoryRegistry'];
     integrationHelpers: Input['services']['integrationHelpers'];
@@ -322,7 +317,6 @@ export function projectBootstrapShellCommandOptions<
     sessionLineageTracker: Input['services']['sessionLineageTracker'];
     changeTracker: Input['services']['sessionChangeTracker'];
     planManager: Input['services']['planManager'];
-    adaptivePlanner: Input['services']['adaptivePlanner'];
     sessionOrchestration: Input['services']['sessionOrchestration'];
     operatorClient: Input['directTransport']['operator'];
     peerClient: Input['directTransport']['peer'];

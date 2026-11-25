@@ -436,19 +436,6 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
     tuningKeys: ['policy.bundleSource', 'policy.bundlePath'],
   },
 
-  // Adaptive Execution Planner.
-  {
-    id: 'adaptive-execution-planner',
-    name: 'Adaptive Execution Planner',
-    description:
-      'Reserved for choosing an execution strategy (single/cohort/background/remote) '
-      + 'on every conversation turn. No turn reads a strategy yet, so turning this on '
-      + 'changes nothing today. /work planner, planner-mode, planner-override and planner-explain work '
-      + 'without it: they configure the planner /workstream drafting consults.',
-    tier: 5,
-    runtimeToggleable: true,
-    settings: { key: 'planner.adaptive', kind: 'boolean' },
-  },
   // Provider Optimizer.
   {
     id: 'provider-optimizer',
@@ -458,8 +445,8 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
       + 'In auto mode, selects the best capable provider for each request profile '
       + 'using ProviderCapabilityRegistry contracts. Supports manual, auto, and pinned '
       + 'routing modes with deterministic, fully-explainable route decisions. '
-      + 'Exposes /provider route, /provider explain, /provider pin-route and '
-      + '/provider fallback.',
+      + 'Its controls are on the Routing list of Models and providers (how requests are routed, '
+      + 'why they go where they go, sending every request to one model, where a failed request goes).',
     tier: 5,
     runtimeToggleable: true,
     settings: { key: 'provider.optimizerMode', kind: 'enum', enabledValues: ['manual', 'auto', 'pinned'] },

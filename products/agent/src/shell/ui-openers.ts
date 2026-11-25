@@ -128,7 +128,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     ...modelPickerCatalogServices({
       picker: input.modelPicker,
       getPinned,
-      refreshLiveModels: async () => (await providerRegistry.refreshLiveModelDiscovery?.()) ?? [],
+      // An empty picker reads every list again past each stored one (force); otherwise each list's own age decides.
+      refreshLiveModels: async (force) => (await providerRegistry.refreshLiveModelDiscovery?.(undefined, force ? { force: true } : {})) ?? [],
     }),
     picker: input.modelPicker,
     render,
@@ -192,9 +193,9 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       (result) => {
         if (!result) return;
         const level = result.item.id;
-        // An explicit user choice, the one kind of write that is allowed to
-        // change the stored preference.
-        configManager.set('provider.reasoningEffort', level);
+        // This conversation's own level: the shared default every program
+        // starts from (the daemon's settings) is not touched.
+        configManager.setRuntimeOverride('provider.reasoningEffort', level as never);
         const serving = servingEffortForLevel(level, model);
         runtime.reasoningEffort = serving.effective ?? '';
         commandContext.print(['Reasoning effort set', `  level ${describeServingEffort(serving, model)}`].join('\n'));

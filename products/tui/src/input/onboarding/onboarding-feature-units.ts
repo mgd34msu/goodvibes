@@ -291,11 +291,6 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
         hint: 'Retry with backoff and a dead-letter queue for Slack/Discord/webhook delivery, with dead-letter events surfaced in diagnostics. On by default; exposes /notify failed and /notify resend. Retry bounds are tuned in /settings.',
       },
       {
-        flagId: 'adaptive-execution-planner',
-        label: 'Adaptive execution planner',
-        hint: 'Reserved for a per-turn execution strategy; no turn reads one yet, so this changes nothing today. /work planner-mode and planner-override already steer /workstream drafting without it.',
-      },
-      {
         flagId: 'daemon-auto-update',
         label: 'Daemon auto-update',
         hint: 'The daemon checks for a new release hourly, checksum-verifies it, swaps binaries only at a no-active-work moment, and keeps the previous binary for one-command rollback. On by default; update.auto turns it off and update.intervalMinutes tunes the cadence in /settings.',
@@ -359,7 +354,7 @@ export const FEATURE_ONBOARDING_SECTIONS: readonly FeatureSection[] = [
       {
         flagId: 'provider-optimizer',
         label: 'Provider optimizer',
-        hint: 'Capability-contract-driven provider routing with explainable route decisions. Exposes /provider route and related commands.',
+        hint: 'Capability-contract-driven provider routing with explainable route decisions. Its controls are on the Routing list of Models and providers.',
         subOptions: [
           {
             key: 'mode',

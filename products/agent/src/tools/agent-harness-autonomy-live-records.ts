@@ -263,6 +263,8 @@ function commandRoute(command: string): string {
 }
 
 const SCHEDULE_LIST_ROUTE = 'schedule action:"list"';
+/** What each kind of approval asks about: a capability the model runs itself (capabilities/builtin/waiting.ts). */
+const APPROVAL_KINDS_ROUTE = 'capability_run id:"approval.kinds"';
 
 function quoteRouteValue(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
@@ -530,7 +532,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null, ownPrincip
       const cancellable = active && raisedHere;
       const label = `${approval.request.tool}: ${approval.request.analysis.summary}`;
       // Answering an approval put to the owner is his own act: the model is shown where he answers it, never a route to answer it.
-      const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, /questions answer, or the web UI`;
+      const ownerAnswers = `only the owner answers approval ${approval.id}: the approval prompt, Waiting for you, or the web UI`;
       const cancelRoute = `agent_operator_action action:"approvals.cancel" approvalId:"${approval.id}"`;
       return {
         id: approval.id,
@@ -548,14 +550,14 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null, ownPrincip
           approval.resolvedBy ? `resolved by ${approval.resolvedBy}` : '',
           compactUnknown(approval.request.args),
         ].filter(Boolean).join(' | '),
-        inspectRoute: commandRoute('/approval kinds'),
+        inspectRoute: APPROVAL_KINDS_ROUTE,
         ...(cancellable ? {
           cancelRoute,
         } : {}),
         nextSteps: active ? [
           `tell the owner: ${ownerAnswers}`,
           ...(cancellable ? [cancelRoute] : []),
-        ] : [commandRoute('/approval kinds')],
+        ] : [APPROVAL_KINDS_ROUTE],
         sourceIds: [
           approval.callId,
           approval.sessionId,
@@ -569,7 +571,7 @@ function approvalLiveRecords(snapshot: UiControlPlaneSnapshot | null, ownPrincip
           entry.note,
         ].filter(Boolean).join(' ')),
         controls: [
-          availableControl('inspect', 'Inspect approval matrix', 'read-only', commandRoute('/approval kinds')),
+          availableControl('inspect', 'Inspect approval matrix', 'read-only', APPROVAL_KINDS_ROUTE),
           active
             ? unavailableControl('approve', 'Approve approval', `It was put to the owner; ${ownerAnswers}.`)
             : unavailableControl('approve', 'Approve approval', `Approval is ${approval.status}; only pending or claimed approvals can be approved.`),

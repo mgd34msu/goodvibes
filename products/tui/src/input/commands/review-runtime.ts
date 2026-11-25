@@ -1,7 +1,4 @@
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { doAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import type { CommandContext } from '../command-registry.ts';
 import type { ReviewHunk } from '../../views/diff-review-model.ts';
 import { hunkPatchText, buildHunkRevertReceiptBlock } from '../../views/diff-review-model.ts';
 
@@ -90,29 +87,4 @@ export async function revertReviewHunk(ctx: CommandContext, hunk: ReviewHunk): P
   if (!receipt) return `Revert not applied: ${result.refusal?.reason ?? 'confirmation was refused.'}`;
   ctx.session.conversationManager.addTypedSystemMessage(buildHunkRevertReceiptBlock(receipt), 'operational');
   return `Reverted the hunk in ${receipt.path}; the receipt is in the transcript.`;
-}
-
-/**
- * `/review`, the comment-on-hunk review loop, in the Changes modal: this
- * session's file changes (the files the platform SessionChangeTracker recorded) as a
- * working-tree diff, hunk by hunk. c attaches a comment to a hunk and Enter
- * sends the attached comments to the model as one steering message with each
- * hunk's file, line range and patch excerpt; x reverts a hunk (its receipt says how to undo it).
- */
-export function registerReviewRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(defineCommand<CommandContext>({
-    name: 'review',
-    title: 'Review this session\'s changes',
-    summary: 'Review this session\'s file changes hunk by hunk: comment to steer the model, or revert a hunk',
-    group: 'Changes',
-    actions: [doAction<CommandContext>({
-      id: 'review', label: 'Review this session\'s changes', word: '', touches: 'reads',
-      sentence: 'Opens this session\'s file changes hunk by hunk: c comments on a hunk, Enter sends the comments to the model, x reverts a hunk at once (its receipt says how to undo it).',
-      operator: { terminalOnly: 'It is a terminal screen over this session\'s changes.' },
-      async run(_values, ctx) {
-        if (!ctx.openChanges) throw commandRefusal('The Changes view is not available in this session.');
-        ctx.openChanges({ source: 'session' });
-      },
-    })],
-  }));
 }

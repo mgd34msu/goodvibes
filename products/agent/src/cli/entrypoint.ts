@@ -13,6 +13,7 @@ export type { ShellEntrypointRoots } from '@goodvibes/engine/terminal-shell/cli-
 // `status` never loads the headless turn and neither loads the terminal UI.
 import { headlessRunFlagErrors } from '@goodvibes/engine/terminal-shell/headless-turn-events';
 import { join } from 'node:path';
+import { DAEMON_STATE_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { AgentConfigManager } from '../config/host-settings.ts';
 import { formatProviderModel, getModelIdFromProviderModel, getProviderIdFromModel } from '@goodvibes/engine/platform/platform/providers/provider-model';
@@ -119,6 +120,8 @@ export async function prepareShellCliRuntime(
     workingDir: bootstrapWorkingDir,
     homeDir: bootstrapHomeDirectory,
     surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+    // Providers of your own are the daemon's, one folder for every program (the Agent's own were carried into it once).
+    providersDir: join(bootstrapHomeDirectory, '.goodvibes', DAEMON_STATE_SURFACE_ROOT, 'providers'),
   });
   new GlobalNetworkTransportInstaller().install(configManager);
 

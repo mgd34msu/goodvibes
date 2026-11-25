@@ -5,14 +5,14 @@
  * every key and the file that changes them. Where no list can be shown (a model,
  * a script) bare `/help` prints every command as text.
  */
-import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { helpForCommand } from './command-actions/catalog.js';
 import type { CommandActionContext } from './command-actions/types.js';
-import { readAction, textInput } from './described-command-kit.js';
+import { sessionCapabilityAction } from './command-actions/capability-actions.js';
+import { CapabilityRefusal, SYSTEM_HELP, type SystemSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
 import type { TerminalSlashCommand } from './command-registry.js';
 
-interface HelpContext extends CommandActionContext {
+export interface HelpContext extends CommandActionContext {
   readonly openCommandPalette?: (() => void) | undefined;
 }
 
@@ -36,40 +36,36 @@ function commandListText<Context>(commands: readonly TerminalSlashCommand<Contex
   ].join('\n');
 }
 
-export function createHelpCommand<Context extends HelpContext>(sources: HelpSources<Context>): DescribedCommand<Context> {
+/**
+ * This program's help as the capability `system.help` takes it (capabilities/builtin/system-program.ts): the keys,
+ * one command's actions and lines, or, for a person where the palette can open, the palette; else every command.
+ */
+export function helpOf<Context extends HelpContext>(sources: HelpSources<Context>, context: Context): (about: string) => Promise<string> {
+  return async (about) => {
+    if (about === 'keys') {
+      const keys = sources.keys(context);
+      return [...keys.lines, '', `Every key can be changed in the System place, on its Keys tab (they are kept in ${keys.file}).`].join('\n');
+    }
+    if (about) {
+      const command = sources.command(about);
+      if (!command) throw new CapabilityRefusal(`No command named /${about}.`);
+      return helpForCommand(command);
+    }
+    if (context.openCommandPalette && context.invokedByModel !== true) {
+      context.openCommandPalette();
+      return '';
+    }
+    return commandListText(sources.commands());
+  };
+}
+
+/** `/help`: the capability `system.help`, run with this program's services. */
+export function createHelpCommand<Context extends HelpContext>(services: (context: Context) => SystemSessionServices): DescribedCommand<Context> {
   return defineCommand<Context>({
     name: 'help',
     title: 'Help',
     summary: 'Every command and every key in one searchable list',
     group: 'Shell',
-    actions: [
-      readAction<Context>({
-        id: 'help', label: 'See every command and every key', word: '',
-        inputs: [textInput({
-          id: 'about', label: 'About', help: 'A command\'s name to see its actions and lines, or keys for every key',
-          why: 'A command name as you type it, without the slash; or keys.', typed: { position: 1 },
-          optional: { default: '', means: 'every command and every key' },
-        })],
-        sentence: 'Shows every command and every key, or one command\'s actions and lines.',
-        example: { about: 'mcp' },
-        async run(values, context) {
-          const about = (values.about ?? '').replace(/^\//, '').trim();
-          if (about === 'keys') {
-            const keys = sources.keys(context);
-            return [...keys.lines, '', `Change any key in ${keys.file}: { "action": { "key": "x", "ctrl": true } }.`].join('\n');
-          }
-          if (about) {
-            const command = sources.command(about);
-            if (!command) throw commandRefusal(`No command named /${about}.`, '/help lists every command.');
-            return helpForCommand(command);
-          }
-          if (context.openCommandPalette && context.invokedByModel !== true) {
-            context.openCommandPalette();
-            return;
-          }
-          return commandListText(sources.commands());
-        },
-      }),
-    ],
+    actions: [sessionCapabilityAction<Context, SystemSessionServices>(SYSTEM_HELP, services, { terminalOnly: 'It lists the commands and keys of the terminal program you are using.' })],
   });
 }

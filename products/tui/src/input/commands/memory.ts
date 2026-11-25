@@ -1,7 +1,7 @@
 /**
  * `/memory` is one description shared with the other terminal app
- * (terminal-shell/memory-command.ts). This app opens the Memory screen and
- * shows the memory each recorded turn was given.
+ * (terminal-shell/memory-command.ts): it opens Memory and knowledge. This app
+ * records the memory each turn was given, which that place shows.
  */
 import { createMemoryCommand } from '@goodvibes/engine/terminal-shell/memory-command';
 import type { MemoryApi } from '@goodvibes/engine/platform/platform/knowledge';
@@ -26,14 +26,10 @@ export function getMemorySpine(context: CommandContext): MemorySpineClient | nul
 }
 
 export const memoryCommand: SlashCommand = createMemoryCommand<CommandContext>({
-  open(ctx) {
-    if (!ctx.openModal) throw commandRefusal('This surface has no Memory screen.', '/memory list shows the records.');
-    ctx.openModal('memory-modal');
-  },
   injections(ctx, agentId) {
     if (!agentId) return buildMainSessionTurnInjectionsText(ctx.session.getMainSessionTurnInjections?.() ?? []);
     const record = (ctx.ops.agentManager?.exportState() ?? []).find((candidate) => candidate.id === agentId);
-    if (!record) throw commandRefusal(`No agent is ${agentId}.`, '/agents lists them.');
+    if (!record) throw commandRefusal(`No agent is ${agentId}.`, 'Your agents are listed in the Work and agents place.');
     return buildTurnInjectionsText(agentId, record.turnInjections ?? []);
   },
   daemon: capabilityBinding,

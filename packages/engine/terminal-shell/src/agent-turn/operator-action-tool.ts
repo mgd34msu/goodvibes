@@ -91,7 +91,7 @@ export function createAgentOperatorActionTool(
         if (!parsed.ok) return { success: false, error: parsed.error };
         const descriptor = parsed.descriptor;
         if (ownerActs.includes(descriptor.action)) {
-          return { success: false, error: `${descriptor.action} answers an approval that was put to the owner, which only he does; a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner approval ${parsed.targetId} is waiting: he answers it in the approval prompt, with /approval, or in the web UI.` };
+          return { success: false, error: `${descriptor.action} answers an approval that was put to the owner, which only he does; a call the model makes is refused whatever approved it. Nothing was sent. Tell the owner approval ${parsed.targetId} is waiting: he answers it in the approval prompt, in Waiting for you, or in the web UI.` };
         }
         assertSafeOperatorPathValue(parsed.targetId, descriptor.targetField);
         const request = captureStrictJudgmentJson(parsed);

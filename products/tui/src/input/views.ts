@@ -91,7 +91,6 @@ export function resolveViewName(name: string, modalRedirect: (name: string) => s
   if (CHANGES_VIEW_NAMES.includes(id)) return { kind: 'changes' };
   if (id === 'notifications') return { kind: 'notifications' };
   if (id === 'sessions' || id === 'session-picker') return { kind: 'sessions' };
-  if (id === 'local-auth') return { kind: 'modal', name: 'local-auth-modal' };
   const redirect = modalRedirect(id);
   if (redirect === 'sessionPicker') return { kind: 'sessions' };
   if (redirect) return { kind: 'modal', name: redirect };

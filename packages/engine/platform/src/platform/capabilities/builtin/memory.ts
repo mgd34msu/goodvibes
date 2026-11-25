@@ -1,16 +1,408 @@
 /**
- * "See what memory a task would be given", worked out by the daemon from the
- * one memory store every program reads (`~/.goodvibes/shared/memory.sqlite`).
+ * Memory: what the project remembers (decisions, constraints, incidents,
+ * patterns), kept in the one memory store every program reads
+ * (`~/.goodvibes/shared/memory.sqlite`), whose single writer is the daemon.
+ *
+ * Home `daemon`: every read and write of the records, their review, links,
+ * copies and search index, what a task would be given, and saving memory to
+ * a file or loading one (a path is the caller's project's; a model's path
+ * stays inside that project).
+ *
+ * Home `session`: what the program holding the conversation alone knows or
+ * does: the memory its turns were given, the incident reports and trust it
+ * holds, and memory kept as files in the project (written, compared and taken
+ * back by the program working in that project).
  */
+import { existsSync, readFileSync } from 'node:fs';
+import { isAbsolute, relative, resolve } from 'node:path';
+import { atomicWriteFileSync } from '../../config/atomic-write.js';
 import type { MemoryApi } from '../../knowledge/knowledge-api.js';
-import type { CapabilityDefinition } from '../types.js';
+import type { MemoryRegistry } from '../../state/memory-registry.js';
+import { memoryRecordTemporalStatus } from '../../state/memory-temporal.js';
+import type {
+  MemoryBundle, MemoryClass, MemoryRecord, MemoryReviewState, MemoryScope, MemorySearchFilter, ProvenanceLink,
+} from '../../state/memory-store.js';
+import type { MemoryRestoreResult, MemorySnapshotInfo } from '../../state/memory-snapshots.js';
+import { CapabilityRefusal, type CapabilityCaller, type CapabilityDefinition, type FixedChoice, type InputDescription, type ListName } from '../types.js';
 
 export interface MemoryCapabilityServices {
-  readonly memory: Pick<MemoryApi, 'explain'>;
+  readonly memory: MemoryApi;
+  /** The copies of memory taken each day, before a migration and before a restore. */
+  readonly memoryCopies: Pick<MemoryRegistry, 'listSnapshots' | 'restoreSnapshot'>;
 }
 
-export const MEMORY_EXPLAIN: CapabilityDefinition<MemoryCapabilityServices> = {
-  capability: { id: 'memory.explain', group: 'memory', home: 'daemon', repeat: 'safe' },
+// ---------------------------------------------------------------------------
+// Words
+// ---------------------------------------------------------------------------
+
+const CLASS_VALUES: readonly MemoryClass[] = ['decision', 'constraint', 'incident', 'pattern', 'fact', 'risk', 'runbook', 'architecture', 'ownership'];
+const SCOPE_VALUES: readonly MemoryScope[] = ['session', 'project', 'team'];
+const STATE_VALUES: readonly MemoryReviewState[] = ['fresh', 'reviewed', 'stale', 'contradicted'];
+
+export const MEMORY_CLASS_LABELS: Readonly<Record<MemoryClass, string>> = {
+  decision: 'A decision', constraint: 'A constraint', incident: 'An incident', pattern: 'A pattern', fact: 'A fact',
+  risk: 'A risk', runbook: 'A runbook', architecture: 'Architecture', ownership: 'Who owns what',
+};
+const SCOPE_LABELS: Readonly<Record<MemoryScope, { label: string; help: string }>> = {
+  session: { label: 'This session', help: 'Given to this session\'s turns only.' },
+  project: { label: 'This project', help: 'Given to work in this project.' },
+  team: { label: 'Shared with the team', help: 'Part of what a team handoff carries.' },
+};
+export const MEMORY_STATE_LABELS: Readonly<Record<MemoryReviewState, string>> = {
+  fresh: 'Not reviewed yet', reviewed: 'Reviewed and right', stale: 'Out of date', contradicted: 'Contradicted by something newer',
+};
+const CLASSES: readonly FixedChoice[] = CLASS_VALUES.map((cls) => ({ value: cls, label: MEMORY_CLASS_LABELS[cls] }));
+const SCOPES: readonly FixedChoice[] = SCOPE_VALUES.map((scope) => ({ value: scope, ...SCOPE_LABELS[scope] }));
+const REVIEW_STATES: readonly FixedChoice[] = STATE_VALUES.map((state) => ({ value: state, label: MEMORY_STATE_LABELS[state] }));
+
+const RECORD: InputDescription = {
+  id: 'record', label: 'Record', help: 'Your memory records', kind: 'choice',
+  choices: { list: 'memory.records' as ListName, allowOther: { reason: 'a record id' } }, required: true, typed: { position: 1 },
+};
+const CLASS_FILTER: InputDescription = {
+  id: 'class', label: 'Kind', help: 'Only records of one kind', kind: 'choice', choices: CLASSES,
+  required: { default: '', defaultMeans: 'every kind' }, typed: { flag: '--class' },
+};
+const SCOPE_FILTER: InputDescription = {
+  id: 'scope', label: 'Where it applies', help: 'Only records for this session, project or team', kind: 'choice', choices: SCOPES,
+  required: { default: '', defaultMeans: 'everywhere' }, typed: { flag: '--scope' },
+};
+const FILE: InputDescription = {
+  id: 'path', label: 'File', help: 'A path in this project, or an absolute path', kind: 'path', freeTextReason: 'a file path', required: true, typed: { position: 1 },
+};
+const TAGS: InputDescription = {
+  id: 'tags', label: 'Tags', help: 'Words to find it by, separated by commas', kind: 'text', freeTextReason: 'your own words',
+  required: { default: '', defaultMeans: 'none' }, typed: { flag: '--tags' },
+};
+const DETAIL: InputDescription = {
+  id: 'detail', label: 'Detail', help: 'More about it, as long as you like', kind: 'long-text', freeTextReason: 'your own words',
+  required: { default: '', defaultMeans: 'none' }, typed: { flag: '--detail' },
+};
+
+function splitTags(text: string | undefined): string[] {
+  return (text ?? '').split(',').map((tag) => tag.trim()).filter(Boolean);
+}
+function shortTime(at: number): string {
+  return new Date(at).toISOString().slice(0, 16).replace('T', ' ');
+}
+function temporalLabel(record: MemoryRecord): string {
+  const status = memoryRecordTemporalStatus(record);
+  return status === 'active' ? '' : ` [${status}]`;
+}
+/** One record on one line: its id, where it applies, its kind, its tags and its summary. */
+export function memoryRecordLine(record: MemoryRecord): string {
+  const tags = record.tags.length ? ` [${record.tags.join(', ')}]` : '';
+  return `  ${record.id}  ${record.scope}/${record.cls}${tags}  ${record.summary}${temporalLabel(record)}`;
+}
+const plural = (count: number, one: string, many = `${one}s`): string => `${count} ${count === 1 ? one : many}`;
+
+function missing(id: string, what = 'nothing was changed'): CapabilityRefusal {
+  return new CapabilityRefusal(`No memory record is ${id}; ${what}.`, 'The Memory place lists every record.');
+}
+
+/** A path in the caller's project, or an absolute one; a path a model or another agent named stays inside the project. */
+function filePath(path: string, caller: CapabilityCaller): string {
+  const project = caller.workingDirectory ? resolve(caller.workingDirectory) : undefined;
+  const target = project ? resolve(project, path) : resolve(path);
+  if (caller.personAsked !== true) {
+    const inside = project !== undefined && !relative(project, target).startsWith('..') && !isAbsolute(relative(project, target));
+    if (!inside) throw new CapabilityRefusal(`${path} is outside the project, and only the person may name a file there; nothing was read or written.`, 'Ask the owner to do it for another place.');
+  }
+  return target;
+}
+
+function readBundle(path: string): MemoryBundle {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf-8'));
+  } catch (error) {
+    throw new CapabilityRefusal(`Could not read ${path}: ${error instanceof Error ? error.message : String(error)}. Nothing was loaded.`);
+  }
+  const bundle = parsed as Partial<MemoryBundle> | null;
+  if (!bundle || bundle.schemaVersion !== 'v1' || typeof bundle.exportedAt !== 'number' || !Array.isArray(bundle.records) || !Array.isArray(bundle.links)) {
+    throw new CapabilityRefusal(`${path} is not a memory file (expected schemaVersion "v1" with records and links). Nothing was loaded.`);
+  }
+  return parsed as MemoryBundle;
+}
+
+/** One line per copy, newest first. */
+export function formatMemorySnapshots(copies: readonly MemorySnapshotInfo[]): string {
+  if (copies.length === 0) return 'No copies of memory yet: the first daily copy is taken within an hour of start.';
+  const size = (bytes: number) => bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return ['Copies of memory (newest first):', ...copies.map((copy) => `  ${copy.name}  ${copy.reason}  ${shortTime(copy.createdAt)} UTC  ${size(copy.sizeBytes)}  ${copy.recordCount === null ? 'records unreadable' : plural(copy.recordCount, 'record')}`)].join('\n');
+}
+
+/** What a restore did, in one paragraph. */
+export function formatMemoryRestore(result: MemoryRestoreResult): string {
+  return [
+    `Restored memory from ${result.restored} (${result.restoredReason}, taken ${shortTime(result.restoredCreatedAt)} UTC): ${plural(result.recordsBefore, 'record')} before, ${result.recordsAfter} now, ${plural(result.linksAfter, 'link')}.`,
+    `The records it replaced were copied to ${result.undoSnapshot}; replacing memory with that copy puts them back.`,
+    result.vectorIndex === 'updating'
+      ? 'Semantic search catches up in the background: records whose text changed are embedded again.'
+      : 'This store keeps no semantic index.',
+  ].join('\n');
+}
+
+function formatVectorStats(stats: ReturnType<MemoryApi['vectorStats']>, title: string): string {
+  return [
+    title,
+    `  works: ${stats.enabled && stats.available ? 'yes' : stats.enabled ? 'no (not available)' : 'no (turned off)'}`,
+    `  records in it: ${stats.indexedRecords} (${stats.dimensions} dimensions, ${stats.backend})`,
+    ...(stats.awaitingReembed > 0 ? [`  waiting to be embedded again: ${stats.awaitingReembed} (embedded by an earlier provider or model; left out of search until a rebuild)`] : []),
+    ...(stats.path ? [`  kept at: ${stats.path}`] : []),
+    ...(stats.error ? [`  error: ${stats.error}`] : []),
+  ].join('\n');
+}
+
+function filterOf(values: Readonly<Record<string, string>>): MemorySearchFilter {
+  return { ...(values.class ? { cls: values.class as MemoryClass } : {}), ...(values.scope ? { scope: values.scope as MemoryScope } : {}) };
+}
+
+type MemoryDefinition = CapabilityDefinition<MemoryCapabilityServices>;
+const daemon = (id: string, repeat: 'safe' | 'unsafe') => ({ id, group: 'memory' as const, home: 'daemon' as const, repeat });
+
+// ---------------------------------------------------------------------------
+// The records
+// ---------------------------------------------------------------------------
+
+export const MEMORY_LIST: MemoryDefinition = {
+  capability: daemon('memory.list', 'safe'),
+  actionId: 'see-memory', label: 'See your memory', word: 'list', inputs: [CLASS_FILTER, SCOPE_FILTER],
+  sentence: 'Lists everything the project remembers, by kind, newest first, with where each applies.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { class: 'decision' },
+  async run(values, services) {
+    const records = await services.memory.search(filterOf(values));
+    if (records.length === 0) return { text: 'No memory records yet.', data: { records: [] } };
+    const grouped = new Map<string, MemoryRecord[]>();
+    for (const record of records) {
+      const group = grouped.get(record.cls);
+      if (group) group.push(record); else grouped.set(record.cls, [record]);
+    }
+    return {
+      text: [...grouped].flatMap(([cls, group]) => [`${MEMORY_CLASS_LABELS[cls as MemoryClass] ?? cls} (${group.length})`, ...group.map(memoryRecordLine)]).join('\n'),
+      data: { records },
+    };
+  },
+};
+
+export const MEMORY_ADD: MemoryDefinition = {
+  capability: daemon('memory.add', 'unsafe'),
+  actionId: 'remember', label: 'Remember something', word: 'add',
+  inputs: [
+    { id: 'class', label: 'Kind', help: 'What sort of thing it is: something decided, a rule to keep to, an incident, a fact', kind: 'choice', choices: CLASSES, required: true, typed: { position: 1 } },
+    { id: 'summary', label: 'Summary', help: 'One line that says it', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } },
+    DETAIL,
+    TAGS,
+    { ...SCOPE_FILTER, help: 'Where it applies', required: { default: 'project', defaultMeans: 'this project' } },
+    { id: 'session', label: 'From session', help: 'The session it came from', kind: 'text', freeTextReason: 'a session id', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--session' } },
+    { id: 'task', label: 'From task', help: 'The task it came from', kind: 'text', freeTextReason: 'a task id', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--task' } },
+    { id: 'file', label: 'From file', help: 'The file it is about', kind: 'path', freeTextReason: 'a file path', required: { default: '', defaultMeans: 'none' }, typed: { flag: '--file' } },
+  ],
+  sentence: '"{summary}" will be remembered as {class} for {scope}, so later work uses it, until you change it.',
+  done: 'Remembered "{summary}".',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'forget',
+  example: { class: 'decision', summary: 'Use SQLite for local state' },
+  async run(values, services) {
+    const summary = (values.summary ?? '').trim();
+    if (!summary) throw new CapabilityRefusal('Nothing was remembered: the summary is empty.');
+    const provenance: ProvenanceLink[] = [];
+    if (values.session) provenance.push({ kind: 'session', ref: values.session });
+    if (values.task) provenance.push({ kind: 'task', ref: values.task });
+    if (values.file) provenance.push({ kind: 'file', ref: values.file });
+    const record = await services.memory.add({
+      scope: (values.scope || 'project') as MemoryScope, cls: values.class as MemoryClass, summary,
+      ...(values.detail ? { detail: values.detail } : {}), tags: splitTags(values.tags), provenance,
+    });
+    return { text: `Its id is ${record.id}.`, data: { record } };
+  },
+};
+
+export const MEMORY_SEARCH: MemoryDefinition = {
+  capability: daemon('memory.search', 'safe'),
+  actionId: 'search', label: 'Search memory', word: 'search',
+  inputs: [
+    { id: 'query', label: 'Words', help: 'What to look for', kind: 'text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'every record' }, typed: { tail: true } },
+    CLASS_FILTER,
+    SCOPE_FILTER,
+    { id: 'limit', label: 'At most', help: 'How many records to show', kind: 'number', freeTextReason: 'a whole number', required: { default: '', defaultMeans: 'the usual number' }, typed: { flag: '--limit' } },
+    { id: 'meaning', label: 'Match by', help: 'The words, or what they mean', kind: 'choice', choices: [{ value: 'words', label: 'The words' }, { value: 'meaning', label: 'What they mean', help: 'Uses the semantic search index.' }], required: { default: 'words', defaultMeans: 'the words' }, typed: { flag: '--semantic', switchOn: 'meaning' } },
+  ],
+  sentence: 'Finds memory records that match {query}.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { query: 'sqlite' },
+  async run(values, services) {
+    const filter: MemorySearchFilter = { ...(values.query ? { query: values.query } : {}), ...filterOf(values) };
+    if (values.limit) {
+      if (!/^[1-9]\d*$/.test(values.limit)) throw new CapabilityRefusal(`"At most" takes a positive whole number, not "${values.limit}".`);
+      filter.limit = Number(values.limit);
+    }
+    const semantic = values.meaning === 'meaning';
+    const scored = semantic ? await services.memory.searchSemantic({ ...filter, semantic: true }) : [];
+    const records = semantic ? scored.map((entry) => entry.record) : await services.memory.search(filter);
+    if (records.length === 0) return { text: 'No records match.', data: { records: [] } };
+    return {
+      text: [`${plural(records.length, 'record')}${semantic ? ', closest meaning first' : ''}:`, ...records.map((record) => {
+        const score = scored.find((entry) => entry.record.id === record.id);
+        return `${memoryRecordLine(record)}${score ? `  ${Math.round(score.similarity * 100)}% alike` : ''}`;
+      })].join('\n'),
+      data: { records },
+    };
+  },
+};
+
+export const MEMORY_SHOW: MemoryDefinition = {
+  capability: daemon('memory.show', 'safe'),
+  actionId: 'see-record', label: 'See one record', word: 'show', inputs: [RECORD],
+  sentence: 'Shows {record} in full: where it applies, its detail, tags, where it came from and what it is linked to.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { record: 'mem-1' },
+  async run(values, services) {
+    const record = services.memory.get(values.record!);
+    if (!record) throw new CapabilityRefusal(`No memory record is ${values.record}.`, 'The Memory place lists every record.');
+    const links = services.memory.linksFor(record.id);
+    const when = (value: number | undefined) => value === undefined ? '(none)' : new Date(value).toISOString().slice(0, 19).replace('T', ' ');
+    return {
+      text: [
+        `${record.id}  ${record.summary}`,
+        `  kind: ${MEMORY_CLASS_LABELS[record.cls] ?? record.cls}; applies to: ${record.scope}; review: ${MEMORY_STATE_LABELS[record.reviewState] ?? record.reviewState}, ${record.confidence}%`,
+        ...(record.detail ? [`  detail: ${record.detail}`] : []),
+        ...(record.tags.length ? [`  tags: ${record.tags.join(', ')}`] : []),
+        `  remembered: ${when(record.createdAt)}`,
+        ...(record.validFrom !== undefined || record.validUntil !== undefined ? [`  valid: ${when(record.validFrom)} to ${when(record.validUntil)}${temporalLabel(record)}`] : []),
+        ...(record.provenance.length ? ['  came from:', ...record.provenance.map((ref) => `    ${ref.kind}: ${ref.ref}${ref.label ? ` (${ref.label})` : ''}`)] : []),
+        ...(links.length ? ['  linked:', ...links.map((link) => `    ${link.fromId === record.id ? '->' : '<-'} ${link.fromId === record.id ? link.toId : link.fromId}  ${link.relation}`)] : []),
+      ].join('\n'),
+      data: { record, links },
+    };
+  },
+};
+
+export const MEMORY_EDIT: MemoryDefinition = {
+  capability: daemon('memory.edit', 'safe'),
+  actionId: 'edit', label: 'Correct a record', word: 'edit',
+  inputs: [
+    RECORD,
+    { id: 'summary', label: 'Summary', help: 'The new one-line summary', kind: 'long-text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'unchanged' }, typed: { flag: '--summary' } },
+    { ...DETAIL, required: { default: '', defaultMeans: 'unchanged' } },
+    { ...TAGS, required: { default: '', defaultMeans: 'unchanged' } },
+    { ...SCOPE_FILTER, help: 'Where it applies', required: { default: '', defaultMeans: 'unchanged' } },
+  ],
+  sentence: '{record} will be corrected in place (its id, kind, origin and links stay) until you change it.',
+  done: 'Corrected {record}.',
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
+  example: { record: 'mem-1', summary: 'Use SQLite for all local state' },
+  async run(values, services) {
+    const patch = {
+      ...(values.summary ? { summary: values.summary.trim() } : {}),
+      ...(values.detail ? { detail: values.detail.trim() } : {}),
+      ...(values.tags ? { tags: splitTags(values.tags) } : {}),
+      ...(values.scope ? { scope: values.scope as MemoryScope } : {}),
+    };
+    if (Object.keys(patch).length === 0) throw new CapabilityRefusal('Nothing was changed: give a new summary, detail, tags or where it applies.');
+    const record = services.memory.update(values.record!, patch);
+    if (!record) throw missing(values.record!);
+    return { text: `Changed: ${Object.keys(patch).join(', ')}.`, data: { record } };
+  },
+};
+
+export const MEMORY_REVIEW: MemoryDefinition = {
+  capability: daemon('memory.review', 'safe'),
+  actionId: 'review', label: 'Say whether a record is still right', word: 'review',
+  inputs: [
+    RECORD,
+    { id: 'state', label: 'It is', help: 'Whether it still holds', kind: 'choice', choices: REVIEW_STATES, required: true, typed: { position: 2 } },
+    { id: 'confidence', label: 'Confidence', help: 'How sure, from 0 to 100', kind: 'number', freeTextReason: 'a number from 0 to 100', required: { default: '', defaultMeans: 'unchanged' }, typed: { flag: '--confidence' } },
+    { id: 'reason', label: 'Why', help: 'A note for whoever reads it next', kind: 'long-text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'no note' }, typed: { flag: '--reason' } },
+    { id: 'by', label: 'Reviewed by', help: 'Who reviewed it', kind: 'text', freeTextReason: 'a name', required: { default: '', defaultMeans: 'you (operator)' }, typed: { flag: '--by' } },
+  ],
+  sentence: '{record} will be marked "{state}" until you change it.',
+  done: 'Marked {record} as {state}.',
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
+  example: { record: 'mem-1', state: 'stale' },
+  async run(values, services, caller) {
+    if (values.confidence && !/^(100|[1-9]?\d)$/.test(values.confidence)) throw new CapabilityRefusal(`Confidence takes a whole number from 0 to 100, not "${values.confidence}". Nothing was changed.`);
+    // "Reviewed" lets the record's text into later prompts as something the owner checked: only his own request counts.
+    if (values.state === 'reviewed' && caller.personAsked !== true) {
+      throw new CapabilityRefusal(`Memory record ${values.record} is unchanged: marking a record reviewed is the owner's decision that its text may reach the prompt, so it only counts when the owner asks for it himself.`, 'Ask the owner to mark it reviewed in the Memory place.');
+    }
+    const record = services.memory.review(values.record!, {
+      state: values.state as MemoryReviewState,
+      ...(values.confidence ? { confidence: Number(values.confidence) } : {}),
+      reviewedBy: values.by || 'operator',
+      ...(values.reason ? { staleReason: values.reason } : {}),
+    });
+    if (!record) throw missing(values.record!);
+    return { text: `Confidence ${record.confidence}%.`, data: { record } };
+  },
+};
+
+export const MEMORY_PROMOTE: MemoryDefinition = {
+  capability: daemon('memory.promote', 'safe'),
+  actionId: 'move', label: 'Change where a record applies', word: 'promote',
+  inputs: [RECORD, { ...SCOPE_FILTER, label: 'Applies to', help: 'This session, this project or the team', required: true, typed: { position: 2 } }],
+  sentence: '{record} will apply to {scope} until you change it.',
+  done: '{record} now applies to {scope}.',
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
+  example: { record: 'mem-1', scope: 'team' },
+  async run(values, services) {
+    const record = services.memory.update(values.record!, { scope: values.scope as MemoryScope });
+    if (!record) throw missing(values.record!);
+    return { text: '', data: { record } };
+  },
+};
+
+export const MEMORY_LINK: MemoryDefinition = {
+  capability: daemon('memory.link', 'safe'),
+  actionId: 'link', label: 'Link two records', word: 'link',
+  inputs: [
+    { ...RECORD, id: 'from', label: 'From', help: 'The record the link starts at' },
+    { ...RECORD, id: 'to', label: 'To', help: 'The record it points to', typed: { position: 2 } },
+    { id: 'relation', label: 'How they relate', help: 'A word such as supersedes, explains or depends-on', kind: 'text', freeTextReason: 'your own word for it', required: true, typed: { tail: true } },
+  ],
+  sentence: '{from} will be linked to {to} as "{relation}" until you change it.',
+  done: 'Linked {from} to {to} ({relation}).',
+  touches: 'this-machine', lasts: 'kept', risk: 'none',
+  example: { from: 'mem-1', to: 'mem-2', relation: 'supersedes' },
+  async run(values, services) {
+    const link = await services.memory.link(values.from!, values.to!, values.relation!);
+    if (!link) throw new CapabilityRefusal('Not linked: check that both records exist.', 'The Memory place lists every record.');
+    return { text: '', data: { link } };
+  },
+};
+
+export const MEMORY_REMOVE: MemoryDefinition = {
+  capability: daemon('memory.remove', 'safe'),
+  actionId: 'forget', label: 'Forget a record', word: 'remove', inputs: [RECORD],
+  sentence: 'Memory record {record} and its links will be deleted and cannot be recovered.',
+  done: 'Forgot {record}.',
+  touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', example: { record: 'mem-1' },
+  async run(values, services) {
+    if (!services.memory.delete(values.record!)) throw missing(values.record!, 'nothing was deleted');
+    return { text: '', data: { deleted: values.record } };
+  },
+};
+
+export const MEMORY_QUEUE: MemoryDefinition = {
+  capability: daemon('memory.queue', 'safe'),
+  actionId: 'see-queue', label: 'See memories waiting for review', word: 'queue',
+  inputs: [
+    { id: 'limit', label: 'At most', help: 'How many to show', kind: 'number', freeTextReason: 'a whole number', required: { default: '10', defaultMeans: 'ten' }, typed: { position: 1 } },
+    SCOPE_FILTER,
+  ],
+  sentence: 'Lists the records whose review is due, least sure first.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { limit: '20', scope: 'team' },
+  async run(values, services) {
+    if (!/^[1-9]\d*$/.test(values.limit || '10')) throw new CapabilityRefusal(`"At most" takes a positive whole number, not "${values.limit}".`);
+    const queue = await services.memory.reviewQueue(Number(values.limit || '10'), values.scope ? values.scope as MemoryScope : undefined);
+    if (queue.length === 0) return { text: 'Nothing is waiting for review.', data: { records: [] } };
+    return {
+      text: [`Waiting for review (${queue.length}):`, ...queue.map((record) => `${memoryRecordLine(record)}  ${MEMORY_STATE_LABELS[record.reviewState] ?? record.reviewState}, ${record.confidence}%${record.staleReason ? `: ${record.staleReason}` : ''}`)].join('\n'),
+      data: { records: queue },
+    };
+  },
+};
+
+/** "See what memory a task would be given", worked out from the one memory store every program reads. */
+export const MEMORY_EXPLAIN: MemoryDefinition = {
+  capability: daemon('memory.explain', 'safe'),
   actionId: 'explain', label: 'See what memory a task would be given', word: 'explain',
   inputs: [
     { id: 'task', label: 'Task', help: 'The task, the way you would ask for it', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } },
@@ -26,3 +418,108 @@ export const MEMORY_EXPLAIN: CapabilityDefinition<MemoryCapabilityServices> = {
     return { text: explanation.prompt ?? 'No reviewed project memory would be given to that task.', data: { records: ids } };
   },
 };
+
+// ---------------------------------------------------------------------------
+// Moving memory, its copies and its search index
+// ---------------------------------------------------------------------------
+
+export const MEMORY_EXPORT: MemoryDefinition = {
+  capability: daemon('memory.export', 'safe'),
+  actionId: 'save', label: 'Save memory to a file', word: 'export',
+  inputs: [FILE, SCOPE_FILTER, CLASS_FILTER],
+  sentence: 'Memory records and their links ({scope}) will be written to the JSON file {path}, to back up or move memory; a file already there is replaced.',
+  done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'team-memory.json', scope: 'team' },
+  async run(values, services, caller) {
+    const target = filePath(values.path!, caller);
+    const bundle = services.memory.exportBundle(filterOf(values));
+    atomicWriteFileSync(target, JSON.stringify(bundle, null, 2) + '\n', { mkdirp: true });
+    return { text: `Saved ${plural(bundle.recordCount, 'record')} and ${plural(bundle.linkCount, 'link')} to ${target}.`, data: { path: target, records: bundle.recordCount, links: bundle.linkCount } };
+  },
+};
+
+export const MEMORY_IMPORT: MemoryDefinition = {
+  capability: daemon('memory.import', 'safe'),
+  actionId: 'load', label: 'Load memories from a file', word: 'import', inputs: [FILE],
+  sentence: 'The records and links in the memory file {path} (one you saved, or one a colleague sent you) will be added to memory; a record already there is left as it is.',
+  done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', example: { path: 'team-memory.json' },
+  async run(values, services, caller) {
+    // The file is the caller's: its path is read in the caller's project (the folder comes from who asked).
+    const target = filePath(values.path!, caller);
+    if (!existsSync(target)) throw new CapabilityRefusal(`There is no file ${target}; nothing was loaded.`);
+    const result = await services.memory.importBundle(readBundle(target));
+    return {
+      text: `Loaded ${target}: ${plural(result.importedRecords, 'record')} added, ${result.skippedRecords} already there, ${plural(result.importedLinks, 'link')} added.`,
+      data: { ...result },
+    };
+  },
+};
+
+export const MEMORY_INSPECT: MemoryDefinition = {
+  capability: daemon('memory.inspect', 'safe'),
+  actionId: 'inspect', label: 'Read a memory file before loading it', word: 'inspect', inputs: [FILE],
+  sentence: 'Shows what the memory file {path} holds; nothing is loaded.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: { path: 'team-memory.json' },
+  async run(values, _services, caller) {
+    const bundle = readBundle(filePath(values.path!, caller));
+    return {
+      text: [`Memory file ${values.path}`, `  applies to: ${bundle.scope}`, `  records: ${bundle.recordCount}`, `  links: ${bundle.linkCount}`, `  saved: ${new Date(bundle.exportedAt).toISOString()}`].join('\n'),
+      data: { scope: bundle.scope, records: bundle.recordCount, links: bundle.linkCount, exportedAt: bundle.exportedAt },
+    };
+  },
+};
+
+export const MEMORY_SNAPSHOTS: MemoryDefinition = {
+  capability: daemon('memory.snapshots', 'safe'),
+  actionId: 'see-copies', label: 'See copies of memory', word: 'snapshots', inputs: [],
+  sentence: 'Lists the copies of memory taken each day, before a migration and before a restore, newest first.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
+  async run(_values, services) {
+    const copies = services.memoryCopies.listSnapshots();
+    return { text: formatMemorySnapshots(copies), data: { snapshots: copies } };
+  },
+};
+
+export const MEMORY_RESTORE: MemoryDefinition = {
+  capability: daemon('memory.restore', 'unsafe'),
+  actionId: 'restore', label: 'Replace all memory with a copy', word: 'restore',
+  inputs: [{ id: 'copy', label: 'Copy', help: 'The copies of memory, newest first', kind: 'choice', choices: { list: 'memory.copies' as ListName, allowOther: { reason: 'latest (the newest copy not taken by a restore), or a date such as 2026-11-19' } }, required: true, typed: { position: 1 } }],
+  sentence: 'Every memory record, link and waiting proposal will be replaced by those in {copy}, until you change it; the records you have now are copied first, so restoring that copy puts them back.',
+  done: '',
+  touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'restore',
+  ownerOnly: { reason: 'it replaces every memory record', instead: 'Ask the owner to choose "Replace all memory with a copy" in the Memory place.' },
+  example: { copy: 'latest' },
+  async run(values, services) {
+    const result = await services.memoryCopies.restoreSnapshot(values.copy!);
+    return { text: formatMemoryRestore(result), data: { ...result } };
+  },
+};
+
+export const MEMORY_INDEX: MemoryDefinition = {
+  capability: daemon('memory.index', 'safe'),
+  actionId: 'see-index', label: 'See the search index', word: 'index', inputs: [],
+  sentence: 'Shows the semantic search index: whether it works, how many records it holds and how many wait to be embedded again.', done: '',
+  touches: 'reads', lasts: 'not-a-change', risk: 'none', example: {},
+  async run(_values, services) {
+    const stats = services.memory.vectorStats();
+    return { text: formatVectorStats(stats, 'Search index'), data: { vector: stats } };
+  },
+};
+
+export const MEMORY_REBUILD_INDEX: MemoryDefinition = {
+  capability: daemon('memory.rebuild-index', 'safe'),
+  actionId: 'rebuild-index', label: 'Rebuild the search index', word: 'rebuild-index', inputs: [],
+  sentence: 'Every record is embedded again with the current provider, so semantic search covers all of memory; nothing is lost.', done: '',
+  touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: {},
+  async run(_values, services) {
+    const stats = await services.memory.rebuildVectorsAsync();
+    return { text: formatVectorStats(stats, 'Search index rebuilt'), data: { vector: stats } };
+  },
+};
+
+/** Every memory capability that runs in the daemon, in the order a person meets them. */
+export const MEMORY_DAEMON_CAPABILITIES: readonly MemoryDefinition[] = [
+  MEMORY_LIST, MEMORY_ADD, MEMORY_SEARCH, MEMORY_SHOW, MEMORY_EDIT, MEMORY_REVIEW, MEMORY_PROMOTE, MEMORY_LINK, MEMORY_REMOVE,
+  MEMORY_QUEUE, MEMORY_EXPLAIN, MEMORY_EXPORT, MEMORY_INSPECT, MEMORY_IMPORT, MEMORY_SNAPSHOTS, MEMORY_RESTORE, MEMORY_INDEX, MEMORY_REBUILD_INDEX,
+];

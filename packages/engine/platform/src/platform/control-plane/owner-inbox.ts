@@ -276,7 +276,8 @@ function askerLabel(asker: OwnerAsker, presence: OwnerAskerPresence | undefined)
   if (asker.session === undefined) return `agent ${asker.agent ?? 'unknown'}`;
   const title = presence && presence.state !== 'gone' ? presence.title?.trim() : undefined;
   const kind = asker.host === 'hosted' ? 'hosted session' : 'session';
-  return title ? `${kind} ${asker.session} ("${clip(title, 60)}")` : `${kind} ${asker.session}`;
+  // A person reads the session by its title, never by its id.
+  return title ? `the ${kind} "${clip(title, 60)}"` : `the ${kind} that asked`;
 }
 
 /** What an answer to `asker` becomes now, when the asker has not yet taken it. Read, never written. */
@@ -448,6 +449,14 @@ function decisionHandlerFor(key: string | undefined): OwnerDecisionHandler | und
  * not be (the item then stays open and the answer is refused with that reason).
  */
 export type OwnerAnswerEffect = (item: OwnerItem, answer: OwnerAnswer) => Promise<void>;
+
+/** The app a decision was made in, as a person names it (its item's `surface`: `tui`, `agent`, `daemon`). */
+function decidingAppWords(surface: unknown): string {
+  if (surface === 'tui') return 'the terminal app';
+  if (surface === 'agent') return 'the Agent';
+  if (surface === 'daemon' || surface === 'hosted') return 'the daemon';
+  return typeof surface === 'string' && surface.trim() ? surface : 'another app';
+}
 
 /** True when this process made the decision posted under `key`, so the owner's choice on it is applied here. */
 export function isOwnerDecisionHandledHere(key: string | undefined): boolean {
@@ -1383,8 +1392,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
         refusal: refusal({
           code: 'DECIDED_ELSEWHERE',
           state: 'still open',
-          reason: `Jev made this decision in ${typeof item.metadata?.['surface'] === 'string' ? item.metadata['surface'] : 'another app'}, and only that app can apply a choice on it.`,
-          next: ['Choose it with /decisions in the app that made it while that session is running.', 'Or set a standing rule with /permissions.'],
+          reason: `Jev made this decision in ${decidingAppWords(item.metadata?.['surface'])}, and only that app can apply a choice on it.`,
+          next: ['Choose it under Decisions in Waiting for you, in the app that made it, while that session is running.', 'Or set a standing rule with /permissions.'],
           status: 409,
         }),
       };

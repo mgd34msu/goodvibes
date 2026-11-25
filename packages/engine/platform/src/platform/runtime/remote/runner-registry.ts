@@ -257,10 +257,18 @@ function buildArtifactFromStore(
   });
 }
 
+/** What a registry keeps between runs of the program holding it (the daemon's runner file). */
+export interface RemoteRunnerRecords {
+  readonly pools: readonly RemoteRunnerPool[];
+  readonly contracts: readonly RemoteRunnerContract[];
+  readonly artifacts: readonly RemoteExecutionArtifact[];
+}
+
 export class RemoteRunnerRegistry {
   private readonly contracts = new Map<string, RemoteRunnerContract>();
   private readonly artifacts = new Map<string, RemoteExecutionArtifact>();
   private readonly pools = new Map<string, RemoteRunnerPool>();
+  private readonly listeners = new Set<() => void>();
   /**
    * @param workspaceRoot The runtime's working directory; carried on every
    *   contract this registry builds.
@@ -269,6 +277,45 @@ export class RemoteRunnerRegistry {
     private readonly agentManager: Pick<AgentManager, 'getStatus' | 'list'>,
     private readonly workspaceRoot?: string | undefined,
   ) {
+  }
+
+  /**
+   * Told after every change a person, a model or a script made (a pool made or
+   * changed, a contract registered, an artifact captured or brought in); not
+   * when a read brings a live runner's contract up to date. Returns the stop.
+   */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => { this.listeners.delete(listener); };
+  }
+
+  private changed(): void {
+    for (const listener of [...this.listeners]) {
+      try { listener(); } catch (error) { logger.warn('RemoteRunnerRegistry change listener failed', { error: summarizeError(error) }); }
+    }
+  }
+
+  /** Everything kept: the pools, every contract and the artifacts, newest first. */
+  records(): RemoteRunnerRecords {
+    return { pools: this.listPools(), contracts: this.listContracts(), artifacts: this.listArtifacts() };
+  }
+
+  /** Put back what `records` gave, as read from the program's own file (each record checked; a bad one is left out). */
+  restore(records: unknown): { readonly kept: number; readonly skipped: number } {
+    let kept = 0;
+    let skipped = 0;
+    const value = isObject(records) ? records : {};
+    for (const pool of Array.isArray(value['pools']) ? value['pools'] : []) {
+      if (isObject(pool) && !missingField(pool, { id: 'string', label: 'string', runnerIds: 'array' }, '')) { this.pools.set(String(pool['id']), Object.freeze(pool as unknown as RemoteRunnerPool)); kept += 1; } else skipped += 1;
+    }
+    for (const contract of Array.isArray(value['contracts']) ? value['contracts'] : []) {
+      if (!contractProblem(contract, '')) { const held = contract as unknown as RemoteRunnerContract; this.contracts.set(held.runnerId, Object.freeze(held)); kept += 1; } else skipped += 1;
+    }
+    // Oldest first, so the newest stay when more than the limit were kept.
+    for (const artifact of [...(Array.isArray(value['artifacts']) ? value['artifacts'] : [])].reverse()) {
+      if (!artifactProblem(artifact, '')) { this.storeArtifact(Object.freeze(artifact as unknown as RemoteExecutionArtifact)); kept += 1; } else skipped += 1;
+    }
+    return { kept, skipped };
   }
 
   private storeArtifact(artifact: RemoteExecutionArtifact): void {
@@ -332,6 +379,7 @@ export class RemoteRunnerRegistry {
     if (contract.poolId) {
       this.assignRunnerToPool(contract.poolId, contract.runnerId);
     }
+    this.changed();
     return contract;
   }
 
@@ -361,6 +409,7 @@ export class RemoteRunnerRegistry {
       lastUpdatedAt: now,
     });
     this.pools.set(pool.id, pool);
+    this.changed();
     return pool;
   }
 
@@ -389,20 +438,22 @@ export class RemoteRunnerRegistry {
     if (pool.maxRunners !== undefined && !pool.runnerIds.includes(runnerId) && pool.runnerIds.length >= pool.maxRunners) {
       return null;
     }
-    const nextRunnerIds = pool.runnerIds.includes(runnerId)
-      ? pool.runnerIds
-      : [...pool.runnerIds, runnerId];
+    const joined = !pool.runnerIds.includes(runnerId);
+    const nextRunnerIds = joined ? [...pool.runnerIds, runnerId] : pool.runnerIds;
     const nextPool: RemoteRunnerPool = Object.freeze({
       ...pool,
       runnerIds: nextRunnerIds,
       lastUpdatedAt: Date.now(),
     });
     this.pools.set(poolId, nextPool);
-    if (contract && contract.poolId !== poolId) {
+    const moved = contract !== undefined && contract.poolId !== poolId;
+    if (contract && moved) {
       // A runner is in at most one pool: moving it takes it out of the pool its contract named.
       if (contract.poolId !== undefined) this.dropFromPoolList(contract.poolId, runnerId);
       this.contracts.set(runnerId, Object.freeze({ ...contract, poolId, lastUpdatedAt: Date.now() }));
     }
+    // A read that brings a pooled runner's contract up to date passes here with nothing changed: no notice then.
+    if (joined || moved) this.changed();
     return nextPool;
   }
 
@@ -419,6 +470,7 @@ export class RemoteRunnerRegistry {
     if (contract?.poolId === poolId) {
       this.contracts.set(runnerId, Object.freeze({ ...contract, poolId: undefined, lastUpdatedAt: Date.now() }));
     }
+    this.changed();
     return nextPool;
   }
 
@@ -429,6 +481,7 @@ export class RemoteRunnerRegistry {
     const contract = this.upsertContractForAgent(agentId, store) ?? buildContract(agent, this.workspaceRoot, connection);
     const artifact = buildArtifact(agent, contract, connection);
     this.storeArtifact(artifact);
+    this.changed();
     return artifact;
   }
 
@@ -439,6 +492,7 @@ export class RemoteRunnerRegistry {
     if (!contract) return null;
     const artifact = buildArtifactFromStore(contract, store);
     this.storeArtifact(artifact);
+    this.changed();
     return artifact;
   }
 
@@ -486,6 +540,7 @@ export class RemoteRunnerRegistry {
     }
     this.storeArtifact(parsed);
     this.storeImportedContract(parsed.runnerContract);
+    this.changed();
     return parsed;
   }
 
@@ -566,6 +621,7 @@ export class RemoteRunnerRegistry {
     for (const artifact of parsed.artifacts) {
       this.storeArtifact(artifact);
     }
+    this.changed();
     return parsed;
   }
 

@@ -289,9 +289,9 @@ export interface AgentWorkspaceVibeSummary {
   readonly truncated: number;
   readonly projectInitPath: string | null;
   readonly globalInitPath: string | null;
-  readonly statusRoute: '/personas vibe';
-  readonly initProjectRoute: '/personas vibe-create';
-  readonly initGlobalRoute: '/personas vibe-create global';
+  readonly statusRoute: 'capability personas.vibe';
+  readonly initProjectRoute: 'capability personas.vibe-create where:"project"';
+  readonly initGlobalRoute: 'capability personas.vibe-create where:"global"';
   readonly next: string;
 }
 

@@ -1,84 +1,47 @@
 /**
  * The everyday conversation commands, each a single-action command
  * (command-actions/) whose line is its name and, where it takes one, a word:
- * `/undo`, `/redo`, `/retry`, `/title`, `/compact`. Both terminal apps
- * register these descriptions; what each does is the app's policy, read by
- * the action's `run`.
+ * `/undo`, `/redo`, `/retry`, `/compact`. Both terminal apps register these
+ * descriptions; each action is a capability on the conversation
+ * (capabilities/builtin/conversation.ts and conversation-controls.ts) run with
+ * the app's own conversation, the same the conversation's list and the
+ * model's capability_run reach.
  */
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
-import { choiceInput, doAction, textInput } from './described-command-kit.js';
-import type { ActionValues, CommandActionContext, FixedChoice } from './command-actions/types.js';
+import type { CommandActionContext } from './command-actions/types.js';
 import { sessionCapabilityAction } from './command-actions/capability-actions.js';
-import { CONVERSATION_COMPACT, CONVERSATION_UNDO, type CompactServices, type UndoServices } from '@goodvibes/engine/platform/platform/capabilities';
+import {
+  CONVERSATION_COMPACT, CONVERSATION_REDO, CONVERSATION_RETRY, CONVERSATION_UNDO,
+  type CompactServices, type RedoServices, type TurnServices, type UndoServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
 
-type Run<Ctx> = (values: ActionValues, ctx: Ctx) => Promise<string | void>;
+const TERMINAL = { terminalOnly: 'It is the terminal program\'s open conversation.' } as const;
 
-const TERMINAL = { terminalOnly: 'It is the terminal app\'s open conversation.' } as const;
-
-/** What `/undo` and `/redo` can take back: the default is the last turn. */
-function stepChoices(undo: boolean, rewind: boolean): readonly FixedChoice[] {
-  return [
-    { value: 'turn', label: undo ? 'The last turn' : 'The turn undone last', help: undo ? 'Your last message and its answer' : 'Your message and its answer come back' },
-    { value: 'file', label: undo ? 'The last file change' : 'The file change undone last', help: undo ? 'Every file the last write or edit changed goes back' : 'The files it changed are written again' },
-    { value: 'set-aside', label: 'Set aside a blocked file change', help: 'A later change blocks it; set it aside without changing a file' },
-    ...(rewind ? [{ value: 'rewind', label: undo ? 'The last rewind' : 'The rewind undone last', help: undo ? 'The conversation and files go back to before the last /checkpoint rewind' : 'The last /checkpoint rewind that was undone is applied again' }] : []),
-  ];
-}
-
-/**
- * `/undo` and `/redo` for one app. `rewind` is whether this app can undo a
- * rewind; the choice is offered in both, and refused with the reason where it
- * is not.
- */
+/** `/undo` and `/redo` for one app, each its capability run on this app's conversation, file undo stack and rewind. */
 export function createUndoCommands<Ctx extends CommandActionContext>(policy: {
   /** The live conversation, file undo stack and rewind `/undo` acts on (the capability conversation.undo runs with them). */
   readonly undo: (ctx: Ctx) => UndoServices;
-  readonly redo: Run<Ctx>;
+  /** The same for `/redo` (conversation.redo). */
+  readonly redo: (ctx: Ctx) => RedoServices;
 }): { readonly undo: DescribedCommand<Ctx>; readonly redo: DescribedCommand<Ctx> } {
-  const make = (undo: boolean): DescribedCommand<Ctx> => defineCommand<Ctx>({
-    name: undo ? 'undo' : 'redo',
-    title: undo ? 'Undo' : 'Redo',
-    summary: undo ? 'Take back the last turn, file change or /checkpoint rewind' : 'Bring back what was undone last',
-    group: 'Conversation',
-    actions: [undo
-      // Moved beside its handler (capabilities/builtin/conversation.ts); it runs here, on this program's conversation.
-      ? sessionCapabilityAction<Ctx, UndoServices>(CONVERSATION_UNDO, policy.undo, TERMINAL)
-      : doAction<Ctx>({
-        id: 'redo', label: 'Redo the step undone last', word: '',
-        inputs: [choiceInput({ id: 'what', label: 'What', help: 'What to bring back', choices: stepChoices(false, true), typed: { position: 1 }, optional: { default: 'turn', means: 'the turn undone last' } })],
-        sentence: 'The step of the kind chosen that was undone last is brought back.',
-        operator: TERMINAL, example: { what: 'file' },
-        run: policy.redo,
-      })],
-  });
-  return { undo: make(true), redo: make(false) };
+  return {
+    undo: defineCommand<Ctx>({
+      name: 'undo', title: 'Undo', summary: 'Take back the last turn, file change or /checkpoint rewind', group: 'Conversation',
+      actions: [sessionCapabilityAction<Ctx, UndoServices>(CONVERSATION_UNDO, policy.undo, TERMINAL)],
+    }),
+    redo: defineCommand<Ctx>({
+      name: 'redo', title: 'Redo', summary: 'Bring back what was undone last', group: 'Conversation',
+      actions: [sessionCapabilityAction<Ctx, RedoServices>(CONVERSATION_REDO, policy.redo, TERMINAL)],
+    }),
+  };
 }
 
-/** `/retry [changed message]`: send the last message again, as it was or changed. */
-export function createRetryCommand<Ctx extends CommandActionContext>(run: Run<Ctx>): DescribedCommand<Ctx> {
+/** `/retry [changed message]`: send the last message again, as it was or changed (conversation.retry). */
+export function createRetryCommand<Ctx extends CommandActionContext>(services: (ctx: Ctx) => TurnServices): DescribedCommand<Ctx> {
   return defineCommand<Ctx>({
     name: 'retry', leadingFlagsOnly: true, title: 'Ask again', summary: 'Send your last message again, as it was or changed', group: 'Conversation',
-    actions: [doAction<Ctx>({
-      id: 'retry', label: 'Send the last message again', word: '',
-      inputs: [textInput({ id: 'message', label: 'Changed message', help: 'What to send instead', why: 'your own words', kind: 'long-text', typed: { tail: true }, optional: { default: '', means: 'the last message as it was' } })],
-      sentence: 'Your last message is sent again (changed, when you typed a new one) and answered as a new turn.',
-      operator: TERMINAL, example: { message: 'shorter please' }, run,
-    })],
-  });
-}
-
-/** `/title [text]`: show the conversation's title, or give it one. */
-export function createTitleCommand<Ctx extends CommandActionContext>(run: Run<Ctx>): DescribedCommand<Ctx> {
-  return defineCommand<Ctx>({
-    name: 'title', leadingFlagsOnly: true, title: 'Conversation title', summary: 'See or change the conversation\'s title', group: 'Conversation',
-    actions: [{
-      id: 'title', label: 'Name this conversation', word: '',
-      inputs: [textInput({ id: 'text', label: 'Title', help: 'Its new title', why: 'your own words', typed: { tail: true }, optional: { default: '', means: 'show the title it has' } })],
-      sentence: 'This conversation will be titled as typed (with nothing typed, its title is shown) until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: TERMINAL, example: { text: 'release notes' }, run,
-    }],
+    actions: [sessionCapabilityAction<Ctx, TurnServices>(CONVERSATION_RETRY, services, TERMINAL)],
   });
 }
 

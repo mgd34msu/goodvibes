@@ -155,6 +155,8 @@ export interface AnswerDeliveryOptions {
   readonly watch: OwnerInboxUpdateWatch;
   /** The host channel of the conversation running `sessionId` in this process, for those questions. */
   readonly hostFor: (sessionId: string | undefined) => Pick<HostInstructions, 'set'> | undefined;
+  /** The title of the conversation running `sessionId` in this process: a question names its asker by it, never by an id. */
+  readonly sessionTitle?: ((sessionId: string) => string | undefined) | undefined;
   /**
    * The session a question belongs to when the caller did not say: a spawned
    * agent's questions belong to the conversation that spawned it.
@@ -164,6 +166,13 @@ export interface AnswerDeliveryOptions {
 
 /** How many of one session's questions a session open or delete reads over the wire; a session asks far fewer. */
 const SESSION_QUESTION_LIMIT = 500;
+
+/** Who asked a question, in a person's words: the session by its title (an untitled one says so), never by an id. */
+function askerWords(title: string | undefined, byAgent: boolean): string {
+  const trimmed = title?.trim();
+  const session = trimmed ? `the session "${trimmed.length > 60 ? `${trimmed.slice(0, 59)}…` : trimmed}"` : 'an untitled session';
+  return byAgent ? `an agent in ${session}` : session;
+}
 
 /**
  * The inbox the `query` tool posts to, plus delivery of each answer to the
@@ -262,7 +271,8 @@ export function withAnswerDelivery(inbox: AnswerDeliveryPort, options: AnswerDel
       const outcome = await inbox.post(session ? {
         ...item,
         sessionId: session,
-        askedBy: item.askedBy ?? (agentId !== undefined ? `agent ${agentId} in session ${session}` : `session ${session}`),
+        // Who asked, as a person reads it: the session by its title, never by its id.
+        askedBy: item.askedBy ?? askerWords(options.sessionTitle?.(session), agentId !== undefined),
         metadata: {
           ...item.metadata,
           ...options.askerFacts?.(session),

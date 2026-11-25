@@ -80,6 +80,8 @@ export function terminalOwnerQuestions(services: RuntimeServices, sessionId: () 
         return await watchOwnerInboxUpdates({ baseUrl: endpoint.baseUrl, getAuthToken: () => token, onItem, onTerminate: onEnd });
       },
       hostFor: (id) => (id ? findSessionConversation(id)?.hostInstructions : undefined),
+      // A question names the session that asked by its title, never its id.
+      sessionTitle: (id) => findSessionConversation(id)?.title,
       sessionId,
     },
   );

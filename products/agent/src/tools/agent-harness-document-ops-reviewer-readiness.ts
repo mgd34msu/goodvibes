@@ -211,9 +211,9 @@ export function buildReviewerReadinessChecklist(
           ? `agent_documents acceptSuggestion documentId:"${firstProposedSuggestionDocument.id}" suggestionId:"..." or agent_documents rejectSuggestion documentId:"${firstProposedSuggestionDocument.id}" suggestionId:"..."`
           : undefined,
       ownerLine: firstOpenCommentDocument && firstOpenComment
-        ? `/documents resolve-comment ${firstOpenCommentDocument.id} ${firstOpenComment.id}`
+        ? `resolve comment ${firstOpenComment.id} on draft ${firstOpenCommentDocument.id} (Memory and knowledge, Drafts)`
         : firstProposedSuggestionDocument && firstProposedSuggestion
-          ? `/documents accept-suggestion ${firstProposedSuggestionDocument.id} ${firstProposedSuggestion.id} (or reject-suggestion)`
+          ? `take or leave suggestion ${firstProposedSuggestion.id} on draft ${firstProposedSuggestionDocument.id} (Memory and knowledge, Drafts)`
           : undefined,
     },
     {
@@ -229,7 +229,7 @@ export function buildReviewerReadinessChecklist(
         ? 'agent_documents attachArtifact documentId:"..." artifactId:"..." or agent_model_compare handoff artifactId:"..." relatedArtifactIds:"..."'
         : undefined,
       ownerLine: firstDocumentMissingSource
-        ? `/documents attach-artifact ${firstDocumentMissingSource.id} <artifact>`
+        ? `attach an artifact to draft ${firstDocumentMissingSource.id} (Memory and knowledge, Drafts)`
         : firstComparisonMissingSource
           ? `/compare export ${firstComparisonMissingSource.id} --as handoff --related <artifact>`
           : undefined,

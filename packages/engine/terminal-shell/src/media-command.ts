@@ -19,8 +19,10 @@ import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, InputDescription } from './command-actions/types.js';
-import { choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
-import { collectMedia, generateMedia, type MediaGenerationRun } from './media-generation.js';
+import { choiceInput, doAction, textInput } from './described-command-kit.js';
+import { generateMedia, type MediaGenerationRun } from './media-generation.js';
+import { daemonCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import { MEDIA_COLLECT, MEDIA_PROVIDERS, type CapabilityDefinition } from '@goodvibes/engine/platform/platform/capabilities';
 import { resolveConfinedBundlePath } from './recall-shared.js';
 
 type MediaStore = Pick<ArtifactStore, 'create'> & Partial<Pick<ArtifactStore, 'readContent'>>;
@@ -38,6 +40,8 @@ export interface MediaCommandPolicy<Ctx> {
   readonly paths: (ctx: Ctx) => Pick<ShellPathService, 'workingDirectory' | 'resolveWorkspacePath' | 'isWithinWorkingDirectory'>;
   /** Opens a saved file in the system viewer; false where there is none. Absent: the path is printed only. */
   readonly openFile?: ((path: string) => Promise<boolean>) | undefined;
+  /** This program's daemon binding (capability-binding.ts): collecting a pending job runs in the daemon. */
+  readonly binding: DaemonCapabilityBinding<Ctx>;
 }
 
 const EXTENSION_BY_MIME: Readonly<Record<string, string>> = {
@@ -59,10 +63,10 @@ export function mediaFilePath(workingDirectory: string, prompt: string, mimeType
   return join(workingDirectory, 'generated', `${words}-${stamp}${count > 1 ? `-${index + 1}` : ''}${extension}`);
 }
 
-/** The `/media collect` line that finishes a job a provider was still making. */
-export function mediaCollectLine(task: MediaProviderTask, out?: string): string {
-  const resume = Object.entries(task.resume ?? {}).map(([key, value]) => ` ${key}=${value}`).join('');
-  return `/media collect ${task.providerId} ${task.taskId}${out ? ` --out ${out}` : ''}${resume}`;
+/** Where a job a provider was still making is collected: the Work place's control, with what its form asks. */
+export function mediaCollectLine(task: MediaProviderTask): string {
+  const resume = Object.entries(task.resume ?? {}).map(([key, value]) => `${key}=${value}`).join(' ');
+  return `"collect a media job" in the Work place: provider ${task.providerId}, job ${task.taskId}${resume ? `, resume values ${resume}` : ''}`;
 }
 
 const PROVIDERS = defineList<MediaListContext>({
@@ -110,7 +114,7 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
     if (result.pending) {
       return [
         `${result.pending.providerId} accepted the job (task ${result.pending.taskId}) and is still making it; it is paid for and keeps running.`,
-        `Collect it with: ${mediaCollectLine(result.pending, out || undefined)}`,
+        `Collect it with ${mediaCollectLine(result.pending)}.`,
       ].join('\n');
     }
     const paths = policy.paths(ctx);
@@ -162,23 +166,8 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
     group: 'Conversation',
     report: 'providers',
     actions: [
-      readAction<Ctx>({
-        id: 'providers', label: 'See the media providers', word: 'providers', operator: LOCAL,
-        sentence: 'Lists the media providers, what each makes, and whether each is set up.',
-        async run(_values, ctx) {
-          const registry = policy.registry(ctx);
-          if (!registry) throw commandRefusal('Media providers are not available in this session.', undefined, 'UNAVAILABLE');
-          const statuses = await registry.status();
-          if (statuses.length === 0) return 'No media providers are registered in this build.';
-          return [
-            'Media providers:',
-            ...statuses.map((status) => {
-              const outputs = Array.isArray(status.metadata['outputs']) ? ` (makes ${(status.metadata['outputs'] as unknown[]).join(', ')})` : '';
-              return `  ${status.id}: ${status.state}${status.configured ? '' : ', setup needed'}${outputs}; ${status.capabilities.join(', ')}${status.detail ? `; ${status.detail}` : ''}`;
-            }),
-          ].join('\n');
-        },
-      }),
+      // The media providers the daemon makes with (Models and providers, capabilities/builtin/models.ts), read there.
+      daemonCapabilityAction<Ctx>(MEDIA_PROVIDERS as CapabilityDefinition<never>, policy.binding),
       doAction<Ctx>({
         id: 'make', label: 'Make an image or a video', word: 'make', touches: 'another-machine', risk: 'spends-money', operator: LOCAL,
         inputs: [
@@ -212,34 +201,8 @@ export function createMediaCommand<Ctx extends CommandActionContext>(policy: Med
           return save(ctx, store, result, prompt, values.out ?? '', target);
         },
       }),
-      doAction<Ctx>({
-        id: 'collect', label: 'Collect a job that was still being made', word: 'collect', touches: 'another-machine', operator: LOCAL,
-        inputs: [
-          { id: 'provider', label: 'Provider', help: 'The provider the job was given to', kind: 'choice', choices: { list: PROVIDERS, allowOther: { reason: 'a provider id' } }, required: true, typed: { position: 1 } },
-          textInput({ id: 'task', label: 'Job', help: 'The task id the provider gave', why: 'the id the pending result printed', typed: { position: 2 } }),
-          OUT,
-          textInput({ id: 'resume', label: 'Resume values', help: 'key=value words, exactly as the pending result printed them', why: 'values the provider gave', typed: { tail: true }, optional: { default: '', means: 'none' } }),
-        ],
-        sentence: 'Job {task} is collected from {provider} and saved as a file; it was paid for when it was accepted, so nothing new is spent.',
-        example: { provider: 'fal', task: 'req-123' },
-        async run(values, ctx) {
-          const { registry, store } = needs(ctx);
-          const target = outPath(ctx, values.out ?? '');
-          const resume: Record<string, string> = {};
-          for (const pair of (values.resume ?? '').split(/\s+/).filter(Boolean)) {
-            const at = pair.indexOf('=');
-            if (at <= 0) throw commandRefusal(`"${pair}" is not key=value; give the resume values exactly as the pending result printed them.`);
-            resume[pair.slice(0, at)] = pair.slice(at + 1);
-          }
-          let result: MediaGenerationRun;
-          try {
-            result = await collectMedia(registry, store, { providerId: values.provider!, taskId: values.task!, ...(Object.keys(resume).length > 0 ? { resume } : {}) }, { product: policy.product, source: 'media-command' });
-          } catch (error) {
-            return failed(`Collecting ${values.provider} job ${values.task}`, error);
-          }
-          return save(ctx, store, result, values.task!, values.out ?? '', target);
-        },
-      }),
+      // A job still being made is collected by the daemon (platform builtin/media-collect.ts); its control is in the Work place.
+      daemonCapabilityAction<Ctx>(MEDIA_COLLECT, policy.binding),
     ],
   });
 }

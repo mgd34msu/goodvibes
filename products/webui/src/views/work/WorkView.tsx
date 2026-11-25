@@ -61,7 +61,8 @@ import { CiWatchDetail } from './CiWatchDetail';
 import { useHostedAttachment } from './HostedSessionDetail';
 import { HostedSessionWorkDetail } from './HostedSessionWorkDetail';
 import { NewWorkMenu } from './NewWorkMenu';
-import { CommandScreenDrawer } from '../../components/command/screens/CommandScreens';
+// The schedules are the Automation place's (views/places): "See schedules" opens it.
+import { runCommand } from '../../lib/commands';
 import { findCommandAction } from '../../components/command/ActionSheet';
 
 /** The Scheduled group's management, in /schedule's own words. */
@@ -223,7 +224,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
   const { toast } = useToast();
   const phone = useMediaQuery(PHONE_QUERY);
   const [query, setQuery] = useState('');
-  const [schedulesOpen, setSchedulesOpen] = useState(false);
+  const openSchedules = useCallback(() => { runCommand('screen.automation'); }, []);
   const [scope, setScope] = useState<ShowScope>(tab === 'waiting' ? 'waiting' : 'active');
   const waitingOnly = scope === 'waiting';
   const [archiving, setArchiving] = useState(false);
@@ -554,7 +555,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
         <>
           <BoardGroup label="Waiting for you" rows={groups.waiting} selectedKey={selectedKey} onOpen={openItem} answerFor={answerFor} now={now} />
           <BoardGroup label="Running now" rows={groups.running} selectedKey={selectedKey} onOpen={openItem} now={now} />
-          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} action={seeSchedules ? { label: seeSchedules, run: () => setSchedulesOpen(true) } : undefined} now={now} />
+          <BoardGroup label="Scheduled" rows={groups.scheduled} selectedKey={selectedKey} onOpen={openItem} action={seeSchedules ? { label: seeSchedules, run: openSchedules } : undefined} now={now} />
           <BoardGroup label="Finished" rows={groups.finished} selectedKey={selectedKey} onOpen={openItem} now={now} />
 
           <div className="work-services">
@@ -685,8 +686,7 @@ function WorkViewContent({ contractScope, tab, subscriptionActive = true, sessio
           {!archived && waitingCount > 0 && (
             <Chip tone="warn" className="work-header__chip">{waitingCount} waiting for you</Chip>
           )}
-          <NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} onSchedules={() => setSchedulesOpen(true)} />
-          <CommandScreenDrawer screen={schedulesOpen ? 'schedules' : null} onClose={() => setSchedulesOpen(false)} />
+          <NewWorkMenu lifetime={contractScope} onCreated={(key) => { dismissedRef.current = true; setSelectedKey(workKey(key)); }} onSchedules={openSchedules} />
         </span>
       )}
       filters={(

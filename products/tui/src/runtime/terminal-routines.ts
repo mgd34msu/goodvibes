@@ -1,36 +1,29 @@
 /**
- * Where this terminal's scheduled routines are kept and run.
+ * The routines (schedules) an earlier terminal app kept in its own store,
+ * carried to the daemon once.
  *
- * With the daemon on (`daemon.enabled`, the default) the daemon's automation
- * owner keeps and runs every routine: it runs once however many terminals are
- * open, and it runs when none is. The terminal arms no timers; `/schedule` is a
- * client of `automation.jobs.*`. On one machine under one home the terminal and
- * the daemon keep routines in the same file, so the daemon already runs what the
- * terminal kept; only routines in a file the daemon does not read (a daemon on
- * another machine or under another home) are moved to it, once.
- *
- * With the daemon off there is nothing that is always there, so the terminal's
- * own manager runs the routines, in exactly one terminal on this machine: the
- * one holding the store's process lock. The kernel releases that lock when the
- * holder exits, however it exits, and another open terminal takes it over on
- * its next try.
+ * The daemon keeps and runs every schedule: each runs once however many
+ * programs are open, and it runs when none is. The terminal app keeps and
+ * runs none of its own (its own scheduler, for when no daemon ran, is gone);
+ * the Automation place and every other door reach the daemon's schedules.
+ * On one machine under one home the terminal app and the daemon keep
+ * schedules in the same file, so the daemon already holds what an earlier
+ * terminal app kept; only schedules in a file the daemon does not read (a
+ * daemon on another machine or under another home) are moved to it, once.
  */
 import { existsSync, readdirSync, readFileSync, renameSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import {
   AutomationJobStore,
   resolveAutomationStorePath,
+  scheduleCreateTimingFields,
   type AutomationJob,
-  type AutomationManager,
   type AutomationScheduleDefinition,
 } from '@goodvibes/engine/platform/platform/automation';
 import { GoodVibesError } from '@goodvibes/engine/errors';
 import type { OperatorMethodInput } from '@goodvibes/engine/platform';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import { scheduleTimingFields } from '@goodvibes/engine/terminal-shell/schedule-command';
-import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
-import { writeJsonFileAtomic } from '@goodvibes/engine/platform/platform/state/durable-file-io';
-import { holdProcessLock, logger, summarizeError, type HeldProcessLock } from '@goodvibes/engine/platform/platform/utils';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { describeOperatorRpcError, resolveOperatorRpc, type OperatorRpcAvailable } from './client/operator-endpoint.ts';
 
 type CreateJobInput = OperatorMethodInput<'automation.jobs.create'>;
@@ -41,13 +34,10 @@ export type DaemonScheduleFields =
   | { readonly kind: 'every'; readonly every: string }
   | { readonly kind: 'at'; readonly at: string };
 
-/** How often a terminal that does not hold the routine lock (daemon off) tries to take it over. */
-const TAKEOVER_RETRY_MS = 60_000;
-
-/** The daemon's create fields for a schedule this terminal read or held. */
+/** The daemon's create fields for a schedule this terminal held. */
 export function daemonScheduleFields(schedule: AutomationScheduleDefinition): DaemonScheduleFields {
-  // One mapping for both terminal apps: /schedule's own (terminal-shell/schedule-command.ts).
-  return scheduleTimingFields(schedule) as DaemonScheduleFields;
+  // One mapping for every door: the automation module's own.
+  return scheduleCreateTimingFields(schedule) as DaemonScheduleFields;
 }
 
 /** This terminal's own routine file, or null when the config manager names no control-plane directory. */
@@ -127,7 +117,7 @@ const settledStores = new Set<string>();
 /** Routine files whose routines were left running nowhere because the daemon could not be reached. */
 const waitingStores = new Set<string>();
 
-/** One move per routine file at a time in this process (start-up, an attach and /schedule can overlap). */
+/** One move per routine file at a time in this process (start-up and an attach can overlap). */
 const movesInFlight = new Map<string, Promise<TerminalRoutineMove>>();
 
 /** Routine files this process found no claimed copy of (see recoverClaimedStore). */
@@ -180,9 +170,8 @@ function recoverClaimedStore(path: string): void {
 
 /** The line for routines that run nowhere because the daemon could not be reached. */
 function notRunningLine(path: string, count: number, reason: string): string {
-  return `${count} routine(s) in ${path} are not running: the daemon could not be reached (${reason}). `
-    + 'Start the daemon (goodvibes service start), or set daemon.enabled to false to run them in this terminal; '
-    + 'this terminal hands them to the daemon as soon as it reaches it.';
+  return `${count} schedule(s) in ${path} are not running: the daemon, which runs every schedule, could not be reached (${reason}). `
+    + 'Start the daemon (goodvibes service start); this terminal hands them to it as soon as it reaches it.';
 }
 
 /** A routine that is archived or whose one run time has passed is not moved. */
@@ -296,22 +285,16 @@ function moveLines(sent: SentRoutines, keptNote: string): readonly string[] {
  * for the next start. Only once every routine still to run is on the daemon is
  * the file renamed out of the way. A routine the daemon refused, or one not
  * sent because the daemon stopped answering, stays in the file and is tried
- * again by the next attach to the daemon, `/schedule` or start. The local
- * runner, if this terminal ran routines while the daemon was off, stops first.
+ * again by the next attach to the daemon or start.
  * Cost: one file read and one `automation.jobs.list` the first time in a
  * process; nothing after that once the file is settled.
  */
 export async function moveTerminalRoutinesToDaemon(
   configManager: Pick<ConfigManager, 'getControlPlaneConfigDir'>,
   rpc: OperatorRpcAvailable,
-  automationManager?: object,
 ): Promise<TerminalRoutineMove> {
   const path = terminalRoutineStorePath(configManager);
   if (!path) return NOTHING_MOVED;
-  const runner = automationManager ? runners.get(automationManager) : undefined;
-  // This terminal ran routines itself (daemon off) and may have added some since the file was settled.
-  if (runner?.holdsLock) settledStores.delete(path);
-  runner?.release();
   const running = movesInFlight.get(path);
   if (running) return running;
   const move = moveStore(path, rpc)
@@ -326,7 +309,7 @@ export async function moveTerminalRoutinesToDaemon(
 }
 
 function unreadableStore(path: string, error: unknown): TerminalRoutineMove {
-  return { moved: 0, waiting: false, lines: [`This terminal's routine file ${path} could not be read (${summarizeError(error)}); its routines were not moved to the daemon. Fix or remove the file, then run /schedule list.`] };
+  return { moved: 0, waiting: false, lines: [`This terminal's schedule file ${path} could not be read (${summarizeError(error)}); its schedules were not moved to the daemon. Fix or remove the file; they are moved at the next start.`] };
 }
 
 async function moveStore(path: string, rpc: OperatorRpcAvailable): Promise<TerminalRoutineMove> {
@@ -364,7 +347,7 @@ async function moveStore(path: string, rpc: OperatorRpcAvailable): Promise<Termi
     // Finished routines are named once, when the file is retired, not on every retry.
     const keptNote = sent.daemonStopped
       ? `still in ${path}; they are not running until they reach the daemon, and this terminal tries again as soon as it reaches it`
-      : `still in ${path} and tried again by the next /schedule`;
+      : `still in ${path} and tried again at the next start`;
     return { moved: sent.moved.length, waiting: sent.daemonStopped, lines: moveLines({ ...sent, skipped: [] }, keptNote) };
   }
   retireMovedStore(path, now, new Set([...held, ...sent.movedIds]));
@@ -373,9 +356,9 @@ async function moveStore(path: string, rpc: OperatorRpcAvailable): Promise<Termi
 }
 
 /**
- * Renames a routine file whose routines are all on the daemon, so this terminal
- * never runs them as well if the daemon is turned off later. A routine added to
- * the file since it was read (this terminal ran with the daemon off in between)
+ * Renames a routine file whose routines are all on the daemon, so an earlier
+ * terminal app put back by a rollback never runs them as well. A routine added
+ * to the file since it was read (an earlier terminal app wrote it in between)
  * keeps the file in place for the next start to send.
  */
 function retireMovedStore(path: string, now: number, onDaemon: ReadonlySet<string>): void {
@@ -389,120 +372,14 @@ function retireMovedStore(path: string, now: number, onDaemon: ReadonlySet<strin
   }
 }
 
-/**
- * Runs this terminal's own routines while the daemon is off, in one terminal
- * per machine. `ensure` takes the lock when it is free and starts the manager;
- * when another terminal holds it, it tries again once a minute (one SQLite open
- * per try, daemon off only) so routines keep running after that terminal exits.
- */
-export class LocalRoutineRunner {
-  #lock: HeldProcessLock | null = null;
-  #retry: ReturnType<typeof setInterval> | null = null;
-
-  constructor(
-    private readonly manager: Pick<AutomationManager, 'start' | 'stop'>,
-    private readonly lockPath: string,
-  ) {}
-
-  /** True while this terminal holds the lock and its manager runs the routines. */
-  get holdsLock(): boolean {
-    return this.#lock !== null;
-  }
-
-  async ensure(): Promise<boolean> {
-    if (this.#lock) return true;
-    let lock: HeldProcessLock | null;
-    try {
-      lock = holdProcessLock(this.lockPath);
-    } catch (error) {
-      logger.warn('Local routines: the routine lock could not be opened', { lockPath: this.lockPath, error: summarizeError(error) });
-      return false;
-    }
-    if (!lock) {
-      this.#armRetry();
-      return false;
-    }
-    this.#lock = lock;
-    if (this.#retry) clearInterval(this.#retry);
-    this.#retry = null;
-    try {
-      await this.manager.start();
-    } catch (error) {
-      // The lock is freed, and the takeover check stays armed so routines start
-      // once the manager can; only shutdown or a daemon takeover ends the retry.
-      this.#releaseLock();
-      this.#armRetry();
-      throw error;
-    }
-    return true;
-  }
-
-  /** Stops the manager's timers and hands the lock back (the daemon took over, or the terminal is closing). */
-  release(): void {
-    if (this.#retry) clearInterval(this.#retry);
-    this.#retry = null;
-    this.#releaseLock();
-  }
-
-  /** Stops the manager and frees the lock, leaving the takeover check as it is. */
-  #releaseLock(): void {
-    if (!this.#lock) return;
-    this.manager.stop();
-    this.#lock.release();
-    this.#lock = null;
-  }
-
-  #armRetry(): void {
-    if (this.#retry !== null) return;
-    const retry = setInterval(() => { void this.#retryTick(); }, TAKEOVER_RETRY_MS);
-    retry.unref?.();
-    this.#retry = retry;
-  }
-
-  /** One takeover check; a manager that fails to start is logged and tried again at the next check, never thrown into nothing. */
-  async #retryTick(): Promise<void> {
-    try {
-      await this.ensure();
-    } catch (error) {
-      logger.warn('Local routines: the routines could not be started; trying again at the next takeover check', { lockPath: this.lockPath, error: summarizeError(error) });
-    }
-  }
-}
-
-const runners = new WeakMap<object, LocalRoutineRunner>();
-
-/**
- * True only while this terminal runs routines itself (daemon off, lock held).
- * A wake's catch-up heartbeat starts the manager, so it is sent only then:
- * otherwise every terminal would arm the routine timers on each wake.
- */
-export function terminalRunsRoutines(manager: object): boolean {
-  return runners.get(manager)?.holdsLock ?? false;
-}
-
-/** The one runner for this terminal's manager; null when its store has no path. */
-export function localRoutineRunnerFor(
-  manager: Pick<AutomationManager, 'start' | 'stop'>,
-  configManager: Pick<ConfigManager, 'getControlPlaneConfigDir'>,
-): LocalRoutineRunner | null {
-  const existing = runners.get(manager);
-  if (existing) return existing;
-  const storePath = terminalRoutineStorePath(configManager);
-  if (!storePath) return null;
-  const runner = new LocalRoutineRunner(manager, `${storePath}.writer.sqlite`);
-  runners.set(manager, runner);
-  return runner;
-}
-
-/** What a terminal with the daemon setting on does with its routine file now. */
+/** What this terminal does with its schedule file now: hand what is in it to the daemon, or say why it waits. */
 async function moveForStart(deps: {
   readonly configManager: ConfigManager;
-  readonly automationManager: Pick<AutomationManager, 'start' | 'stop'>;
   readonly homeDirectory: string;
 }): Promise<TerminalRoutineMove> {
-  const { configManager, automationManager } = deps;
+  const { configManager } = deps;
   const rpc = resolveOperatorRpc({ configManager, homeDirectory: deps.homeDirectory });
-  if (rpc.available) return moveTerminalRoutinesToDaemon(configManager, rpc, automationManager);
+  if (rpc.available) return moveTerminalRoutinesToDaemon(configManager, rpc);
   const path = terminalRoutineStorePath(configManager);
   if (!path) return NOTHING_MOVED;
   recoverClaimedStore(path);
@@ -519,20 +396,15 @@ async function moveForStart(deps: {
 }
 
 /**
- * Start-up step, run when automation is on: with the daemon on, move any
- * routines this terminal kept to it (nothing runs here), and say so when they
- * could not be moved, since then they run nowhere; with it off, run them here
- * when this terminal holds the lock. Returns lines worth showing.
+ * Start-up step, run when automation is on: move any schedules an earlier
+ * terminal app kept to the daemon (nothing runs here), and say so when they
+ * could not be moved, since then they run nowhere. Returns lines worth showing.
  */
 export async function startTerminalRoutines(deps: {
   readonly configManager: ConfigManager;
-  readonly automationManager: Pick<AutomationManager, 'start' | 'stop'>;
   readonly homeDirectory: string;
 }): Promise<readonly string[]> {
-  const { configManager, automationManager } = deps;
-  if (resolveDaemonEnabled(configManager)) return (await moveForStart(deps)).lines;
-  await localRoutineRunnerFor(automationManager, configManager)?.ensure();
-  return [];
+  return (await moveForStart(deps)).lines;
 }
 
 /**
@@ -543,11 +415,10 @@ export async function startTerminalRoutines(deps: {
  */
 export async function retryTerminalRoutineMove(deps: {
   readonly configManager: ConfigManager;
-  readonly automationManager: Pick<AutomationManager, 'start' | 'stop'>;
   readonly homeDirectory: string;
 }): Promise<readonly string[]> {
   const path = terminalRoutineStorePath(deps.configManager);
-  if (!path || !waitingStores.has(path) || !resolveDaemonEnabled(deps.configManager)) return [];
+  if (!path || !waitingStores.has(path)) return [];
   const move = await moveForStart(deps);
   return move.waiting ? [] : move.lines;
 }

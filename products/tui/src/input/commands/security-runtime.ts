@@ -21,6 +21,7 @@ import {
 } from './runtime-services.ts';
 import { createPolicyCommandContext } from './policy-dispatch.ts';
 import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
+import { capabilityBinding } from './capability-binding.ts';
 
 const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
   listSecrets: (ctx) => requireSecretsManager(ctx).list(),
@@ -73,31 +74,11 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
         }
       },
     },
+    // The daemon decides this folder's trust in the shared register; this app reads it again at once, so the
+    // folder's hooks file loads or stops and its MCP servers start or stop now.
+    binding: capabilityBinding,
     folder: {
-      async status(ctx) {
-        const manager = trustManager(ctx);
-        const level = manager.getLevel();
-        const lines = [
-          `This folder is ${manager.isDecided() ? level : 'not decided yet (restricted until you decide)'}.`,
-          level === 'trusted'
-            ? 'Every tool may run here, subject to your permission settings.'
-            : 'Reading only: tools that write, run commands or hand work to agents are refused here.',
-        ];
-        if (manager.hasIgnoredLegacyDecision()) lines.push('A trust.json inside this folder was found and is not honored: a project cannot decide its own trust. Decisions are kept in your own GoodVibes state.');
-        const registrationManager = ctx.workspace.workspaceRegistrationManager;
-        if (registrationManager) lines.push(`Registration: ${await registrationManager.describe()}`);
-        return lines.join('\n');
-      },
-      async set(ctx, level) {
-        const saved = await trustManager(ctx).setLevel(level);
-        ctx.renderRequest();
-        return [
-          level === 'trusted'
-            ? 'This folder is trusted: every tool may run here, subject to your permission settings. Its hooks file loads and the MCP servers its files name start now.'
-            : 'This folder is restricted: tools that write, run commands or hand work to agents are refused here. Its hooks file and the MCP servers its files name are stopped now; your own hooks and MCP files are not affected.',
-          ...(saved.saved ? [] : [`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`]),
-        ].join('\n');
-      },
+      reread: async (ctx) => { await trustManager(ctx).load(); },
       decided: (ctx) => ctx.workspace.workspaceTrustManager?.isDecided(),
     },
     policyContext: createPolicyCommandContext,

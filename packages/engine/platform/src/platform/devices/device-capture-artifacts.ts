@@ -7,6 +7,7 @@ import { PersistentStore } from '../state/persistent-store.js';
 import { ArtifactStorageOwner, type ArtifactCreatedLeaf } from '../artifacts/storage-ownership.js';
 import { fileObservationIdentity, readFileObservation, type FileObservation } from '../utils/file-observation.js';
 import { acquireProcessLock } from '../utils/process-lock.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { isDeviceCapabilityId, type DeviceArtifactKind, type DeviceCapabilityId } from './device-capability-contract.js';
 import { resolveDevicePolicySource, type DevicePolicySource } from './device-policy-source.js';
 
@@ -237,7 +238,7 @@ export class DeviceCaptureArtifactStore {
     const bytes = input.bytes, now = this.now(), id = crypto.randomUUID();
     const extension = input.mediaType.includes('png') ? 'png' : input.mediaType.includes('webp') ? 'webp' : /jpe?g/.test(input.mediaType) ? 'jpg' : input.mediaType.includes('webm') ? 'webm' : 'bin';
     const fileName = `${id}.${extension}`;
-    return this.mutate(async (rows, _malformed, mutation) => {
+    const kept = await this.mutate(async (rows, _malformed, mutation) => {
       mutation.declare(); const leaf = mutation.create(fileName), fd = leaf.open();
       try { leaf.claim(fd); mutation.current();
         const sourceIdentity = pendingIdentity(fstatSync(fd, { bigint: true }));
@@ -254,6 +255,9 @@ export class DeviceCaptureArtifactStore {
         ...(input.workId ? { workId: input.workId } : {}), ...(input.reason ? { reason: input.reason } : {}) };
       mutation.complete(id); return { next: [...rows, row], result: publicArtifact(row) };
     }, input.assertCurrent);
+    // A capture kept: every view of the captures (the Devices place, the web UI) reads them again.
+    noteListChanged({ list: 'paired-devices', change: 'created', id });
+    return kept;
   }
   pathFor(artifact: DeviceCaptureArtifact): string { if (!CAPTURE_FILE.test(artifact.fileName)) throw new Error('Invalid device capture filename'); return join(this.directory, artifact.fileName); }
   private adopt(row: SavedArtifact, mutation: Mutation, needBytes: boolean): { row: SavedArtifact; bytes?: Uint8Array } {
@@ -294,7 +298,7 @@ export class DeviceCaptureArtifactStore {
    * removed; one that is not there is `not-found`.
    */
   async delete(artifactId: string): Promise<DeviceArtifactDeleteResult> {
-    return this.mutate<DeviceArtifactDeleteResult>(async (rows, _malformed, mutation) => {
+    const deleted = await this.mutate<DeviceArtifactDeleteResult>(async (rows, _malformed, mutation) => {
       const original = rows.find(row => row.id === artifactId);
       if (!original) return { next: rows, result: { ok: false as const, reason: 'not-found' as const } };
       const next = rows.filter(row => row !== original), now = this.now();
@@ -311,6 +315,9 @@ export class DeviceCaptureArtifactStore {
       this.retire(row, mutation, () => { result.fileRemoved = true; });
       return { next, result };
     });
+    // A capture removed, from any client: every view of the captures reads them again.
+    if (deleted.ok) noteListChanged({ list: 'paired-devices', change: 'deleted', id: artifactId });
+    return deleted;
   }
   async sweep(): Promise<DeviceArtifactSweepReport> {
     const now = this.now(), policy = this.getPolicy();

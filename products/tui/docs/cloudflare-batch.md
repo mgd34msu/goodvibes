@@ -12,7 +12,7 @@ The TUI owns the user flow. The platform daemon owns all Cloudflare API calls, t
 
 ## Setup
 
-`/setup cloudflare` (Use Cloudflare) opens the Cloudflare form; `/cloudflare setup` opens the same guided setup. The form configures:
+`/setup cloudflare` (Use Cloudflare) opens the Cloudflare form. The form configures:
 
 | Field | Choices / notes |
 | --- | --- |
@@ -28,44 +28,26 @@ The TUI owns the user flow. The platform daemon owns all Cloudflare API calls, t
 The setup form supports these paths:
 
 - Save settings only: persist configuration and provision later.
-- Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token. The daemon keeps a record of the operational token it made (its id, never its value) and returns that token again for the same account, zone and components, across retries, the final apply and restarts; a new token, for a changed selection, revokes the one it replaces, and the result says whether that worked. Disable revokes it too when a bootstrap token is given (set in the wizard, or `/cloudflare disable --bootstrap-token <token>` / `--bootstrap-env <ENV_NAME>`); otherwise it says the token is still live. A token Cloudflare no longer has counts as revoked, and its record is cleared.
+- Paste temporary bootstrap token: the platform creates a narrower operational token, stores it in GoodVibes secrets, and does not persist the bootstrap token. The daemon keeps a record of the operational token it made (its id, never its value) and returns that token again for the same account, zone and components, across retries, the final apply and restarts; a new token, for a changed selection, revokes the one it replaces, and the result says whether that worked. Turning it off revokes it too when a bootstrap token is given (set in the wizard, or typed on the hidden line of "Turn the Cloudflare integration off"); otherwise it says the token is still live. A token Cloudflare no longer has counts as revoked, and its record is cleared.
 - Read bootstrap token from environment: same as pasted bootstrap token, but the TUI reads the value from an environment variable in the current process.
 - Paste final operational token: the TUI stores it as `goodvibes://secrets/goodvibes/CLOUDFLARE_API_TOKEN`.
 - Use final token from environment: the TUI writes a `goodvibes://secrets/env/<ENV_NAME>` reference, usually `CLOUDFLARE_API_TOKEN`.
 
 Bootstrap tokens should be temporary and should be revoked or allowed to expire after GoodVibes creates and validates the operational token.
 
-## Slash command
+## In Devices and network
 
-Use `/cloudflare` for runtime inspection and daemon actions:
+The Cloudflare tab of **Devices and network** (the menu, `Ctrl+G` then `m`; the same place in the Agent and the web UI) shows whether the integration is on and ready and what is deployed, read by itself, and carries every action: `q` what the API token needs, `t` create the token, `d` find your accounts and resources, `v` check a token, `e` deploy, `k` check the deployed worker and `x` turn it off. Each opens its form (parts to add under "Also use", usual parts to leave out under "Leave out", or every part; a token typed on the hidden line; a `goodvibes://secrets/` reference instead). The daemon does every act through its `cloudflare.*` methods; the model may run the reads, while creating the token, deploying and turning it off are the owner's own acts. A script runs the same capabilities: `goodvibes do cloudflare.status`, `goodvibes do cloudflare.validate --input token="$CLOUDFLARE_API_TOKEN"`.
 
-```text
-/cloudflare status
-/cloudflare setup
-/cloudflare requirements [--all|--component queues]
-/cloudflare create-token --account <account-id> --bootstrap-env <ENV_NAME> [--new]
-/cloudflare discover --token-env CLOUDFLARE_API_TOKEN
-/cloudflare validate --token-env CLOUDFLARE_API_TOKEN
-/cloudflare provision --account <account-id> --batch-mode explicit --tunnel-token-ref goodvibes://secrets/goodvibes/GOODVIBES_CLOUDFLARE_TUNNEL_TOKEN
-/cloudflare verify [--worker-url <url>] [--worker-token <token> | --worker-token-ref <ref>]
-/cloudflare disable [--keep-cron] [--keep-worker-subdomain] [--bootstrap-token <token> | --bootstrap-env <ENV_NAME>]
-```
+Creating the token returns the token the daemon already made for the same account, zone and components while Cloudflare reports it active and unexpired (one check at Cloudflare); a token deleted in the dashboard, disabled or expired is replaced by a new one. "Make a fresh one" always makes a new token and revokes the one it replaces. When Cloudflare creates the operational token but does not keep the permission policy GoodVibes asked for, the token is not stored and the action fails with code `CLOUDFLARE_TOKEN_POLICY_MISMATCH`, naming the missing permission groups; creating the token again revokes the unusable one first.
 
-Bare `/cloudflare` opens its list of actions (from a model or script it runs `status`). `/cloudflare setup` opens the guided Cloudflare setup, the same form as `/setup cloudflare`. All other actions call platform-owned daemon routes under local daemon admin/auth. The Agent has the same `/cloudflare` command over its connected host (without the guided setup); the model may run its reads, while `create-token`, `provision` and `disable` count only when the owner types them.
+Turning it off saves that in config and asks first, because with a bootstrap token it revokes the operational token this daemon made, which cannot be undone; the token is then created again before deploying again, and the result says which applies. Without a bootstrap token, deploying sets it up again (the resources a deploy makes can be billed; turning it off turns them off). It removes the daemon credential from the Worker (so the Worker can no longer call the daemon), turns off the Worker cron (add `--keep-cron` to leave it running) and the Worker's workers.dev route (add `--keep-worker-subdomain` to keep it; `POST /api/cloudflare/disable` turns the route off unless `disableWorkerSubdomain` is `false`), stops the tunnel connector, and returns the batch queue backend to `local`. It deletes no deployed resource at Cloudflare: every resource still deployed (Worker script, queues, tunnel, Access application, DNS records, KV, R2, Secrets Store) is listed as a `still-deployed` step, to delete in the Cloudflare dashboard if it is no longer wanted. Provisioning again restores the credential.
 
-`create-token` returns the token the daemon already made for the same account, zone and components while Cloudflare reports it active and unexpired (one check at Cloudflare); a token deleted in the dashboard, disabled or expired is replaced by a new one. `--new` always makes a new token and revokes the one it replaces. When Cloudflare creates the operational token but does not keep the permission policy GoodVibes asked for, the token is not stored and `create-token` fails with code `CLOUDFLARE_TOKEN_POLICY_MISMATCH`, naming the missing permission groups; creating the token again revokes the unusable one first.
-
-Each action accepts only its own flags, and a line is refused before anything is sent when it has an unknown or misspelt flag (`--keepcron`), a flag that needs a value and has none (`--token-env` with no name), a word that names no component (`provision tunel`), a `--batch-mode` other than `off`, `explicit` or `eligible-by-default`, or a `--token-env`/`--bootstrap-env` naming a variable that is not set in the app's environment (the stored token would otherwise be used). The refusal names the accepted values.
-
-`/cloudflare disable` turns the integration off and saves that in config. Typed, it runs at once; with a bootstrap token it revokes the operational token this daemon made, which cannot be undone; then `/cloudflare create-token` is needed before `/cloudflare provision` sets it up again, and the last line of its output says which applies. Without a bootstrap token, `/cloudflare provision` sets it up again (the resources provision deploys can be billed; `/cloudflare disable` turns them off). It removes the daemon credential from the Worker (so the Worker can no longer call the daemon), turns off the Worker cron (add `--keep-cron` to leave it running) and the Worker's workers.dev route (add `--keep-worker-subdomain` to keep it; `POST /api/cloudflare/disable` turns the route off unless `disableWorkerSubdomain` is `false`), stops the tunnel connector, and returns the batch queue backend to `local`. It deletes no deployed resource at Cloudflare: every resource still deployed (Worker script, queues, tunnel, Access application, DNS records, KV, R2, Secrets Store) is listed as a `still-deployed` step, to delete in the Cloudflare dashboard if it is no longer wanted. Provisioning again restores the credential.
-
-`/cloudflare provision` also accepts `--no-verify` (skip the check after provisioning), `--no-store-token` (do not store the API token), `--no-workers-dev` (do not enable the workers.dev route), `--worker-cron`, `--daemon-url`, `--worker-url`, `--dlq`, and `--operator-token` and `--worker-client-token`. Every token typed on the line (`--token`, `--bootstrap-token`, `--operator-token`, `--worker-client-token`, `--worker-token`) is hidden as it is typed and kept out of the input history and the shown line.
-
-`/cloudflare provision` accepts the same major platform daemon fields the setup form exposes, including `--tunnel-name`, `--tunnel-id`, `--tunnel-service-url`, `--tunnel-token-ref`, `--access-app-id`, `--access-service-token-id`, `--access-service-token-ref`, `--kv-namespace-name`, `--kv-namespace-id`, `--do-namespace-name`, `--r2-bucket-name`, `--secrets-store-name`, `--secrets-store-id`, `--operator-token-ref`, and `--worker-client-token-ref`.
+The deploy form also has "Check it after" (or skip the check), "Keep the API token" (or not store it), the workers.dev address (on, or left off), the worker's schedule, the daemon's and the worker's addresses, the queues, the operator token and the worker client token, and the same major daemon fields the setup form exposes: the tunnel's name, id, target and token reference, the Access application and service token, the KV namespace, the Durable Objects namespace, the R2 bucket, the Secrets Store, and the token references. Every token typed in (the API token, the bootstrap token, the operator and worker tokens) is a secret input: typed on the hidden line, kept out of the history, never shown and never kept anywhere but the daemon's secret store.
 
 ## Daemon routes
 
-The TUI integrates with these daemon routes, each backing the matching `/cloudflare` subcommand:
+The daemon serves these routes, each backing the matching action of the Cloudflare tab:
 
 | Route | Does |
 | --- | --- |
@@ -83,9 +65,9 @@ Errors return JSON with `error`; failures raised by the Cloudflare integration a
 
 ## What provisioning sets up
 
-`/cloudflare provision` reports `ok: true` only when what was asked for works: the Worker check (`/batch/health` and the Worker's proxy to the daemon) passed, or was turned off with `--no-verify`, and Access, when selected, protects the daemon hostname. Only then does it turn `cloudflare.enabled` on and move `batch.queueBackend` to `cloudflare`; otherwise the result is `ok: false`, the integration stays off, and the `switch-on` step says why.
+A deploy reports `ok: true` only when what was asked for works: the Worker check (`/batch/health` and the Worker's proxy to the daemon) passed, or was skipped under "Check it after", and Access, when selected, protects the daemon hostname. Only then does it turn `cloudflare.enabled` on and move `batch.queueBackend` to `cloudflare`; otherwise the result is `ok: false`, the integration stays off, and the `switch-on` step says why.
 
-`/cloudflare status` lists a resource component (Worker, queues, Tunnel, Access, KV, Durable Objects, R2, Secrets Store) as configured only after a provision created or confirmed it. Provisioning again is safe: a resource of the configured name that already exists, from an earlier run or made by hand, is reused rather than created a second time, and when Cloudflare refuses a new Secrets Store because the account has reached its limit (`maximum_stores_exceeded`) and the account holds exactly one store, that store is used. The record of what provisioning created is kept in the daemon's control-plane directory as `cloudflare-resources.json`.
+The Cloudflare tab lists a resource component (Worker, queues, Tunnel, Access, KV, Durable Objects, R2, Secrets Store) as configured only after a provision created or confirmed it. Provisioning again is safe: a resource of the configured name that already exists, from an earlier run or made by hand, is reused rather than created a second time, and when Cloudflare refuses a new Secrets Store because the account has reached its limit (`maximum_stores_exceeded`) and the account holds exactly one store, that store is used. The record of what provisioning created is kept in the daemon's control-plane directory as `cloudflare-resources.json`.
 
 | Component | What it does in the batch path |
 | --- | --- |

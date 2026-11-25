@@ -2,26 +2,29 @@
  * The screens drawn from slash command descriptions (listed in
  * command-screen-list.ts), and the panel the command palette opens one in.
  * Each screen is a plain component, so a settings section or a Work tab can
- * also show it in place.
+ * also show it in place. A screen that is a place's (Automation, System,
+ * Devices and network, Money, Permissions and safety) has no component here:
+ * it opens the place (views/places), the group's one web view.
  */
 import type { ComponentType } from 'react';
 import { Drawer } from '../../ui/Drawer';
 import { CommandScreenTitleShown } from './CommandScreen';
 import { COMMAND_SCREEN_LIST, type CommandScreenListing } from './command-screen-list';
-import { McpServers } from './McpServers';
+import { CodePanel } from './CodePanel';
+import { ToolsPanel } from './ToolsPanel';
 import { RepeatPurchases } from './RepeatPurchases';
-import { SchedulesPanel } from './SchedulesPanel';
-import { TriggersPanel } from './TriggersPanel';
+import { WaitingPanel } from './WaitingPanel';
 
 export interface CommandScreenEntry extends CommandScreenListing {
   readonly Component: ComponentType;
 }
 
 const SCREEN_COMPONENTS: Readonly<Record<string, ComponentType>> = {
-  'schedules': SchedulesPanel,
-  'mcp-servers': McpServers,
+  // Tools and extensions: hooks and their trace, tool servers (McpServers inside it), skills, presets, managed settings.
+  'tools': ToolsPanel,
   'repeat-purchases': RepeatPurchases,
-  'triggers': TriggersPanel,
+  'waiting': WaitingPanel,
+  'code': CodePanel,
 };
 
 export const COMMAND_SCREENS: readonly CommandScreenEntry[] = COMMAND_SCREEN_LIST.flatMap((entry) => {

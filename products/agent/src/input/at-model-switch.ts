@@ -18,7 +18,7 @@ import { splitAtModelDirectives } from '@goodvibes/engine/terminal-shell/submiss
 
 export interface AtModelSwitchOptions {
   readonly providerRegistry: Pick<ProviderRegistry, 'setCurrentModel' | 'getCurrentModel'>;
-  readonly configManager: Pick<ConfigManager, 'set'>;
+  readonly configManager: Pick<ConfigManager, 'setRuntimeOverride'>;
   /** Applied for each switch that took, so the surface's own labels follow. */
   readonly onModelChanged: (model: { readonly id: string; readonly provider: string }) => void;
   /** One line per switch, what it became, or that the id named nothing. */
@@ -38,8 +38,9 @@ function switchModel(modelId: string, options: AtModelSwitchOptions): boolean {
   // The switch is live from here, so a later failure is not "unknown model".
   try {
     options.onModelChanged({ id: def.id, provider: def.provider });
-    options.configManager.set('provider.model', def.registryKey);
-    options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) via @model:`);
+    // This conversation's own model: the shared default every program starts from is not touched.
+    options.configManager.setRuntimeOverride('provider.model', def.registryKey);
+    options.notify(`[Model] Switched this conversation to ${def.displayName} (${def.provider}) via @model:`);
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     options.notify(`[Model] Switched to ${def.displayName} (${def.provider}) for this session, but saving or showing the change failed: ${reason}`);

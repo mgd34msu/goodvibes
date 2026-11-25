@@ -12,6 +12,8 @@ import type { CapabilityFilter, CategoryFilter } from './model-picker-types.js';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { isTextBackspace } from './delete-key-policy.js';
 import { runPickedCommand } from './command-registry.js';
+import { runModelsCapability } from './models-lists.js';
+import type { CommandActionContext } from './command-actions/types.js';
 export interface ModelPickerCommandContext {
   readonly provider: {
     readonly providerRegistry: Pick<import('@goodvibes/engine/platform/platform/providers').ProviderRegistry, 'getSelectableModels'>;
@@ -99,8 +101,8 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
     const requested = readRequestedEffort(state) ?? 'medium';
     return servingEffortForLevel(requested, toEffortModel(model as never)).effective ?? requested;
   }
-  // /pin add and /pin remove each read the stored favorites first, so they must run in
-  // the order the keys were pressed; one chain per picker keeps them ordered.
+  // pin.add and pin.remove (the daemon's pins, every program's) each read the stored favorites first, so they must
+  // run in the order the keys were pressed; one chain per picker keeps them ordered.
   const pinChains = new WeakMap<object, Promise<void>>();
   function togglePin(state: State): void {
     const picker = state.modelPicker;
@@ -108,13 +110,14 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
     if (!model) return;
     const pinned = picker.togglePinnedLocal(model);
     const context = state.commandContext;
-    if (!context?.executeCommand) return;
+    if (!context) return;
     const chain = (pinChains.get(picker) ?? Promise.resolve()).then(async () => {
       let done = false;
       try {
-        done = (await context.executeCommand?.('pin', [pinned ? 'add' : 'remove', model.registryKey])) ?? false;
+        // The press is the person's own request, run in the daemon that keeps the pins.
+        done = await runModelsCapability(pinned ? 'pin.add' : 'pin.remove', { model: model.registryKey }, context as unknown as CommandActionContext);
       } catch (error) {
-        logger.warn('model picker: pin command failed', { model: model.registryKey, error: summarizeError(error) });
+        logger.warn('model picker: pin failed', { model: model.registryKey, error: summarizeError(error) });
       }
       // Show what is stored: undo the local flip unless a later toggle already changed it.
       if (!done && picker.isPinned(model) === pinned) {

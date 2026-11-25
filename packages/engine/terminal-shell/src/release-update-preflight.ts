@@ -4,6 +4,8 @@ import { dirname } from 'node:path';
 import { atomicWriteFileSync, listBuiltinSubscriptionProviders } from '@goodvibes/engine/platform/platform/config';
 import { PREVIOUS_FILE_SUFFIX } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { describeDaemonUpdates, type DaemonUpdateVerbs } from './daemon-update-status.js';
+import { daemonCapabilityAction, runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import { REPLACED_DONE, UPDATE_DAEMON } from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import type { CommandActionContext, InputDescription } from './command-actions/types.js';
@@ -235,6 +237,8 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
   readonly repairRequired?: ((tag: string, context: Context) => boolean) | undefined;
   /** The connected daemon's own update loop, which this app's update does not cover. */
   readonly daemon?: ((context: Context) => DaemonUpdateVerbs) | undefined;
+  /** How this program reaches the daemon for a capability (its `capability-binding.ts`): "See the daemon's updates" runs there. */
+  readonly capability: DaemonCapabilityBinding<Context>;
   /** Where this install's update state is read, for the review, save-review and read-review actions. */
   readonly install: InstallReviewSource<Context>;
 }): DescribedCommand<Context> {
@@ -311,21 +315,20 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
           }
         },
       },
-      readAction<Context>({
-        id: 'daemon', label: 'See the daemon\'s updates', word: 'daemon',
-        inputs: [choiceInput({
-          id: 'now', label: 'Check now', help: 'Ask the daemon to look for a newer release now', typed: { flag: '--check', switchOn: 'yes' },
-          choices: [{ value: 'no', label: 'Show what it last found' }, { value: 'yes', label: 'Look now' }],
-          optional: { default: 'no', means: 'show what it last found' },
-        })],
-        sentence: 'Shows the connected daemon\'s own update state: its version, the newest release it found and when it looks again.',
-        operator: terminal, example: { now: 'yes' },
+      // The capability update.daemon (capabilities/builtin/system.ts): the daemon reads and checks its own updates.
+      // A person typing it at a terminal that can redraw a line also sees an install the check started through to the
+      // new version (the same update.status and update.check, followed on screen); a place, a model and a script get
+      // the capability's answer.
+      {
+        ...daemonCapabilityAction<Context>(UPDATE_DAEMON, policy.capability),
         async run(values, context) {
-          if (!policy.daemon) throw commandRefusal('This program reaches no daemon of its own.');
-          // A person at the terminal sees an install through to the new version; a model's run answers at once.
-          return describeDaemonUpdates(policy.daemon(context), values.now === 'yes', context.invokedByModel === true ? undefined : { print: context.print, printLive: context.printLive });
+          if (policy.daemon && context.invokedByModel !== true && context.printLive) {
+            return describeDaemonUpdates(policy.daemon(context), values.now === 'yes', { print: context.print, printLive: context.printLive });
+          }
+          const answer = await runDaemonCapability(UPDATE_DAEMON.capability.id, values, context, policy.capability);
+          return answer.detail ?? '';
         },
-      }),
+      },
       readAction<Context>({
         id: 'review', label: 'See this install', word: 'review',
         sentence: 'Shows the version installed, the newest release, how it was installed, whether a previous version is kept and what an update keeps.',
@@ -347,7 +350,7 @@ export function createSelfUpdateCommand<Context extends CommandActionContext & {
           pathInput('Where to write it; it holds no secret'),
           choiceInput({
             id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
-            choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+            choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }],
             optional: { default: 'no', means: 'keep it and stop' },
           }),
         ],

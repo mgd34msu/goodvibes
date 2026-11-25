@@ -228,15 +228,15 @@ function gmailVerifyFix(outcome: Awaited<ReturnType<GoogleSetupActionDeps['verif
   const protocol = outcome.stage ?? 'IMAP';
   if (outcome.failure === 'credentials-rejected') {
     return `Gmail refused the stored app password over ${protocol}. Make a new one: open ${APP_PASSWORD_URL}, delete the "${APP_PASSWORD_LABEL}" entry, `
-      + `type ${APP_PASSWORD_LABEL} in the "App name" box, click "Create" and copy the 16-character password; then run /mail password, `
-      + 'paste it, and run /google setup again to check it.';
+      + `type ${APP_PASSWORD_LABEL} in the "App name" box, click "Create" and copy the 16-character password; then choose "Store the mailbox password" `
+      + 'in Mail, calendar and channels, paste it, and run /google setup again to check it.';
   }
   if (outcome.failure === 'unreachable') {
     const server = outcome.server ?? `the ${protocol} server`;
     return `The ${protocol} server ${server} could not be reached, so this machine's network or that address is the cause; `
-      + 'the app password was not checked. Run /google setup again once the network is up; /mail settings shows the address.';
+      + 'the app password was not checked. Run /google setup again once the network is up; the mailbox settings in Mail, calendar and channels show the address.';
   }
-  return 'Put right what the line above names (/mail settings shows every mail setting), then run /google setup again.';
+  return 'Put right what the line above names (the mailbox settings in Mail, calendar and channels show every mail setting), then run /google setup again.';
 }
 
 function gmailVerifyRunner(deps: GoogleSetupActionDeps): GoogleStepRunner {

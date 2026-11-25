@@ -19,6 +19,21 @@ import {
   CAPABILITY_RUN_METHOD_ID, CapabilityRefusal, SESSION_CAPABILITIES, capabilityFindDefinition, capabilityOutcomeText, capabilityRunDefinition,
   checkCapabilityInputs, createSecretInputProjector, daemonCapability, findCapabilities, methodBodyOf, operatorInputFromValues, revealSecretInputs,
   hiddenSecret, type CapabilityCatalog, type CapabilityDefinition, type CapabilityEntry, type ClearServices, type CompactServices, type KeysCapabilityServices, type UndoServices,
+  type SessionsCapabilityServices, type ConversationControlServices,
+  type CodeCapabilityServices,
+  type ChecklistCapabilityServices, type TasksCapabilityServices, type WorkIntakeCapabilityServices,
+  type DecisionsCapabilityServices, type HeldSendsCapabilityServices, presentCapabilityRunAsks,
+  type HooksReloadServices, type ToolRegistryCapabilityServices, type McpSessionServices, type PluginsSessionServices, type MarketplaceRecommendServices,
+  type PermissionsSessionServices, type PlanModeSessionServices, type SecretsSessionServices, type SandboxSessionServices,
+  type MemorySessionCapabilityServices, type TemplateSessionCapabilityServices, type DeepLinkCapabilityServices,
+  type ReplayCapabilityServices,
+  type AgentsCapabilityServices,
+  type EvalCapabilityServices,
+  type ResearchConversationServices,
+  type SystemSessionServices,
+  type RoutineStartServices,
+  type ServiceSessionServices,
+  type DevicesSessionServices,
 } from '@goodvibes/engine/platform/platform/capabilities';
 import { dropNestedSecretInputs, holdNestedSecretInputs, type SecretInputLeaf } from './operator-input-projector.js';
 import type { Tool } from '@goodvibes/engine/platform/platform/types';
@@ -31,9 +46,51 @@ import { operatorContractMethods, ownerOnlyOperatorMethodIds, resolveOperatorCon
 import { captureOperatorConnection } from './operator-connection-owner.js';
 import { agentCallConnection } from './agent-call-credential.js';
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
+import { createDaemonRemoteTool } from './daemon-remote-tool.js';
 
 /** The live conversation's services, from the program holding it, and its key table (builtin/keys.ts). */
-export type SessionCapabilityServices = ClearServices & CompactServices & UndoServices & KeysCapabilityServices;
+export type SessionCapabilityServices = ClearServices & CompactServices & UndoServices & KeysCapabilityServices
+  // Its saved sessions and branches, and the hosted session it joined (builtin/sessions.ts).
+  & SessionsCapabilityServices
+  // The controls on the conversation itself: the turn, its record, its context, the composer, checkpoints (builtin/conversation-controls.ts).
+  & ConversationControlServices
+  // The project's files: git, the code index, code lookups, tests, worktrees (builtin/code.ts).
+  & CodeCapabilityServices
+  // The project's checklist, the shared file this program reads (builtin/checklist.ts).
+  & ChecklistCapabilityServices
+  // This program's tasks and the daemon's (builtin/tasks.ts).
+  & TasksCapabilityServices
+  // Asking for work, and its journal (builtin/work-intake.ts).
+  & WorkIntakeCapabilityServices
+  // A choice on a call Jev decided here, and the sends the content check refused here (builtin/waiting.ts).
+  & DecisionsCapabilityServices & HeldSendsCapabilityServices
+  // This program's own dispatcher, which reads the hooks file again (builtin/hooks.ts), and its tools (builtin/tools.ts).
+  & HooksReloadServices & ToolRegistryCapabilityServices
+  // Its own tool server connections and its session's settings for them (builtin/mcp.ts).
+  & McpSessionServices
+  // The plugins it runs (builtin/plugins.ts).
+  & PluginsSessionServices
+  // What the marketplace has that fits this project, as this program reads it (builtin/marketplace.ts).
+  & MarketplaceRecommendServices
+  // Permissions and safety: this conversation's permissions and plan mode, a secret for this session, its sandbox sessions.
+  & PermissionsSessionServices & PlanModeSessionServices & SecretsSessionServices & SandboxSessionServices
+  // Memory and knowledge: what this program's turns were given and holds, memory files in its project, templates as the
+  // next message, links to its views (builtin/memory-session.ts, templates.ts, deeplink.ts).
+  & MemorySessionCapabilityServices & TemplateSessionCapabilityServices & DeepLinkCapabilityServices
+  // Work and agents: the runs this program recorded of its turns (builtin/replay.ts).
+  & ReplayCapabilityServices
+  // Work and agents: team modes, recipes, archetypes and work contracts of this program's own agents (builtin/agents.ts).
+  & AgentsCapabilityServices
+  // Work and agents: task suites run in this program's project, and a question or page sent to its conversation (builtin/eval.ts, research.ts).
+  & EvalCapabilityServices & ResearchConversationServices
+  // System: this session at a glance, closing the program, how much it prints (builtin/system-session.ts).
+  & SystemSessionServices
+  // Memory and knowledge: a routine started in this conversation (builtin/routines.ts); a model reads its steps as the answer.
+  & RoutineStartServices
+  // Models and providers: this program's own sign-in to a daemon or listener (builtin/service-sessions.ts); the Agent keeps none.
+  & ServiceSessionServices
+  // Devices and network: pairing on this program's screen, and its own credential for its daemon (builtin/devices-session.ts).
+  & DevicesSessionServices;
 
 export interface CapabilityToolOptions {
   /** This program's catalog: its own described actions and the moved capabilities. */
@@ -44,6 +101,8 @@ export interface CapabilityToolOptions {
   readonly program?: 'tui' | 'agent' | undefined;
   /** The turn's working directory (the project a hooks file or a project secret belongs to). */
   readonly workingDirectory: () => string;
+  /** The model this conversation uses (provider:model), for a capability on it (its context window size). */
+  readonly model?: (() => string | undefined) | undefined;
   /** Called with a listener the catalog's owner calls when the catalog changes (the program bound its commands). */
   readonly onCatalogChange?: ((listener: () => void) => void) | undefined;
   /**
@@ -148,15 +207,26 @@ function runDefinitionFor(catalog: () => CapabilityCatalog): () => ReturnType<ty
   };
 }
 
-function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, host: RunHost): Tool {
-  const definitionNow = runDefinitionFor(options.catalog);
-  /**
-   * One daemon method call made directly, with the credential the one rule names for it (agent-call-credential.ts):
-   * `capabilities.run` with the Agent's delegated credential (the host judges it as the Agent's after this gate), a
-   * read such as an action's preview with the ordinary one.
-   */
-  const postToDaemon = async (methodId: string, input: Record<string, unknown>, signal: AbortSignal | undefined, what: string):
-    Promise<{ readonly ok: true; readonly body: Record<string, unknown> } | { readonly ok: false; readonly error: string }> => {
+/** The conversation's model for a daemon capability's call, when the program gave a way to read it. */
+function modelNow(options: Pick<CapabilityToolOptions, 'model'>): { readonly model?: string } {
+  try {
+    const model = options.model?.();
+    return model ? { model } : {};
+  } catch {
+    return {};
+  }
+}
+
+/** What one direct daemon method call answered. */
+type Posted = { readonly ok: true; readonly body: Record<string, unknown> } | { readonly ok: false; readonly error: string };
+
+/**
+ * One daemon method call made directly, with the credential the one rule names for it (agent-call-credential.ts):
+ * `capabilities.run` with the Agent's delegated credential (the host judges it as the Agent's after this gate), a
+ * read such as an action's preview with the ordinary one.
+ */
+function daemonPoster(host: RunHost): (methodId: string, input: Record<string, unknown>, signal: AbortSignal | undefined, what: string) => Promise<Posted> {
+  return async (methodId, input, signal, what) => {
     let sending = false;
     try {
       const ordinary = captureOperatorConnection(host.shellPaths, host.configManager, () => signal?.throwIfAborted(), host.inProcess);
@@ -182,7 +252,12 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
         : `connected_host_unavailable: ${what} was not sent (${cause}).` };
     }
   };
-  const runOnDaemon = async (input: Record<string, unknown>, executeOptions: Parameters<Tool['execute']>[1]): Promise<Settled> => {
+}
+
+function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, host: RunHost): Tool {
+  const definitionNow = runDefinitionFor(options.catalog);
+  const postToDaemon = daemonPoster(host);
+  const runOnDaemon =async (input: Record<string, unknown>, executeOptions: Parameters<Tool['execute']>[1]): Promise<Settled> => {
     const sent = await postToDaemon(CAPABILITY_RUN_METHOD_ID, input, executeOptions?.signal, String(input.id));
     if (!sent.ok) return { success: false, error: sent.error };
     return { success: true, output: typeof sent.body.text === 'string' && sent.body.text ? sent.body.text : `${String(input.id)}: done.` };
@@ -235,8 +310,10 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
         const live = options.session?.();
         const capability = sessionDefinition(entry.id);
         if (!live || !capability) return { success: false, error: `${entry.id} acts on a terminal program's open conversation, and this turn has none to act on.` };
+        if (capability.available && !capability.available(live)) return { success: false, error: `${entry.label} is not something this program does; nothing was done.` };
         // The model's own turn is running while it calls this: what a capability refuses during a turn, it refuses here.
-        const session: SessionCapabilityServices = { ...live, conversation: { ...live.conversation, isGenerating: () => true } };
+        // A routine the model starts is read as its answer, never sent as the owner's next message (builtin/routines.ts).
+        const session: SessionCapabilityServices = { ...live, conversation: { ...live.conversation, isGenerating: () => true }, send: undefined };
         try {
           const result = await capability.run(values, session, { workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}) });
           return { success: true, output: capabilityOutcomeText(entry, values, result) || `${entry.label}: done.` };
@@ -250,7 +327,7 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
         return { success: false, error: `${entry.id} (/${entry.command}${entry.word ? ` ${entry.word}` : ''}) has not moved to a capability that can be run from here yet; only the person can run it, from that slash command.` };
       }
       const result: Settled = daemonCapability(entry.id)
-        ? await runOnDaemon({ id: entry.id, inputs: values, workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}) }, executeOptions)
+        ? await runOnDaemon({ id: entry.id, inputs: values, workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}), ...modelNow(options) }, executeOptions)
         : entry.method
           ? await (async () => {
             const method = entry.method!;
@@ -287,6 +364,32 @@ function createRunTool(registry: ToolRegistry, options: CapabilityToolOptions, h
   return tool;
 }
 
+/** What a daemon capability answered when a turn tool ran it: the text a person reads and the facts a script reads. */
+export type DaemonCapabilityAnswer =
+  | { readonly ok: true; readonly text: string; readonly data: Readonly<Record<string, unknown>> }
+  | { readonly ok: false; readonly error: string };
+
+/**
+ * Run one daemon capability from a turn tool, as `capability_run` runs one: `capabilities.run` with the Agent's
+ * delegated credential, after the tool's own gate admitted the call. A write made this way is the daemon's, so
+ * every program's lists follow it (the capability announces its change).
+ */
+export function daemonCapabilityRunner(
+  shellPaths: ShellPathService,
+  configManager: ConnectedHostConfigReader,
+  program: 'tui' | 'agent',
+  inProcess?: AgentInProcessHost,
+): (id: string, inputs: Readonly<Record<string, string>>, signal?: AbortSignal) => Promise<DaemonCapabilityAnswer> {
+  const post = daemonPoster({ shellPaths, configManager, ...(inProcess ? { inProcess } : {}) });
+  return async (id, inputs, signal) => {
+    const sent = await post(CAPABILITY_RUN_METHOD_ID, { id, inputs, workingDirectory: shellPaths.workingDirectory, program }, signal, id);
+    if (!sent.ok) return { ok: false, error: sent.error };
+    const text = typeof sent.body.text === 'string' ? sent.body.text : '';
+    if (sent.body.ok === false) return { ok: false, error: text || `${id} was not done.` };
+    return { ok: true, text, data: record(sent.body.data) };
+  };
+}
+
 /**
  * Register `capability_find` and `capability_run`, and the daemon-method
  * runner they call nested (offered to the model no longer). `inProcess`: the
@@ -300,7 +403,18 @@ export function registerCapabilityTools(
   inProcess?: AgentInProcessHost,
 ): void {
   registerAgentOperatorMethodTool(registry, shellPaths, configManager, inProcess);
+  // The owner's ask for a capability_run call reads as the capability's own words, never its arguments as JSON.
+  presentCapabilityRunAsks((id) => options.catalog().get(id));
   registry.register(createFindTool(options));
+  // In a program's own process the remote runners are the daemon's: the `remote` tool runs the daemon's `remote.*`
+  // capabilities in place of the program's own registry. A turn the daemon hosts keeps the daemon's registry tool.
+  if (!inProcess && registry.has('remote')) {
+    const post = daemonPoster({ shellPaths, configManager });
+    registry.unregister('remote');
+    registry.register(createDaemonRemoteTool((id, inputs, signal) => post(CAPABILITY_RUN_METHOD_ID, {
+      id, inputs, workingDirectory: options.workingDirectory(), ...(options.program ? { program: options.program } : {}),
+    }, signal, id)));
+  }
   registry.register(createRunTool(registry, options, { shellPaths, configManager, ...(inProcess ? { inProcess } : {}) }), {
     inputProjection: createSecretInputProjector((id) => (options.catalog().get(id)?.inputs ?? []).filter((input) => input.kind === 'secret').map((input) => input.id)),
   });

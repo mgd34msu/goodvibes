@@ -41,6 +41,11 @@ import {
 import { newestHistoryTime, watchHostedSession, type HostedSessionSubscription } from '../../runtime/client/hosted-session-stream.ts';
 import { getSharedHostedSessionFeed, type HostedSessionFeed } from '../../views/hosted-session-feed.ts';
 import { getSharedHostedSessionRoster } from '../../runtime/client/hosted-roster.ts';
+import {
+  HOSTED_ATTACH, HOSTED_LEAVE, HOSTED_SEND, HOSTED_SEND_LATER, HOSTED_STATUS,
+  type CapabilityDefinition, type HostedJoin, type SessionsCapabilityServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
+import { sessionCapabilityAction } from '@goodvibes/engine/terminal-shell/command-actions';
 
 /** The last list this terminal printed, so `attach 2` means what the user just read. */
 let lastListedIds: readonly string[] = [];
@@ -284,6 +289,63 @@ const SESSION_PICK = {
   required: true, typed: { position: 1 },
 } as const;
 
+/** What a routine prints while it runs, as its answer in words. */
+async function said(ctx: CommandContext, run: (ctx: CommandContext) => Promise<unknown>): Promise<string> {
+  const lines: string[] = [];
+  let answering = true;
+  const answeringCtx: CommandContext = { ...ctx, print: (message: string) => { if (answering) lines.push(message); else ctx.print(message); } };
+  try {
+    const returned = await run(answeringCtx);
+    if (typeof returned === 'string' && returned.trim() !== '') lines.push(returned);
+  } finally {
+    answering = false;
+  }
+  return lines.join('\n');
+}
+
+/**
+ * This terminal's own join of the daemon's hosted sessions, as the hosted capabilities take it
+ * (capabilities/builtin/sessions.ts): each runs the daemon's method with this terminal's own id, and
+ * joining follows the session live here.
+ */
+export function hostedJoinOf(ctx: CommandContext): HostedJoin {
+  return {
+    status: async () => renderHostedStatus(getSharedHostedSessionFeed()),
+    join: (session) => said(ctx, async (c) => {
+      const seams = resolveSeams(c)!;
+      const sessionId = resolveIdArgument(session);
+      await daemonCall(() => attachSession(seams, sessionId, getSharedHostedSessionFeed(), c));
+    }),
+    send: async (text) => {
+      const outcome = await sayToHosted(ctx, text);
+      if (!outcome.ok) throw commandRefusal(`Not sent: ${outcome.error}`);
+      return 'Sent; its answer shows in the Agents view under Hosted.';
+    },
+    leave: async () => {
+      const feed = getSharedHostedSessionFeed();
+      if (!hasHostedAttachments(feed)) throw commandRefusal('No hosted session is joined in this terminal.');
+      const seams = resolveSeams(ctx)!;
+      // Each attachment is released through the client it was made with, on its own daemon.
+      const records = await daemonCall(() => detachHostedAttachments(feed, seams.client, seams.origin ?? 'the selected daemon'));
+      if (records.length === 0) throw commandRefusal('No hosted session is joined in this terminal.');
+      return records.map((record) => record.status === 'terminated'
+        ? `Left ${hostedSessionLabel(record)}: it ended (${record.terminatedReason ?? 'no reason recorded'}), as its setting said it would.`
+        : `Left ${hostedSessionLabel(record)}: it is still running in the daemon and can be joined again.`).join('\n');
+    },
+    // A message for after the turn (hosted.send-later, a control on the conversation: builtin/conversation-controls.ts).
+    sendLater: async (text) => {
+      const { seams, sessionId } = joined(ctx, 'queued');
+      await daemonCall(() => seams.client.followUp(sessionId, text));
+      return 'Queued: it runs after the current turn.';
+    },
+  };
+}
+
+/** The slash action of one of the terminal's own hosted capabilities. */
+function joinAction(definition: CapabilityDefinition<SessionsCapabilityServices>, terminalOnly: string) {
+  return sessionCapabilityAction<CommandContext, SessionsCapabilityServices>(definition, (ctx) => ({ hostedJoin: hostedJoinOf(ctx) }), { terminalOnly });
+}
+
 const HOSTED_COMMAND: CommandDescription<CommandContext> = {
   name: 'hosted',
   // --yes confirms only right after the action word: the same word in the text is text.
@@ -294,20 +356,16 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
   report: 'see-joined',
   actions: [
     {
-      id: 'see-joined', label: 'See the hosted session you are in', word: 'status', inputs: [],
+      // The capability (capabilities/builtin/sessions.ts) reads the session this terminal joined.
+      ...joinAction(HOSTED_STATUS, 'It is the session this terminal joined.'),
       async rowValue() {
         const record = getSharedHostedSessionFeed().getState().record;
         return record ? `in ${hostedSessionLabel(record)}` : 'none joined';
       },
-      sentence: 'Shows the hosted session this terminal joined, what leaving it would do, and the tool running in it.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { terminalOnly: 'It is the session this terminal joined.' }, example: {},
-      async run() {
-        return renderHostedStatus(getSharedHostedSessionFeed());
-      },
     },
     {
       id: 'start', label: 'Start a hosted session', word: 'new',
+      capability: { id: 'hosted.new', group: 'sessions', home: 'daemon', repeat: 'unsafe' },
       inputs: [
         { id: 'prompt', label: 'First message', help: 'What it should start on, the way you would ask in the chat', kind: 'long-text', freeTextReason: 'your own words', required: { default: '', defaultMeans: 'nothing yet' }, typed: { tail: true } },
         { id: 'leave', label: 'When everyone leaves', help: 'Whether it keeps running once no terminal or browser has it open', kind: 'choice', choices: [
@@ -318,7 +376,9 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
       sentence: 'A conversation will start in the daemon for this project and this terminal joins it; it lasts until you change it (ending it, or as "When everyone leaves" says).',
       done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'end',
-      operator: { method: 'sessions.hosted.create', fields: { initialPrompt: 'prompt' } }, example: { prompt: 'summarise the open issues', leave: 'keep' },
+      // The web UI's sheet and every other door start it through the capability (its project is the caller's folder).
+      operator: { method: 'capabilities.run', fields: { id: '="hosted.new"', 'inputs.prompt': 'prompt', 'inputs.leave': 'leave' } },
+      example: { prompt: 'summarise the open issues', leave: 'keep' },
       async run(values, ctx) {
         const seams = resolveSeams(ctx)!;
         const feed = getSharedHostedSessionFeed();
@@ -332,17 +392,20 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
             ...(prompt ? { initialPrompt: prompt } : {}),
             ...(policy ? { detachPolicy: policy } : {}),
           });
-          ctx.print([`Started ${hostedSessionLabel(record)} in ${record.workspaceRoot}.`, `  ${describeDetachEffect(record)}`].join('\n'));
+          // What leaving does is said once, by the join that follows.
+          ctx.print(`Started ${hostedSessionLabel(record)}.`);
           return record;
         }, feed, ctx));
       },
     },
     {
       id: 'see-all', label: 'See hosted sessions', word: 'list',
+      capability: { id: 'hosted.list', group: 'sessions', home: 'daemon', repeat: 'safe' },
       inputs: [{ id: 'ended', label: 'Ended ones too', help: 'Also the ones that have ended and are still kept', kind: 'choice', choices: [{ value: 'no', label: 'Only running ones' }, { value: 'yes', label: 'Ended ones too' }], required: { default: 'no', defaultMeans: 'only running ones' }, typed: { flag: '--all', switchOn: 'yes' } }],
       sentence: 'Lists the hosted sessions the daemon has, who has joined each, and what leaving would do.', done: '',
       touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'sessions.hosted.list', fields: {} }, example: { ended: 'yes' },
+      // The web UI's sheet and every other door read them through the capability (capabilities/builtin/sessions.ts).
+      operator: { method: 'capabilities.run', fields: { id: '="hosted.list"', 'inputs.ended': 'ended' } }, example: { ended: 'yes' },
       async run(values, ctx) {
         const seams = resolveSeams(ctx)!;
         const includeTerminated = values.ended === 'yes';
@@ -358,41 +421,10 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
         return [`Hosted sessions (${records.length}${includeTerminated ? ', including ended' : ''}):`, ...records.map(renderHostedRecordLine), '', '  /hosted attach <id or number>'].join('\n');
       },
     },
-    {
-      id: 'join', label: 'Join a hosted session', word: 'attach', inputs: [SESSION_PICK],
-      sentence: 'This terminal joins hosted session {session}, shows its conversation so far and follows it live.', done: '',
-      touches: 'reads', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'sessions.hosted.attach', fields: { sessionId: 'session' } }, example: { session: 'hs-1' },
-      async run(values, ctx) {
-        const seams = resolveSeams(ctx)!;
-        const sessionId = resolveIdArgument(values.session!);
-        await daemonCall(() => attachSession(seams, sessionId, getSharedHostedSessionFeed(), ctx));
-      },
-    },
-    {
-      id: 'send-now', label: 'Send a message now', word: 'send',
-      inputs: [{ id: 'text', label: 'Message', help: 'What to tell it; it reads it during the turn it is in', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
-      sentence: '"{text}" will be sent to the hosted session now, into the turn it is running.', done: '',
-      touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'sessions.steer', fields: { message: 'text' } }, example: { text: 'focus on the failing test' },
-      async run(values, ctx) {
-        const outcome = await sayToHosted(ctx, values.text!.trim());
-        if (!outcome.ok) throw commandRefusal(`Not sent: ${outcome.error}`);
-        return 'Sent; its answer shows in the Agents view under Hosted (/agents).';
-      },
-    },
-    {
-      id: 'send-later', label: 'Send a message after this turn', word: 'send-later',
-      inputs: [{ id: 'text', label: 'Message', help: 'What it should do next, once the turn it is in ends', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } }],
-      sentence: '"{text}" will wait and run after the hosted session\'s current turn.', done: '',
-      touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
-      operator: { method: 'sessions.followUp', fields: { message: 'text' } }, example: { text: 'then update the changelog' },
-      async run(values, ctx) {
-        const { seams, sessionId } = joined(ctx, 'queued');
-        await daemonCall(() => seams.client.followUp(sessionId, values.text!.trim()));
-        return 'Queued: it runs after the current turn.';
-      },
-    },
+    joinAction(HOSTED_ATTACH, 'It is this terminal that joins and follows the session.'),
+    joinAction(HOSTED_SEND, 'It goes to the session this terminal joined.'),
+    // A control on the conversation (capabilities/builtin/conversation-controls.ts), on the session this terminal joined.
+    joinAction(HOSTED_SEND_LATER, 'It goes to the session this terminal joined.'),
     {
       id: 'stop-tool', label: 'Stop the tool that is running', word: 'stop-tool',
       inputs: [{ id: 'call', label: 'Tool', help: 'The tools running in the session now', kind: 'choice', choices: { list: RUNNING_TOOLS, allowOther: { reason: 'a tool call id' } }, required: { default: '', defaultMeans: 'the one running now' }, typed: { position: 1 } }],
@@ -408,30 +440,15 @@ const HOSTED_COMMAND: CommandDescription<CommandContext> = {
         return `Stopped tool call ${callId}.`;
       },
     },
-    {
-      id: 'leave', label: 'Leave the hosted session', word: 'leave', inputs: [],
-      sentence: 'This terminal leaves the hosted session; it keeps running or ends, as its "when everyone leaves" setting says.', done: '',
-      touches: 'this-machine', lasts: 'not-a-change', risk: 'none', undoneBy: 'join',
-      operator: { method: 'sessions.hosted.detach', fields: {} }, example: {},
-      async run(_values, ctx) {
-        const feed = getSharedHostedSessionFeed();
-        if (!hasHostedAttachments(feed)) throw commandRefusal('No hosted session is joined in this terminal.');
-        const seams = resolveSeams(ctx)!;
-        // Each attachment is released through the client it was made with, on its own daemon.
-        const records = await daemonCall(() => detachHostedAttachments(feed, seams.client, seams.origin ?? 'the selected daemon'));
-        if (records.length === 0) throw commandRefusal('No hosted session is joined in this terminal.');
-        return records.map((record) => record.status === 'terminated'
-          ? `Left ${hostedSessionLabel(record)}: it ended (${record.terminatedReason ?? 'no reason recorded'}), as its setting said it would.`
-          : `Left ${hostedSessionLabel(record)}: it is still running in the daemon and can be joined again.`).join('\n');
-      },
-    },
+    joinAction(HOSTED_LEAVE, 'It is this terminal that leaves the session.'),
     {
       // An id, never a list number: the question names exactly the session that ends, and a later list cannot change what it means.
       id: 'end', label: 'End a hosted session', word: 'end', inputs: [{ ...SESSION_PICK, choices: { list: HOSTED_SESSIONS, allowOther: { reason: 'a session id' } } }],
+      capability: { id: 'hosted.end', group: 'sessions', home: 'daemon', repeat: 'safe' },
       sentence: 'Hosted session {session} and the turn it is running will end, whatever its setting says.',
       done: '',
       touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
-      operator: { method: 'sessions.hosted.kill', fields: { sessionId: 'session' } }, example: { session: 'hs-1' },
+      operator: { method: 'capabilities.run', fields: { id: '="hosted.end"', 'inputs.session': 'session' } }, example: { session: 'hs-1' },
       async run(values, ctx) {
         const feed = getSharedHostedSessionFeed();
         const target = values.session!;

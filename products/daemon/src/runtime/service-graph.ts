@@ -5,17 +5,24 @@ import { createDaemonWorkspaceTrustResolver } from './workspace-trust-compositio
 import { installNativeHostedConversationOwner } from './native-hosted-conversation-composition.js';
 import { createNativeWorkSubmissionHost } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-submission';
 import { createNativeConversationIntakeHost, createNativeRequirementProposer, type NativeConversationContinuationOwner } from '@goodvibes/engine/platform/platform/workflow/work-ledger/native-intake';
-import { createLocalWorkLedgerReadBinding } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
-import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods } from '@goodvibes/engine/platform/platform/control-plane';
+import { createLocalWorkLedgerReadBinding, createWorkPlans } from '@goodvibes/engine/platform/platform/workflow/work-ledger';
+import { createWorkstreamDraftService } from '@goodvibes/engine/platform/platform/orchestration';
+import { prepareGatewayScopePolicyOwner, registerNativeAutomationGatewayMethods, registerWorkLedgerGatewayMethods, registerWorkLedgerImportGatewayMethods, registerNativeWorkExecutionGatewayMethods, registerNativeWorkSubmissionGatewayMethods, registerNativeConversationIntakeGatewayMethods, registerWorkGatewayMethods } from '@goodvibes/engine/platform/platform/control-plane';
 import { openWorkspaceRegistrationStore, sharedWorkspaceRegisterPath, WorkspaceSwapManager } from '@goodvibes/engine/platform/platform/workspace';
 import { ApprovalRelay, GatewayMethodCatalog, createOwnerInbox, ownerInboxStorePath, terminalSessionPresence, type DaemonBrowserGatewayService } from '@goodvibes/engine/platform/platform/control-plane';
 import { resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { describeModeInForceWords, hostApprovalPresentation, hostItemPresenter } from '@goodvibes/engine/platform/platform/permissions';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
-import { carryProgramSecretsToDaemon, describeSecretsCarryForward, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
+import {
+  carryAgentProviderStoresToDaemon, carryProgramSecretsToDaemon, describeProviderStoresCarryForward, describeSecretsCarryForward, resolveGoodVibesDaemonHome,
+} from '@goodvibes/engine/platform/platform/config';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { join } from 'node:path';
+import { carryAgentPluginStateForward } from '@goodvibes/engine/platform/platform/plugins';
 import { MailboxReaders } from '@goodvibes/engine/platform/platform/email';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes/engine/terminal-shell';
+import { createAgentStoreRunner } from '@goodvibes/engine/terminal-shell/agent-turn/agent-store-runner';
+import { createKnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
 import { composeMailDeps } from './mail-composition.js';
 import { composeBrowserJudgment } from './browser-judgment-composition.js';
@@ -179,6 +186,20 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     }).catch((error: unknown) => {
       logger.warn('[daemon] the programs\' secrets could not be carried into the daemon\'s store; they are read where they are', { error: summarizeError(error) });
     });
+    // The Agent's own pinned models, providers of your own and services, copied once into the daemon's, which every
+    // program reads now (provider-stores-carry-forward.ts); the Agent's files are left as they are. Off the start path.
+    void carryAgentProviderStoresToDaemon({ homeDirectory, daemonHome: resolveGoodVibesDaemonHome(homeDirectory) }).then((carried) => {
+      const line = carried ? describeProviderStoresCarryForward(carried) : undefined;
+      if (line) daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(line, { audience: 'owner' });
+    }).catch((error: unknown) => {
+      logger.warn('[daemon] the Agent\'s pinned models, providers and services could not be carried into the daemon\'s; the Agent\'s are left where they are', { error: summarizeError(error) });
+    });
+    // The Agent's own plugin state (switched on, quarantines, publisher keys), carried once into the one plugin state
+    // every program reads now (plugins/state-carry-forward.ts); the Agent's file is left as it is.
+    const carriedPlugins = carryAgentPluginStateForward(join(homeDirectory, '.goodvibes'));
+    if (carriedPlugins.length > 0) {
+      daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(`The Agent's plugin settings for ${carriedPlugins.join(', ')} now hold in every program.`, { audience: 'owner' });
+    }
     const browserJudgment = options.createBrowserJudgment ? options.createBrowserJudgment(judgment)
       : composeBrowserJudgment({ judgment, providers: () => providerRegistry, config: configManager, secrets: secretsManager, methods: gatewayMethods, env: process.env, disposal: disposalScope.registry });
     let browserClosing: Promise<void> | undefined;
@@ -379,6 +400,18 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       ...(options.moveWorkspace ? { moveHost: options.moveWorkspace, getBusySessionCount: () => sessionBroker.countBusySessions() } : {}),
     });
     if (workspaceSwap) disposalScope.registry.add('working directory move wait', () => workspaceSwap.dispose());
+    // The Agent's own stores (notes, personas, routines, drafts, saved artifacts), managed here for every program.
+    const agentStores = createAgentStoreRunner({
+      homeDirectory, workingDirectory: () => configManager.getWorkingDirectory() ?? workingDirectory,
+      artifactStore: graph.artifactStore, channelDeliveryRouter: graph.channelDeliveryRouter, permissionManager, memory: graph.memorySpine,
+      // A note's web page goes into the daemon's one knowledge store, as "Add a web page" puts it there.
+      // A routine put on a schedule is made on this daemon's own schedules, reached as the routine's host.
+      config: configManager,
+      ingestUrl: (input) => createKnowledgeApi(graph.knowledgeService).ingest.url({ ...input, tags: [...input.tags], sourceType: 'url', connectorId: 'url', fetchMode: 'public-only' }),
+      // Work and agents: a research run's sources are collected with the daemon's web search, and coding work handed to
+      // the terminal app is a shared session on this daemon's broker.
+      webSearchService: graph.webSearchService, sessions: sessionBroker,
+    });
     const agentToolDependencies = {
       ...graph.agentToolDependencies,
       ...(workspaceSwap ? { workspaceSwap } : {}),
@@ -396,7 +429,17 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       capabilityTools: {
         catalog: daemonCapabilityCatalog,
         loaded: loadedDaemonCapabilityCatalog,
-        services: createDaemonCapabilityServices({ configManager, hookDispatcher, hookWorkbench: graph.hookWorkbench, secretsManager, memoryRegistry: graph.memoryRegistry }),
+        services: createDaemonCapabilityServices({ configManager, hookDispatcher, hookWorkbench: graph.hookWorkbench, secretsManager, memoryRegistry: graph.memoryRegistry,
+          // The daemon's remote runners (capabilities/builtin/remote.ts), the same holder every door reaches.
+          remoteRunnerRegistry: graph.remoteRunnerRegistry, remoteSupervisor: graph.remoteSupervisor, runtimeStore: graph.runtimeStore,
+          runtimeBus: graph.runtimeBus, agentManager, judgment: graph.judgment, permissionManager, shellPaths,
+          // Permissions and safety (capabilities/builtin/permissions.ts, security.ts).
+          userPermissionRuleStore: graph.userPermissionRuleStore, tokenAuditor: graph.tokenAuditor, workspaceTrustManager,
+          // Memory and knowledge: the Agent's own stores (capabilities/builtin/agent-stores.ts).
+          agentStores,
+          // Models and providers (capabilities/builtin/models.ts, services.ts): the daemon's provider stack, sign-ins and services file.
+          providerRegistry, providerOptimizer: graph.providerOptimizer, favoritesStore: graph.favoritesStore, benchmarkStore: graph.benchmarkStore,
+          subscriptionManager: graph.subscriptionManager, serviceRegistry: graph.serviceRegistry, mediaProviders: graph.mediaProviders }),
         methods: gatewayMethods,
         workingDirectory: () => configManager.getWorkingDirectory() ?? workingDirectory,
       },
@@ -463,7 +506,18 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // One journal serves every paired principal: a revoked or replaced pairing's finished turns are dropped from it.
       principalCanAct: principalId => pairingTokens.nativePrincipalCurrent(principalId) });
     disposalScope.registry.add('native hosted conversation binding', removeHostedOwner);
+    // A piece of work's plan before it runs ("Show me the plan before it runs", planner.showPlanFirst): written by a
+    // planning agent of the daemon's own, kept in the project's draft store, approved in Work, carried into its run.
+    const workPlans = createWorkPlans({
+      drafts: createWorkstreamDraftService({
+        agentManager, configManager, projectRoot: workingDirectory, contractRunner,
+        sessionId: `native-work:${projectPlanningProjectId}`, pricing: providerRegistry,
+      }),
+      file: shellPaths.resolveProjectPath(GOODVIBES_DAEMON_SURFACE_ROOT, 'work-plans.json'),
+      showPlanFirst: () => configManager.get('planner.showPlanFirst') === true,
+    });
     const nativeWork = createDaemonNativeWorkExecutionActivation({
+      workPlans,
       nativeDataWriter: options.nativeDataWriter ?? configManager.getNativeDataWriter(),
       runtimeBus: options.runtimeBus, configManager, providerRegistry,
       projectRoot: workingDirectory, projectId: projectPlanningProjectId,
@@ -485,6 +539,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     fenceNativeWork = async () => { await Promise.all([nativeImport.close(), nativeSubmission.close(), nativeIntake.close(), nativeWork.close()]); };
     disposalScope.registry.add('native work execution', nativeWork.close);
     registerNativeWorkExecutionGatewayMethods(gatewayMethods, { projectId: projectPlanningProjectId, acquire: nativeWork.acquire });
+    // Work as every surface reads it: each piece of work with where it stands and its plan, and what an act on one sends.
+    registerWorkGatewayMethods(gatewayMethods, { projectId: projectPlanningProjectId, reader: workLedgerReader, acquire: nativeWork.acquire, plans: workPlans });
 
     // This process's own memory pressure, to the operator's configured notice
     // destination. Targeted at OPS_MEMORY_PRESSURE rather than subscribed to the
@@ -500,6 +556,8 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       triggerManager,
       ownerInbox,
       mailboxReaders,
+      // The Agent's own stores, for the capabilities that manage them through every door (and a hosted session's).
+      agentStores,
       workLedger: workLedgerOwner.service,
       workspaceSwap,
       browserJudgment,

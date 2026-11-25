@@ -28,13 +28,6 @@ export interface CommandExecutionPolicy {
 function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'effect' | 'readVerbs'> {
   const root = commandName.replace(/^\//, '').trim().toLowerCase();
   const confirmation = 'Model command effects require current recorded engine admission. Caller confirmation and request fields grant no authority; owner-specific scope and effect checks remain mandatory.';
-  if (root === 'triggers') {
-    return {
-      confirmation: 'Status is read-only.',
-      preferredModelTool: `${agentHarnessModes('run_command')} commandName:"triggers"`,
-      boundary: '/triggers list reads the actual surface supervisor and its triggers without promoting ownership.',
-    };
-  }
   if (root === 'work') {
     return {
       requiresConfirmation: false,
@@ -97,13 +90,6 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
       confirmation,
       preferredModelTool: `${settingsActions('get', 'set')} or ${agentHarnessModes('open_ui_surface')}`,
       boundary: 'Provider selection and custom provider files belong to Agent provider configuration. Adding, removing, or switching providers requires explicit user intent.',
-    };
-  }
-  if (root === 'network-scan' || root === 'discover-lan') {
-    return {
-      confirmation,
-      preferredModelTool: settingsActions('get', 'set'),
-      boundary: 'Turns the local-network model-server scan on or off and persists that decision to a local consent file; it never probes the network itself. Enabling it requires the user\'s explicit request, do not turn it on unprompted.',
     };
   }
   if (root === 'refresh-models') {
@@ -258,8 +244,8 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   if (root === 'mail') {
     return {
       confirmation,
-      preferredModelTool: `${agentHarnessModes('run_command')} (use /mail set to configure, /mail settings to view them, /mail password to store the password)`,
-      boundary: 'Email IMAP reads are read-only (EXAMINE); a send asks the owner first and goes only to the configured account. Use /mail set <setting> <value> to configure the mailbox; use /mail settings to view the current settings. /mail set is the reviewed path for email.* keys: it validates each field and stores the password as a secret reference. The generic settings action routes an email.* write to the daemon that owns the key, under the same recorded admission; prefer /mail set. Setting the mail servers, ports, security, username or password changes where the stored password is presented, so only the owner typing /mail set counts; a model invocation is refused.',
+      preferredModelTool: 'capability_run (mail.set to configure the mailbox, mail.settings to view it, mail.password to store the password; the daemon runs each)',
+      boundary: 'Email IMAP reads are read-only (EXAMINE); a send asks the owner first and goes only to the configured account. The mailbox is the daemon\'s: mail.set validates each field and writes it to the daemon\'s settings, mail.password stores the password as a secret reference in the daemon\'s store. Setting the mail servers, ports, security or username changes where the stored password is presented, and storing the password writes a credential, so a model\'s call of either is put to the owner, opening on No.',
     };
   }
   if (root === 'calendar' || root === 'cal') {

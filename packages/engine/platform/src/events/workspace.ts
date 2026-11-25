@@ -10,13 +10,40 @@ export type WorkspaceEvent =
    * A list a client shows changed (runtime/list-changes.ts): a memory record,
    * a workspace checkpoint, a CI watch, a check-in setting or receipt, a person
    * or device in the people list, the mailbox, the calendar, dates, paired
-   * devices, delegated Telegram messages, the local voice install, Tailscale.
-   * A view showing that list reads it again.
+   * devices, delegated Telegram messages, the local voice install, Tailscale,
+   * the daemon's remote runners. A view showing that list reads it again.
    */
   | {
       type: 'LIST_CHANGED';
       list: 'memory' | 'checkpoints' | 'ci-watches' | 'check-ins' | 'people'
-        | 'mail' | 'calendar' | 'dates' | 'paired-devices' | 'telegram-intake' | 'voice' | 'tailscale' | 'relay';
+        | 'mail' | 'calendar' | 'dates' | 'paired-devices' | 'telegram-intake' | 'voice' | 'tailscale' | 'relay'
+        | 'remote-runners'
+        // Work and agents: a research run or a research source changed, or work was handed to the terminal app.
+        | 'research' | 'handed-off'
+        // The hook trace: a hook ran in any program.
+        | 'hook-trace'
+        // Tools and extensions: the hooks file, a tool server's config, a plugin or an install changed through the daemon.
+        | 'tools'
+        // Automation: a trigger made, stopped, started again or changed state, or a command triggers may run.
+        | 'triggers'
+        // Permissions and safety: a permission rule, a secret, a folder's trust, a local sign-in, the policy or the sandbox.
+        | 'safety'
+        // Money: a card added or removed, a repeat purchase allowed or stopped, a billing or shipping address set.
+        | 'payments'
+        // Money: the daemon recorded what a model call cost.
+        | 'spending'
+        // Memory and knowledge: a note, persona, routine, draft or saved artifact changed through the daemon.
+        | 'notes' | 'personas' | 'routines' | 'documents' | 'artifacts'
+        // Memory and knowledge: what is known about you written or edited by hand, a template deleted through the daemon.
+        | 'profile' | 'templates'
+        // Models and providers: a pin, a backup, the routing, a provider of your own, a sign-in or the services list changed through the daemon.
+        | 'models' | 'services'
+        // Devices and network: the network-scan decision changed, or the daemon's scan of your network finished.
+        | 'network-scan'
+        // Devices and network: a settings sync bundle pulled, or a setting that disagreed settled.
+        | 'settings-sync'
+        // This conversation: a model's context window size set or cleared through the daemon; every running program reads it again.
+        | 'context-windows';
       change: 'created' | 'changed' | 'deleted';
       id?: string | undefined;
     }

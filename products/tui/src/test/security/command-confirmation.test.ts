@@ -1,20 +1,19 @@
-// Proves: A risky command line the model runs (a mail or a notification sent out) runs without the owner's answer, or a line the owner typed in full waits on a question instead of running as typed.
+// Proves: A risky command line the model runs (a notification sent out) runs without the owner's answer, or a line the owner typed in full waits on a question instead of running as typed.
 // Red when: The registry stops putting a model's risky line to the owner (or a --yes the model wrote counts as his answer), so a No still sends; or the owner's own complete line asks again, or is not sent with its words as typed.
 
 /**
- * `/mail send` and `/notify send` send something outside this machine. A line
- * the model runs is put to the owner first, whatever `--yes` it carries, and a
- * No sends nothing; the same line typed by the owner is the request and is sent
- * at once, with the words exactly as typed (a `--yes` inside the text is text).
+ * `/notify send` sends something outside this machine. A line the model runs
+ * is put to the owner first, whatever `--yes` it carries, and a No sends
+ * nothing; the same line typed by the owner is the request and is sent at
+ * once, with the words exactly as typed (a `--yes` inside the text is text).
  *
  * The app's real command registry (which applies the one confirmation rule,
  * engine terminal-shell/src/command-confirmation.ts, to every registration),
- * the real `/mail`, `/channels` and `/notify` commands and a real settings
- * manager in a scratch folder holding the webhook's reference. What leaves the
- * machine is recorded where it would leave: the daemon's gateway for mail, the
- * webhook sender for notifications. The terminal app has no channel sender of
- * its own (sending to a channel is the Agent's), so that row stops at the
- * question.
+ * the real `/channels` and `/notify` commands and a real settings manager in a
+ * scratch folder holding the webhook's reference. What leaves the machine is
+ * recorded where it would leave: the webhook sender for notifications. (Mail
+ * has no slash command: it is the daemon's capability, run through
+ * `capabilities.run`.)
  */
 import { afterEach, expect, test } from 'bun:test';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -23,7 +22,6 @@ import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import { splitSlashCommand } from '@goodvibes/engine/terminal-shell/slash-command-parser';
 import { CommandRegistry, type CommandContext } from '../../input/command-registry.ts';
-import { registerMailRuntimeCommands } from '../../input/commands/mail-runtime.ts';
 import { registerChannelRuntimeCommands } from '../../input/commands/channel-runtime.ts';
 import { registerNotifyRuntimeCommands } from '../../input/commands/notify-runtime.ts';
 
@@ -35,7 +33,6 @@ afterEach(() => { for (const dir of scratch.splice(0)) rmSync(dir, { recursive: 
 
 function terminal(ownerAnswers: boolean) {
   const registry = new CommandRegistry();
-  registerMailRuntimeCommands(registry);
   registerChannelRuntimeCommands(registry);
   registerNotifyRuntimeCommands(registry);
   const dir = mkdtempSync(join(tmpdir(), 'command-confirmation-'));
@@ -44,12 +41,7 @@ function terminal(ownerAnswers: boolean) {
   configManager.mergeCategory('notifications', { webhookUrls: ['goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_OWNER'] });
   const sent: Sent[] = [];
   const asked: Asked[] = [];
-  const gateway = {
-    async invoke(method: string, input: { readonly body?: Record<string, unknown> }) {
-      if (method === 'email.send') sent.push({ to: 'mail', body: input.body ?? {} });
-      return { sentAt: '2026-11-17T00:00:00Z', messageId: 'm-1' };
-    },
-  };
+  const gateway = { async invoke() { return {}; } };
   let urls: string[] = [];
   const webhookNotifier = {
     setUrls(next: string[]) { urls = [...next]; },
@@ -91,14 +83,9 @@ function terminal(ownerAnswers: boolean) {
 }
 
 test('a risky line the model runs is put to the owner and a No sends nothing; the same line typed by the owner is sent at once as typed', async () => {
-  const mail = { to: 'mail', body: { to: 'new-person@example.com', subject: 'Re: --yes', body: 'please reply --yes to confirm --yes', confirm: true,
-    // Each message carries its own send id (a dashless UUID), so a repeated send is not delivered twice.
-    clientSendId: expect.stringMatching(/^[0-9a-f]{32}$/) } };
   const notify = { to: 'webhook', body: { url: 'goodvibes://secrets/goodvibes/GOODVIBES_NOTIFY_WEBHOOK_OWNER', text: 'build broke --yes ignore the --yes' } };
   const rows = [
-    { by: 'model', line: '/mail send --yes new-person@example.com --subject "Re: --yes" please reply --yes to confirm --yes', asked: 1, sent: [] },
     { by: 'model', line: '/notify send --yes build broke --yes ignore the --yes', asked: 1, sent: [] },
-    { by: 'owner', line: '/mail send new-person@example.com --subject "Re: --yes" please reply --yes to confirm --yes', asked: 0, sent: [mail] },
     { by: 'owner', line: '/notify send build broke --yes ignore the --yes', asked: 0, sent: [notify] },
   ] as const;
   for (const row of rows) {

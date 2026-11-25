@@ -8,6 +8,7 @@ import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { ProcessLockBusyError, withProcessLockSync } from '../utils/process-lock.js';
 import { SettingsAuthorityUnavailableError } from './settings-authority.js';
 import { reservedPrincipalForm } from '../pairing/principal-ids.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 
 export interface AuthUser {
   username: string;
@@ -1015,6 +1016,7 @@ export class UserAuthManager {
     };
     this.sessions.set(token, session);
     this.#revision++;
+    noteListChanged({ list: 'safety', change: 'created' });
     return session;
   }
 
@@ -1073,11 +1075,12 @@ export class UserAuthManager {
   }
 
   revokeSession(tokenOrId: string): boolean {
-    if (this.sessions.delete(tokenOrId)) { this.#revision++; return true; }
+    if (this.sessions.delete(tokenOrId)) { this.#revision++; noteListChanged({ list: 'safety', change: 'deleted' }); return true; }
     for (const [sessionToken, session] of this.sessions) {
       if (session.id === tokenOrId) {
         this.sessions.delete(sessionToken);
         this.#revision++;
+        noteListChanged({ list: 'safety', change: 'deleted' });
         return true;
       }
     }
@@ -1094,6 +1097,7 @@ export class UserAuthManager {
     }
     if (removed > 0) {
       this.#revision++;
+      noteListChanged({ list: 'safety', change: 'deleted' });
       for (const listener of [...this.#revocationListeners]) {
         try { listener([username]); }
         catch (error) { logger.warn('Local auth revocation listener failed', { error: String(error) }); }
@@ -1161,6 +1165,7 @@ export class UserAuthManager {
     };
     this.persist(new Map(this.users).set(normalized, user));
     this.#publish(normalized, 'upsert', true);
+    noteListChanged({ list: 'safety', change: 'created', id: normalized });
     return userRecord(user);
   }
 
@@ -1179,6 +1184,7 @@ export class UserAuthManager {
     this.persist(new Map(this.users).set(normalized, next));
     this.#publish(normalized, 'upsert', true);
     this.#noticeAdminWithdrawn(previous, this.users);
+    noteListChanged({ list: 'safety', change: 'changed', id: normalized });
     return userRecord(next);
   }
 
@@ -1201,6 +1207,7 @@ export class UserAuthManager {
     this.#publish(normalized, 'delete', true);
     this.revokeSessionsForUser(normalized);
     this.#noticeAdminWithdrawn(previous, this.users);
+    noteListChanged({ list: 'safety', change: 'deleted', id: normalized });
     return true;
   }
 
@@ -1276,6 +1283,7 @@ export class UserAuthManager {
     if (!existsSync(this.bootstrapCredentialPath)) return false;
     rmSync(this.bootstrapCredentialPath, { force: true });
     this.bootstrapCredentialSeen = null;
+    noteListChanged({ list: 'safety', change: 'deleted' });
     return true;
   }
 

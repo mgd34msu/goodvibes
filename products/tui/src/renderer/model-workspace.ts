@@ -1,5 +1,6 @@
 import {
   drawModelWorkspaceDetail,
+  modelWorkspaceEmptyLine,
   modelWorkspaceFilterRow,
   modelWorkspaceKey as modelKey,
   modelWorkspaceListAge,
@@ -124,7 +125,7 @@ function modelRows(picker: ModelPickerModal, compact = false): KitRow[] {
     });
   });
   if (rows.length === 0 && !picker.catalogLoading)
-    rows.push({ label: picker.query ? `No models match "${picker.query}".` : 'No models are available for this target.', muted: true });
+    rows.push({ label: modelWorkspaceEmptyLine(picker), muted: true });
   return rows;
 }
 

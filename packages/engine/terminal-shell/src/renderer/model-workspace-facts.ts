@@ -36,18 +36,32 @@ export function modelWorkspaceTabs(picker: Pick<ModelPickerModal, 'targetIndex'>
   const infos = picker.targetInfos;
   const main = Math.max(0, infos.findIndex((info) => info.target === 'main'));
   const others = infos.map((_, index) => index).filter((index) => index !== main);
+  // Each job's tab names the model it uses now, so what each job runs on is seen without opening it.
+  const mainLabel = infos[main] ? `${infos[main]!.label}: ${modelWorkspaceTabModel(infos[main]!)}` : modelPickerTargetLabel('main');
   if (others.length === 0 || picker.targetIndex === main) {
     return {
-      labels: [infos[main]?.label ?? modelPickerTargetLabel('main'), ...(others.length > 0 ? ['Other jobs (optional) ▸'] : [])],
+      labels: [mainLabel, ...(others.length > 0 ? ['Other jobs (optional) ▸'] : [])],
       active: 0,
       targetAt: (tab) => (tab === 0 ? main : others[0] ?? main),
     };
   }
   return {
-    labels: [infos[main]?.label ?? modelPickerTargetLabel('main'), ...others.map((index) => `${infos[index]!.label}${infos[index]!.enabled ? '' : ' (off)'}`)],
+    labels: [mainLabel, ...others.map((index) => `${infos[index]!.label}: ${modelWorkspaceTabModel(infos[index]!)}`)],
     active: 1 + Math.max(0, others.indexOf(picker.targetIndex)),
     targetAt: (tab) => (tab === 0 ? main : others[tab - 1] ?? main),
   };
+}
+
+/**
+ * The model a job's tab names: the model's own id (its provider left off), `off` for a job that is off, `as Main
+ * chat` for one with none of its own, and the decision model's own short note; cut to fit a tab.
+ */
+export function modelWorkspaceTabModel(info: Pick<ModelPickerTargetInfo, 'enabled' | 'inherited' | 'model' | 'provider' | 'configuredNote'>): string {
+  if (!info.enabled) return 'off';
+  if (info.inherited) return 'as Main chat';
+  const route = info.configuredNote ?? (info.model.includes(':') ? info.model.slice(info.model.indexOf(':') + 1) : info.model);
+  const shown = route.trim() || 'not set';
+  return shown.length > 22 ? `${shown.slice(0, 21)}…` : shown;
 }
 
 /**
@@ -92,6 +106,26 @@ export function modelWorkspaceListAge(reading: { readonly source: string; readon
   const minutes = Math.max(0, Math.round((now - reading.listedAt) / 60_000));
   const age = minutes < 1 ? 'just now' : minutes < 60 ? `${minutes} min ago` : minutes < 48 * 60 ? `${Math.round(minutes / 60)} h ago` : `${Math.round(minutes / 1440)} days ago`;
   return `list read ${age}${reading.error ? ' (the last reading failed)' : ''}`;
+}
+
+/**
+ * What an empty model list says: when the lists were read (the picker reads them again by itself when it opens
+ * empty) and why it is empty: nothing set up, a provider's list that could not be read, filters, or providers that
+ * list nothing this job can use.
+ */
+export function modelWorkspaceEmptyLine(
+  picker: Pick<ModelPickerModal, 'configuredProviders' | 'listsReadAt' | 'listReading' | 'models' | 'query'>,
+): string {
+  if (picker.query) return `No models match "${picker.query}".`;
+  const read = picker.listsReadAt ? ` The lists were read again at ${new Date(picker.listsReadAt).toTimeString().slice(0, 5)}.` : '';
+  if (picker.models.length > 0) return 'No model fits the filters on the row above.';
+  if (picker.configuredProviders.size === 0) return `No models: no provider is set up yet. Add one of your own or sign in with a subscription in Models and providers.${read}`;
+  const failed = [...picker.configuredProviders].flatMap((provider) => {
+    const error = picker.listReading(provider)?.error;
+    return error ? [`${provider}'s list could not be read (${error})`] : [];
+  });
+  if (failed.length > 0) return `No models: ${failed.join('; ')}.${read}`;
+  return `No models: the providers you set up list none this job can use.${read}`;
 }
 
 function formatContextShort(value: number | undefined): string {

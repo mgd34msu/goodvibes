@@ -137,7 +137,7 @@ function liveRemoval(meta: ManagedWorktreeMeta | undefined, now: number): Worktr
 function refuseWhileRemoving(meta: ManagedWorktreeMeta | undefined, normalized: string, action: string): void {
   if (!liveRemoval(meta, Date.now())) return;
   throw new Error(`${normalized} is being removed by the worktree retention sweep right now, so it was not ${action}. `
-    + 'Nothing protected it when the removal started (not kept, paused or attached); its branch is kept unless it was merged. /worktree review shows what remains.');
+    + 'Nothing protected it when the removal started (not kept, paused or attached); its branch is kept unless it was merged. The Worktrees list in Code and changes shows what remains.');
 }
 
 interface WorktreeStore {
@@ -1052,7 +1052,7 @@ export class WorktreeRegistry {
     if (total <= thresholdBytes) return null;
     const largest = [...sizes].sort((a, b) => (b.sizeBytes ?? 0) - (a.sizeBytes ?? 0)).slice(0, 3)
       .map((item) => `${relative(this.workingDirectory, item.entry.path)} ${item.sizeBytes !== undefined ? formatBytes(item.sizeBytes) : 'size unknown'} (${item.entry.reason.detail})`);
-    return `${kept.length} kept worktree(s) under .goodvibes use ${formatBytes(total)}; largest: ${largest.join('; ')}. Review them with /worktree review in goodvibes; remove one you no longer need with /worktree discard <path> (its changes are committed to its branch first).`;
+    return `${kept.length} kept worktree(s) under .goodvibes use ${formatBytes(total)}; largest: ${largest.join('; ')}. See them in goodvibes under Code and changes, Worktrees; remove one you no longer need there with "Remove a worktree" (its changes are committed to its branch first).`;
   }
 
   public attach(path: string, target: { sessionId?: string; taskId?: string }): void {
@@ -1107,7 +1107,7 @@ export class WorktreeRegistry {
       const existing: ManagedWorktreeMeta | undefined = store.records[normalized]
         ?? (gitKnows ? { path: normalized, kind: classified.kind, state: 'active', updatedAt: Date.now() } : undefined);
       if (!existing) {
-        throw new Error(`No worktree exists at ${normalized}; nothing was changed. /worktree review lists the worktrees git knows about; retry with one of those paths.`);
+        throw new Error(`No worktree exists at ${normalized}; nothing was changed. The Worktrees list in Code and changes shows the worktrees git knows about; choose one of those.`);
       }
       refuseWhileRemoving(existing, normalized, `marked ${state}`);
       store.records[normalized] = {
@@ -1332,7 +1332,7 @@ const DESCRIBE_CONCURRENCY = 4;
  * question (see `evaluateRow`).
  */
 function sweepProtection(row: Pick<WorktreeStatusRecord, 'path' | 'state' | 'sessionId' | 'taskId'>): WorktreeKeepReason | null {
-  if (row.state === 'kept') return { why: 'protected', detail: 'marked kept; only /worktree discard removes it' };
+  if (row.state === 'kept') return { why: 'protected', detail: 'marked kept; only "Remove a worktree" removes it' };
   if (row.state === 'paused') return { why: 'protected', detail: 'paused; resume or discard it explicitly' };
   if (row.sessionId || row.taskId) return { why: 'protected', detail: `attached to ${row.sessionId ? `session ${row.sessionId}` : `task ${row.taskId}`}; detach or discard it explicitly` };
   return null;

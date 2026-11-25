@@ -102,7 +102,7 @@ export function checkPaymentGates(input: GateInput): GateRefusal | null {
       reason:
         'Refused: this purchase was not asked for by you directly and no live standing authorisation of '
         + 'yours covers it. A schedule, a trigger, or a message from a channel cannot authorize spending '
-        + 'on its own; you can, in your own words, or in advance with /payments repeat.',
+        + 'on its own; you can, in your own words, or in advance with "Allow a repeat purchase" in the Money place.',
     };
   }
   if (!input.isPaymentsLeader) {

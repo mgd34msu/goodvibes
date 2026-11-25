@@ -1,6 +1,6 @@
 # Knowledge, artifacts, and multimodal
 
-GoodVibes Agent has its own Knowledge segment. It must not query or ingest through default knowledge or other product-specific knowledge spaces.
+GoodVibes Agent uses the daemon's one knowledge store, the same the terminal app and the web app's Library use. The Agent's earlier store of its own, Agent Knowledge (`~/.goodvibes/agent/knowledge-agent.sqlite`), was carried into it once at the daemon's first start of this version, every source, extraction, entry, link and issue the daemon's store did not already hold; the old file is left as it was, so a rollback still reads it. The record of the carry is `agent-knowledge-carried.json` beside the daemon's store.
 
 ## Context layers
 
@@ -9,14 +9,14 @@ GoodVibes Agent uses these context layers:
 - current conversation context for the active turn;
 - Agent-local memory records for durable but private assistant facts and preferences;
 - VIBE.md personality files, project context files, plus Agent-local routines, skills, and personas for reusable behavior profiles;
-- isolated Agent Knowledge for source-backed documents, search, and semantic answers;
-- artifacts for uploaded/generated files that can be referenced by chat, delegation, or explicit Agent Knowledge ingestion.
+- the daemon's knowledge for source-backed documents, search, and semantic answers;
+- artifacts for uploaded/generated files that can be referenced by chat, delegation, or explicit knowledge ingestion.
 
-These layers are intentionally separate. VIBE.md, project context files, local memory/routines/skills/personas, and default knowledge are not automatically promoted into Agent Knowledge. Agent Knowledge records are not copied into default knowledge. Secrets are rejected or represented only by explicit secret references.
+These layers are intentionally separate. VIBE.md, project context files, local memory/routines/skills/personas are not automatically promoted into knowledge. Secrets are rejected or represented only by explicit secret references.
 
-## Agent Knowledge boundary
+## The Agent's knowledge routes
 
-Agent Knowledge uses only the Agent route family:
+The Agent's knowledge tools and its CLI use the Agent route family, which the daemon serves from its one knowledge store:
 
 ```text
 GET  /api/goodvibes-agent/knowledge/status
@@ -41,15 +41,15 @@ POST /api/goodvibes-agent/knowledge/reindex
 
 If those routes are unavailable, Agent commands fail closed with a structured error. They do not retry against the default knowledge routes or arbitrary knowledge-space selectors.
 
-The CLI and slash-command layers reject route-selection flags such as `--space`, `--knowledge-space`, `--knowledge-space-id`, and `--include-all-spaces` because those would violate the Agent product boundary.
+The CLI rejects route-selection flags such as `--space`, `--knowledge-space`, `--knowledge-space-id`, and `--include-all-spaces`.
 
-Successful route responses are validated before rendering. Parseable public Agent-route scope aliases are normalized. If a connected host response carries known non-Agent payload markers or unparseable default-scope text, Agent returns a `scope_contamination` error instead of treating that payload as isolated Agent Knowledge.
+Successful route responses are validated before rendering. Parseable public Agent-route scope aliases are normalized.
 
-Agent Knowledge writes are explicit-user-action paths. Slash commands that ingest, import, review issues, reindex, or run consolidation require `--yes`; ask/search/status/list/get/map/connector paths remain read-only.
+Knowledge writes are explicit-user-action paths: the CLI forms that ingest, import, review issues or reindex take `--yes`; inside the Agent a form submitted in Memory and knowledge is the request. Ask, search, status, list, get, map and the connector reads only read.
 
 ## Ask and search
 
-Use `/knowledge ask <query>` (the Knowledge page's "Ask your knowledge a question" row opens the same form) for source-backed Agent Knowledge answers. `goodvibes-agent ask <query>` is the scriptable equivalent over the same route. Default output is concise:
+Inside the Agent, "Ask your knowledge" (`q` anywhere in Memory and knowledge, the menu `Ctrl+G` then `m` or `/memory`) gives source-backed answers. `goodvibes-agent ask <query>` is the scriptable equivalent over the same route. Default output is concise:
 
 - answer text or a clear no-match state;
 - confidence when present;
@@ -58,54 +58,39 @@ Use `/knowledge ask <query>` (the Knowledge page's "Ask your knowledge a questio
 
 `--json` preserves the raw structured Agent route response for tooling after the scope-contamination guard accepts the payload.
 
-The command layer does not turn search results into an answer locally and does not apply client-side filters to hide contamination. It rejects contaminated payloads; the connected host must still return Agent-owned data for the route to succeed.
+The command layer does not turn search results into an answer locally.
 
-Use `/knowledge search <query>` (the Knowledge page's "Search your knowledge" row) for interactive search. It and `goodvibes-agent search <query>` query the isolated Agent Knowledge search route and render bounded results with title, id, type, score, source, URL, and snippets when available. Empty Agent stores return an explicit empty state.
+Inside the Agent, "search" on the Sources tab of Memory and knowledge searches interactively; it and `goodvibes-agent search <query>` render bounded results with title, id, type, score, source, URL, and snippets when available. An empty store says so.
 
-Read-only inspection is available from the TUI Knowledge workspace first, with CLI equivalents for scripts:
+Read-only inspection is the Sources, Entries, Issues, Jobs and Connectors tabs of Memory and knowledge (each item in full on `Enter`; the map, what a task would get, a connector's check), with CLI equivalents for scripts (`goodvibes-agent knowledge list`, `get`, `map`, `connectors`).
 
-- Source library and review queue in Agent Workspace -> Knowledge.
-- `/knowledge list --kind sources|nodes|issues`
-- `/knowledge get <id>`
-- `/knowledge connectors`
-- `/knowledge connectors <connector-id>`
-- `/knowledge connectors doctor <connector-id>`
-- `/knowledge map`
-- `/knowledge packet <task...> [--scope <path> ...]`
-- `/knowledge explain <task...> [--scope <path> ...]`
-
-The main assistant conversation can use the read-only `agent_knowledge` tool for the same isolated status, ask, search, source/node/issue list, item lookup, map, connector list, connector detail, and connector doctor workflows.
+The main assistant conversation can use the read-only `agent_knowledge` tool for status, ask, search, source/node/issue list, item lookup, map, connector list, connector detail, and connector doctor workflows, and `capability_run` with the `knowledge.*` capabilities.
 
 ## Ingest
 
-Use Agent Workspace -> Knowledge for URL, URL-list, file, artifact-id, bookmark, browser-history, connector ingest, issue review, consolidation, and reindex forms. The main assistant conversation can also call the confirmed `agent_knowledge_ingest` tool for URL, file, artifact-id, URL-list, bookmark, browser-history, and connector source families. `/knowledge ingest-url <url>` and `goodvibes-agent knowledge ingest-url <url> --yes` ingest URL sources into Agent Knowledge only.
-
-The TUI workspace exposes the common confirmed ingest, issue-review, consolidation, and reindex flows. The CLI also exposes Agent-specific batch routes for scripts:
+Memory and knowledge has the forms to add a web page (`a`), a list of pages, bookmarks, a file, a saved artifact, your browser history (yours only) and something through a connector; to review an issue, tidy (a quick or a deep pass), rebuild, and stop a waiting or running job. The main assistant conversation can also call the confirmed `agent_knowledge_ingest` tool for URL, file, artifact-id, URL-list, bookmark, browser-history, and connector source families. `goodvibes-agent knowledge ingest-url <url> --yes` and the other CLI forms are the scriptable equivalents:
 
 - `goodvibes-agent knowledge import-urls <path> --yes`
 - `goodvibes-agent knowledge import-bookmarks <path> --yes`
 - `goodvibes-agent knowledge import-browser-history --yes`
-- `/knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget>`
-- `/knowledge consolidate [light|deep]`
-- `/knowledge cancel-run [runId]` (without an id it lists the queued and running job runs)
 - `goodvibes-agent knowledge reindex --yes`
 
-Connected-host ingest and read CLI routes target `/api/goodvibes-agent/knowledge/*`. Workspace and slash-command issue review, packet/explain, consolidation, and reindex flows stay inside the isolated Agent Knowledge service. None of them call default knowledge.
+The CLI targets `/api/goodvibes-agent/knowledge/*`; the place runs the `knowledge.*` capabilities in the daemon. Both reach the same one store.
 
-Do not map VIBE.md, project context files, local memory, notes, routines, skills, personas, or default knowledge documents into Agent Knowledge automatically. Durable source-backed facts can be ingested deliberately through Agent routes when the user or an explicit Agent workflow asks for it.
+Do not map VIBE.md, project context files, local memory, notes, routines, skills or personas into knowledge automatically. Durable source-backed facts can be ingested deliberately when the user or an explicit Agent workflow asks for it.
 
 ## Artifacts and multimodal
 
 Artifacts are first-class runtime objects for files, images, audio, video, generated outputs, and delegation results. Agent Knowledge use of artifacts must still go through Agent-specific ingest routes when those are available.
 
-The saved artifact list is `/artifacts list` (also a row on the Documents & Files page) and `agent_artifacts`. It lists recent uploads, exports, generated media, source artifacts, session artifacts, comparison artifacts, sourced research reports, and exported document drafts with filters for query, kind, MIME type, purpose, and source. `agent_artifacts mode:"show"` inspects one artifact by id with redacted metadata and a bounded preview for text-like content only; binary bytes and inline base64 stay out of the transcript.
+The saved artifact list is the Artifacts tab of Memory and knowledge (the menu), the `artifacts.list` capability, and `agent_artifacts`; it is the daemon's one artifact store, the same in the Agent, the terminal app and the web UI (the Agent's own earlier store was copied into it once, under the same ids, at the daemon's first start of this version). It lists recent uploads, exports, generated media, source artifacts, session artifacts, comparison artifacts, sourced research reports, and exported document drafts with filters for query, kind, MIME type, purpose, and source. `agent_artifacts mode:"show"` inspects one artifact by id with redacted metadata and a bounded preview for text-like content only; binary bytes and inline base64 stay out of the transcript.
 
 Related saved-artifact actions:
 
-- `/artifacts export` copies one reviewed artifact to a workspace file after typed confirmation, preserves exact bytes for text or binary artifacts, and refuses overwrite unless explicitly enabled.
-- `/artifacts package` copies selected reviewed artifact ids into a workspace package directory or ZIP archive with exact bytes under `artifacts/`, a redacted `manifest.json`, and a README.
+- "Copy to a file" (`e` on an artifact) copies one artifact to a file of this project, preserves exact bytes for text or binary artifacts, and refuses to write over a file unless you choose so.
+- "Copy into a package" (`k`) copies selected reviewed artifact ids into a workspace package directory or ZIP archive with exact bytes under `artifacts/`, a redacted `manifest.json`, and a README.
 - `/documents attach-artifact` links one reviewed saved artifact id to a document without rewriting the body.
-- `/knowledge ingest-artifact` ingests one reviewed saved artifact id through the isolated Agent Knowledge artifact route after typed confirmation.
+- "Add a saved artifact" (`j` on the Sources tab of Memory and knowledge) adds one saved artifact id to your knowledge.
 
 `/media make` creates image/video artifacts through configured media providers after confirmation, and `/media collect` collects a job that was still being made. The main conversation can perform the same confirmed action with the `agent_media_generate` tool when the user explicitly asks for generated media. Generated media output is summarized as artifact ids, MIME types, filenames, and source URLs when present; inline base64 is not printed into the transcript.
 
@@ -145,7 +130,7 @@ Blind model comparison can run from a direct prompt or a saved text artifact id,
 
 `/documents timeline` shows a chronological review packet timeline across document, comment, suggestion, attachment, export, compare, judgment, route-decision receipt, packet preset, handoff, and archive events, and `/documents packet-steps` shows the review packet steps: what is ready, what is missing and the line that fixes it.
 
-The workspace's Documents & Files rows open the actions of `/documents`, `/artifacts` and `/compare`; `/documents readiness` lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff) before an export, a handoff or archive, or applying a winner, and every change still asks or names its blanks.
+The drafts and artifacts are the Drafts and Artifacts tabs of Memory and knowledge; `/compare` runs comparisons; `/documents readiness` lists what still stands in the way of review (open comments, suggestions waiting, missing sources, hidden comparisons, the handoff) before an export, a handoff or archive, or applying a winner, and every change still asks or names its blanks.
 
 `autonomy` adds ongoing-work route selection plus visible queue and item inspection. Lower-level `agent_harness` adds:
 

@@ -102,7 +102,7 @@ needs; what you see when that happens is in
   analysis, outlines and edits by syntax tree, several embedded so they are
   ready at start. Language servers for TypeScript, Python, Bash, CSS, HTML and
   JSON come with the program; `rust-analyzer` (checksum-verified) and `gopls`
-  are downloaded only when you run `/intelligence install`. After an edit, the
+  are downloaded only when you install one from Code and changes. After an edit, the
   agent is told the type errors the running language server finds in the new
   text.
 - **Crash recovery.** A snapshot of the session is written when a prompt is

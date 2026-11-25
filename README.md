@@ -116,10 +116,11 @@ run.
   src/parser.ts`. It runs beside your conversation, in its own git worktree
   when you want one; `F2` shows everything running.
   ([agents](products/tui/docs/tools-and-commands.md#spawning-an-agent))
-- **Have it check something on a schedule.** `/schedule add --every 30m check
-  that https://example.com/health answers` runs that request every 30 minutes.
-  The daemon runs it, so no terminal needs to be open; `/schedule list` shows
-  your schedules. ([commands](products/tui/docs/commands-reference.md))
+- **Have it check something on a schedule.** Say `every 30 minutes, check that
+  https://example.com/health answers`, or open Automation from the menu and
+  choose New schedule. The daemon runs it, so no terminal needs to be open;
+  Automation shows your schedules, their runs, triggers, CI watches and
+  check-ins. ([automation](docs/llms/50-automation-and-services.md))
 - **Reach it from your phone or a chat app.** `goodvibes pair` prints a QR
   code that signs your phone in to the web app (run
   `goodvibes-daemon webui enable --lan` first so your phone can reach it).
@@ -130,9 +131,10 @@ run.
 - **Mail and calendar.** In `goodvibes-agent`, `/google connect` links Gmail and
   Google Calendar. Then ask `what's on my calendar tomorrow?`.
   ([Google setup](packages/engine/docs/google-setup-runbook.md))
-- **Search what it knows.** `/knowledge ingest-url <url>` saves a page, and
-  `/knowledge search <words>` or `/knowledge ask <question>` finds it later.
-  The assistant keeps its own store: `goodvibes-agent search "release checklist"`.
+- **Search what it knows.** In Memory and knowledge (the menu, `Ctrl+G` then `m`,
+  or `/memory`), "add a page" saves a web page, and "search" or "ask your
+  knowledge" finds it later. The terminal app, the assistant and the web app's
+  Library share one knowledge store: `goodvibes-agent search "release checklist"`.
   ([knowledge](products/tui/docs/knowledge-artifacts-and-multimodal.md))
 - **Buy something within limits.** Purchases are off until you set
   `payments.enabled`. Add a card with `/payments add-card`, then set your limits:
@@ -200,13 +202,13 @@ around is **Jev**. The setting `permissions.mode` is a dial from "ask me" to
 | --- | --- |
 | `ask-me` | You are asked about the risky in-between actions: those the decision model reads as critical, hard to undo or weakening security. With no decision model, you are asked about all of them. |
 | `jev-decides` (default) | The decision model settles the in-between actions, and you are asked only what is yours alone. With no working decision model, you are asked as in `ask-me`. |
-| `just-vibes` | Nothing stops to ask you. Anything that needs you is set aside and listed at the end of the run, where `/held` approves or drops it. |
+| `just-vibes` | Nothing stops to ask you. Anything that needs you is set aside and listed at the end of the run, and Waiting for you (the menu) approves or drops it. |
 | `yolo` | No permission questions, except about a change requested from a chat channel. Spending limits, sign-in, the project boundary and secret storage still apply, and the agent can never answer an approval for you. |
 | `plan` | Read-only: reading tools run, and anything that would change something is refused. |
 
 In `goodvibes`, `Shift+Tab` changes the mode for the current session.
 `--just-vibes` or `--yolo` sets it for one launch of either terminal app, and
-`/settings` (When GoodVibes asks) saves it. `/decisions` and the rest:
+`/settings` (When GoodVibes asks) saves it. What Jev decided (Waiting for you, Decisions) and the rest:
 [permission modes](docs/decision-model-policy.md#permission-modes).
 
 ## The decision model

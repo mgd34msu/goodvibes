@@ -70,7 +70,7 @@ import type { WebhookNotifier } from '@goodvibes/engine/platform/platform/integr
 import type { McpRegistry } from '@goodvibes/engine/platform/platform/mcp';
 import type { BenchmarkStore, CacheHitTracker, FavoritesStore, ModelLimitsService, ProviderCapabilityRegistry, ProviderOptimizer, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
 import type { KeybindingsManager } from '../input/keybindings.ts';
-import type { AdaptivePlanner, DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes/engine/platform/platform/core';
+import type { DeterministicReplayEngine, ExecutionPlanManager, SessionLineageTracker, SessionMemoryStore } from '@goodvibes/engine/platform/platform/core';
 import type { ArchivableProcessRegistry } from '@goodvibes/engine/platform/platform/runtime/fleet';
 import type { ProjectWorkPlan } from '@goodvibes/engine/platform/platform/knowledge';
 import type { WorkspaceTrustManager, WorkspaceTrustLevel } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -272,7 +272,6 @@ export interface RuntimeServices {
   readonly sessionLineageTracker: SessionLineageTracker;
   readonly sessionChangeTracker: SessionChangeTracker;
   readonly planManager: ExecutionPlanManager;
-  readonly adaptivePlanner: AdaptivePlanner;
   readonly idempotencyStore: IdempotencyStore;
   readonly overflowHandler: OverflowHandler;
   readonly policyRuntimeState: PolicyRuntimeState;

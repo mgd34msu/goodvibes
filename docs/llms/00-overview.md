@@ -165,7 +165,7 @@ Each project an app works in gets `<project>/.goodvibes/`. It contains a `.gitig
 | `tui/code-index.sqlite` | The project's code search index. | No. |
 | `tui/decisions.sqlite` | The decision log: every reading asked of the decision model in this project, answered or failed. | No. |
 | `tui/watchers.json` | Watchers defined for this project. | No. |
-| `tui/triggers.db` | Supervised triggers. Only the daemon keeps them, so this file exists in the daemon's working directory; both apps use the daemon's triggers. | No. Use `/triggers` or the `trigger` tool. |
+| `tui/triggers.db` | Supervised triggers. Only the daemon keeps them, so this file exists in the daemon's working directory; both apps use the daemon's triggers. | No. Use Automation's Triggers tab, the `triggers.*` capabilities or the `trigger` tool. |
 | `project-index.json` | The project's file index. | No. |
 | `worktrees.json` | Git worktrees GoodVibes created for parallel work. | No. |
 | `logs/activity.md` | The activity log of programs working in this project, in Markdown; the previous one is kept as `activity.md.1`. | Read only. |

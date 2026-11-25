@@ -116,8 +116,6 @@ export interface TerminalCommandSessionServices {
   readonly hydrateSessionUsage?: () => void;
   /** The contract operator `/workstream` lists, inspects, stops, answers, retries and re-budgets contracts through. */
   readonly contractOperator?: import('@goodvibes/engine/platform/platform/contract').ContractOperatorService;
-  /** Workstream drafts: propose a plan, review and edit it, approve and launch it as a contract (`/workstream propose`). */
-  readonly workstreamDrafts?: import('@goodvibes/engine/platform/platform/orchestration').WorkstreamDraftService;
 }
 
 export interface TerminalCommandProviderServices {

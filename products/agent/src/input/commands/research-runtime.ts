@@ -215,7 +215,7 @@ export function registerResearchRuntimeCommands(registry: CommandRegistry): void
           ...(values.visual !== 'no' ? { visualReport: true } : {}), ...(values.cite === 'yes' ? { requireCitationCoverage: true } : {}),
           tags: values.tags ? splitWords(values.tags) : ['research'],
         };
-      }, (values) => `Report "${values.title ?? ''}" saved as an artifact. /artifacts list shows it.`),
+      }, (values) => `Report "${values.title ?? ''}" saved as an artifact; it is in Memory and knowledge, Artifacts.`),
     ],
   }));
 }

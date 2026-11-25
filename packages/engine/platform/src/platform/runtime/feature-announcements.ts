@@ -388,7 +388,7 @@ export function buildAutomationEmptyState(input: {
   return {
     title: 'No routines yet',
     body:
-      'Automation is on and idle. Schedule something with /schedule (what it does and when); '
+      'Automation is on and idle. Schedule something with New schedule in Automation (what it does and when); '
       + 'it runs on its cadence with durable run history, retries, and delivery receipts.',
   };
 }

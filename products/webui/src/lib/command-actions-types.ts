@@ -51,6 +51,8 @@ export interface CommandActionsData {
 
 export interface CommandActionsSnapshot {
   readonly commands: readonly CommandActionsData[];
+  /** The capabilities no slash command carries, by the command each names: drawn as sheets, never typed. */
+  readonly capabilities?: readonly CommandActionsData[];
   readonly lists: Readonly<Record<string, ListOperatorData>>;
 }
 

@@ -65,8 +65,8 @@ function vibeCandidate(
     status: isBlocked ? 'needs-setup' : 'needs-review',
     reason,
     next: isBlocked
-      ? 'Inspect /personas vibe, edit or remove blocked content, then rerun status before relying on personality instructions.'
-      : 'Inspect /personas vibe and shorten the file if omitted personality instructions matter for this user.',
+      ? 'Look at the VIBE.md files (Memory and knowledge, Personas), edit or remove blocked content, then rerun status before relying on personality instructions.'
+      : 'Look at the VIBE.md files (Memory and knowledge, Personas) and shorten the file if omitted personality instructions matter for this user.',
     ...(isBlocked ? { missingRequirements: ['VIBE.md file is not loaded into the prompt until the blocked content is repaired.'] } : {}),
     proposalFields: {
       path,

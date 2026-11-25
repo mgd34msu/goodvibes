@@ -1,7 +1,6 @@
 import {
   collectServiceReadiness,
   collectSettingsHealthIssues,
-  collectRemoteRecoveryIssues,
   collectMcpLifecycleIssues,
   collectContinuityIssues,
   formatHealthStatusValue,
@@ -10,7 +9,9 @@ import { evaluateSessionMaintenance, formatSessionMaintenanceLines } from '@/run
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
 import { formatDoctorReport } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { createHealthCommand, type HealthArea } from '@goodvibes/engine/terminal-shell/health-command';
+import { createHealthCommand, readRemoteRunnersHealth, type HealthArea, type HealthCommandPolicy } from '@goodvibes/engine/terminal-shell/health-command';
+import { systemSessionOf } from './session-capabilities.ts';
+import { capabilityBinding } from './capability-binding.ts';
 import type { CommandReport } from '@goodvibes/engine/terminal-shell/command-actions';
 import { isSetupIssue } from '@goodvibes/engine/terminal-shell/setup-review';
 import { formatRuntimeStateSnapshot, snapshotRuntimeState } from '@/runtime/index.ts';
@@ -131,7 +132,8 @@ async function healthReport(ctx: CommandContext): Promise<CommandReport> {
     items.push({ sentence: `${check.area}: ${check.message}.`, ...(fixFor[check.area] ? { fix: fixFor[check.area] } : {}) });
   }
   for (const provider of accounts.providers) {
-    for (const issue of provider.issues) items.push({ sentence: `${provider.providerId}: ${issue}.`, fix: { label: 'Fix the account', line: `/accounts repair ${provider.providerId}` } });
+    // What fixes it is a control on the provider in Models and providers ("how to fix it"), not a line to type.
+    for (const issue of provider.issues) items.push({ sentence: `${provider.providerId}: ${issue}. In Models and providers, the provider's "how to fix it" says what fixes it.` });
   }
   for (const issue of collectSettingsHealthIssues(readModels.settings.getSnapshot(), 'a pending managed settings bundle is waiting to be applied or rolled back')) {
     items.push({ sentence: `Settings: ${issue}.`, fix: { label: 'See the setting', line: '/settings open' } });
@@ -212,18 +214,17 @@ async function checkArea(ctx: CommandContext, area: HealthArea): Promise<string>
       ].join('\n');
     }
     case 'remote': {
-      const snapshot = requireReadModels(ctx).remote.getSnapshot().supervisor;
-      const issues = collectRemoteRecoveryIssues(
-        snapshot.sessions,
-        (id, kind, value) => id + ' ' + (kind === 'error' ? value : kind + ' ' + formatHealthStatusValue(value)),
-      );
+      // The remote runners are the daemon's: read there, and said when they could not be read.
+      const remote = await readRemoteRunnersHealth(ctx, capabilityBinding,
+        (id, kind, value) => id + ' ' + (kind === 'error' ? value : kind + ' ' + formatHealthStatusValue(value)));
+      if (remote.unreadable) return ['Remote runners', `  Could not read them: ${remote.unreadable}.`].join('\n');
       return [
-        'Remote runners',
-        `  sessions ${snapshot.sessions.length}`,
-        `  active connections ${snapshot.activeConnections}`,
-        `  degraded ${snapshot.degradedConnections}`,
-        ...(issues.length > 0 ? issues.map((issue) => `  issue ${issue}`) : ['  no active remote recovery issues detected']),
-        '  Remote runners are set up and recovered from the terminal app (goodvibes /remote).',
+        'Remote runners (the daemon\'s)',
+        `  supervised ${remote.supervised}`,
+        `  connections open now ${remote.connections}`,
+        `  degraded ${remote.degraded}`,
+        ...(remote.issues.length > 0 ? remote.issues.map((issue) => `  issue ${issue}`) : ['  no runner needs recovering']),
+        '  They are started, stopped and recovered on the Runners tab of the Work place.',
       ].join('\n');
     }
     case 'memory': {
@@ -302,7 +303,11 @@ async function checkArea(ctx: CommandContext, area: HealthArea): Promise<string>
 }
 
 export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(createHealthCommand<CommandContext>({
+  registry.register(createHealthCommand<CommandContext>(healthPolicy, (ctx) => ({ systemSession: systemSessionOf(ctx) })));
+}
+
+/** This Agent's health, as the `health.*` capabilities read it (session-capabilities.ts binds it with `healthServicesOf`). */
+export const healthPolicy: HealthCommandPolicy<CommandContext> = {
     report: healthReport,
     check: (ctx, area) => checkArea(ctx, area),
     async diagnose(ctx, symptom) {
@@ -330,5 +335,4 @@ export function registerHealthRuntimeCommands(registry: CommandRegistry): void {
       return result.output;
     },
     elsewhere: 'the terminal app (goodvibes)',
-  }));
-}
+};

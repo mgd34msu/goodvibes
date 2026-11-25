@@ -1,6 +1,5 @@
-import {
-  createContextInspectionCommand,
-} from '@goodvibes/engine/terminal-shell/context-inspection-command';
+import type { ContextInspectionPolicy } from '@goodvibes/engine/terminal-shell/context-inspection-command';
+import { systemSessionOf } from './session-capabilities.ts';
 import { registerInteractionModeCommand } from '@goodvibes/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
@@ -10,7 +9,6 @@ import { captureTranscriptSource } from './transcript-reading.ts';
 import type { CommandContext, CommandRegistry, SlashCommand } from '../command-registry.ts';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools/input-projection';
 import { commandRefusal, stripYesFlag } from './confirmation.ts';
-import { handleContextWindowSubcommand } from './context-window.ts';
 import { isAgentHostSettingKey } from '../../config/host-settings.ts';
 import {
   formatHarnessError,
@@ -164,15 +162,12 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
   nativeSettingsCommands.set(settingsCommand, settingsCommand.handler);
   registry.register(settingsCommand);
 
-  registry.register(contextInspectionCommand);
-
-
-  registerInteractionModeCommand<CommandContext>(registry);
+  registerInteractionModeCommand<CommandContext>(registry, (ctx) => ({ systemSession: systemSessionOf(ctx) }));
 }
 
 
-const contextInspectionCommand = createContextInspectionCommand<CommandContext>({
-  window: handleContextWindowSubcommand,
+/** How the Agent measures its context, for the conversation's context controls (session-capabilities.ts). */
+export const contextInspectionPolicy: ContextInspectionPolicy<CommandContext> = {
   estimate: (message) => {
     const text =
       typeof message.content === 'string'
@@ -186,4 +181,4 @@ const contextInspectionCommand = createContextInspectionCommand<CommandContext>(
   total: (_messages, estimates) => estimates.reduce((sum, value) => sum + value, 0),
   instructionFiles: instructionFilesReport,
   lastTurns: lastTurnsReport,
-});
+};

@@ -39,7 +39,7 @@ The platform owns semantic question answering through:
 
 - `POST /api/knowledge/ask`
 - operator method `knowledge.ask`
-- local TUI command `/knowledge ask <query> [--space <knowledgeSpaceId>] [--limit <n>] [--mode <concise|standard|detailed>]`
+- the capability `knowledge.ask` ("Ask your knowledge a question", `q` in Memory and knowledge), whose form takes the question, how long an answer, how many sources at most and a knowledge space
 
 platform-owned semantic enrichment supports provider-backed LLM extraction with timeout, abort, and concurrency controls. Broad reindex caps LLM attempts and then continues with deterministic extraction, so hosts should wire the platform semantic service rather than implementing their own timeout or concurrency shim.
 
@@ -80,9 +80,9 @@ The daemon runtime wires platform semantic refinement to the platform web gap re
 
 ## Issue review
 
-Knowledge issues can be reviewed through the local TUI command and the daemon/operator surfaces:
+Knowledge issues can be reviewed in Memory and knowledge and through the daemon/operator surfaces:
 
-- `/knowledge review-issue <issueId> <accept|reject|resolve|reopen|edit|forget> [--reviewer <name>] [--value <json-object>]`
+- the Issues tab of Memory and knowledge: `v` on an open issue opens the review (accept, reject, resolve, reopen, accept with changes given as a JSON object, or forget), the capability `knowledge.review-issue`
 - `POST /api/knowledge/issues/{id}/review`
 - operator method `knowledge.issue.review`
 
@@ -124,17 +124,17 @@ ships with extension loading disabled. The addon is still installed for
 consistency (and would work if a future runtime lifts the limit), but the
 runtime reports the vector index as unavailable and memory search degrades to
 literal matching. This is a permanent platform capability limit, not a
-packaging defect. `/memory index` names the reason plainly. Linux
+packaging defect. "Search index" (`h` on the Copies and files tab of Memory and knowledge) names the reason plainly. Linux
 (including WSL2) has no such restriction.
 
 ### Copies of memory and restoring one
 
 The memory records store (`memory.sqlite`) is copied once a day, before a
 schema upgrade, and before every restore; the semantic index is not copied, it
-is rebuilt from the records. `/memory snapshots` lists the copies with their
-date, size and record count. `/memory restore <name|latest|date>` replaces
-every record, link and pending consolidation proposal with those of one copy,
-after one confirmation. The records it replaces are copied first and the
+is rebuilt from the records. The Copies and files tab of Memory and knowledge
+lists the copies with their date, size and record count; `u` on one replaces
+every record, link and pending consolidation proposal with those of that copy
+(the capability `memory.restore`, which a model may not run: it is the owner's). The records it replaces are copied first and the
 answer names that copy, so restoring it by that name undoes the restore.
 `latest` is the newest copy not taken by a restore, so it names the same copy
 before and after one. The restore runs
@@ -198,14 +198,20 @@ Ten knowledge job kinds can be run directly or saved as schedules through the ru
 | `light-consolidation` | Score recent usage, refresh candidate promotions, and write a deterministic consolidation report |
 | `deep-consolidation` | Run the full consolidation loop, including high-confidence memory promotion and deterministic reporting |
 
-## High-signal commands
+## Memory and knowledge, the place
 
-Two commands front this whole subsystem:
+One place fronts this whole subsystem in the terminal app and the Agent (the menu, `Ctrl+G` then `m`, or `/memory`), and the Library in the web app. Its tabs are the real things, read by themselves and read again when they change anywhere:
 
-| Command | Does |
+| Tab | What it shows, and what you do there |
 | --- | --- |
-| `/memory` | Durable project memory: remember, search, read, correct, link and review records; see what a task would be given; keep memory as files; save it to a file or load one (a team handoff is `/memory export <file> --scope team`); list and restore its copies; the search index. Bare, it opens the list of actions. |
-| `/knowledge status\|ask\|ingest-url\|import-bookmarks\|import-urls\|list\|search\|get\|queue\|review-issue\|candidates\|reports\|schedules\|lint\|packet\|explain\|reindex\|consolidate` | The structured knowledge store's full command surface |
+| Memory | What the project remembers. Enter shows one record in full; correct it, say whether it is still right, change where it applies, link it, forget it; remember something (`n`), search, see what a task or a turn would be given, remember an incident or a setting's state |
+| Proposals | What tidying memory proposes (two records that disagree, one twice, one out of date) |
+| Copies and files | The copies of memory; replace memory with one; save memory to a file (a team handoff is the team's records), read a file, load one; keep memory as files in the project, see what your edits to them change, take the edits in; the search index |
+| Sources, Entries, Issues, Jobs, Connectors | Your structured knowledge, one store for every program: add a page (`a`), a list of pages, bookmarks, a file, browser history, a saved artifact or through a connector; ask it (`q`), search it, see the map and what a task would get; review an issue; tidy and rebuild; stop a job |
+| About you | What is known about you: correct a fact, put its earlier value back, forget it, add a line |
+| Templates | Your prompt templates: see one, use it as your next message, edit it, delete it, keep your last message as one |
+
+Every one of these is a capability that the model (`capability_find`, `capability_run`), an outside agent (`capabilities.find`, `capabilities.run`) and a script (`goodvibes do <id>`) reach the same way.
 
 ## Related docs
 

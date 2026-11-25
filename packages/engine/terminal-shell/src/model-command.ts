@@ -1,9 +1,10 @@
 /**
- * `/model` and `/effort`, each described once (command-actions/) for both
- * terminal apps: which model your conversations use, its backup models, the
- * list of models read again from every provider you have set up, and how hard
- * the model thinks. Each app says how it reaches its provider API and what it
- * does before a switch lands (the terminal app asks for a missing key first).
+ * `/model`, described once (command-actions/) for both terminal apps: which
+ * model your conversations use, its backup models and the list of models read
+ * again from every provider you have set up; and how hard the model thinks,
+ * which is a control on the conversation (`effortOf`). Each app says how it
+ * reaches its provider API and what it does before a switch lands (the
+ * terminal app asks for a missing key first).
  */
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
 import type { LLMProvider, ProviderApi, ProviderApiLiveModelRefreshReport, ProviderRegistry } from '@goodvibes/engine/platform/platform/providers';
@@ -24,11 +25,13 @@ import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext, CommandDescription, InputDescription } from './command-actions/types.js';
 import { doAction, listInput, readAction } from './described-command-kit.js';
+import { daemonCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import { MODEL_BACKUP, MODEL_DROP_BACKUP, type CapabilityDefinition } from '@goodvibes/engine/platform/platform/capabilities';
 
 export interface ModelCommandContext extends CommandActionContext {
   readonly session: { readonly runtime: { model: string; provider: string; reasoningEffort: string } };
   readonly provider: { readonly providerRegistry: Pick<ProviderRegistry, 'getCurrentModel' | 'listProviders'> };
-  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'set'> };
+  readonly platform: { readonly configManager: Pick<ConfigManager, 'get' | 'set' | 'setRuntimeOverride'> };
   /** The full model picker (Recommended, price tier, a tab per job), where this surface has one. */
   readonly openModelPicker?: ((onClosed?: (chosen: boolean) => void) => void) | undefined;
 }
@@ -43,7 +46,19 @@ export interface ModelCommandServices<Ctx extends ModelCommandContext> {
    * `/model refresh` (the lists the web UI and every other program show).
    */
   readonly daemon?: ((ctx: Ctx) => DaemonVerbCaller) | undefined;
+  /** How this app runs a daemon capability (its `capability-binding.ts`): the backup models are the daemon's. */
+  readonly binding?: DaemonCapabilityBinding<Ctx> | undefined;
 }
+
+/** The app's binding, read when an action runs (the description is built before the app registers it). */
+const BINDING: DaemonCapabilityBinding<ModelCommandContext> = {
+  daemon: (ctx) => {
+    const binding = services().binding;
+    if (!binding) throw commandRefusal('The daemon is not reachable from this program, so the backup models were not changed.');
+    return binding.daemon(ctx);
+  },
+  caller: (ctx) => services().binding?.caller(ctx) ?? {},
+};
 
 /** One provider's line in `models.refresh`'s answer. */
 interface DaemonRefreshReport {
@@ -101,7 +116,8 @@ function backupOrder(ctx: ModelCommandContext): string[] {
   return Array.isArray(current) ? current.filter((entry): entry is string => typeof entry === 'string') : [];
 }
 
-const BACKUPS = defineList<ModelCommandContext>({
+// The backups the daemon keeps (the setting every program reads from the daemon's settings), for model.drop-backup.
+defineList<ModelCommandContext>({
   name: 'models.backups',
   async read(ctx) {
     return backupOrder(ctx).map((key, index): ListRow => ({ value: key, label: key, detail: `tried ${ordinal(index + 1)}` }));
@@ -194,7 +210,7 @@ async function refreshModels(ctx: ModelCommandContext, api: ProviderApi): Promis
   const byProvider = new Map(reports.map((report) => [report.providerId, report]));
   const setUp = ctx.provider.providerRegistry.listProviders().filter(isSetUp).map((provider) => provider.name).sort((a, b) => a.localeCompare(b));
   const lines = setUp.length === 0
-    ? ['No provider is set up yet, so there is no list to read. /provider adds one or signs in with a subscription.']
+    ? ['No provider is set up yet, so there is no list to read. Add one of your own or sign in with a subscription in Models and providers.']
     : [`Models by provider (${setUp.length} set up):`, ...setUp.map((name) => providerRefreshLine(name, all.filter((model) => model.providerId === name).length, byProvider.get(name)))];
   const text = [...lines, '', ...notes].join('\n');
   if (failed.length > 0) {
@@ -215,7 +231,10 @@ function switchTo(ctx: ModelCommandContext, registryKey: string): Promise<string
     services().beforeSelection(ctx, selected.providerId, () => {
       ctx.session.runtime.model = selected.registryKey;
       ctx.session.runtime.provider = selected.providerId;
+      // The shared default every program holds in the daemon's settings (config-ownership.ts), and this conversation's
+      // own choice with it, so a model it chose before in its picker does not stay in force here.
       ctx.platform.configManager.set('provider.model', selected.registryKey);
+      ctx.platform.configManager.setRuntimeOverride('provider.model', selected.registryKey);
       // The requested level may not exist on this model: the session runs at what it offers; the preference stays.
       const switchedTo = toEffortModel(ctx.provider.providerRegistry.getCurrentModel());
       const serving = resolveRequestedEffortForServingModel(ctx.platform.configManager, switchedTo);
@@ -264,7 +283,7 @@ export const MODEL_COMMAND: CommandDescription<ModelCommandContext> = {
           current ? `In use: ${current.displayName} (${current.providerId}), ${current.registryKey}` : 'No model is in use yet. /model use chooses one.',
           backups.length === 0 ? 'No backup model: a turn that fails stops and says why.' : `Backup models, in order: ${backups.join(', ')}.`,
           '',
-          models.length === 0 ? 'No model can be chosen yet: /provider adds a provider or signs in with a subscription.' : 'Models you can switch to (/model use <model>):',
+          models.length === 0 ? 'No model can be chosen yet: add a provider of your own or sign in with a subscription in Models and providers.' : 'Models you can switch to (/model use <model>):',
           ...models.map((model) => `  ${model.current ? '▶' : ' '} ${model.registryKey.padEnd(36)} ${model.displayName} (${model.providerId})`),
         ].join('\n');
       },
@@ -293,93 +312,49 @@ export const MODEL_COMMAND: CommandDescription<ModelCommandContext> = {
         return text;
       },
     }),
-    {
-      id: 'add-backup', label: 'Add a backup model', word: 'backup', inputs: [{ ...MODEL, help: 'The model a turn moves to when yours fails' }],
-      sentence: 'When a turn fails on your model, it moves to {model} (after any backups already listed), until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'remove-backup',
-      operator: { terminalOnly: 'Backup models are kept in this terminal app\'s settings.' },
-      example: { model: 'openai:gpt-5-mini' },
-      async run(values, ctx) {
-        const models = await services().requireProviderApi(ctx).listModels({ selectableOnly: true });
-        const match = models.find((model) => model.registryKey === values.model || model.modelId === values.model);
-        if (!match) throw commandRefusal(`No model you can use is named ${values.model}; the backups were not changed.`, '/model list shows them.');
-        const order = backupOrder(ctx);
-        if (order.includes(match.registryKey)) return `${match.registryKey} is already a backup. Backup models, in order: ${order.join(', ')}.`;
-        const next = [...order, match.registryKey];
-        ctx.platform.configManager.set('provider.fallbackModels', next);
-        return `Backup models, in order: ${next.join(', ')}.`;
-      },
-    },
-    {
-      id: 'remove-backup', label: 'Remove a backup model', word: 'drop-backup',
-      inputs: [listInput({ id: 'model', label: 'Backup model', help: 'Your backup models', list: BACKUPS })],
-      sentence: 'A turn that fails will no longer move to {model}, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'add-backup',
-      operator: { terminalOnly: 'Backup models are kept in this terminal app\'s settings.' },
-      example: { model: 'openai:gpt-5-mini' },
-      async run(values, ctx) {
-        const order = backupOrder(ctx);
-        if (!order.includes(values.model!)) throw commandRefusal(`${values.model} is not a backup model; nothing was changed.`, '/model list shows the backups.');
-        const next = order.filter((key) => key !== values.model);
-        ctx.platform.configManager.set('provider.fallbackModels', next);
-        return next.length === 0 ? 'No backup model is left: a turn that fails stops and says why.' : `Backup models, in order: ${next.join(', ')}.`;
-      },
-    },
+    // The backups are the shared default's, kept by the daemon for every program (capabilities/builtin/models.ts).
+    daemonCapabilityAction<ModelCommandContext>(MODEL_BACKUP as CapabilityDefinition<never>, BINDING),
+    daemonCapabilityAction<ModelCommandContext>(MODEL_DROP_BACKUP as CapabilityDefinition<never>, BINDING),
   ],
 };
 
-export const EFFORT_COMMAND: CommandDescription<ModelCommandContext> = {
-  name: 'effort',
-  title: 'Reasoning effort',
-  summary: 'How hard the model thinks before it answers',
-  group: 'Models',
-  report: 'see-effort',
-  actions: [
-    readAction<ModelCommandContext>({
-      id: 'see-effort', label: 'See how hard the model thinks', readsOnlyThisMachine: true, word: 'show',
-      sentence: 'Shows the level you chose, the level the model in use runs at, and the levels it offers.',
-      operator: { terminalOnly: 'The levels belong to the model this terminal app uses.' },
-      async rowValue(ctx) {
-        return requestedEffortLevel(ctx.platform.configManager) || 'the model\'s usual';
-      },
-      async run(_values, ctx) {
-        const model = toEffortModel(ctx.provider.providerRegistry.getCurrentModel());
-        return describeEffortForModel(model, requestedEffortLevel(ctx.platform.configManager) || undefined).join('\n');
-      },
-    }),
-    {
-      id: 'set', label: 'Choose how hard the model thinks', word: 'set',
-      inputs: [listInput({ id: 'level', label: 'Level', help: 'The levels the model in use offers', list: EFFORT_LEVELS })],
-      sentence: 'The model will think at {level} from the next message, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: { terminalOnly: 'The levels belong to the model this terminal app uses.' },
-      example: { level: 'high' },
-      async run(values, ctx) {
-        const definition = ctx.provider.providerRegistry.getCurrentModel();
-        const model = toEffortModel(definition);
-        const presentation = effortPresentationForModel(model);
-        if (!presentation.configurable) throw commandRefusal([presentation.headline, ...(presentation.caveat ? [presentation.caveat] : [])].join(' '));
-        const level = values.level!;
-        if (!presentation.choices.some((choice) => choice.level === level)) {
-          throw commandRefusal(`${definition.displayName} does not offer reasoning effort '${level}'; nothing was changed.`, `Levels it offers: ${presentation.choices.map((choice) => choice.level).join(', ')}`);
-        }
-        // An explicit choice is the one write allowed to change the stored preference.
-        ctx.platform.configManager.set('provider.reasoningEffort', level);
-        const serving = servingEffortForLevel(level, model);
-        ctx.session.runtime.reasoningEffort = serving.effective ?? '';
-        ctx.renderRequest?.();
-        return `Reasoning effort: ${describeServingEffort(serving, model)}.`;
-      },
+/**
+ * How hard this app's model thinks, as the conversation's controls take it (capabilities/builtin/conversation-controls.ts:
+ * effort.show and effort.set, run from the conversation's list and by the model). The levels offered are the
+ * model in use's (`effort.levels`, the list above).
+ */
+export function effortOf(ctx: ModelCommandContext): { effort(): Promise<string>; setEffort(level: string): Promise<string> } {
+  return {
+    async effort() {
+      const model = toEffortModel(ctx.provider.providerRegistry.getCurrentModel());
+      return describeEffortForModel(model, requestedEffortLevel(ctx.platform.configManager) || undefined).join('\n');
     },
-  ],
-};
+    async setEffort(level) {
+      const definition = ctx.provider.providerRegistry.getCurrentModel();
+      const model = toEffortModel(definition);
+      const presentation = effortPresentationForModel(model);
+      if (!presentation.configurable) throw commandRefusal([presentation.headline, ...(presentation.caveat ? [presentation.caveat] : [])].join(' '));
+      if (!presentation.choices.some((choice) => choice.level === level)) {
+        throw commandRefusal(`${definition.displayName} does not offer reasoning effort '${level}'; nothing was changed.`, `Levels it offers: ${presentation.choices.map((choice) => choice.level).join(', ')}`);
+      }
+      // This conversation's own level: the shared default (the daemon's settings, Settings > reasoning effort) is not
+      // touched, and the level lasts as long as this session.
+      ctx.platform.configManager.setRuntimeOverride('provider.reasoningEffort', level);
+      const serving = servingEffortForLevel(level, model);
+      ctx.session.runtime.reasoningEffort = serving.effective ?? '';
+      ctx.renderRequest?.();
+      return `Reasoning effort: ${describeServingEffort(serving, model)}.`;
+    },
+  };
+}
+
+/** The effort levels list stays registered for the conversation's effort.set (`effort.levels`). */
+export const EFFORT_LEVELS_LIST = EFFORT_LEVELS;
 
 const MODEL_SLASH_COMMAND = defineCommand(MODEL_COMMAND);
-const EFFORT_SLASH_COMMAND = defineCommand(EFFORT_COMMAND);
 
-/** Register `/model` and `/effort` (one description each) with how this app reaches its models. */
+/** Register `/model` (one description) with how this app reaches its models. */
 export function registerModelCommands<Ctx extends ModelCommandContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, host: ModelCommandServices<Ctx>): void {
   installed = host as unknown as ModelCommandServices<ModelCommandContext>;
   registry.register(MODEL_SLASH_COMMAND);
-  registry.register(EFFORT_SLASH_COMMAND);
 }

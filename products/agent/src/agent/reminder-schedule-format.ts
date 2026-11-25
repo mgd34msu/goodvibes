@@ -1,6 +1,6 @@
 import { REMINDER_SCHEDULE_METHOD, type ReminderScheduleFailure, type ReminderSchedulePreview, type ReminderScheduleSuccess } from '@goodvibes/engine/terminal-shell/agent-turn/reminder-schedule';
 import { scheduleConfirmationRouteLines, scheduleNextRouteLines, scheduleRouteArg } from '@goodvibes/engine/terminal-shell/agent-turn/schedule-next-routes';
-import { scheduleDeliveryLine } from './schedule-delivery-line.ts';
+import { scheduleDeliveryLine } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);

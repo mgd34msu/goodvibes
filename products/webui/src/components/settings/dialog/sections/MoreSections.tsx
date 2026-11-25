@@ -1,4 +1,3 @@
-import { TriggersPanel } from '../../../command/screens/TriggersPanel';
 /**
  * The smaller settings sections. Each one gathers the panels that used to sit
  * on the Admin and Providers pages (or were their own page) and the config
@@ -278,7 +277,7 @@ export function SecureAddressSection() {
 export function AllSettingsSection() {
   return (
     <>
-      <TriggersPanel />
+      {/* Triggers, and recovering one that gave up, are in Automation (AutomationPanel.tsx). */}
       <SectionConfig id="all" emptyText="Every setting the daemon reports has a home in another section." />
     </>
   );

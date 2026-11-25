@@ -274,7 +274,7 @@ export class PhoneNodeClient {
       pendingRequestId: '',
       message: this.identity
         ? 'Paired. Waiting for requests.'
-        : 'Not paired yet. Ask to pair, then approve it in Settings, Devices and pairing (or /devices approve in the terminal) on a device signed in as you.',
+        : 'Not paired yet. Ask to pair, then approve it in Settings, Devices and pairing (or Devices and network, Waiting to pair, in the terminal) on a device signed in as you.',
       activity: [],
     };
   }
@@ -389,7 +389,7 @@ export class PhoneNodeClient {
         status: 'awaiting-approval',
         pendingRequestId: requestId,
         announced,
-        message: 'Waiting for approval. Approve it in Settings, Devices and pairing (or /devices approve in the terminal) on a device signed in as you, then press Finish pairing.',
+        message: 'Waiting for approval. Approve it in Settings, Devices and pairing (or Devices and network, Waiting to pair, in the terminal) on a device signed in as you, then press Finish pairing.',
       });
     } catch {
       if (this.isCurrent(lifetime)) this.failPairing('Could not reach the daemon. Ask to pair again.');
@@ -436,7 +436,7 @@ export class PhoneNodeClient {
         this.setState({
           status: 'awaiting-approval',
           message: status === 404
-            ? 'Not approved yet. Approve it in Settings, Devices and pairing (or /devices approve in the terminal) on a device signed in as you, then press Finish pairing again.'
+            ? 'Not approved yet. Approve it in Settings, Devices and pairing (or Devices and network, Waiting to pair, in the terminal) on a device signed in as you, then press Finish pairing again.'
             : `Pairing could not be finished (HTTP ${status}).`,
         });
         return;

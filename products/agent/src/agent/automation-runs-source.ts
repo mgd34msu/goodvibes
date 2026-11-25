@@ -2,8 +2,7 @@
  * Connected-host automation runs source.
  *
  * The away-digest (src/core/away-digest.ts via src/shell/autonomy-surfacing.ts)
- * and the /schedule list surface (src/input/commands/schedule-runtime.ts) both
- * need "what actually happened with scheduled automation since I was last
+ * needs "what actually happened with scheduled automation since I was last
  * here", and that truth lives on the connected GoodVibes host, not in this
  * Agent process. Local automation execution is disabled by design (see
  * src/runtime/bootstrap.ts), so the agent's local AutomationManager never
@@ -20,7 +19,7 @@
  * contract. It never falls back to the local automation manager.
  */
 import { createConnectedHost, isHostFailure, type ConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
-import { connectedHostOf, type AgentConnectedHostConfigReader, type AgentConnectedHostConnection } from './routine-schedule-promotion.ts';
+import { connectedHostOf, type AgentConnectedHostConfigReader, type AgentConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 
 export const AUTOMATION_RUNS_LIST_METHOD = 'automation.runs.list';
 export const AUTOMATION_JOBS_LIST_METHOD = 'automation.jobs.list';

@@ -211,6 +211,13 @@ export function freezeDurableRequest(value: DurableContractRequest): DurableCont
     throw new DurableContractAdmissionError('invalid');
   }
   if (input['taskEvidence'] !== undefined && typeof input['taskEvidence'] !== 'string') throw new DurableContractAdmissionError('invalid');
+  if (input['draftPlan'] !== undefined) {
+    const draft = input['draftPlan'] as { goal?: unknown; units?: unknown };
+    if (!record(draft) || typeof draft.goal !== 'string' || !Array.isArray(draft.units) || draft.units.length === 0
+      || !draft.units.every((unit) => record(unit) && typeof unit['id'] === 'string' && typeof unit['title'] === 'string' && typeof unit['brief'] === 'string' && Array.isArray(unit['dependsOn']))) {
+      throw new DurableContractAdmissionError('invalid');
+    }
+  }
   if (input['isolation'] !== undefined && (typeof input['isolation'] !== 'string' || !['auto', 'worktree', 'shared'].includes(input['isolation']))) throw new DurableContractAdmissionError('invalid');
   if (input['nativeSource'] !== undefined) {
     let source;
@@ -271,7 +278,9 @@ export function assertDurableCheckpoint(contract: ContractView, admission: Durab
     || contract.id !== admission.contractId || contract.ownerAgentId !== admission.ownerAgentId) {
     throw new DurableContractAdmissionError('checkpoint');
   }
-  for (const field of ['ask', 'sessionId', 'origin', 'projectRoot', 'parentAgentId', 'selectedModel', 'budget', 'proposedUnits', 'nativeSource', 'taskEvidence'] as const) {
+  for (const field of ['ask', 'sessionId', 'origin', 'projectRoot', 'parentAgentId', 'selectedModel', 'budget', 'proposedUnits', 'nativeSource', 'taskEvidence', 'draftPlan'] as const) {
+    // A spending limit the owner changed while the work ran is the run's own; the admitted one is where it started.
+    if (field === 'budget' && contract.budgetSetByOwner === true) continue;
     const value = contract[field], admitted = admission.input[field];
     if (value !== admitted && canonical({ value }) !== canonical({ value: admitted })) {
       throw new DurableContractAdmissionError('checkpoint');

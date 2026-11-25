@@ -87,7 +87,7 @@ export async function buildSetupPlan(
         blocksAutonomy: true,
         reason: 'Native intake needs a fresh selected-host check of a paired owner with read:work-ledger and write:work-ledger. Provider, workspace and Jev readiness are separate checks.',
         nextAction: connectedHostAuthNextAction(auth),
-        userRoute: 'Agent Workspace -> Connected Host; /auth review',
+        userRoute: 'Agent Workspace -> Connected Host; Models and providers, Providers',
         modelRoute: connectedHostAuthModelRoute(auth),
         relatedSetupItemId: 'operator-terminal',
         signals: connectedHostAuthSignals(auth),

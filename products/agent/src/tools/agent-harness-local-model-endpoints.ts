@@ -16,7 +16,8 @@ export function localProviderNameFor(providerId: string | null, stack: string | 
 
 export function localProviderAddRoute(providerId: string | null, stack: string | null, baseUrl: string): string {
   const name = localProviderNameFor(providerId, stack, 'local-openai');
-  return `agent_harness mode:"run_command" command:"/provider add ${name} ${baseUrl}" explicitUserRequest:"<the user request, in their own words>"`;
+  // A provider of your own is the daemon's (capabilities/builtin/models.ts): the model adds one with capability_run.
+  return `capability_run id:"provider.add" inputs:{"name":"${name}","address":"${baseUrl}"}`;
 }
 
 export function localEndpointId(baseUrl: string): string {

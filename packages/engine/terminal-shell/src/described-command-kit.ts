@@ -6,6 +6,10 @@
  * objects a description writes out in full.
  */
 import type { ActionDescription, ActionValues, CommandReport, FixedChoice, InputDescription, ListName } from './command-actions/types.js';
+import { REPLACED_DONE as OVERWROTE } from '@goodvibes/engine/platform/platform/capabilities/words';
+
+/** What "Write over it" or "Replace it" did, said after it ran (a choice's `riskDone`), whether or not anything was there. */
+export { REPLACED_DONE } from '@goodvibes/engine/platform/platform/capabilities/words';
 
 type ReadFields<Ctx> = Pick<ActionDescription<Ctx>, 'id' | 'label' | 'word' | 'sentence' | 'run'>
   & Partial<Pick<ActionDescription<Ctx>, 'inputs' | 'example' | 'operator' | 'rowValue' | 'stepTitles' | 'readsOnlyThisMachine' | 'blanksTypedOnly'>>;
@@ -67,7 +71,7 @@ export function choiceInput(fields: { id: string; label: string; help: string; c
 /** Whether a file write may replace a file already at its path: no by default; yes (`--replace`) writes over it, and the old file is not kept. */
 export const REPLACE_FILE_INPUT: InputDescription = choiceInput({
   id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
-  choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+  choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone', riskDone: OVERWROTE }],
   optional: { default: 'no', means: 'keep it and stop' },
 });
 

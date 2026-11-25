@@ -1,16 +1,11 @@
-import { registerTriggerCommands } from './commands/trigger-supervisor.ts';
-import { registerWorkPlanRuntimeCommands } from './commands/workplan-runtime.ts';
-import { registerWorkstreamRuntimeCommands } from './commands/workstream-runtime.ts';
+import { registerAutomationLists } from '@goodvibes/engine/terminal-shell/automation-lists';
 import type { CommandRegistry } from './command-registry.ts';
 import type { CommandContext } from './command-registry.ts';
-import { resumeCommand, saveCommand, sessionCommand } from './commands/session.ts';
+import { resumeCommand, sessionCommand } from './commands/session.ts';
 import { memoryCommand } from './commands/memory.ts';
-import { registerKnowledgeRuntimeCommands } from './commands/knowledge.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
-import { registerScheduleRuntimeCommands } from './commands/schedule-runtime.ts';
 import { registerOperatorRuntimeCommands } from './commands/operator-runtime.ts';
 import { registerNotifyRuntimeCommands } from './commands/notify-runtime.ts';
-import { registerPlatformAccessRuntimeCommands } from './commands/platform-access-runtime.ts';
 import { registerSecurityRuntimeCommands } from './commands/security-runtime.ts';
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
 import { registerSessionContentCommands } from './commands/session-content.ts';
@@ -18,38 +13,26 @@ import { registerLocalRuntimeCommands } from './commands/local-runtime.ts';
 import { registerDevicesRuntimeCommands } from './commands/devices-runtime.ts';
 import { registerExperienceRuntimeCommands } from './commands/experience-runtime.ts';
 import { registerTasksRuntimeCommands } from './commands/tasks-runtime.ts';
-import { registerLocalProviderRuntimeCommands } from './commands/local-provider-runtime.ts';
-import { registerNetworkScanRuntimeCommands } from './commands/network-scan-runtime.ts';
 import { registerHealthRuntimeCommands } from './commands/health-runtime.ts';
 import { registerStatusRuntimeCommands } from './commands/status-runtime.ts';
-import { registerProviderAccountsRuntimeCommands } from './commands/provider-accounts-runtime.ts';
+import { registerModelsLists } from '@goodvibes/engine/terminal-shell/models-lists';
 import { registerOnboardingRuntimeCommands } from './commands/onboarding-runtime.ts';
 import { registerAgentWorkspaceRuntimeCommands } from './commands/agent-workspace-runtime.ts';
 import { registerAgentRuntimeProfileRuntimeCommands } from './commands/agent-runtime-profile-runtime.ts';
 import { registerDelegationRuntimeCommands } from './commands/delegation-runtime.ts';
-import { registerPersonasRuntimeCommands } from './commands/personas-runtime.ts';
-import { registerAgentSkillsRuntimeCommands } from './commands/agent-skills-runtime.ts';
-import { registerRoutinesRuntimeCommands } from './commands/routines-runtime.ts';
+import { registerReviewPacketReportCommand } from './commands/documents-runtime.ts';
 import { registerChannelsRuntimeCommands } from './commands/channels-runtime.ts';
-import { registerTelegramIntakeCommands } from './commands/telegram-intake-runtime.ts';
-import { registerBriefRuntimeCommands } from './commands/brief-runtime.ts';
 import { registerSupportBundleRuntimeCommands } from './commands/support-bundle-runtime.ts';
-import { registerOwnerProfileRuntimeCommands } from './commands/owner-profile-runtime.ts';
+import { registerKnowledgeLists } from '@goodvibes/engine/terminal-shell/knowledge-lists';
 import { registerConnectedHostAdminCommands } from './commands/connected-host-admin-runtime.ts';
-import { registerOwnerInboxCommands } from './commands/owner-inbox-runtime.ts';
-import { registerCloudflareRuntimeCommands } from './commands/cloudflare-runtime.ts';
-import { registerHeldCallsCommands } from './commands/held-calls-runtime.ts';
-import { registerIntelligenceRuntimeCommands } from './commands/intelligence-runtime.ts';
-import { registerEmailRuntimeCommands } from './commands/email-runtime.ts';
+import { registerWaitingLists } from '@goodvibes/engine/terminal-shell/waiting-lists';
+import { registerMailLists } from '@goodvibes/engine/terminal-shell/mail-lists';
 import { registerCalendarRuntimeCommands } from './commands/calendar-runtime.ts';
 import { registerGoogleRuntimeCommands } from './commands/google-runtime.ts';
 import { registerUpdateCommand } from './commands/update-runtime.ts';
 import { registerPaymentCardCommands } from './commands/payment-card-intake.ts';
 import { commandVerbPolicy, declareCommandVerbs, SHARED_COMMAND_VERBS } from './commands/command-verbs.ts';
 import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
-import { registerNotesRuntimeCommands } from './commands/notes-runtime.ts';
-import { registerDocumentsRuntimeCommands } from './commands/documents-runtime.ts';
-import { registerArtifactsRuntimeCommands } from './commands/artifacts-runtime.ts';
 import { registerCompareRuntimeCommands } from './commands/compare-runtime.ts';
 import { registerResearchRuntimeCommands } from './commands/research-runtime.ts';
 import { registerHooksCommand } from '@goodvibes/engine/terminal-shell/hooks-command';
@@ -67,52 +50,49 @@ export function registerBuiltinCommands(
   options: { readonly rememberedRules?: (() => RememberedRuleStore | undefined) | undefined } = {},
 ): void {
   registerShellCoreCommands(registry);
-  registerTriggerCommands(registry);
+  // Automation is the daemon's (capabilities/builtin/automation.ts): no slash command; its lists reach the daemon with this binding.
+  registerAutomationLists<CommandContext>(capabilityBinding);
   registerAgentWorkspaceRuntimeCommands(registry);
-  registerNotesRuntimeCommands(registry);
-  registerDocumentsRuntimeCommands(registry);
-  registerArtifactsRuntimeCommands(registry);
+  // Memory and knowledge: notes, personas, routines, saved artifacts and drafts are the daemon's (capabilities/builtin/agent-stores.ts),
+  // controls in the Memory and knowledge place (routines that run by themselves in Automation too); /documents keeps the
+  // review packet reports, which read the Agent workspace's own view.
+  registerReviewPacketReportCommand(registry);
   registerCompareRuntimeCommands(registry);
   registerResearchRuntimeCommands(registry);
-  registerWorkPlanRuntimeCommands(registry);
-  registerWorkstreamRuntimeCommands(registry);
-  registerBriefRuntimeCommands(registry);
+  // `/brief` is gone: the briefing is a capability (`work.brief`) with its control in the Work place.
   registerSupportBundleRuntimeCommands(registry);
-  registerOwnerProfileRuntimeCommands(registry);
   registerConnectedHostAdminCommands(registry);
-  registerOwnerInboxCommands(registry);
-  registerCloudflareRuntimeCommands(registry);
-  registerHeldCallsCommands(registry);
-  registerIntelligenceRuntimeCommands(registry);
+  // Memory and knowledge is the daemon's (capabilities/builtin/knowledge.ts, profile.ts, templates.ts): no slash command but /memory; its lists reach the daemon with this binding.
+  registerKnowledgeLists<CommandContext>(capabilityBinding);
+  // Waiting for you is the daemon's and the program's own (capabilities/builtin/waiting.ts, telegram.ts): no slash command; its lists reach the daemon with this binding.
+  registerWaitingLists<CommandContext>(capabilityBinding);
+  // Cloudflare and the machine group are the daemon's (capabilities/builtin/cloudflare.ts, cluster.ts): controls in the Devices place.
+  // Code lookups and language servers are controls in Code and changes and capabilities the model runs (builtin/code.ts).
   registerCalendarRuntimeCommands(registry);
   registerAgentRuntimeProfileRuntimeCommands(registry);
-  registerPersonasRuntimeCommands(registry);
-  registerAgentSkillsRuntimeCommands(registry);
-  registerRoutinesRuntimeCommands(registry);
+  // Skills are the daemon's one skill store (capabilities/builtin/skills.ts): controls in Tools and extensions, no slash command.
   registerChannelsRuntimeCommands(registry);
-  registerTelegramIntakeCommands(registry);
-  registerEmailRuntimeCommands(registry);
+  // Mail is the daemon's (capabilities/builtin/messages.ts): no slash command; its list reaches the daemon with this binding.
+  registerMailLists<CommandContext>(capabilityBinding);
   registerGoogleRuntimeCommands(registry);
   registerDelegationRuntimeCommands(registry);
   registerOperatorRuntimeCommands(registry);
   registerNotifyRuntimeCommands(registry);
-  registerPlatformAccessRuntimeCommands(registry);
   registerSecurityRuntimeCommands(registry);
   registerMcpRuntimeCommands(registry);
   // The Agent loads the hooks file too, so the hook messages that name /hooks hold here.
   registerHooksCommand<CommandContext>(registry, capabilityBinding);
   registerExperienceRuntimeCommands(registry);
   registerTasksRuntimeCommands(registry);
-  registerLocalProviderRuntimeCommands(registry);
-  registerNetworkScanRuntimeCommands(registry);
   registerHealthRuntimeCommands(registry);
   registerStatusRuntimeCommands(registry);
   registerUpdateCommand(registry);
-  registerProviderAccountsRuntimeCommands(registry);
+  // Models and providers are the daemon's (capabilities/builtin/models.ts, services.ts): controls in their place; the
+  // lists their forms choose from reach the daemon with this binding.
+  registerModelsLists<CommandContext>(capabilityBinding);
   registerOnboardingRuntimeCommands(registry);
   registerLocalRuntimeCommands(registry);
   registerDevicesRuntimeCommands(registry);
-  registerScheduleRuntimeCommands(registry);
   registerSessionContentCommands(registry);
   registerPaymentCardCommands(registry);
   registry.register(memoryCommand);
@@ -120,10 +100,6 @@ export function registerBuiltinCommands(
   // ── /session ─────────────────────────────────────────────────────────────
   registry.register(sessionCommand);
   registry.register(resumeCommand);
-  registry.register(saveCommand);
-
-  // ── /knowledge ───────────────────────────────────────────────────────────
-  registerKnowledgeRuntimeCommands(registry);
 
   // Shared commands state which of their verbs only read; the model's command runner reads it.
   for (const [name, verbs] of Object.entries(SHARED_COMMAND_VERBS)) {

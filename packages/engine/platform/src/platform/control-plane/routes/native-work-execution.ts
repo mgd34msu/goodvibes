@@ -116,7 +116,7 @@ export function registerNativeWorkExecutionGatewayMethods(catalog: GatewayMethod
         if (error instanceof NativeWorkExecutionError) {
           const code = error.code;
           const status = code === 'not-found' ? 404 : code === 'unsupported-authority' ? 403 : code === 'invalid' ? 400 : code === 'refused' ? 422
-            : code === 'stale' || code === 'conflict' || code === 'recovery-required' ? 409 : 503;
+            : code === 'stale' || code === 'conflict' || code === 'recovery-required' || code === 'plan-waiting' ? 409 : 503;
           throw new GatewayVerbError(error.message, `NATIVE_EXECUTION_${code.toUpperCase().replaceAll('-', '_')}`, status);
         }
         // No source, tool output, credential, filesystem path or internal owner

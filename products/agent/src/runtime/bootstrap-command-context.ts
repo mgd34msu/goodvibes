@@ -1,6 +1,5 @@
 import { composeTerminalCommandContext } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import type { AdaptivePlanner } from '@goodvibes/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import type { KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
 import type { HookApi } from '@goodvibes/engine/platform/platform/hooks';
@@ -36,7 +35,7 @@ import type {
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
 } from '@/runtime/index.ts';
-import { createBootstrapCommandShellServices, type PlanRuntimeService, type RemoteCommandService } from '@/runtime/index.ts';
+import { createBootstrapCommandShellServices, type RemoteCommandService } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
@@ -82,7 +81,6 @@ export type CreateBootstrapCommandContextOptions = {
   readModels: UiReadModels;
   shellPaths: ShellPathService;
   remoteRuntime?: RemoteCommandService;
-  planRuntime?: PlanRuntimeService;
   fileUndoManager: FileUndoManager;
   workspaceCheckpointManager?: import('@goodvibes/engine/platform/platform/workspace').WorkspaceCheckpointManager;
   processManager?: import('@goodvibes/engine/platform/platform/tools').ProcessManager;
@@ -118,7 +116,6 @@ export type CreateBootstrapCommandContextOptions = {
   sessionMemoryStore?: import('@goodvibes/engine/platform/platform/core').SessionMemoryStore;
   changeTracker?: import('@goodvibes/engine/platform/platform/sessions').SessionChangeTracker;
   planManager?: ShellPlanManagerService;
-  adaptivePlanner?: AdaptivePlanner;
   sessionOrchestration?: ShellSessionOrchestrationService;
   operatorClient?: OperatorClient;
   peerClient?: PeerClient;
@@ -142,7 +139,6 @@ export type CreateBootstrapCommandContextOptions = {
   surface?: import('@/runtime/index.ts').SessionSurface;
   hydrateSessionUsage?: () => void;
   contractOperator?: import('@goodvibes/engine/platform/platform/contract').ContractOperatorService;
-  workstreamDrafts?: import('@goodvibes/engine/platform/platform/orchestration').WorkstreamDraftService;
 };
 
 export function createBootstrapCommandContext(options: CreateBootstrapCommandContextOptions): CommandContext {

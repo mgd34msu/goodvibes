@@ -49,16 +49,29 @@ function optionalNumber(value: unknown, field: string): number | undefined {
   return parsed;
 }
 
+/**
+ * The repository, branch and pull request a call names. A repository written
+ * the way a person says it, `owner/repo#123` (a pull request) or
+ * `owner/repo@branch`, is read into its parts when the call does not give
+ * them separately.
+ */
+function targetOf(params: Record<string, unknown>): { readonly repo: string; readonly ref?: string; readonly prNumber?: number } {
+  const written = requireString(params, 'repo').trim();
+  const prNumber = optionalNumber(params.prNumber, 'prNumber');
+  const ref = optionalString(params.ref);
+  const pr = prNumber === undefined && ref === undefined ? written.match(/^([^#@\s]+)#(\d+)$/) : null;
+  if (pr) return { repo: pr[1]!, prNumber: Number(pr[2]) };
+  const branch = prNumber === undefined && ref === undefined ? written.match(/^([^#@\s]+)@(\S+)$/) : null;
+  if (branch) return { repo: branch[1]!, ref: branch[2]! };
+  return { repo: written, ...(ref !== undefined ? { ref } : {}), ...(prNumber !== undefined ? { prNumber } : {}) };
+}
+
 function createStatusHandler(service: CiWatchGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const prNumber = optionalNumber(params.prNumber, 'prNumber');
+    const target = targetOf(params);
     try {
-      const report = await service.status({
-        repo: requireString(params, 'repo'),
-        ...(optionalString(params.ref) ? { ref: optionalString(params.ref)! } : {}),
-        ...(prNumber !== undefined ? { prNumber } : {}),
-      });
+      const report = await service.status(target);
       return { report };
     } catch (error) {
       rethrow(error);
@@ -73,12 +86,10 @@ function createListHandler(service: CiWatchGatewayService): GatewayMethodHandler
 function createCreateHandler(service: CiWatchGatewayService): GatewayMethodHandler {
   return async (invocation) => {
     const params = readInvocationParams(invocation);
-    const prNumber = optionalNumber(params.prNumber, 'prNumber');
+    const target = targetOf(params);
     try {
       const watch = await service.createWatch({
-        repo: requireString(params, 'repo'),
-        ...(optionalString(params.ref) ? { ref: optionalString(params.ref)! } : {}),
-        ...(prNumber !== undefined ? { prNumber } : {}),
+        ...target,
         deliveryChannel: requireString(params, 'deliveryChannel'),
         triggerFixSession: params.triggerFixSession === true,
       });

@@ -62,7 +62,7 @@ export async function inspectProviderAuth(
 
   if (!configured) {
     issues.push('No provider OAuth configuration is available.');
-    nextActions.push(`Add provider OAuth config or a built-in adapter before using /provider sign-in ${provider}.`);
+    nextActions.push(`Add an oauth block for ${provider} to your services file before signing in to it in Models and providers.`);
   }
   if (freshness === 'expired') {
     issues.push('Stored provider session is expired.');
@@ -72,9 +72,9 @@ export async function inspectProviderAuth(
     nextActions.push(`Verify or renew the stored ${provider} session soon.`);
   } else if (freshness === 'pending') {
     issues.push('OAuth login has started but has not been completed.');
-    nextActions.push(`Finish with /provider finish ${provider} <code-or-url>.`);
+    nextActions.push(`Finish signing in to ${provider} in Models and providers with the code or address the sign-in page showed.`);
   } else if (freshness === 'available') {
-    nextActions.push(`Start with /provider sign-in ${provider} to create a stored session.`);
+    nextActions.push(`Sign in to ${provider} in Models and providers to create a stored session.`);
   }
 
   const callbackMode = resolved?.oauth.localCallback ? 'local' : 'manual';

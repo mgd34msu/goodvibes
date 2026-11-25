@@ -120,18 +120,3 @@ export function buildCompactionAfterNotice(opts: CompactionAfterOptions): string
 function fmtN(n: number): string {
   return n.toLocaleString();
 }
-
-/**
- * What `/notes create` says once a note is written: the model keeps seeing it after a compaction.
- *
- * @param id - The assigned note ID (e.g. "mem-1")
- * @param text - The note's text
- * @param count - How many notes there are after adding
- */
-export function buildPinSuccessText(id: string, text: string, count: number): string {
-  return (
-    `Note ${id}: "${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"\n` +
-    `  ${count} note${count === 1 ? '' : 's'} the model keeps seeing after the next compaction.\n` +
-    '  They last for this session only.'
-  );
-}

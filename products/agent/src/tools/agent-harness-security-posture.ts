@@ -75,8 +75,8 @@ const SUPPORT_BUNDLE_ROUTES: readonly SupportBundleRoute[] = [
   {
     bundleType: 'subscription',
     defaultPath: 'subscription-bundle.json',
-    inspectCommand: '/provider inspect <path>',
-    exportCommand: '/provider export <path>',
+    inspectCommand: 'capability_run id:"provider.inspect" inputs:{"path"}',
+    exportCommand: 'capability_run id:"provider.export" inputs:{"path"} (the owner\'s own act)',
     workspaceActionIds: ['subscription-bundle-export', 'subscription-bundle-inspect'],
   },
   {

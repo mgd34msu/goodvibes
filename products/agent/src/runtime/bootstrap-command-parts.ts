@@ -5,11 +5,11 @@ import {
 } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import { createBootstrapActionBase } from '@goodvibes/engine/terminal-shell/bootstrap-command-actions';
 import { createModelSelectionAction } from '@goodvibes/engine/terminal-shell/model-selection-action';
+import { createAgentDaemonVerbCaller } from './client/daemon-verbs.ts';
 import { projectCommandProviderServices } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import { getConfigSnapshot } from '../config/index.ts';
 import { toEffortModel } from '../providers/reasoning-effort-surface.ts';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import type { AdaptivePlanner } from '@goodvibes/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import type { KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
 import type { AgentPromptContextReceiptStore } from '@goodvibes/engine/terminal-shell/agent-turn/prompt-context-receipts';
@@ -44,7 +44,6 @@ import type {
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
   RemoteCommandService,
-  PlanRuntimeService,
 } from '@/runtime/index.ts';
 import type { BootstrapCommandShellServices } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
@@ -140,15 +139,12 @@ export interface BootstrapCommandSectionOptions {
   readonly surface?: import('@/runtime/index.ts').SessionSurface;
   readonly hydrateSessionUsage?: () => void;
   readonly contractOperator?: import('@goodvibes/engine/platform/platform/contract').ContractOperatorService;
-  readonly workstreamDrafts?: import('@goodvibes/engine/platform/platform/orchestration').WorkstreamDraftService;
   readonly agentManager?: ShellAgentManagerService;
   readonly modeManager?: ShellModeManagerService;
   readonly automationManager?: ShellAutomationManagerRuntimeService;
   readonly planManager?: ShellPlanManagerService;
-  readonly adaptivePlanner?: AdaptivePlanner;
   readonly sessionOrchestration?: ShellSessionOrchestrationService;
   readonly remoteRuntime?: RemoteCommandService;
-  readonly planRuntime?: PlanRuntimeService;
   readonly operatorClient?: OperatorClient;
   readonly peerClient?: PeerClient;
   readonly providerApi?: ProviderApi;
@@ -209,7 +205,15 @@ export function createBootstrapCommandActions(
     ...createBootstrapActionBase(options, {
       unwiredMessage: (name) => `Agent runtime action "${name}" was called before the operator route was attached.`,
       completeModelSelection: createModelSelectionAction(
-        { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect },
+        { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect,
+          // A context window size chosen in the picker is the daemon's, for every program (capabilities/builtin/context-windows.ts).
+          setContextWindow: async (registryKey, tokens) => {
+            const homeDirectory = configManager.getHomeDirectory();
+            if (!homeDirectory) throw new Error('the Agent has no home folder to find its daemon from');
+            const answer = await createAgentDaemonVerbCaller({ configManager, homeDirectory }).invoke<{ readonly text?: string }>('capabilities.run',
+              { id: 'context.set-window', inputs: { size: String(tokens), model: registryKey }, program: 'agent', model: registryKey }, { explicitUserRequest: true });
+            return answer.text ?? '';
+          } },
         {
           setToolEnabled: () => configManager.setDynamic('tools.llmEnabled', true),
           effortModel: () => toEffortModel(providerRegistry.getCurrentModel()),
@@ -247,13 +251,11 @@ export function createBootstrapCommandSessionSection(
     | 'surface'
     | 'hydrateSessionUsage'
     | 'contractOperator'
-    | 'workstreamDrafts'
   >,
 ): BootstrapCommandSessionSection {
   return {
     ...projectCommandSessionSection(options),
     contractOperator: options.contractOperator,
-    workstreamDrafts: options.workstreamDrafts,
     writeLastSessionPointer: options.writeLastSessionPointer,
     announceSessionResumed: options.announceSessionResumed,
     announceSessionRecoveryFailed: options.announceSessionRecoveryFailed,

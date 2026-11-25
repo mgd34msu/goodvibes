@@ -85,20 +85,6 @@ function findDiscoveredSkill(skills: readonly SkillRecord[], idOrName: string): 
   return skills.find((skill) => discoveredSkillLookupValues(skill).includes(lookup)) ?? null;
 }
 
-function discoveredFrontmatterList(skill: SkillRecord, key: string): readonly string[] {
-  const value = skill.frontmatter[key];
-  if (!value) return [];
-  return value.split(',').map((entry) => entry.trim()).filter(Boolean);
-}
-
-function discoveredFrontmatterAnyList(skill: SkillRecord, keys: readonly string[]): readonly string[] {
-  for (const key of keys) {
-    const values = discoveredFrontmatterList(skill, key);
-    if (values.length > 0) return values;
-  }
-  return [];
-}
-
 function renderSkill(skill: AgentSkillRecord): string {
   const readiness = evaluateAgentSkillReadiness(skill);
   return [
@@ -198,23 +184,12 @@ export async function handleSkillsCommand(runtime: CliCommandRuntime): Promise<C
           '  next rerun with --yes to import into the Agent-local skill registry',
         ].join('\n'));
       }
-      const skill = registry.create({
-        name: discovered.name,
-        description: discovered.description || `Imported skill from ${discovered.origin} skill file.`,
-        procedure: discovered.body,
-        tags: discoveredFrontmatterList(discovered, 'tags'),
-        triggers: discoveredFrontmatterList(discovered, 'triggers'),
-        requirements: buildAgentSkillRequirements({
-          env: discoveredFrontmatterAnyList(discovered, ['requiresEnv', 'requires-env', 'requires_env']),
-          commands: discoveredFrontmatterAnyList(discovered, ['requiresCommands', 'requires-commands', 'requires_commands', 'commands']),
-        }),
-        enabled: hasFlag(options, 'enabled'),
-        source: 'imported',
-        provenance: `discovered:${discovered.origin}:${discovered.path}`,
-      });
-      return success(runtime, 'agent.skills.import_discovered', skill, [
-        `Imported Agent skill ${skill.id}: ${skill.name}${skill.enabled ? ' (enabled)' : ''}`,
-        `  name ${skill.name}`,
+      // The person's file is never changed: the skill is copied into the store and GoodVibes' facts go on the copy.
+      const { skill, original } = registry.copyIn(discovered.name, { enabled: hasFlag(options, 'enabled'), source: 'user' });
+      return success(runtime, 'agent.skills.import_discovered', { ...skill, original }, [
+        `Copied the skill into your skills as ${skill.id}${skill.enabled ? ' (enabled)' : ''}.`,
+        `  the copy is ${skill.path ?? registry.folder}`,
+        `  the original, ${original}, was not changed`,
         `  enabled ${skill.enabled ? 'yes' : 'no'}`,
       ].join('\n'));
     }

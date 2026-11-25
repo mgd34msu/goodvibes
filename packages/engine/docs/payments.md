@@ -714,7 +714,7 @@ as a hand edit, is skipped with a logged warning and that channel is not notifie
 
 `owner-inbox` is never configured: every notice (approval and veto windows,
 confirmations, recovery settlements) is also posted to the owner inbox, which
-both terminal apps (`/questions`) and the web UI list and answer
+both terminal apps (Waiting for you) and the web UI list and answer
 (`payments/host/notifier.ts` `withOwnerInbox`). A window's item offers
 `approve`/`deny` or `go`/`stop`, the first answer from any channel or the inbox
 settles the window, and the item is withdrawn when the window closes. So an

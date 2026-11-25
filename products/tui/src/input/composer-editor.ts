@@ -51,12 +51,12 @@ export interface ComposerEditorDeps {
   readonly spawn?: EditorSpawn;
 }
 
-/** Core flow: temp file round-trip around an awaited editor launch. */
-export async function openComposerInEditor(deps: ComposerEditorDeps): Promise<void> {
+/** Core flow: temp file round-trip around an awaited editor launch. What happened, in words (the control's outcome). */
+export async function openComposerInEditor(deps: ComposerEditorDeps): Promise<string> {
   const editor = resolveEditorCommand(deps.env);
   if (!editor.ok) {
-    deps.notify(editor.message);
-    return;
+    if (!(deps.env.VISUAL || deps.env.EDITOR || '').trim()) return 'No editor is set on this computer, so nothing was opened.';
+    return `${editor.message.replace(/^\[Editor\]\s*/, '')} Nothing was opened.`;
   }
   const draft = deps.readDraft();
   // Real production scratch (runs on the end user's machine, not test
@@ -72,24 +72,18 @@ export async function openComposerInEditor(deps: ComposerEditorDeps): Promise<vo
     const ran = await withEditorTerminal(deps.suspend, deps.resume, deps.notify, async () => {
       result = await spawn(editor.cmd, [...editor.args, file], { cwd: deps.cwd, env: deps.env });
     });
-    if (!ran) return;
-    if (result.error) {
-      deps.notify(`[Editor] Failed to launch ${editor.cmd}: ${result.error.message}`);
-      return;
-    }
-    if (result.status !== 0 && result.status !== null) {
-      deps.notify(`[Editor] ${editor.cmd} exited with code ${result.status}; composer left unchanged.`);
-      return;
-    }
+    if (!ran) return `The terminal could not be handed to ${editor.cmd}, so nothing was opened.`;
+    const failed = (result as EditorSpawnResult).error;
+    if (failed) return `${editor.cmd} could not be started (${failed.message}), so nothing was opened.`;
+    const status = (result as EditorSpawnResult).status;
+    if (status !== 0 && status !== null) return `${editor.cmd} ended with code ${status}; the message was left as it was.`;
     // A draft typed into the composer while the editor was open is not overwritten.
-    if (deps.readDraft() !== draft) {
-      deps.notify('[Editor] The composer changed while the editor was open; the edited text was not loaded.');
-      return;
-    }
+    if (deps.readDraft() !== draft) return 'The message changed here while the editor was open, so the edited text was not loaded.';
     let edited = draft;
     try { edited = readFileSync(file, 'utf8'); } catch { /* keep the original draft */ }
-    deps.writeDraft(edited.replace(/\n+$/, '')); // editors append a trailing newline
-    deps.notify('[Editor] Composer updated from external editor.');
+    const text = edited.replace(/\n+$/, ''); // editors append a trailing newline
+    deps.writeDraft(text);
+    return text === draft ? `${editor.cmd} closed with the message unchanged.` : `The message is back from ${editor.cmd}, as you left it; nothing is sent until you send it.`;
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -104,10 +98,10 @@ export interface ComposerEditorOpenerDeps extends EditorTerminalDeps {
   readonly spawn?: EditorSpawn;
 }
 
-/** Build the `openComposerEditor` command action, wiring terminal suspend/resume. */
-export function makeComposerEditorOpener(deps: ComposerEditorOpenerDeps): () => void {
+/** Build the `openComposerEditor` command action, wiring terminal suspend/resume; it answers what happened, in words. */
+export function makeComposerEditorOpener(deps: ComposerEditorOpenerDeps): () => Promise<string> {
   return () => {
-    void openComposerInEditor({
+    return openComposerInEditor({
       readDraft: () => deps.buffer.prompt,
       writeDraft: (text) => { deps.buffer.prompt = text; deps.buffer.cursorPos = text.length; },
       cwd: deps.cwd,

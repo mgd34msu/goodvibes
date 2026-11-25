@@ -182,6 +182,8 @@ export class ModelPickerModal {
    */
   public catalogLoading = false;
   public catalogTicket = 0;
+  /** When this picker read the providers' model lists again (on open; past each stored list when it opened empty). */
+  public listsReadAt: number | null = null;
 
   private filteredModelsCache: FilteredModelsCache | null = null;
   private filteredProvidersCache: FilteredProvidersCache | null = null;
@@ -489,6 +491,7 @@ export class ModelPickerModal {
   close(): void {
     this.catalogLoading = false;
     this.catalogTicket++;
+    this.listsReadAt = null;
     this.active = false;
     this.backStack.length = 0;
     this.mode = 'model';

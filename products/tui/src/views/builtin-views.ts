@@ -28,13 +28,9 @@ import { FleetActs, type FleetDiffSurface } from './fleet-acts.ts';
 import { createFleetGateway } from './fleet-gateway.ts';
 import { FleetSpawn, createAcpSpawnGateway } from './fleet-spawn.ts';
 
-export type MaskedEntryOpener = (kind: 'add-user' | 'rotate-password', username?: string) => void;
-
 export interface ShellViewBridge {
   /** Show candidate diffs and ask over them (the Changes preview). */
   diffSurface: FleetDiffSurface | null;
-  /** Open the local-auth password prompt. */
-  openMaskedEntry: MaskedEntryOpener | null;
 }
 
 export interface ShellViews {
@@ -59,7 +55,7 @@ export function createShellViews(deps: BuiltinViewDeps): ShellViews {
   const resolved = resolveBuiltinViewDeps(deps);
   const ui = deps.uiServices;
   const requestRender = deps.requestRender ?? (() => {});
-  const bridge: ShellViewBridge = { diffSurface: null, openMaskedEntry: null };
+  const bridge: ShellViewBridge = { diffSurface: null };
   const fleetReadModel = ui.runtime.fleetReadModel;
   const notify = deps.fleetActsNotify ?? (() => {});
 
@@ -121,7 +117,7 @@ export function createShellViews(deps: BuiltinViewDeps): ShellViews {
   };
 
   const modalSurfaces = new ModalSurfaceRegistry();
-  registerBuiltinModals(modalSurfaces, resolved, (kind, username) => bridge.openMaskedEntry?.(kind, username));
+  registerBuiltinModals(modalSurfaces, resolved);
 
   return {
     modalSurfaces,

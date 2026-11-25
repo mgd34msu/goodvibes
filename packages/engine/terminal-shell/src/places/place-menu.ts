@@ -32,6 +32,8 @@ interface MenuRow {
   readonly title: string;
   readonly line: string;
   readonly place: AnyPlace | undefined;
+  /** A row for one tab of the place, found by its name: the place opens on it. */
+  readonly list?: string | undefined;
 }
 
 export class PlaceMenu implements SurfaceModal {
@@ -75,6 +77,11 @@ export class PlaceMenu implements SurfaceModal {
     this.placeHost.requestRender();
   }
 
+  /**
+   * Every group, or what the typed words find: a group's name first, then a list or tab inside its place (its own
+   * row, "System: Keys", opening the place on that tab), then the group's description. A group found by its name or
+   * a tab is not listed again for its description.
+   */
   private rows(): readonly MenuRow[] {
     const all = CAPABILITY_GROUPS.map((group): MenuRow => ({
       group: group.id,
@@ -84,13 +91,20 @@ export class PlaceMenu implements SurfaceModal {
     }));
     const words = this.query.toLowerCase().split(/\s+/).filter(Boolean);
     if (words.length === 0) return all;
-    return all.filter((row) => words.every((word) => `${row.title} ${row.line}`.toLowerCase().includes(word)));
+    const has = (text: string): boolean => words.every((word) => text.toLowerCase().includes(word));
+    const byName = all.filter((row) => has(row.title));
+    const byTab = all.flatMap((row) => (row.place?.lists ?? [])
+      .filter((list) => has(list.label) || has(list.noun))
+      .map((list): MenuRow => ({ ...row, title: `${row.title}: ${list.label}`, list: list.id })));
+    const found = new Set([...byName, ...byTab].map((row) => row.group));
+    const byLine = all.filter((row) => !found.has(row.group) && has(row.line));
+    return [...byName, ...byTab, ...byLine];
   }
 
   private open(row: MenuRow | undefined): void {
     if (!row) return;
     if (!row.place) { this.note = `${row.title} has no place in this program yet.`; return; }
-    this.placeHost.openPlace(row.place.id);
+    this.placeHost.openPlace(row.place.id, row.list ? { list: row.list } : undefined);
   }
 
   handleToken(token: InputToken, host: SurfaceModalHost): void {
@@ -130,9 +144,10 @@ export class PlaceMenu implements SurfaceModal {
     const hints: KitHint[] = [[label('choose', '⏎'), 'open'], ['type', 'filter'], [label('back', 'esc'), 'close']];
     const f = beginModal(screenWidth, screenHeight, { title: 'GoodVibes', sub: 'every place', hints });
     searchRow(f, f.top, this.query, 'type to filter');
-    const titleWidth = Math.max(...CAPABILITY_GROUPS.map((group) => group.title.length)) + 3;
     const x0 = f.l + 1 + MODAL_MARK_INSET;
     const x1 = f.r - MODAL_MARK_INSET;
+    // A tab's row ("System: Keys") may be longer than a group's name: the column fits it, never more than half the row.
+    const titleWidth = Math.min(Math.max(...CAPABILITY_GROUPS.map((group) => group.title.length), ...rows.map((row) => row.title.length)) + 3, Math.floor((x1 - x0 + 1) / 2));
     const kitRows: KitRow[] = rows.map((row, index) => {
       const count = row.place ? this.counts.get(row.place.id) : undefined;
       const right = count ? count.words : row.place ? '' : 'not here yet';
@@ -141,7 +156,7 @@ export class PlaceMenu implements SurfaceModal {
       const line = row.line.length > room ? `${row.line.slice(0, Math.max(0, room - 1)).trimEnd()}…` : row.line;
       return {
         spans: [
-          { text: row.title.padEnd(titleWidth), fg: row.place ? t.text : t.textMuted, bold: index === this.selected },
+          { text: (row.title.length > titleWidth - 2 ? `${row.title.slice(0, Math.max(0, titleWidth - 3))}…` : row.title).padEnd(titleWidth), fg: row.place ? t.text : t.textMuted, bold: index === this.selected },
           { text: room > 3 ? line : '', fg: t.textMuted },
         ],
         ...(count ? { right, rightFg: count.tone === 'wrong' ? t.warning : t.info } : right ? { right } : {}),

@@ -6,8 +6,8 @@
  * kept in the memory store once each and listed by the consolidation
  * scheduler (MemoryConsolidationScheduler.listProposals), so the list is the
  * same after a restart and a proposal found by several passes appears once.
- * Each line jumps into the EXISTING review flow (`/memory review <id> <state>`,
- * the review action of /memory, terminal-shell/memory-command.ts) rather than adding a
+ * Each line points into the EXISTING review flow (the capability `memory.review`,
+ * "still right?" on the Memory tab of Memory and knowledge) rather than adding a
  * second, parallel review mechanism.
  */
 import type { MemoryConsolidationProposal } from '@goodvibes/engine/platform/platform/state';
@@ -40,6 +40,6 @@ export function formatConsolidationProposalForReview(proposal: MemoryConsolidati
   const kindLabel = PROPOSAL_KIND_LABELS[proposal.kind] ?? proposal.kind;
   const idList = proposal.ids.join(', ');
   const jumpId = proposal.ids[0];
-  const jumpHint = jumpId ? `, review: /memory review ${jumpId} <state>` : '';
+  const jumpHint = jumpId ? `, review ${jumpId} on the Memory tab of Memory and knowledge` : '';
   return `  [${kindLabel}] ${idList}: ${proposal.reason}${jumpHint}`;
 }

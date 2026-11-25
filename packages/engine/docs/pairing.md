@@ -541,7 +541,7 @@ The token the modal shows is an offer: no device is added until one uses it, and
 offer stops working after 15 minutes. Reopening the modal shows the same offer while it is
 unused and unexpired, so looking at the QR again adds nothing. Pressing `r` shows a new offer in
 its place; the one it replaces stops working unless a device already paired with it. A device
-that paired stays until it is revoked with `/devices revoke` (or `pairing.tokens.delete`). `device.nodes.maxPaired` applies to the TUI's own
+that paired stays until it is revoked in Devices and network (`x` on the device, or `pairing.tokens.delete`). `device.nodes.maxPaired` applies to the TUI's own
 pairings as it does to the daemon's: an unused offer does not count toward it.
 
 ### Daemon CLI `pair` command

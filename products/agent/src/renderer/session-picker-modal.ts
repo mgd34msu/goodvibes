@@ -40,5 +40,5 @@ export const { renderSessionPickerModal } = createSessionPickerRenderer<SessionP
   mouseNavigation: false,
   openLabel: 'load',
   deleteLabel: 'how to delete',
-  saveHint: 'Open Agent Workspace -> Conversation -> Save current session.',
+  saveHint: 'Save the current session from This conversation, in the menu.',
 });

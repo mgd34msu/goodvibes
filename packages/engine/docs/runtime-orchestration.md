@@ -404,8 +404,8 @@ waits.
   `.goodvibes/` folder are not counted as the worktree's own files. One that is
   clean and whose commits are all in its base is removed at once, with its
   branch. A terminal app's start names each worktree kept for the owner's
-  decision once, with its next steps; `/worktree review` lists it while it
-  stays. One that is clean but holds commits its base lacks stays for 14 days
+  decision once, with its next steps; the Worktrees list of Code and changes
+  shows it while it stays. One that is clean but holds commits its base lacks stays for 14 days
   after the owner ended; then its directory is removed and its branch is kept,
   so the commits stay reachable. One with uncommitted changes (tracked or
   untracked) or with files git ignores (`.env`, local databases, build output,
@@ -419,11 +419,12 @@ waits.
   it is more than ten minutes old), uncommitted changes and ignored files
   included, and its branch is kept unless every commit on it is already in its
   base. A new worktree whose record cannot be written is taken back at once
-  and its creation fails, so it is never mistaken for an old one. `/worktree
-  review` and `/worktree inspect` show each worktree's age, size on disk and
-  why it is kept, with the days left before pruning. When kept worktrees total
-  more than 1 GB the daemon prints one line at startup naming the count and
-  size. `/worktree discard <path>` removes one on request: it commits any
+  and its creation fails, so it is never mistaken for an old one. The
+  Worktrees list of Code and changes (and the capabilities `worktree.review`
+  and `worktree.inspect`) shows each worktree's age, size on disk and why it is
+  kept, with the days left before pruning. When kept worktrees total more than
+  1 GB the daemon prints one line at startup naming the count and size.
+  "Remove a worktree" (`worktree.discard`) removes one on request: it commits any
   uncommitted state onto the branch first, keeps the branch (a detached HEAD
   that no branch holds gets a `goodvibes/discarded-<commit>` branch so its
   commits stay reachable), says how many ignored files it deleted because they
@@ -509,8 +510,8 @@ The runner reads `contract.*` (`config/schema-domain-contract.ts`,
 | --- | --- | --- |
 | `contract.autoCommit` | `true` | Commit the deliverable when it passes |
 | `contract.commitScope` | `scoped` | `off`, `scoped` (the contract's changes only) or `all` |
-| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`). Any gate, `test` included, passes or fails on its command's exit code; under `bun test` its assertion counts are recorded too. A list with a gate that cannot run (missing name or command, a wrong option, a name used twice, an enabled gate with an empty command) is refused when saved, and a contract reports it when it starts. A gate named `test`, enabled or not, is also the command `/test` runs |
-| `contract.gateTimeoutMs` | `900000` (15 minutes) | Timeout per gate, and for a `/test` run; a gate past it is stopped and reported unverified; `0` waits until it finishes or is cancelled |
+| `contract.gates` | typecheck, lint and build, all off | Quality gate commands run at each completion check; each runs only once you enable it (`enabled: true`). Any gate, `test` included, passes or fails on its command's exit code; under `bun test` its assertion counts are recorded too. A list with a gate that cannot run (missing name or command, a wrong option, a name used twice, an enabled gate with an empty command) is refused when saved, and a contract reports it when it starts. A gate named `test`, enabled or not, is also the command "Run the project's tests" (Code and changes) runs |
+| `contract.gateTimeoutMs` | `900000` (15 minutes) | Timeout per gate, and for a run of the project's tests from Code and changes; a gate past it is stopped and reported unverified; `0` waits until it finishes or is cancelled |
 | `contract.acceptanceStakes` | `high` | Which declared pass band the judges use: `high` or `critical` |
 | `contract.midRunChecks` | `true` | Check a unit after turns that write, edit or run commands, once a criterion already reads met (before that nothing can regress) |
 | `contract.evidenceNudgeLimit` | `0` (no limit) | Unsettled checks before the owner is asked; with `0` the owner is not asked on this count, and `contract.stallLimit` still applies |
@@ -717,7 +718,8 @@ at once; a scheduled command is killed when it outlasts its interval (at least
 60 seconds), and a tick while the previous run is still going is skipped and
 counted. `list` and the fleet show each one's last fire or run, exit code and
 error. Both live only in the process that added them; durable routines are
-`/schedule`.
+the daemon's schedules (the `schedule.*` capabilities, Automation's Schedules
+tab).
 
 The fleet shows hook actions as `hook-action` nodes. The `trigger` kind
 belongs to the trigger family (`platform/triggers`: stream watchers, condition

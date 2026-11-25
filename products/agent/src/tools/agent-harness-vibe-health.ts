@@ -62,7 +62,7 @@ export function agentHarnessVibeHealth(context: CommandContext): AgentHarnessVib
       projectInitPath: '',
       globalInitPath: '',
       nextAction: 'VIBE.md discovery is unavailable because shell paths are not wired into this runtime.',
-      userRoute: 'Agent Workspace -> Local Context -> Inspect VIBE.md; /personas vibe',
+      userRoute: 'Memory and knowledge -> Personas -> VIBE.md files',
       modelRoute: 'vibe action:"status"',
       signals: ['VIBE.md discovery unavailable: shell paths are not wired.'],
     };
@@ -75,11 +75,11 @@ export function agentHarnessVibeHealth(context: CommandContext): AgentHarnessVib
       ? 'ready'
       : 'recommended';
   const nextAction = snapshot.blocked.length > 0
-    ? 'Run /personas vibe, inspect blocked files, and edit or remove secret-looking content before relying on personality instructions.'
+    ? 'Look at the VIBE.md files (Memory and knowledge, Personas), inspect blocked files, and edit or remove secret-looking content before relying on personality instructions.'
     : truncated.length > 0
-      ? 'Run /personas vibe and shorten the truncated VIBE.md file if the omitted content matters.'
+      ? 'Look at the VIBE.md files (Memory and knowledge, Personas) and shorten the truncated VIBE.md file if the omitted content matters.'
       : snapshot.files.length > 0
-        ? 'Review /personas vibe when changing project or global personality instructions.'
+        ? 'Look at the VIBE.md files (Memory and knowledge, Personas) when changing project or global personality instructions.'
         : 'Create a project VIBE.md or import a reviewed persona when the user wants a custom assistant feel.';
   const signals = [
     `applied VIBE.md files: ${snapshot.files.length}`,
@@ -99,7 +99,7 @@ export function agentHarnessVibeHealth(context: CommandContext): AgentHarnessVib
     projectInitPath: homeRelativePath(snapshot.projectInitPath, shellPaths.homeDirectory),
     globalInitPath: homeRelativePath(snapshot.globalInitPath, shellPaths.homeDirectory),
     nextAction,
-    userRoute: 'Agent Workspace -> Local Context -> Inspect VIBE.md; /personas vibe',
+    userRoute: 'Memory and knowledge -> Personas -> VIBE.md files',
     modelRoute: 'vibe action:"status"',
     signals,
   };

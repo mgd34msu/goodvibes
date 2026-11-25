@@ -36,6 +36,7 @@ import { revisionSource, type RevisionSource } from '../utils/revision.js';
 import { compileRules, ruleCovers, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { contentDigest } from '../utils/target-ref.js';
 import { noteCarriedForward } from '../state/carried-forward.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 
 /** One project's rules for evaluation: the committed and remembered lists, and both compiled for matching. */
 export interface CompiledProjectRules {
@@ -501,6 +502,7 @@ export class UserPermissionRuleStore {
         this.publicationRevision++;
       } };
     });
+    noteListChanged({ list: 'safety', change: 'created', id: record.rule.id });
   }
 
   /**
@@ -530,6 +532,7 @@ export class UserPermissionRuleStore {
       // adoptDisk keeps the written record, as a remembered rule.
       return { next, covered, publish: () => undefined };
     }, keptHere);
+    noteListChanged({ list: 'safety', change: 'changed', id: record.rule.id });
   }
 
   /**
@@ -548,6 +551,7 @@ export class UserPermissionRuleStore {
       if (next.length === disk.length && !inMemory) return null;
       return { next, publish: (revisionMoved) => { if (!revisionMoved) this.publicationRevision++; removed = true; } };
     });
+    if (removed) noteListChanged({ list: 'safety', change: 'deleted', id: ruleId });
     return removed;
   }
 

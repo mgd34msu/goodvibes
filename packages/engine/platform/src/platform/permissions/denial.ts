@@ -74,7 +74,7 @@ const REFUSALS: Readonly<Record<string, RefusalFacts>> = {
   boundary_outward_effect: { state: 'what the call sends may repeat untrusted text read this turn', standing: false,
     next: () => ['send only what the owner gave or what you wrote yourself', 'or carry on without it and report that it was not sent'] },
   owner_act: { state: 'only the owner does this himself (answering what was put to him, granting or withdrawing access)', standing: true,
-    next: () => ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, /approval, the web UI)'] },
+    next: () => ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, Waiting for you, the web UI)'] },
   preset_deny: { state: 'the execution mode refuses calls with these stakes', standing: true,
     next: (tool) => [`do not repeat this ${tool} call in this mode`, `${TELL_OWNER}; the owner can change permissions.mode`] },
   mode_denied: { state: 'the execution mode denies this kind of tool', standing: true,
@@ -101,7 +101,7 @@ const REFUSALS: Readonly<Record<string, RefusalFacts>> = {
     next: () => ['carry on without it and report that it was not run'] },
   mode_queued_for_owner: { state: 'the execution mode held this call for the owner to approve; it has not run', standing: false,
     next: () => ['carry on with the work that does not need this call',
-      'the owner is shown it at the end of the run and can approve it with /held; after that the same call runs'] },
+      'the owner is shown it at the end of the run and can approve it in Waiting for you, under Held calls; after that the same call runs'] },
 } satisfies Partial<Record<PermissionDecisionReasonCode, RefusalFacts>>;
 
 const UNKNOWN_REFUSAL: RefusalFacts = { state: 'the permission layer refused this call', standing: false,

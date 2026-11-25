@@ -12,7 +12,6 @@ import { JudgmentError } from '@goodvibes/judgment';
 import { classifyFailure, JudgmentPortMissingError, judgmentPort } from '@goodvibes/engine/errors';
 import { decisionModelUse, inheritClassicDecisionFallback, isClassicOperation, withDecisionModelPolicy } from '../runtime/decision-policy.js';
 import { JudgmentInputError } from '../gate/judgment-input.js';
-import { PlannerJudgmentError } from './adaptive-planner.js';
 import { ResponseCompletionError } from './response-completion.js';
 import { completedContractEvidence } from './response-completion-contracts.js';
 import type { ConversationManager } from './conversation.js';
@@ -1502,7 +1501,7 @@ export class Orchestrator {
       return;
     }
     const error = err instanceof Error ? err : new Error(summarizeError(err));
-    const judgmentFailed = error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError || error instanceof PlannerJudgmentError || error instanceof ResponseCompletionError;
+    const judgmentFailed = error instanceof JudgmentError || error instanceof JudgmentPortMissingError || error instanceof JudgmentInputError || error instanceof ResponseCompletionError;
     const display = error instanceof ProviderError ? { provider: providerRegistry.getCurrentModel().provider, source: 'provider' as const } : {};
     // A failure with a status, errno or code is worded from it; only one with none is read, and a failed reading never replaces it.
     const structured = (error instanceof AppError && (error.statusCode !== undefined || error.category !== 'unknown')) || classifyFailure(error) !== undefined;

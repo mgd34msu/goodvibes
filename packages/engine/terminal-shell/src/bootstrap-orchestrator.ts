@@ -45,13 +45,12 @@ export function projectOrchestratorCoreServices(input: {
   readonly providerRegistry: ProviderRegistry;
   readonly services: Pick<
     OrchestratorCoreServices,
-    'planManager' | 'adaptivePlanner' | 'sessionMemoryStore' | 'sessionLineageTracker' | 'idempotencyStore' | 'sessionOrchestration'
+    'planManager' | 'sessionMemoryStore' | 'sessionLineageTracker' | 'idempotencyStore' | 'sessionOrchestration'
   >;
 }): {
   configManager: ConfigManager;
   providerRegistry: ProviderRegistry;
   planManager: OrchestratorCoreServices['planManager'];
-  adaptivePlanner: OrchestratorCoreServices['adaptivePlanner'];
   sessionMemoryStore: OrchestratorCoreServices['sessionMemoryStore'];
   sessionLineageTracker: OrchestratorCoreServices['sessionLineageTracker'];
   idempotencyStore: OrchestratorCoreServices['idempotencyStore'];
@@ -62,7 +61,6 @@ export function projectOrchestratorCoreServices(input: {
     configManager,
     providerRegistry,
     planManager: services.planManager,
-    adaptivePlanner: services.adaptivePlanner,
     sessionMemoryStore: services.sessionMemoryStore,
     sessionLineageTracker: services.sessionLineageTracker,
     idempotencyStore: services.idempotencyStore,

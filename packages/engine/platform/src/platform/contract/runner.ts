@@ -1050,7 +1050,9 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
         creation.assertCurrent();
         const admission = parseDurableAdmission({ ...frozen, schemaVersion: 2, execution, contractId: id,
           ownerAgentId: owner.id, payloadRevision: durablePayloadRevision(frozen) });
-        created = create(frozen.input, id, owner, { durableAdmission: admission, execution, creation }, true, true);
+        // The plan a person approved before it ran is the contract's drafted plan: the planner keeps its steps.
+        created = create(frozen.input, id, owner, { durableAdmission: admission, execution, creation,
+          ...(frozen.input.draftPlan === undefined ? {} : { draftPlan: frozen.input.draftPlan }) }, true, true);
         if (isTerminalContractStatus(created.contract.status)) {
           // A reentrant creation listener may cancel before launch admission.
           // The live run has already retired, but its final checkpoint still
@@ -1933,7 +1935,8 @@ export function createContractRunner(deps: ContractRunnerDeps): ContractRunner &
           : { ...(maxTokens === undefined ? {} : { maxTokens }), ...(maxCostUsd === undefined ? {} : { maxCostUsd }) };
         run.engine!.updateBudget(workstream.id, next);
       }
-      Object.assign(run.contract, { budget });
+      // A durable run's stored-run check compares the limit it was admitted with; this one is the owner's from now on.
+      Object.assign(run.contract, { budget, ...(run.contract.durableAdmission !== undefined ? { budgetSetByOwner: true as const } : {}) });
       run.decide('owner-replied', run.id, `budget set to ${[budget.maxCostUsd === undefined ? '' : `$${budget.maxCostUsd}`, budget.maxTokens === undefined ? '' : `${budget.maxTokens} tokens`].filter(Boolean).join(' and ') || 'no ceiling'} by the owner`);
       if (run.contract.statusLine?.includes('its budget is used up') === true) run.contract.statusLine = undefined;
       deps.store.put(run.contract);

@@ -27,6 +27,7 @@ export function createPermissionRulesListHandler(store: PermissionRulesGatewayDe
       tool: record.tool,
       ...(record.rule.description ? { description: record.rule.description } : {}),
       createdAt: record.createdAt,
+      ...(record.project !== undefined ? { project: record.project } : {}),
     })),
   });
 }

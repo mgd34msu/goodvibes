@@ -69,7 +69,7 @@ export function watchDefinitionFromValues(values: WatchValues, grant: WatchGrant
   }
   let action: Record<string, unknown>;
   if (values.then === 'run') {
-    if (!grant) throw new WatchValuesError(`No approved command ${values.grant ?? ''}; nothing was made.`, 'Let triggers run it first: /triggers allow-command.');
+    if (!grant) throw new WatchValuesError(`No approved command ${values.grant ?? ''}; nothing was made.`, 'Let triggers run it first: "Let triggers run a command" in Automation, on the Commands tab.');
     action = { kind: 'action-grant', grantId: grant.id, digest: grant.digest };
   } else {
     action = { kind: 'agent-turn', ...(values.say ? { prompt: values.say } : {}), ...(values.deliver ? { deliverTo: values.deliver } : {}) };

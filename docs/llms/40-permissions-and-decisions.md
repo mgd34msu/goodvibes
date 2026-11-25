@@ -16,7 +16,7 @@ How settings are written in this part: the examples use the terminal app's `/set
 | decision model | The model that reads judgment calls and other decisions. Jev is the hosted decision model. |
 | working decision model | A decision model that is set (see "When a decision model counts as working") and is answering: from its first failed request until it answers again it does not count as working. Nothing is sent to test it; the gate's own requests show it. |
 | stakes | The level the gate's reading gives a judgment call: `low`, `medium`, `high` or `critical`. Defined in "Stakes". Only a decision model's reading produces one. |
-| held call | A call `just-vibes` did not run because it needed the owner; it is listed at the end of the run and answered with `/held`. |
+| held call | A call `just-vibes` did not run because it needed the owner; it is listed at the end of the run and answered in Waiting for you, under Held calls. |
 | remembered rule | A saved answer ("always allow this command class in this project") that settles later calls. |
 | working directory | The project directory the app was started in, or the directory given with `-C` / `--cd`. The gate calls this "the allowed directories". |
 
@@ -77,7 +77,7 @@ Stakes enter only at step 9 of the order (judgment calls) and only with a workin
 
 ### What happens to each kind of call
 
-The table gives the outcome for each kind of call in each mode, with and without a working decision model. "Asked" means the approval prompt appears (in a headless run, see "Headless runs and permissions"). "Held" means the call does not run and is listed for `/held`.
+The table gives the outcome for each kind of call in each mode, with and without a working decision model. "Asked" means the approval prompt appears (in a headless run, see "Headless runs and permissions"). "Held" means the call does not run and waits in Waiting for you, under Held calls.
 
 | Kind of call | `ask-me` | `jev-decides` | `just-vibes` | `yolo` | `plan` |
 | --- | --- | --- | --- | --- | --- |
@@ -240,7 +240,7 @@ Where code reads recipients:
 
 A recognised send whose recipients cannot be read (`sendmail -t`, `mail -t`, an SMTP session on standard input with `sendmail -bs`, a body read from a file), and a command whose script cannot be read (missing, read by a shell from its standard input, or a script path or `-c` / `eval` program built when the command runs), is treated as a new recipient. A service's host is matched with or without a trailing dot (`api.telegram.org.`). A send no rule names (an address held in a shell variable, a script that sends from inside a program, a page the browser types into) is not recognised; that call is a judgment call. When the owner allows a new recipient and chooses any remember option, that recipient is known for the rest of the session.
 
-The terminal app's model has no mail tool of its own: the owner sends mail with `/mail send`, which is the owner's own command, not a tool call. In the Agent the model sends with the `google` tool (`mail.send`).
+Mail is the daemon's capability `mail.send`. The owner sends from the Inbox of Mail, calendar and channels (a submitted form is his own request and goes at once); a model in either program sends through `capability_run` with `mail.send`, which is put to the owner first because it sends something outside this machine. In the Agent the model can also send with the `google` tool (`mail.send`).
 
 ## The approval prompt
 
@@ -256,7 +256,7 @@ In the terminal app and the Agent, an ask appears as the same card. Its title is
 | `w` | Say why (`w say why` on the card): opens `Why not:`; from then on every key is text until Enter refuses with that reason or Esc goes back. While it is open `No` is the highlighted button and the key row reads `⏎ no, with this reason`. |
 | `d` | Details: why you are asked, the tool, the folder, the sandbox, the decision, effects, review reasons, the checklist and the raw arguments. |
 | Left, Right, Tab | Choose a button. |
-| Enter | Press the chosen button. The card opens on the yes, or on `No` for what cannot be undone, for owner-only asks whose effect cannot be taken back (money spent, a payment step, a message sent as you, a delete nothing restores, an irreversible operator action), and for asks that weaken a protection (a security, judgment or payment setting loosened; access granted to a person, device, tool server or hook), so Enter never allows those and never remembers anything. The web UI's card makes the same button its main one, and a call `just-vibes` held for one of those reasons opens on `No` in `/questions` and the web UI. |
+| Enter | Press the chosen button. The card opens on the yes, or on `No` for what cannot be undone, for owner-only asks whose effect cannot be taken back (money spent, a payment step, a message sent as you, a delete nothing restores, an irreversible operator action), and for asks that weaken a protection (a security, judgment or payment setting loosened; access granted to a person, device, tool server or hook), so Enter never allows those and never remembers anything. The web UI's card makes the same button its main one, and a call `just-vibes` held for one of those reasons opens on `No` in Waiting for you and the web UI. |
 | Any other letter | Nothing; a paste is never an answer. |
 | Space, `1` to `9`, `a`, Up, Down, PgUp, PgDn | In a multi-edit edit (`Apply selected`): keep or leave out the change under the cursor or the numbered change, keep all, move, scroll. |
 | Tab | When you were typing a draft, Tab answers the request and keeps your draft. |
@@ -266,9 +266,9 @@ In the terminal app and the Agent, an ask appears as the same card. Its title is
 
 A call that cannot be undone, and a request that offers no remembering (a channel request, a one-call boundary ask), offer only the yes and `No`, with `always asks · can't be remembered` beside them; to let such a call run without asking, add a permission rule with `/permissions`. A command waiting on its terminal for input shows its prompt and a masked answer field: Enter sends the answer, Esc clears it and then declines. A denial is the call's answer: the model is told the call was refused (with your reason) and the turn goes on. The same keys answer a turn that runs on the daemon.
 
-A question an agent of this chat left for you (the `query` tool's `ask`) appears as `A question for you`, pinned above the composer on rows of its own (nothing of the conversation shows beside it), with the first option selected; an option may be a short phrase (`Hi there`), and `/questions answer <id> <option> [note]` matches the longest option the answer starts with. Up and Down choose an option, `1` to `9` pick one, Enter answers (the last option, `Something else…`, opens a one-line answer), and Esc answers later (it stays in `/questions` and the web UI). These keys reach the card while the composer is empty; typing goes to the composer. The answer goes through the owner inbox and the card shows `Answered: <option>` once.
+A question an agent of this chat left for you (the `query` tool's `ask`) appears as `A question for you`, pinned above the composer on rows of its own (nothing of the conversation shows beside it), with the first option selected; an option may be a short phrase (`Hi there`), and a written answer (`questions.answer`) matches the longest option it starts with. Up and Down choose an option, `1` to `9` pick one, Enter answers (the last option, `Something else…`, opens a one-line answer), and Esc answers later (it stays in Waiting for you and the web UI). The card's hint row names the keys as bound: a key rebound to choose, move up or down, or go back shows there. These keys reach the card while the composer is empty; typing goes to the composer. The answer goes through the owner inbox and the card shows `Answered: <option>` once.
 
-The same asks appear in the web UI, in `/questions` (the owner inbox), on Telegram, and in the channel conversation the request came from, where that channel's owner can answer.
+The same asks appear in the web UI, in Waiting for you (the owner inbox), on Telegram, and in the channel conversation the request came from, where that channel's owner can answer.
 
 ## Remembered rules
 
@@ -289,7 +289,7 @@ A choice to remember is not saved when the owner edited the arguments, when the 
 No command, setting or operator method adds a rule directly. A rule exists only in these ways:
 
 1. You answer an approval prompt with a remember tier other than session (in both terminal programs, `a` on the card, then the choice and Enter; the tiers offered are numbered in this order: exact, command-class, path, tool, session, with command-class moved first after three remembered exact answers for that class; only the tiers that apply to the call are offered). A stream-json headless run's `"remember": true` on a `PERMISSION_ANSWER` remembers for the session only, not as a rule.
-2. You answer `/decisions never|always|ask <id>` on a call Jev decided. The rule is built at the first tier the call offers (for `exec`, `exact`; for `write` and `edit`, `path`; otherwise `tool`).
+2. You choose never, always or ask me on a call Jev decided (Waiting for you, Decisions). The rule is built at the first tier the call offers (for `exec`, `exact`; for `write` and `edit`, `path`; otherwise `tool`).
 3. You add a record to the rules file by hand (format below). The file is re-read within two seconds; a malformed record is skipped.
 
 Each rule records the project it was made in (the working directory's absolute path) and matches only there. A rule made with no working directory is not saved. What each tier matches:
@@ -305,7 +305,7 @@ A deny rule reads `deny ...` and an "always ask me" rule `ask ...`.
 
 Worked example: allow `bun test` in this project only.
 
-1. Make the call reach you. With a working decision model in `jev-decides`, Jev may run it without asking; then use `/decisions always <id>` on that decision instead (it saves the same `exact` rule). Otherwise switch to `ask-me` for this session only (Shift+Tab in the terminal app); without a working decision model, with `permissions.tools.exec` at its default `prompt`, the `exec` call is asked.
+1. Make the call reach you. With a working decision model in `jev-decides`, Jev may run it without asking; then choose `a` always on that decision in Waiting for you, Decisions, instead (it saves the same `exact` rule). Otherwise switch to `ask-me` for this session only (Shift+Tab in the terminal app); without a working decision model, with `permissions.tools.exec` at its default `prompt`, the `exec` call is asked.
 2. Ask the model to run `bun test`. On the card, choose the tier "This exact command" and press Enter.
 3. `/permissions rules` lists `exec: allow exactly: bun test`.
 
@@ -398,43 +398,39 @@ The refusal the model receives: `Your never-run rule "<rule>" refuses this call:
 
 `/permissions` prints `mode in force` (with `not <mode>, because <reason>` when it is not the chosen mode), then `saved mode`, or `chosen for this session` with the saved default, then each permission setting with its value and origin (`built-in default`, `global config file (<path>)`, `project config file (<path>)`, `shared config file (<path>)`, or `runtime override`), then the number of remembered rules. A value marked `*` was changed at runtime (for example with `-c`) and is not saved on disk. The `Permission evaluator` row shows `in force: <value> until restart` when `permissions.engine` was changed and the process has not restarted.
 
-## Decisions Jev made: `/decisions`
+## Decisions Jev made: Waiting for you, Decisions
 
-Every call Jev decided at the gate (in `jev-decides` and `just-vibes`) is posted to the owner inbox as a `decision` item. `/decisions` lists them and lets the owner reverse each one.
+Every call Jev decided at the gate (in `jev-decides` and `just-vibes`) is posted to the owner inbox as a `decision` item. Waiting for you (the menu, Ctrl+G then m) lists them on its Decisions tab, read by itself and read again when one is posted, answered or expires, and lets the owner change each one with a key on the selected decision:
 
-```text
-/decisions list                       open decisions (newest first) and recently answered inbox items
-/decisions list --count 50            up to 50 of each
-/decisions list --when today          only what was decided today (local time); also yesterday
-/decisions list --when 2026-11-19     only what was decided on that day
-/decisions list --when "since 2h"     only what was decided since then: 30m, 2h, 3d, 1w, or a day (2026-11-18)
-/decisions keep <decision>            Leave a decision as Jev made it
-/decisions undo <decision>            Undo what a decision did (restores the files the call changed)
-/decisions never <decision>           Never allow calls like a decision's (saves a deny rule)
-/decisions always <decision>          Always allow calls like a decision's without asking (saves an allow rule; /permissions revoke takes it back)
-/decisions ask <decision>             Ask me about calls like a decision's (saves an "always ask me" rule)
-```
+| Key | What it does | Shown when |
+| --- | --- | --- |
+| `k` keep | Leave a decision as Jev made it | always |
+| `u` undo | Undo what a decision did (restores the files the call changed) | the call ran and recorded its changes |
+| `n` never | Never allow calls like a decision's (saves a deny rule) | a rule can be made from the call |
+| `a` always | Always allow calls like a decision's without asking (saves an allow rule; `/permissions revoke` takes it back) | a rule can be made from the call |
+| `s` ask me | Ask me every time about calls like a decision's (saves an "always ask me" rule) | a rule can be made from the call |
 
-- An id may be given as a unique prefix.
+- A choice is the answer to the decision: it runs on the press, and the line under the list says what was done.
+- A decision is carried out by the program whose gate made it (its detail names it: the terminal app, the Agent or the daemon), while that session is open. Chosen elsewhere, it is refused with `Jev made this decision in <program>, and only that app can apply a choice on it.`
 - `undo` works only for a call Jev allowed whose tool recorded every change for undo (`write`, `edit`). Otherwise it is refused with the reason, for example `Jev refused this call, so it never ran and there is nothing to undo.`
-- `never`, `always` and `ask` save the rule in the same rule store as a remembered answer. They are offered only when a rule can be made from that call.
+- `never`, `always` and `ask` save the rule in the same rule store as a remembered answer.
 - A decision item stays open for 24 hours. The app keeps the last 200 decisions. When the session that made a decision ends, its open items are withdrawn with the note that a standing rule can be set with `/permissions`.
-- Only the owner typing at the terminal can choose. When the model runs the command, it is told `Only the owner changes what Jev decided.` `/decisions` alone opens these actions, with each open decision picked from a list.
+- Only the owner chooses. The model and scripts reach the same choices as the capabilities `decisions.keep`, `decisions.undo`, `decisions.never`, `decisions.always` and `decisions.ask` (each takes `decision`, an item id or a unique prefix); a model's call of one is refused as the owner's own act. `decisions.list` (inputs `when`: `today`, `yesterday`, a day such as `2026-11-19`, or `since <day | 30m | 2h | 3d | 1w>`; `count`) lists the open decisions and what was decided, through the daemon.
 - The web UI shows the same list with the same choices.
 
 What you can see, and for which period:
 
 | What | Where | Period |
 | --- | --- | --- |
-| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | `/decisions` in either app, the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `/decisions list --when today`, `yesterday`, `<YYYY-MM-DD>` and `"since <day or 30m/2h/3d/1w>"` show only that period (an open item by when it was decided, an answered one by when it was answered), looking through the whole inbox; `--count <n>` shows the latest n, however many. |
-| Answered owner-inbox items (permission asks, questions, claims, purchase windows), by whom and from where | `/decisions` (the "Decided" list), `/questions all`, the web UI's Work page ("Show older") | For good: an answered item is never dropped. |
-| Calls `just-vibes` held | `/held` | Until answered; at most 64. |
+| Gate calls Jev decided in `jev-decides` and `just-vibes` (allowed or refused, with Jev's reason) | Waiting for you, Decisions, in either app; the web UI | Each item is open for 24 hours; the newest 200 per running app are kept; items of an app that exits are withdrawn. `decisions.list` with `when` set to `today`, `yesterday`, `<YYYY-MM-DD>` or `since <day or 30m/2h/3d/1w>` shows only that period (an open item by when it was decided, an answered one by when it was answered), looking through the whole inbox; `count` shows the latest n, however many. |
+| Answered owner-inbox items (permission asks, questions, claims, purchase windows), by whom and from where | Waiting for you, Answered; `questions.all`; the web UI's Waiting for you and Work page ("Show older") | For good: an answered item is never dropped. |
+| Calls `just-vibes` held | Waiting for you, Held calls | Until answered; at most 64. |
 
 What cannot be seen from any product command:
 
-- Judgment calls Jev read in `ask-me` and let run (`ask-me` asks Jev to read, not to decide, so nothing is posted to `/decisions`).
+- Judgment calls Jev read in `ask-me` and let run (`ask-me` asks Jev to read, not to decide, so nothing is posted to Decisions).
 - Decisions that are not about a tool call: reading a natural-language schedule, triaging mail, grading a merchant, reading a channel message.
-- Jev's reason for a refusal after the fact, other than the refusal text the model received and the `/decisions` item.
+- Jev's reason for a refusal after the fact, other than the refusal text the model received and the decision item.
 
 Every reading the engine takes, answered or failed, is written to the decision log, the SQLite file `<project>/.goodvibes/<surface>/decisions.sqlite` (`<surface>` is `tui` for the terminal app and the daemon, `agent` for the Agent), but no product command shows it.
 Each reading is one row with its context, answers, timing, model and lineage, written in one synced commit; its questions (a battery's instructions and criteria, the same on every call) are stored once per distinct set and named by their SHA-256, so a row is under a kilobyte on average (it was 3.5 KB, up to 49 KB). Readings older than `atRest.retentionMaxAgeDays` (30 days by default) are removed, and at most the newest 100,000 kept, a batch at a time ten seconds after start and once a day; the space they free goes back to the disk a few megabytes at a time. A log written by 3.4.2 or earlier is carried forward by the same pass, 500 rows at a time, and rewritten once into the new form when its live data is under 32 MB; then one line says how much space came back (`[Decision log] The decision log was carried forward to its smaller form: ...`). After a rollback to 3.4.2 the log cannot be read by that build: it is set aside as `decisions.sqlite.unrecognized-1` and a new one is started.
@@ -443,41 +439,30 @@ How to reverse a decision:
 
 | Decision | Reverse it with |
 | --- | --- |
-| Jev allowed a `write` or `edit` | `/decisions undo <id>` restores the files (while the item is open). |
-| Jev allowed anything else (an `exec` command, a `fetch`, a send) | It cannot be undone from here. `/decisions never <id>` or `ask <id>` stops calls like it. |
-| Jev refused a call | There is no "allow once". `/decisions always <id>` saves an allow rule for calls like it; then ask the model to try again. Or switch to `ask-me` for the session (Shift+Tab) and approve it when asked. |
+| Jev allowed a `write` or `edit` | `u` undo on it in Decisions restores the files (while the item is open). |
+| Jev allowed anything else (an `exec` command, a `fetch`, a send) | It cannot be undone from here. `n` never or `s` ask me on it stops calls like it. |
+| Jev refused a call | There is no "allow once". `a` always on it saves an allow rule for calls like it; then ask the model to try again. Or switch to `ask-me` for the session (Shift+Tab) and approve it when asked. |
 
-## Calls held by `just-vibes`: `/held`
+## Calls held by `just-vibes`: Waiting for you, Held calls
 
-```text
-/held list                 list what is held (what /held alone gives a model or script)
-/held approve h3 h4        approve those held calls for this session (they run at once; a call that ran is not taken back)
-/held approve all
-/held dismiss h2           set one aside; it is not run
-/held dismiss all
-```
+Waiting for you's Held calls tab lists every call a gate held for the owner, the daemon's and each terminal program's, with the answers `y` (let it run) and `n` (set it aside) on the selected call; an answer runs on the press. The model and scripts reach the program's own held calls as the capabilities `held.list`, `held.approve` and `held.dismiss` (`calls`: ids separated by spaces, or `all`); they run in the program holding the session, and a model's approve or dismiss is refused as the owner's own act.
 
 - Each held call shows its id (`h1`, `h2`, ...), the tool, a summary and the reason. The reasons are: `held for you: <owner-only reason>` for an owner-only item; `held for you: this needs a decision and no decision model is set up` or `held for you: this needs a decision and decision models are off` (both mean the call was a judgment call and no working decision model was in use: none set, `No Decision Model` chosen, or `Hybrid` after the set model failed); `held for you: <Jev's summary>` when Jev would not run it.
 - The end of each `just-vibes` run lists what it held.
 - An approval is the owner's "allow for this session" answer for that exact call. The call does not run by itself: ask the agent to carry on, and the call runs when it is made again.
 - The same exact call held again keeps its first id. At most 64 held calls are kept.
-- Only the owner can approve or dismiss. When the model runs the command it is told to have the owner type it.
-- Every held call is also in the owner inbox, as a queued action (`Let it run: ...?`, `y` lets it run, `n` sets it aside): the daemon posts the calls its own gate holds, and each terminal program posts the calls its gate holds while it is connected to the daemon (one held while the daemon is down is posted when it is back). So Waiting for you, `/questions`, the web UI and a phone list them with everything else and answer them; an answer there approves or sets aside the call here, and an answer with `/held` withdraws the inbox item. A held call that loosens a protection opens on No.
+- Only the owner can approve or dismiss.
+- Every held call is in the owner inbox, as a queued action (`Let it run: ...?`, `y` lets it run, `n` sets it aside): the daemon posts the calls its own gate holds, and each terminal program posts the calls its gate holds while it is connected to the daemon (one held while the daemon is down is posted when it is back). So Waiting for you, the web UI and a phone list them with everything else and answer them; an answer there approves or sets aside the call in the program that held it, and `held.approve` or `held.dismiss` there withdraws the inbox item. A held call that loosens a protection opens on No.
 
-## The owner inbox: `/questions`
+## The owner inbox: Waiting for you
 
-`/questions` lists everything waiting on the owner: permission asks, questions agents left, channel owner claims, purchase windows and queued actions.
+Waiting for you (the menu, Ctrl+G then m; the same place in the Agent and a view in the web UI) shows everything waiting on the owner, read by itself and read again when anything in it changes anywhere: Questions (questions agents left, channel owner claims, purchase windows, reports), Approvals, Held calls, Decisions, Telegram (messages held for the owner), Sends (the Agent only: sends its content check refused), Answered (everything already answered, withdrawn or expired, with who answered, from where, and whether the answer reached the asker) and Kinds (what each kind of approval asks about and what to check before answering). The selected item's detail says who asked, when, until when it waits, what answering does and why you are asked; a session is named by its title (`the session "Garden planner"`), never by its id.
 
-```text
-/questions list                open items (what /questions alone gives a model or script)
-/questions all                 every item, newest first
-/questions show <item>
-/questions answer <item> <choice|text> [note]   answers at once: an answer cannot be taken back
-```
+An item's answers are its own keys on the hint row (the daemon's keys for its choices: `y`/`n` for approve and deny, digits otherwise); an answer runs on the press, and the line under the list names it as pressed (`Answered "Run bun test?": No.`). Enter lists the answers, starting on No for an ask that loosens a protection. `w` answers a question in your own words. `x` withdraws a request for approval you raised (it asks first: it cannot be undone).
 
-When the daemon does not answer, `/questions list`, `/questions all` and `/decisions list` show what this machine holds under one line naming it: `The daemon at <address> did not answer (<reason>); showing only what is held on this machine, so its approvals and questions are missing.`
+The model and scripts reach the same inbox through the daemon as capabilities: `questions.list` (everything open), `questions.all` (everything, newest first), `questions.show` (`item`), `questions.answer` (`item`, `answer`: one of its answers, then a note if you like, or your own words) and `questions.withdraw` (`request`, `note`). A model's answer or withdrawal is refused as the owner's own act; a purchase window is answered only with the authority `payments.purchase.approve` takes.
 
-For an item with options, the first word of the answer is the choice and the rest is its note. Only the owner can answer. A channel owner claim offers `accept` and `decline`: `/questions answer <id> accept`. A decision item offers `keep`, `undo`, `never`, `always` and `ask`; a held-call item `approve` and `dismiss`.
+For an item with options, the longest option the answer starts with is the choice and the rest is its note. A channel owner claim offers `accept` and `decline`; a held-call item `approve` and `dismiss`. A decision item's choices are the Decisions tab's keys.
 
 ## Plan mode
 
@@ -915,7 +900,7 @@ In `goodvibes run` and `goodvibes-agent run`, a call that needs the owner is ref
 | Writes refused: "Not run: this folder is restricted (/security trust-folder trusts it)." | Workspace set to restricted. | `/security trust-folder`. |
 | A request from Slack never runs in `yolo`. | A channel request always needs the owner's answer. | Answer it in the terminal app, the web UI or the conversation; or ask from the terminal. |
 | A request from email, a webhook or ntfy is refused. | Those surfaces cannot direct changes. | Ask from the terminal, Telegram or another owned surface. |
-| `just-vibes` finished without doing some steps. | They were held. | `/held`, `/held approve <id>`, then ask to carry on. |
+| `just-vibes` finished without doing some steps. | They were held. | Approve them in Waiting for you, Held calls (`y`), then ask to carry on. |
 | "Decision model ... failing" once, then work continues. | The decision model failed and each decision took its fallback. | Fix the endpoint or key named in the notice; the app says when it answers again. |
 | Tool calls are refused with a decision-model error. | "If Jev can't answer" is Refuse the action and the model failed. | Fix the model, or set "If Jev can't answer" to Ask me in the decision model settings. |
 | Commands have no network. | The exec sandbox turns it off. | Add every command of the line to `sandbox.egressAllowlist`, and have a working decision model: without one the sandbox never opens the network. |

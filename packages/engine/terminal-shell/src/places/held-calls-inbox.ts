@@ -2,10 +2,10 @@
  * held-calls-inbox.ts, the calls this terminal program's gate holds for the
  * owner (just-vibes: not run, kept for him), posted to the daemon's one owner
  * inbox as queued actions, where the daemon already posts the calls its own
- * gate holds. Waiting for you, `/questions`, the web UI and a phone then show
- * them in one list and answer them there; an answer approves or sets aside
- * the call in this program's ledger, and an answer given here (`/held`)
- * withdraws the item.
+ * gate holds. Waiting for you, the web UI and a phone then show them in one
+ * list and answer them there; an answer approves or sets aside the call in
+ * this program's ledger, and an answer given here (`held.approve`,
+ * `held.dismiss`) withdraws the item.
  *
  * The answer is heard on the daemon's event stream (`owner-inbox-update`),
  * held open only while a posted call waits; on each event the waiting items

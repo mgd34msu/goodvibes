@@ -88,7 +88,6 @@ import type { SessionMemoryStore } from '../core/session-memory.js';
 import type { SessionLineageTracker } from '../core/session-lineage.js';
 import type { SessionChangeTracker } from '../sessions/change-tracker.js';
 import type { ExecutionPlanManager } from '../core/execution-plan.js';
-import type { AdaptivePlanner } from '../core/adaptive-planner.js';
 import type { IdempotencyStore } from './idempotency/index.js';
 import type { OverflowHandler } from '../tools/shared/overflow.js';
 import type { ToolLLM } from '../config/tool-llm.js';
@@ -142,6 +141,12 @@ export interface SurfaceRoots {
   readonly logDir?: string | undefined;
   /** The telemetry-ledger directory the retention sweep prunes; default `<home>/.goodvibes/telemetry`. */
   readonly telemetryDir?: string | undefined;
+  /**
+   * The `.goodvibes/<root>/` the provider stores the daemon keeps for every program are read from: the pinned models
+   * (`favorites.json`) and the services file (`services.json`). Default `surfaceRoot`. A program that is not the
+   * daemon's root (the Agent) names the daemon's (`tui`), so one copy serves all.
+   */
+  readonly providerStoresRoot?: string | undefined;
 }
 
 /**
@@ -394,6 +399,8 @@ export interface RuntimeServices {
   readonly ownerInbox?: import('../control-plane/owner-inbox.js').OwnerInbox | undefined;
   /** Where mailbox readers and the consumers of their mail (the inbox) meet; one reader per mailbox. */
   readonly mailboxReaders?: import('../email/inbound/mailbox-consumers.js').MailboxReaders | undefined;
+  /** The Agent's own stores (notes, personas, routines, drafts, artifacts) the capabilities that manage them run on (capabilities/builtin/agent-stores.ts); the daemon sets it. */
+  readonly agentStores?: import('../capabilities/builtin/agent-stores.js').AgentStoreRunner | undefined;
   readonly userPermissionRuleStore: UserPermissionRuleStore; // durable user-origin permission rules (remembered approvals); permissions.rules.* surface
   readonly sessionBroker: SharedSessionBroker;
   readonly deliveryManager: AutomationDeliveryManager;
@@ -480,7 +487,6 @@ export interface RuntimeServices {
   readonly sessionLineageTracker: SessionLineageTracker;
   readonly sessionChangeTracker: SessionChangeTracker;
   readonly planManager: ExecutionPlanManager;
-  readonly adaptivePlanner: AdaptivePlanner;
   readonly idempotencyStore: IdempotencyStore;
   readonly overflowHandler: OverflowHandler;
   readonly policyRuntimeState: PolicyRuntimeState;

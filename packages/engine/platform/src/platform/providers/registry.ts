@@ -59,6 +59,7 @@ import { resolveModelReference } from './model-id-resolution.js';
 import { ConfiguredModelFollower } from './registry-configured-model.js';
 import { LiveModelListings, getProviderModelsCachePath, type LentModelListings, type LiveModelDiscoveryResult, type LiveModelDiscoverySource } from './live-model-discovery.js';
 import { TTL_24H_MS } from './json-ttl-cache.js';
+import { onListChanged } from '../runtime/list-changes.js';
 
 /** One provider's model list as it stands (ProviderRegistry.modelListReading). */
 export interface ProviderModelListReading {
@@ -185,6 +186,8 @@ export class ProviderRegistry {
   private _modelRegistryRevision = 0;
   /** Persisted per-model context-window overrides; lazy-constructed (needs persistence root). */
   private _contextWindowOverrideStore: ContextWindowOverrideStore | null = null;
+  /** Which context window file this registry reads, and whether it writes it (ProviderRegistryOptions.contextWindows). */
+  private readonly contextWindowsFile: ProviderRegistryOptions['contextWindows'];
   private readonly catalogWindows = new CatalogContextWindowResolver(
     () => this.catalogModels,
     (name) => this.discoveredProviderNames.has(name),
@@ -235,6 +238,11 @@ export class ProviderRegistry {
     };
     this.featureFlags = options.featureFlags ?? null;
     this.runtimeBus = options.runtimeBus ?? null;
+    this.contextWindowsFile = options.contextWindows;
+    // A size set or cleared through the daemon, in this same process (a daemon's own registries): read it again now.
+    const stopContextWindows = onListChanged((change) => { if (change.list === 'context-windows') this.contextWindowsChanged(); });
+    try { options.registerDispose?.(stopContextWindows); }
+    catch (error) { stopContextWindows(); throw error; }
     this.registerBuiltins(); // builtins register BEFORE the configured model is read: a bare id resolves against the real registry
     this.configuredModel = new ConfiguredModelFollower({
       readConfiguredModel: () => getConfiguredModelId(this.configManager),
@@ -516,9 +524,19 @@ export class ProviderRegistry {
 
   private contextWindowOverrideStore(): ContextWindowOverrideStore {
     this._contextWindowOverrideStore ??= new ContextWindowOverrideStore(
-      getContextWindowOverridesPath(this.getPersistenceRoot()),
+      this.contextWindowsFile?.path ?? getContextWindowOverridesPath(this.getPersistenceRoot()),
+      { writes: this.contextWindowsFile?.writes ?? true },
     );
     return this._contextWindowOverrideStore;
+  }
+
+  /**
+   * The daemon changed a model's context window size (its `context-windows` notice): the file is read again and every
+   * model's window worked out again, so the next turn uses the new size (terminal-shell context-windows-follow.ts).
+   */
+  contextWindowsChanged(): void {
+    this._contextWindowOverrideStore?.reload();
+    this._invalidateModelRegistry();
   }
 
   /**

@@ -1,7 +1,5 @@
 import type { AutomationJob } from '@goodvibes/engine/platform/platform/automation';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import type { CommandContext } from '../command-registry.ts';
 import { buildAgentWorkspaceBriefPart } from '../agent-workspace-snapshot.ts';
 import { WORK_PLAN_TASK_STATUSES as WORK_PLAN_STATUSES, type ProjectWorkPlanTaskStatus as WorkPlanItemStatus } from '@goodvibes/engine/platform/platform/knowledge';
 
@@ -90,28 +88,28 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
       ? 'Choose the assistant model: /model use.'
       : '',
     snapshot.localMemoryCount === 0
-      ? 'Keep durable, non-secret facts: /memory add.'
+      ? 'Keep durable, non-secret facts: remember something, in Memory and knowledge.'
       : snapshot.localMemoryReviewQueueCount > 0
-        ? `Review ${plural(snapshot.localMemoryReviewQueueCount, 'memory record')}: /memory queue.`
+        ? `Review ${plural(snapshot.localMemoryReviewQueueCount, 'memory record')}: the ones marked on the Memory tab of Memory and knowledge.`
         : '',
     !hasLocalSkillBehavior
-      ? 'Make reusable procedures: /my-skills create, or import a skill file with /my-skills import-discovered.'
+      ? 'Make reusable procedures: new skill, or take in a skill file found on disk, on the Skills tab of Tools and extensions.'
       : '',
     skillSetupGaps > 0
-      ? `Give ${plural(skillSetupGaps, 'skill')} what they need: /my-skills attention.`
+      ? `Give ${plural(skillSetupGaps, 'skill')} what they need: the ones marked "needs setting up" on the Skills tab of Tools and extensions.`
       : '',
     skillBundleSetupGaps > 0
-      ? `Give ${plural(skillBundleSetupGaps, 'skill bundle')} what they need: /my-skills bundles-attention.`
+      ? `Give ${plural(skillBundleSetupGaps, 'skill bundle')} what they need: the ones marked "needs setting up" on the Skill bundles tab of Tools and extensions.`
       : '',
     hasLocalSkillBehavior && skillSetupGaps === 0 && skillBundleSetupGaps === 0 && snapshot.activeSkillCount === 0
-      ? 'Switch on reviewed skills or bundles: /my-skills enable.'
+      ? 'Switch on reviewed skills or bundles: switch on, on the Skills or Skill bundles tab of Tools and extensions.'
       : '',
     snapshot.localRoutineCount === 0
-      ? 'Make repeatable workflows: /routines create; put one on a schedule with /routines promote.'
+      ? 'Make repeatable workflows: new routine, on the Routines tab of Memory and knowledge; run one on a schedule from Automation.'
       : routineSetupGaps > 0
-        ? `Give ${plural(routineSetupGaps, 'routine')} what they need: /routines list --only attention.`
+        ? `Give ${plural(routineSetupGaps, 'routine')} what they need: the routines marked "needs setting up" in Memory and knowledge.`
         : snapshot.enabledRoutineCount === 0
-        ? 'Switch on reviewed routines: /routines enable.'
+        ? 'Switch on reviewed routines: switch on, on the Routines tab of Automation.'
         : '',
     channelSetupGaps > 0
       ? `Finish setting up ${plural(channelSetupGaps, 'enabled channel')}: /channels setup.`
@@ -122,7 +120,7 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
     mediaSetupNeedsReview
       ? 'Check the media providers before relying on images or media: /media providers.'
       : '',
-    'Agent Knowledge: /knowledge.',
+    'Your knowledge: the Sources tab of Memory and knowledge.',
     'Hand build, fix or review work to the terminal app only when you mean to: /agents hand-off.',
   ].filter((line): line is string => line.length > 0);
 
@@ -153,19 +151,4 @@ export function formatAgentOperatorBriefing(ctx: CommandContext): string {
     '',
     ...formatWarnings(snapshot.warnings),
   ].join('\n');
-}
-
-export function registerBriefRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(defineCommand<CommandContext>({
-    name: 'brief',
-    title: 'Briefing',
-    summary: 'A short briefing: how the Agent is set up, what is ready, and what to do next',
-    group: 'Agent',
-    actions: [readAction<CommandContext>({
-      id: 'brief', label: 'See your briefing', word: '',
-      sentence: 'Shows the model in use, what is ready (memory, skills, routines, channels, voice), the work plan and schedules, and what to do next.',
-      operator: { terminalOnly: 'It reads this Agent\'s own state.' },
-      async run(_values, ctx) { return formatAgentOperatorBriefing(ctx); },
-    })],
-  }));
 }

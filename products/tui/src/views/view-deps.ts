@@ -18,7 +18,7 @@ import type { ProjectPlanningService, ProjectWorkPlan, KnowledgeApi } from '@goo
 import type { SessionChangeTracker } from '@goodvibes/engine/platform/platform/sessions';
 import type { PolicyRuntimeState, SandboxSessionRegistry } from '@/runtime/index.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
-import type { PluginsModalManager } from './modals/plugins-modal.ts';
+import type { PluginManager } from '@goodvibes/engine/platform/platform/plugins';
 
 export interface BuiltinViewDeps {
   /** The /work modal's view of the shared native host selection. */
@@ -34,7 +34,7 @@ export interface BuiltinViewDeps {
   readonly sandboxSessionRegistry: SandboxSessionRegistry;
   /** Memory access for the Memory modal (the spine client, which routes to an adopted daemon). */
   readonly memoryRegistry?: MemoryAccess;
-  readonly pluginManager?: PluginsModalManager;
+  readonly pluginManager?: Pick<PluginManager, 'list'>;
   readonly hookDispatcher?: Pick<HookDispatcher, 'listHooks' | 'getChains'>;
   readonly hookWorkbench?: HookWorkbench;
   readonly hookActivityTracker?: Pick<HookActivityTracker, 'listRecent'>;

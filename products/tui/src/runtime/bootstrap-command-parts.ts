@@ -5,13 +5,13 @@ import {
 } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import { createBootstrapActionBase } from '@goodvibes/engine/terminal-shell/bootstrap-command-actions';
 import { createModelSelectionAction } from '@goodvibes/engine/terminal-shell/model-selection-action';
+import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
 import { projectCommandProviderServices } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import { EvalRegistry } from '@goodvibes/engine/platform/platform/observe';
 import { activeTokens } from '../renderer/theme.ts';
 import { getConfigSnapshot } from '@goodvibes/engine/platform/platform/config';
 import { toEffortModel } from '../providers/reasoning-effort-surface.ts';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import type { AdaptivePlanner } from '@goodvibes/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import type { KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
 import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
@@ -50,7 +50,6 @@ import type {
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
   RemoteCommandService,
-  PlanRuntimeService,
 } from '@/runtime/index.ts';
 import type { BootstrapCommandShellServices } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
@@ -138,7 +137,6 @@ export interface BootstrapCommandSectionOptions {
   readonly changeTracker?: import('@goodvibes/engine/platform/platform/sessions').SessionChangeTracker;
   readonly hydrateSessionUsage?: () => void;
   readonly contractOperator?: import('@goodvibes/engine/platform/platform/contract').ContractOperatorService;
-  readonly workstreamDrafts?: import('@goodvibes/engine/platform/platform/orchestration').WorkstreamDraftService;
   readonly codeIndexStore?: CodeIndexStore;
   readonly codeIndexReindexScheduler?: import('@goodvibes/engine/platform/platform/state').CodeIndexReindexScheduler;
   readonly isPassiveCodeInjectionFlagEnabled?: () => boolean;
@@ -147,10 +145,8 @@ export interface BootstrapCommandSectionOptions {
   readonly modeManager?: ShellModeManagerService;
   readonly automationManager?: ShellAutomationManagerRuntimeService;
   readonly planManager?: ShellPlanManagerService;
-  readonly adaptivePlanner?: AdaptivePlanner;
   readonly sessionOrchestration?: ShellSessionOrchestrationService;
   readonly remoteRuntime?: RemoteCommandService;
-  readonly planRuntime?: PlanRuntimeService;
   readonly operatorClient?: OperatorClient;
   readonly userPermissionRuleStore?: import('@goodvibes/engine/platform/platform/permissions').UserPermissionRuleStore;
   readonly peerClient?: PeerClient;
@@ -194,9 +190,7 @@ export function createBootstrapCommandActions(
   | 'openSecurityView'
   | 'openKnowledgeView'
   | 'openMemoryView'
-  | 'openRemoteView'
   | 'openSubscriptionView'
-  | 'openLocalAuthMaskedEntry'
 > {
   const { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect } = options;
 
@@ -211,7 +205,15 @@ export function createBootstrapCommandActions(
     ...createBootstrapActionBase(options, {
       unwiredMessage: (name) => `commandContext.${name} was called before the shell bridge was attached in main.ts`,
       completeModelSelection: createModelSelectionAction(
-        { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect },
+        { providerRegistry, configManager, conversation, runtime, requestRender, completeModelSelectionSideEffect,
+          // A context window size chosen in the picker is the daemon's, for every program (capabilities/builtin/context-windows.ts).
+          setContextWindow: async (registryKey, tokens) => {
+            const homeDirectory = configManager.getHomeDirectory();
+            if (!homeDirectory) throw new Error('this app has no home folder to find its daemon from');
+            const answer = await createDaemonVerbCaller({ configManager, homeDirectory }).invoke<{ readonly text?: string }>('capabilities.run',
+              { id: 'context.set-window', inputs: { size: String(tokens), model: registryKey }, program: 'tui', model: registryKey }, { explicitUserRequest: true });
+            return answer.text ?? '';
+          } },
         {
           setToolEnabled: () => configManager.setDynamic('tools.llmEnabled' as never, true),
           effortModel: (model) => toEffortModel(model),
@@ -230,9 +232,7 @@ export function createBootstrapCommandActions(
     openSecurityView: viewNotAttached('Security'),
     openKnowledgeView: viewNotAttached('Knowledge'),
     openMemoryView: viewNotAttached('Memory'),
-    openRemoteView: viewNotAttached('Remote'),
     openSubscriptionView: viewNotAttached('Subscriptions'),
-    openLocalAuthMaskedEntry: viewNotAttached('The password prompt'),
   };
 }
 
@@ -248,7 +248,6 @@ export function createBootstrapCommandSessionSection(
     | 'changeTracker'
     | 'hydrateSessionUsage'
     | 'contractOperator'
-    | 'workstreamDrafts'
     | 'codeIndexStore'
     | 'codeIndexReindexScheduler'
     | 'isPassiveCodeInjectionFlagEnabled'
@@ -259,7 +258,6 @@ export function createBootstrapCommandSessionSection(
     ...projectCommandSessionSection(options),
     contractRunner: options.contractRunner,
     contractOperator: options.contractOperator,
-    workstreamDrafts: options.workstreamDrafts,
     codeIndexStore: options.codeIndexStore,
     codeIndexReindexScheduler: options.codeIndexReindexScheduler,
     isPassiveCodeInjectionFlagEnabled: options.isPassiveCodeInjectionFlagEnabled,

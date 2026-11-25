@@ -104,9 +104,9 @@ const WATCHER_METHOD_IDS = new Set<string>([
 
 /** Where the owner does the refused act himself in the Agent app, named for what was refused. */
 function ownerActRoute(methodId: string): string {
-  if (methodId === 'inbox.answer') return 'he answers it with /questions (/questions answer <id> <choice>) or in the web UI.';
+  if (methodId === 'inbox.answer') return 'he answers it in Waiting for you, in either terminal program or the web UI.';
   if (methodId === 'approvals.approve' || methodId === 'approvals.deny') {
-    return 'he answers it at the approval prompt, with /questions answer, or in the web UI.';
+    return 'he answers it at the approval prompt, in Waiting for you, or in the web UI.';
   }
   return 'he grants or withdraws access himself, from his own app\'s settings or the web UI.';
 }
@@ -410,7 +410,7 @@ export function createAgentOperatorMethodTool(
       if (operatorMethodIsOwnerOnly(method.id)) {
         return {
           success: false,
-          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <shop> --most <amount> <item> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with /payments repeat; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
+          error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, "Approve one purchase ahead of time" in the Money place approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with "Allow a repeat purchase" in the Money place; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
         };
       }
       // A capability's risk is read from the capability itself, by capability_run; through this tool it would not be.

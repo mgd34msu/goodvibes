@@ -48,7 +48,7 @@ export function buildConnectionHelp(modal: SettingsModal): HelpLine[] {
     ...(entry.nextActions.length > 0 ? [helpText(''), helpHeading('Next steps:'), ...entry.nextActions.map((action) => helpText(action))] : []),
     helpText(''),
     helpText(entry.surface === 'mail'
-      ? 'Use it from the transcript with /mail (status, list, read, draft, send).'
-      : 'Use it from the transcript with /calendar (status, list, get, create).'),
+      ? 'Read and send it in Mail, calendar and channels, from the menu (its Inbox).'
+      : 'See and change it in Mail, calendar and channels, from the menu (its Calendar).'),
   ];
 }

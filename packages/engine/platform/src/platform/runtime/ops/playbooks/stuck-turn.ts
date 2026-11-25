@@ -119,7 +119,7 @@ export const stuckTurnPlaybook: Playbook = {
     },
   ],
   steps: [
-    { step: 1, title: 'Answer what is waiting on you', action: 'If an approval is waiting, open /questions and answer it; the call that asked continues at once.', kind: 'command', command: '/questions', expectedOutcome: 'The held call runs or is refused and the turn moves on.', automatable: false },
+    { step: 1, title: 'Answer what is waiting on you', action: 'If an approval is waiting, open Waiting for you from the menu and answer it; the call that asked continues at once.', kind: 'observe', expectedOutcome: 'The held call runs or is refused and the turn moves on.', automatable: false },
     { step: 2, title: 'Stop the turn', action: 'Press Esc (or Ctrl+C) to cancel the turn in flight; tool calls in flight are cancelled with it.', kind: 'command', command: 'Esc', expectedOutcome: 'The turn ends as cancelled and the composer is free.', automatable: false },
     { step: 3, title: 'Look at the provider', action: 'Run /health check provider to see whether the model provider is degraded, and switch with /model if it is.', kind: 'command', command: '/health check provider', expectedOutcome: 'A healthy provider is selected.', automatable: false },
     { step: 4, title: 'Retry the turn', action: 'Run /retry to send the last message again.', kind: 'command', command: '/retry', expectedOutcome: 'The turn completes or fails with a clear error.', automatable: false },

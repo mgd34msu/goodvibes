@@ -68,7 +68,7 @@ export function credentialValueRefusal(key: string, value: unknown): { readonly 
   const facts = configKeyFacts(key);
   if (facts.cardMaterial) {
     return { code: 'CONFIG_CARD_MATERIAL', reason: `${key} is card material, which is kept only in the daemon's card store, never in a settings file.`,
-      next: 'Enter the card with /payments add-card in a terminal app, or under Payments in the web UI.' };
+      next: 'Enter the card with "Add a card" in the Money place of a terminal app, or under Payments in the web UI.' };
   }
   // A value meant as a reference that the resolver cannot read would be saved
   // and later reported as a missing credential; it is refused as malformed.

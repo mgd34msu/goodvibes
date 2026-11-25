@@ -74,7 +74,15 @@ export interface PlaceList<Item extends PlaceItem> {
   readonly empty: string;
   readonly row: (item: Item) => PlaceRow;
   readonly detail: (item: Item) => readonly PlaceDetailLine[];
+  /**
+   * The programs that have the thing this list shows (`['tui']`: only the terminal app records runs). A program not
+   * named leaves the tab out, as the web view leaves out a list with no web side. Absent: every program has it.
+   */
+  readonly programs?: readonly PlaceProgramName[] | undefined;
 }
+
+/** A program a place is drawn in: the terminal app, the Agent, the web UI. */
+export type PlaceProgramName = 'tui' | 'agent' | 'web';
 
 /**
  * An action on the selected item (or on the place, with no `list`): a
@@ -88,7 +96,9 @@ export interface PlaceCapabilityAction<Item extends PlaceItem> {
   /**
    * Its default key: a letter is a rebindable entry of the place's key context
    * (`place.<place>.<id>` in keybindings.json); `enter`, `tab`, `escape` or an
-   * arrow is the table's navigation key of that name, wherever it is bound.
+   * arrow is the table's navigation key of that name, wherever it is bound;
+   * `''` is an entry with no default key, shown and pressed only once a person
+   * binds it in the Keys place.
    */
   readonly key: string;
   /** Its name in the place's key context; the label in lower case with dashes when absent. */
@@ -97,6 +107,16 @@ export interface PlaceCapabilityAction<Item extends PlaceItem> {
   readonly capability: string;
   readonly list?: string | undefined;
   readonly states?: readonly string[] | undefined;
+  /**
+   * It acts on the list's kind of thing, not on the selected item ("watch for something" on the Triggers tab):
+   * shown while its list is the open tab, whether or not an item is selected, and given nothing from an item.
+   */
+  readonly whole?: true | undefined;
+  /**
+   * It always opens its form, even when every input the item does not give is optional: a change of several
+   * fields, each blank keeping what is set (an address). Without it, an action with nothing required left runs at once.
+   */
+  readonly form?: true | undefined;
   /** The hint's words; the capability's label is used when absent. */
   readonly label?: string | undefined;
   readonly fill?: Readonly<Record<string, string | ((item: Item) => string)>> | undefined;
@@ -115,6 +135,12 @@ export interface PlaceCapabilityAction<Item extends PlaceItem> {
    * (place-modal.ts). An action with `answers` is one.
    */
   readonly answersItem?: true | undefined;
+  /**
+   * The programs that have this control (`['tui']`: the Agent keeps one line of conversation, so it has no "Branch this
+   * conversation here"), as `PlaceList.programs` says for a list: a program not named shows no control for it.
+   * Absent: every program that resolves the capability has it.
+   */
+  readonly programs?: readonly PlaceProgramName[] | undefined;
 }
 
 /** One answer an item offers, as a key on the hint row and a row of its answer list. */

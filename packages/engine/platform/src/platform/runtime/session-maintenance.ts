@@ -4,6 +4,9 @@ import type { ConfigManager } from '../config/manager.js';
 import type { SessionDomainState } from './store/domains/session.js';
 
 export type GuidanceMode = 'off' | 'minimal' | 'guided';
+
+/** The control that shows what fills the context (This conversation), named where a next step is said. */
+const SEE_CONTEXT = '"See what fills the context" in This conversation';
 export type SessionMaintenanceLevel =
   | 'stable'
   | 'watch'
@@ -92,7 +95,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
       lastCompactedAt,
       summary: usagePct === null ? 'Context window unavailable.' : 'No context counted yet.',
       reasons: [usagePct === null ? 'Current model does not expose a known context limit yet.' : 'Context usage is known after the first model response.'],
-      nextSteps: guidanceMode === 'off' ? [] : ['/provider', '/context'],
+      nextSteps: guidanceMode === 'off' ? [] : ['/provider', SEE_CONTEXT],
     };
   }
 
@@ -137,7 +140,7 @@ export function evaluateSessionMaintenance(input: SessionMaintenanceInput): Sess
         ? `Context usage is climbing toward the ${thresholdPct}% auto-compact threshold.`
         : `Context usage is high (${usagePct}%) and auto-compaction is off.`);
     nextSteps.push('/usage');
-    if (guidanceMode === 'guided') nextSteps.push('/context');
+    if (guidanceMode === 'guided') nextSteps.push(SEE_CONTEXT);
   } else {
     reasons.push('Context pressure is currently within the stable operating band.');
   }
@@ -201,7 +204,7 @@ export function formatSessionMaintenanceLines(
   const nextSteps = status.nextSteps.length > 0
     ? status.nextSteps
     : detail === 'guided'
-      ? ['/context']
+      ? [SEE_CONTEXT]
       : [];
   if ((detail === 'guided' || status.guidanceMode !== 'off') && nextSteps.length > 0) {
     lines.push(`  Next: ${nextSteps.join('  |  ')}`);

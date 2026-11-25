@@ -14,6 +14,8 @@ export type { CardEntryTransport } from './entry-policy.js';
 export { PAYMENTS_SYNTHETIC_CONFIG_KEYS } from '../config/payment-config-keys.js';
 export { minorUnitExponent } from './money-parsing.js';
 export { formatMinorUnits, readPurchaseNoticeRow, type PurchaseNoticeRow } from './message.js';
+// The Money place's declaration reads currency codes too (terminal-shell places/money-place.ts, drawn by the web UI).
+export { parseCurrencyCode } from './types.js';
 export { readPaymentWindowStatus, readPaymentWindowAnswer, readPaymentSecurityCodeAcceptance } from './window-view.js';
 export type { PaymentWindowView, PaymentWindowAnswer, PaymentPurchaseStatus, PaymentUnreadableOperation, PaymentSecurityCodeRequestView, PaymentSecurityCodeAcceptance, PaymentHostStopView } from './window-view.js';
 

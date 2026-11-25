@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { SecretsManager } from '../config/secrets.ts';
 import { join } from 'node:path';
 import { ConfigManager } from '@goodvibes/engine/platform/platform/config';
+import { DAEMON_STATE_SURFACE_ROOT } from '@goodvibes/engine/platform/platform/daemon/lifecycle-marker';
 import { shell as runtimeShell } from '@goodvibes/engine/platform/platform/runtime';
 import type { shell as RuntimeShell, bootstrap as RuntimeBootstrap } from '@goodvibes/engine/platform/platform/runtime';
 import { readCheckpointGuardSettings, readCheckpointRegistrationSetting } from '../config/checkpoint-settings.ts';
@@ -95,7 +96,6 @@ import { SessionMemoryStore } from '@goodvibes/engine/platform/platform/core';
 import { SessionLineageTracker } from '@goodvibes/engine/platform/platform/core';
 import { SessionChangeTracker } from '@goodvibes/engine/platform/platform/sessions';
 import { ExecutionPlanManager } from '@goodvibes/engine/platform/platform/core';
-import { AdaptivePlanner } from '@goodvibes/engine/platform/platform/core';
 import { FileStateCache } from '@goodvibes/engine/platform/platform/state';
 import { ProjectIndex } from '@goodvibes/engine/platform/platform/state';
 import { IdempotencyStore } from '@/runtime/index.ts';
@@ -590,7 +590,6 @@ export interface RuntimeServices extends Omit<PlatformRuntimeServices,
   readonly sessionLineageTracker: SessionLineageTracker;
   readonly sessionChangeTracker: SessionChangeTracker;
   readonly planManager: ExecutionPlanManager;
-  readonly adaptivePlanner: AdaptivePlanner;
   readonly idempotencyStore: IdempotencyStore;
   readonly overflowHandler: OverflowHandler;
   readonly policyRuntimeState: PolicyRuntimeState;
@@ -724,6 +723,9 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       surface: 'agent',
       roots: {
         surfaceRoot: GOODVIBES_AGENT_SURFACE_ROOT,
+        // The pinned models and the services file are the daemon's, one copy for every program (the Agent's own were
+        // carried into them once, config/provider-stores-carry-forward.ts).
+        providerStoresRoot: DAEMON_STATE_SURFACE_ROOT,
         workingDir: workingDirectory,
         homeDirectory,
         sessionStorePath: shellPaths.resolveProjectPath(GOODVIBES_AGENT_SURFACE_ROOT, 'control-plane', 'sessions.json'),

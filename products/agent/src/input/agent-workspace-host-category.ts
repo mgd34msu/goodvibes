@@ -8,9 +8,9 @@ export const AGENT_WORKSPACE_HOST_CATEGORY: AgentWorkspaceCategory = {
   summary: 'The connected host: its tasks, sessions, providers and sign-ins.',
   detail: 'Use this workspace to inspect the GoodVibes host surfaces that Agent can see: system health, remote routes, host tasks, sessions, channels, schedules, knowledge, media, MCP, provider auth, support bundles, and telemetry/config posture.',
   actions: [
-    actRow('host-task-filter', 'tasks list'),
-    actRow('host-task-show', 'tasks show'),
-    actRow('host-task-output', 'tasks output'),
+    actRow('host-task-filter', 'work tasks'),
+    actRow('host-task-show', 'work task'),
+    actRow('host-task-output', 'work task-output'),
     actRow('host-session-graph', 'session graph'),
     actRow('host-provider-detail', 'accounts see-account'),
     actRow('host-provider-routes', 'accounts see-routes'),

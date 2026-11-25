@@ -13,9 +13,9 @@ import {
   effectiveRisk as capabilityEffectiveRisk,
   fillSentence as capabilityFillSentence,
   lastsWords as capabilityLastsWords,
+  riskDoneLine,
 } from '@goodvibes/engine/platform/platform/capabilities/words';
 import {
-  RISK_DONE_WORDS,
   RISK_WORDS,
   type ActionDescription,
   type ActionRisk,
@@ -369,13 +369,13 @@ export function actionSubmitLabel(action: ActionShape, values: ActionValues): st
 }
 
 /**
- * What the risk did, said with the result of an action that ran ("This loosened
- * a protection: its tools are no longer held back."); empty for no risk.
+ * What the act did, said with the result of an action that ran: its own words
+ * (`riskDone`) when it has them, else its risk's ("This loosened a
+ * protection."); empty for no risk.
  */
 export function actionRiskDoneLine(action: ActionShape & Pick<ActionDescription<never>, 'riskDone'>, values: ActionValues): string {
-  const risk = effectiveRisk(action, values);
-  if (risk === 'none') return '';
-  return `This ${RISK_DONE_WORDS[risk]}${action.riskDone ? `: ${fillSentence(action.riskDone, values, '')}` : ''}.`;
+  // The one chooser (platform capabilities/outcome.ts): the act's own line, or the chosen value's, else the risk's words.
+  return riskDoneLine(action, values);
 }
 
 /** What submitting does, in the words the typed line's question uses: the sentence, then its risk. */

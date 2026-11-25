@@ -41,6 +41,7 @@ import { activeTokens } from './renderer/theme.js';
 import { routeCardInput, type CardTypeahead } from './blocking-permission-input.js';
 import { beginModal, finishModal, layoutHintRows, modalInnerWidth, standardModalWidth, wrapLines, type KitHint, type SurfaceLayer } from './renderer/surface-kit.js';
 import { paintKeycapHints } from './renderer/surface-kit-parts.js';
+import type { KeyCombo } from './keybindings.js';
 
 /** The inbox the card reads and answers: the home's one store. */
 export interface QuestionCardInbox {
@@ -62,7 +63,34 @@ export interface QuestionCardDeps {
    * choose and back (a key bound to one of them is that key here; a navigation
    * key given to another action is not the card's). Without it, the keys as pressed.
    */
-  readonly keys?: { translateNavigation(token: InputToken & { type: 'key' }): { readonly kind: 'pass' } | { readonly kind: 'drop' } | { readonly kind: 'rewrite'; readonly token: InputToken & { type: 'key' } } } | undefined;
+  readonly keys?: {
+    translateNavigation(token: InputToken & { type: 'key' }): { readonly kind: 'pass' } | { readonly kind: 'drop' } | { readonly kind: 'rewrite'; readonly token: InputToken & { type: 'key' } };
+    /** Every key each action is bound to now, for the hint row (the same table). */
+    getAll?(): ReadonlyArray<{ readonly action: string; readonly combos: readonly KeyCombo[] }>;
+    formatCombo?(combo: KeyCombo): string;
+  } | undefined;
+}
+
+/** The keys an action is bound to now, as a hint's keycap shows them (`esc`, `⏎`, `down/f1`); the fallback when the table says nothing. */
+function boundKeys(keys: QuestionCardDeps['keys'], action: string, fallback: string): string {
+  const combos = keys?.getAll?.().find((entry) => entry.action === action)?.combos;
+  if (!combos || combos.length === 0 || !keys?.formatCombo) return fallback;
+  const shown = combos.map((combo) => {
+    const label = keys.formatCombo!(combo).toLowerCase();
+    return label === 'escape' ? 'esc' : label === 'enter' ? '⏎' : label;
+  });
+  return shown.join('/');
+}
+
+/** The card's hint row with the keys as bound now: the arrows, Enter and Esc are the table's move-up, move-down, choose and back. */
+function cardHints(keys: QuestionCardDeps['keys'], typing: boolean, choices: number): KitHint[] {
+  const choose = boundKeys(keys, 'choose', '⏎');
+  const back = boundKeys(keys, 'back', 'esc');
+  if (typing) return [[choose, 'answer'], [back, 'back']];
+  const up = boundKeys(keys, 'move-up', 'up');
+  const down = boundKeys(keys, 'move-down', 'down');
+  const move = up === 'up' && down === 'down' ? '↑↓' : `${up}/${down}`;
+  return [[move, 'choose'], [choose, 'answer'], ...(choices > 1 ? [[`1-${choices}`, 'pick'] as const] : []), [back, 'answer later']];
 }
 
 /** One chunk as the card reads it: a navigation key through the table, or typed text. */
@@ -179,7 +207,7 @@ export class OwnerQuestionCard {
     void this.#deps.inbox.answer(id, answer).then((outcome) => {
       if (!outcome.applied) this.#deps.notify(`Your answer was not recorded: ${outcome.refusal?.reason ?? 'the inbox refused it'}`);
     }, (error: unknown) => {
-      this.#deps.notify(`Your answer was not recorded (${error instanceof Error ? error.message : String(error)}). It is still waiting in /questions.`);
+      this.#deps.notify(`Your answer was not recorded (${error instanceof Error ? error.message : String(error)}). It is still waiting in Waiting for you.`);
     }).finally(() => { this.refresh(); this.#deps.render(); });
   }
 
@@ -281,9 +309,7 @@ export class OwnerQuestionCard {
     const own = (index: number): boolean => choices[index]?.id === 'own-words';
     const optionRows = choices.length;
     const typingRows = state.typing !== undefined ? 2 : 0;
-    const hints: KitHint[] = state.typing !== undefined
-      ? [['⏎', 'answer'], ['esc', 'back']]
-      : [['↑↓', 'choose'], ['⏎', 'answer'], ...(choices.length > 1 ? [[`1-${choices.length}`, 'pick'] as const] : []), ['esc', 'answer later']];
+    const hints: KitHint[] = cardHints(this.#deps.keys, state.typing !== undefined, choices.length);
     const hintRows = layoutHintRows(hints, inner);
     // Rows: title, blank, body, blank, detail?, options, typing?, blank, hints.
     const rows = body.length + (detail.length > 0 ? detail.length + 1 : 0) + 1 + optionRows + typingRows + 1 + hintRows.length;

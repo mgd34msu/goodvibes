@@ -366,7 +366,7 @@ export async function stageManagedSettingsBundle(
 
 /**
  * Apply the staged bundle. `reviewedStageId` is the id of the stage the person
- * reviewed (shown by `/managed staged`, or staged by the same command): a
+ * reviewed (the staged bundle shown in Managed settings, or staged by the same action): a
  * different stage, put there by another process or window since, is refused
  * with `TARGET_CHANGED` and nothing is applied, so only a reviewed candidate
  * ever bypasses the managed locks. Compared under the store lock that reads
@@ -397,7 +397,7 @@ function applyStagedManagedBundleLocked(
     throw new TargetChangedError(
       targetRef('managed-stage', reviewedStageId, {}, {}),
       [{ field: 'staged bundle', was: reviewedStageId, now: stage ? `${stage.profileName} (${stage.id}, staged ${new Date(stage.importedAt).toISOString()})` : null }],
-      'Review the staged bundle again with /managed staged, then apply it',
+      'See the staged bundle again in Tools and extensions, Managed settings, then apply it',
     );
   }
   if (!stage) {
@@ -504,7 +504,7 @@ export function rollbackManagedApply(configManager: ConfigManager, token: string
 function rollbackManagedApplyLocked(configManager: ConfigManager, token: string, configDir: string): number {
   const store = readStoreForWrite(configDir);
   const record = store.rollbackHistory.find((entry) => entry.token === token);
-  if (!record) throw new Error(`Unknown managed rollback token: ${token}. A token works once; rolled-back tokens are removed from the history (see /managed history).`);
+  if (!record) throw new Error(`Unknown managed rollback token: ${token}. A token works once; an apply rolled back is no longer listed (Tools and extensions, Managed settings, lists the ones left).`);
   const releasedKeys = record.appliedKeys ?? record.restoredKeys;
   // A later apply recorded this record's layers and values as what it replaced; rolling this one back first
   // would let the later rollback re-install them. Roll back newest first.
@@ -777,7 +777,7 @@ export function formatStagedManagedBundleReview(configManager: ConfigManager): s
   if (!stage) return 'No staged managed settings bundle is available.';
   const lines = [
     'Staged Managed Bundle Review',
-    `  stage: ${stage.id} (apply exactly this one with /managed apply-staged --stage ${stage.id})`,
+    `  stage: ${stage.id} (apply it in Tools and extensions, Managed settings: exactly this one is applied)`,
     `  profileName: ${stage.profileName}`,
     `  importedAt: ${new Date(stage.importedAt).toISOString()}`,
     `  risk: ${stage.risk}`,

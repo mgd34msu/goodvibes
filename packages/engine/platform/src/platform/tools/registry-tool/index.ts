@@ -22,6 +22,7 @@ import {
   materializeRegistryMarkdown, type RegistryToolSource,
 } from './source.js';
 import { findSkill, listSkillIndex, listSkills } from '../../skills/discovery.js';
+import { skillMayLoad } from '../../skills/library.js';
 import type { SkillFrontmatterValue } from '../../skills/model.js';
 import { capturedRegistryAdmission, type CapturedRegistryContext } from './captured-source.js';
 import { decisionOrClassic, isClassicOperation, withConfiguredDecisionModelPolicy } from '../../runtime/decision-policy.js';
@@ -67,7 +68,8 @@ function frontmatterList(value: SkillFrontmatterValue | undefined): string[] {
  * same names, case rules, descriptions and project-over-global override.
  */
 async function listRegistrySkills(roots: RegistryToolRoots, source: RegistryToolSource): Promise<RegistryMatch[]> {
-  return (await listSkills(registrySkillRoots(roots), source)).map((skill): RegistryMatch => ({
+  // A skill switched off, or not reviewed yet, in the skill store is not offered (skills/library.ts).
+  return (await listSkills(registrySkillRoots(roots), source)).filter((skill) => skillMayLoad(skill.metadata)).map((skill): RegistryMatch => ({
     name: skill.name,
     type: 'skill',
     description: skill.description,

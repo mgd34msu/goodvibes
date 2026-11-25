@@ -74,6 +74,12 @@ export interface KeyContext {
   /** The screen's name, as the Keys place groups them ("Automation"). */
   readonly title: string;
   readonly actions: readonly KeyContextAction[];
+  /**
+   * Read wherever the program's own keys are (the composer), not only while a screen is open: `lookup` and
+   * `lookupAfterLeader` answer `<context>.<name>` for a key bound to one of its entries that no program action has
+   * (This conversation's controls, read while writing a message).
+   */
+  readonly global?: true | undefined;
 }
 
 /** A context action as the Keys place lists it. */
@@ -463,11 +469,29 @@ export class KeybindingsManager<Action extends string> {
   lookup(token: KeyToken): Action | null {
     const stood = translated.get(token as object);
     if (stood !== undefined && this.isAction(stood)) return stood;
-    return token.logicalName ? this.lookupMap.get(tokenKey(token)) ?? null : null;
+    if (!token.logicalName) return null;
+    return this.lookupMap.get(tokenKey(token)) ?? this.lookupGlobal(tokenKey(token), false);
   }
   /** The action the key pressed after the leader completes; null when that sequence is not bound. */
   lookupAfterLeader(token: KeyToken): Action | null {
-    return token.logicalName ? this.lookupMap.get(`L|${tokenKey(token)}`) ?? null : null;
+    if (!token.logicalName) return null;
+    return this.lookupMap.get(`L|${tokenKey(token)}`) ?? this.lookupGlobal(tokenKey(token), true);
+  }
+  /**
+   * The entry of a global context (KeyContext `global`) a key no program action has is bound to, as
+   * `<context>.<name>`; null when none. A program action on the same key wins (the conflict is reported).
+   */
+  private lookupGlobal(pressed: string, afterLeader: boolean): Action | null {
+    for (const context of this.contexts.values()) {
+      if (!context.global) continue;
+      for (const action of context.actions) {
+        const id = `${context.id}.${action.name}`;
+        if ((this.contextBindings.get(id) ?? []).some((combo) => Boolean(combo.leader) === afterLeader && tokenKey({ ...combo, logicalName: combo.key }) === pressed)) {
+          return id as Action;
+        }
+      }
+    }
+    return null;
   }
   /** Reads the same table as lookup(), so a chord shared by two actions reaches only the one lookup() names. */
   matches(action: string, token: KeyToken): boolean {

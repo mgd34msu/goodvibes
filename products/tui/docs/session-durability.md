@@ -24,7 +24,7 @@ since its last write:
   are written at most once every five seconds (a batch inside that window is written when it ends, and
   dropped once the turn completes, since the turn-end save is the copy then);
 - when the save at the end of a turn fails, so that turn is not lost;
-- for a change made outside a turn (`/undo`, `/title`, a branch switch), at most once a minute
+- for a change made outside a turn (`/undo`, a new title, a branch switch), at most once a minute
   (`src/runtime/recovery-autosave.ts`);
 - on a signal, a crash or a quit, before the save at exit runs, so a quit that misses its deadline
   keeps what was not yet saved.

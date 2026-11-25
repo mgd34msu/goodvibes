@@ -39,7 +39,7 @@ import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { undoFactOf } from './ask-consequence.js';
 import { canonicalJson } from '../utils/target-ref.js';
-import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, hostDecidesCall, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
+import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, hostDecidesCall, ownerOnlyReason, ownerActWordsOf, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
 import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 import { resolveNotificationWebhookLocally } from '../integrations/notification-webhooks.js';
@@ -1668,6 +1668,7 @@ export class PermissionManager {
       paths: paths === undefined ? undefined : classifyPaths(paths, i.directory),
       recoverable: declaredRecoverable(i.definition, i.args),
       ownerOnly: i.ownerOnly, untrustedRead: i.untrustedRead, declaredReadOnly: i.declaredReadOnly,
+      ...(i.ownerOnly === 'owner-act' ? { ownerActWords: ownerActWordsOf(i.args, i.definition) } : {}),
       workspaceRestricted: this.gate.workspaceTrust?.isRestricted?.(),
       hostDecides: hostDecidesCall(i.args, i.definition),
     };
@@ -2496,7 +2497,7 @@ export class PermissionManager {
       detail: reason,
       decision: { state: 'queued-for-owner', decidedBy: 'mode', reason, heldId: held.id,
         next: ['carry on with the work that does not need this call',
-          `the owner is shown it at the end of the run and can approve it with /held approve ${held.id}; after that the same call runs`] },
+          `the owner is shown it at the end of the run and can approve it (${held.id}) in Waiting for you, under Held calls; after that the same call runs`] },
     }) };
   }
 

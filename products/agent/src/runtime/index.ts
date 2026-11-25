@@ -342,7 +342,6 @@ export type TaskManager = Operations.TaskManager;
 // so the old separate `export type WorktreeRegistry` alias is gone (TS2484).
 export {
   createShellPathService,
-  createShellPlanRuntime,
   createShellRemoteCommandService,
   createBootstrapCommandShellServices,
   resolveSurfaceDirectory,
@@ -384,7 +383,6 @@ export type CommandOpsShellServices = Shell.CommandOpsShellServices;
 export type CommandPlatformShellServices = Shell.CommandPlatformShellServices;
 export type CommandWorkspaceShellServices = Shell.CommandWorkspaceShellServices;
 export type RemoteCommandService = Shell.RemoteCommandService;
-export type PlanRuntimeService = Shell.PlanRuntimeService;
 export type WorktreeStatusRecord = Shell.WorktreeStatusRecord;
 export type ManagedWorktreeMeta = Shell.ManagedWorktreeMeta;
 export type ShellAgentManagerService = Shell.ShellAgentManagerService;

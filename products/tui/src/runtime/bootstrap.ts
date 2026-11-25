@@ -482,7 +482,7 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // reached then) are moved once a daemon is adopted or comes back.
   const retryRoutineMove = (): void => {
     if (!configManager.get('automation.enabled')) return;
-    void retryTerminalRoutineMove({ configManager, automationManager: services.automationManager, homeDirectory: services.homeDirectory })
+    void retryTerminalRoutineMove({ configManager, homeDirectory: services.homeDirectory })
       .then((lines) => {
         if (lines.length === 0) return;
         showRoutineMove(lines);
@@ -767,9 +767,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     surfaceRoot: GOODVIBES_TUI_SURFACE_ROOT,
   });
   wireTerminalMcpReload(services.shellPaths, services.mcpRegistry, mcpDiscovery, bootstrapUnsubs, systemMessageRouter, requestRender);
-  // Routines belong to the daemon, so each runs once with or without a terminal
-  // open: this moves any this terminal kept to it. With the daemon off, the one
-  // terminal holding the routine lock runs them (runtime/terminal-routines.ts).
+  // Schedules belong to the daemon, so each runs once with or without a program
+  // open: this moves any an earlier terminal app kept to it (runtime/terminal-routines.ts).
   if (configManager.get('automation.enabled')) {
     deferredStartup.schedule({
       label: 'automation',
@@ -777,13 +776,13 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
         // The daemon may be being started or attached by the external-services
         // task; moving before it answers would report routines as not running.
         await externalServicesStarted;
-        const lines = await startTerminalRoutines({ configManager, automationManager: services.automationManager, homeDirectory: services.homeDirectory });
+        const lines = await startTerminalRoutines({ configManager, homeDirectory: services.homeDirectory });
         if (lines.length > 0) showRoutineMove(lines);
       },
       onError: (error) => {
         const message = summarizeError(error);
         logger.error('Deferred automation startup failed', { error: message });
-        systemMessageRouter.high(`[Startup] Scheduled routines could not be started: ${message}. /schedule list shows where they are kept.`, 'error');
+        systemMessageRouter.high(`[Startup] The schedules this terminal kept could not be handed to the daemon: ${message}. Automation, in the menu, shows the daemon's schedules.`, 'error');
         requestRender();
       },
     });

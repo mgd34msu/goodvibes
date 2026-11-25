@@ -26,6 +26,7 @@ import { RefusalError, refusal } from '@goodvibes/engine/errors';
 import { summarizeError } from '../utils/error-display.js';
 import { newIncarnation } from '../utils/target-ref.js';
 import { logger } from '../utils/logger.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 import { TriggerManagerWork, stopTriggerResources } from './manager-work.js';
 import { restartDueStreams } from './manager-stream-restarts.js';
 import { runExtract, storedObservation, toObservation } from './extract.js';
@@ -441,7 +442,7 @@ export class TriggerManager {
     let record = this.records.get(id);
     try {
       if (!record) {
-        if (this.stored.has(id)) { this.store.remove(id); this.stored.delete(id); }
+        if (this.stored.has(id)) { this.store.remove(id); this.stored.delete(id); noteListChanged({ list: 'triggers', change: 'deleted', id }); }
         this.unsaved.delete(id);
         return true;
       }
@@ -449,9 +450,12 @@ export class TriggerManager {
         record = { ...record, lastError: undefined };
         this.records.set(id, record);
       }
-      if (this.stored.has(id)) this.store.update(record);
+      const known = this.stored.has(id);
+      if (known) this.store.update(record);
       else { this.store.insert(record); this.stored.add(id); }
       this.unsaved.delete(id);
+      // Every saved change of a trigger (its state, a firing, a stop or a start again) is said once it is durable.
+      noteListChanged({ list: 'triggers', change: known ? 'changed' : 'created', id });
       return true;
     } catch (error) {
       const failure = error instanceof TriggerStoreError ? error : new TriggerStoreError(this.store.path, `save trigger ${id}`, error);
@@ -492,6 +496,7 @@ export class TriggerManager {
     const grant = createActionGrant({ ...input, now: input.now ?? this.now() }, this.grants.get(input.id));
     this.store.saveGrant(grant);
     this.grants.set(grant.id, grant);
+    noteListChanged({ list: 'triggers', change: 'changed', id: grant.id });
     return grant;
   }
 
@@ -552,6 +557,7 @@ export class TriggerManager {
     this.records.set(definition.id, admitted);
     try { this.store.insert(admitted); this.stored.add(definition.id); }
     catch (error) { this.records.delete(definition.id); throw error; }
+    noteListChanged({ list: 'triggers', change: 'created', id: definition.id });
     let ownedStream: StreamRuntime | undefined;
     try {
       if (definition.spec.kind === 'on-exit') record = await this.startOnExit(record, definition.spec, now);

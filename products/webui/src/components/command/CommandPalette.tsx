@@ -2,7 +2,9 @@
  * CommandPalette (Ctrl K), design doc "Menus and modals": 640 wide glass over the
  * scrim, a search field on top, results grouped Chats / Go to / Actions /
  * Settings. On a phone it is a full-height sheet. Typing filters the registered
- * commands in the page at once; nothing is sent anywhere.
+ * commands in the page at once; nothing is sent while typing. A search of three
+ * characters or more ends in one more row, "Find what does …": choosing it asks
+ * the daemon's `capabilities.find` once, and what it found replaces the row.
  *
  * Keyboard: Up and Down (or Tab and Shift Tab) move, Enter runs, Escape closes the
  * palette and nothing else. Focus stays in the search field (the options are an
@@ -14,6 +16,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { createPortal } from 'react-dom';
 import { classicCommandIndices } from '@goodvibes/engine/platform/browser/decision-policy';
 import { type CommandDef, getCommands, subscribeCommands } from '../../lib/commands';
+import { formatError } from '../../lib/errors';
+import { invokeOwnerMethod } from '../../lib/goodvibes';
 import { formatShortcut } from '../../lib/shortcut-keys';
 import {
   buildPaletteSections,
@@ -28,6 +32,31 @@ interface CommandPaletteProps {
   onClose: () => void;
   /** The search it opens on ("/schedule" from the composer's slash command); empty by default. */
   initialQuery?: string;
+  /**
+   * Open a capability by id (its form, then `capabilities.run`). With it, a search offers one more row: find what
+   * does the words typed, asked of the daemon's `capabilities.find` when that row is chosen (never while typing).
+   */
+  onRunCapability?: (id: string) => void;
+}
+
+/** What `capabilities.find` answered for the words typed. */
+interface FoundAnswer {
+  readonly need: string;
+  readonly status: 'reading' | 'ready' | 'failed';
+  readonly found: readonly { readonly id: string; readonly does: string; readonly runsIn: string }[];
+  readonly reason?: string;
+}
+
+const FIND_ROW = 'found.ask';
+
+function readFound(output: unknown): FoundAnswer['found'] {
+  const list = output && typeof output === 'object' ? (output as { capabilities?: unknown }).capabilities : undefined;
+  return (Array.isArray(list) ? list : []).flatMap((entry: unknown) => {
+    const row = entry && typeof entry === 'object' ? entry as Record<string, unknown> : {};
+    return typeof row.id === 'string' && typeof row.does === 'string'
+      ? [{ id: row.id, does: row.does, runsIn: typeof row.runsIn === 'string' ? row.runsIn : 'daemon' }]
+      : [];
+  });
 }
 
 const SECTION_ICONS: Record<PaletteSection, ReactNode> = {
@@ -37,9 +66,10 @@ const SECTION_ICONS: Record<PaletteSection, ReactNode> = {
   settings: <Settings aria-hidden="true" />,
 };
 
-export function CommandPalette({ open, onClose, initialQuery = '' }: CommandPaletteProps) {
+export function CommandPalette({ open, onClose, initialQuery = '', onRunCapability }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [commands, setCommands] = useState(getCommands);
+  const [answer, setAnswer] = useState<FoundAnswer | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -58,10 +88,36 @@ export function CommandPalette({ open, onClose, initialQuery = '' }: CommandPale
   useEffect(() => subscribeCommands(() => setCommands(getCommands())), []);
 
   const searching = query.trim().length > 0;
+  const need = query.trim();
+  /** Ask the daemon what does the words typed: one request, when the row is chosen. */
+  const findNeed = useCallback(() => {
+    if (!need) return;
+    setAnswer({ need, status: 'reading', found: [] });
+    invokeOwnerMethod('capabilities.find', { need }).then(
+      (output) => setAnswer((now) => (now?.need === need ? { need, status: 'ready', found: readFound(output) } : now)),
+      (error: unknown) => setAnswer((now) => (now?.need === need ? { need, status: 'failed', found: [], reason: formatError(error) } : now)),
+    );
+  }, [need]);
+  // The rows of the find: the one that asks, then what it found (each opens its form), or why nothing came.
+  const foundRows = useMemo((): CommandDef[] => {
+    if (!onRunCapability || need.length < 3) return [];
+    if (!answer || answer.need !== need) {
+      return [{ id: FIND_ROW, title: `Find what does “${need}”`, group: 'system', run: findNeed }];
+    }
+    if (answer.status === 'reading') return [{ id: 'found.reading', title: 'Finding…', group: 'system', run: () => undefined }];
+    if (answer.status === 'failed') return [{ id: 'found.failed', title: `Could not find: ${answer.reason ?? 'no reason was given'}`, group: 'system', run: findNeed }];
+    if (answer.found.length === 0) return [{ id: 'found.none', title: `Nothing found for “${need}”`, group: 'system', run: () => undefined }];
+    return answer.found.map((found) => ({
+      id: `found.${found.id}`,
+      title: `${found.does.charAt(0).toUpperCase()}${found.does.slice(1)}${found.runsIn === 'daemon' ? '' : ' (in the terminal app or the Agent)'}`,
+      group: 'system' as const,
+      run: () => onRunCapability(found.id),
+    }));
+  }, [answer, findNeed, need, onRunCapability]);
   // Matching runs here on every keystroke: title, id, group and keywords, no request.
   const visibleCommands = useMemo(
-    () => (searching ? classicCommandIndices(query, commands).map((index) => commands[index]!) : commands),
-    [commands, query, searching],
+    () => (searching ? [...classicCommandIndices(query, commands).map((index) => commands[index]!), ...foundRows] : commands),
+    [commands, query, searching, foundRows],
   );
   const sections = useMemo(() => buildPaletteSections(visibleCommands), [visibleCommands]);
   // The keyboard order is the on-screen order: section by section.
@@ -83,6 +139,9 @@ export function CommandPalette({ open, onClose, initialQuery = '' }: CommandPale
   const runCommand = useCallback(
     (cmd: CommandDef) => {
       if (!open || !ordered.includes(cmd)) return;
+      // The find's own rows stay in the palette: asking fills it with what was found.
+      if (cmd.id === FIND_ROW || cmd.id === 'found.failed') { cmd.run(); return; }
+      if (cmd.id === 'found.reading' || cmd.id === 'found.none') return;
       onClose();
       cmd.run();
     },

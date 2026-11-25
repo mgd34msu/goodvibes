@@ -94,6 +94,7 @@ import { ProjectIndex } from '../state/project-index.js';
 import { HookActivityTracker } from '../hooks/activity.js';
 import { HookDispatcher, createHookWorkbench, type HookWorkbench } from '../hooks/index.js';
 import { PluginManager } from '../plugins/manager.js';
+import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
 import { SessionManager } from '../sessions/manager.js';
 import { CrossSessionTaskRegistry } from '../sessions/orchestration/index.js';
 import { McpRegistry } from '../mcp/registry.js';
@@ -627,7 +628,9 @@ function composeClientRuntimeServices(
 
   const pluginManager = new PluginManager({
     pathOptions: { cwd: shellPaths.workingDirectory, homeDir: shellPaths.homeDirectory },
-    stateFilePath: shellPaths.resolveUserPath(surfaceRoot, 'plugins.json'),
+    // One plugin state for every program: the daemon's (`~/.goodvibes/tui/plugins.json`), which it manages; an Agent's
+    // own earlier file is carried into it once by the daemon (plugins/state-carry-forward.ts) and left as it was.
+    stateFilePath: shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'plugins.json'),
     // One trust decision per plugin for every app on this machine.
     trustFilePath: shellPaths.resolveUserPath('plugin-trust.json'),
     runtimeBus: options.runtimeBus,

@@ -7,7 +7,8 @@ import type { MemoryAccess } from '@goodvibes/engine/platform/platform/runtime/m
 import { AgentPersonaRegistry, type AgentPersonaRecord } from './persona-registry.js';
 import { AgentNoteRegistry, type AgentNoteRecord } from './note-registry.js';
 import { AgentRoutineRegistry, type AgentRoutineRecord } from './routine-registry.js';
-import { AgentSkillRegistry, formatSkillDeleteBundleLines, type AgentSkillBundleRecord, type AgentSkillRecord } from './skill-registry.js';
+import { AgentSkillRegistry, type AgentSkillBundleRecord, type AgentSkillRecord } from './skill-registry.js';
+import type { DaemonCapabilityAnswer } from './capability-tools.js';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from './record-labels.js';
 import { assertActorMayEnable, assertActorMayMarkReviewed } from './review-authority.js';
 import { formatRefusal, readRefusal } from '@goodvibes/engine/errors';
@@ -281,7 +282,31 @@ function handlePersona(shellPaths: ShellPathService, action: AgentLocalRegistryA
   throw new Error(invalidAction(action, 'personas', 'persona'));
 }
 
-function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
+/** A daemon capability run for this tool call (capability-tools.ts `daemonCapabilityRunner`). */
+type SkillCapabilityRun = (id: string, inputs: Readonly<Record<string, string>>) => Promise<DaemonCapabilityAnswer>;
+
+/**
+ * A skill or bundle write, made by the daemon's skills capability (the one the Skills tab runs), so every program's
+ * list follows it. The call's own checks hold before it is sent, and the store's change is accepted as this call's.
+ */
+async function skillWrite(run: SkillCapabilityRun, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, id: string, inputs: Readonly<Record<string, string | undefined>>, kind: 'skill' | 'bundle'): Promise<string> {
+  effects.assertCurrent();
+  const given = Object.fromEntries(Object.entries(inputs).filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1] !== ''));
+  const answer = await run(id, given);
+  if (!answer.ok) throw new Error(answer.error);
+  effects.onEffect();
+  const facts = answer.data[kind];
+  const recordId = typeof facts === 'string' ? facts : facts !== null && typeof facts === 'object' && typeof (facts as Record<string, unknown>)['id'] === 'string' ? (facts as Record<string, unknown>)['id'] as string : '';
+  return [answer.text || `${id}: done.`, ...(recordId ? [`  id ${recordId}`] : [])].join('\n');
+}
+
+/** A list argument as a capability's comma-separated input; undefined when it was not given. */
+function listInput(value: unknown): string | undefined {
+  return value === undefined ? undefined : readStringList(value).join(', ');
+}
+
+/** Skill and bundle reads stay in this process (the same files); every write goes through the daemon's capabilities. */
+async function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, run: SkillCapabilityRun): Promise<string> {
   const registry = AgentSkillRegistry.fromShellPaths(shellPaths, effects);
   if (action === 'list') return listSkills(registry.list(), 'Agent-local skills');
   if (action === 'search') return listSkills(registry.search(readString(args.query)), 'Agent-local skills search');
@@ -300,22 +325,16 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
   }
   if (action === 'create') {
     if (args.enabled === true) assertActorMayEnable('model', 'skill', requireName(args), 'fresh');
-    const skill = registry.create({
+    return skillWrite(run, effects, 'my-skills.create', {
       name: requireName(args),
       description: requireDescription(args),
       procedure: requireTextField(args.procedure, 'procedure'),
-      triggers: readStringList(args.triggers),
-      tags: readStringList(args.tags),
-      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands),
-      enabled: args.enabled === true,
-      source: 'agent',
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    return [
-      `Created Agent-local skill ${skill.id}`,
-      `  id ${skill.id}`,
-      `  name ${skill.name}`,
-    ].join('\n');
+      triggers: listInput(args.triggers),
+      tags: listInput(args.tags),
+      env: listInput(args.requiresEnv),
+      commands: listInput(args.requiresCommands),
+      enabled: args.enabled === true ? 'yes' : 'no',
+    }, 'skill');
   }
   if (action === 'update') {
     const id = requireId(args);
@@ -325,59 +344,41 @@ function handleSkill(shellPaths: ShellPathService, action: AgentLocalRegistryAct
     requireUpdateFields('skill', { name: args.name, description: args.description, procedure: args.procedure, triggers: args.triggers, tags: args.tags,
       requiresEnv: args.requiresEnv, requiresCommands: args.requiresCommands, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
     const fieldsGiven = [args.name, args.description, args.procedure, args.triggers, args.tags, args.requiresEnv, args.requiresCommands].some((value) => value !== undefined);
-    const skill = updateOrSetEnabled(fieldsGiven, args.enabled, (enabled) => registry.update(id, {
-      name: readString(args.name) || undefined,
-      description: readString(args.description) || undefined,
-      procedure: readString(args.procedure) || undefined,
-      triggers: args.triggers === undefined ? undefined : readStringList(args.triggers),
-      tags: args.tags === undefined ? undefined : readStringList(args.tags),
-      requirements: buildAgentLocalRequirements(args.requiresEnv, args.requiresCommands, registry.get(id)?.requirements),
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-      enabled,
-    }), (enabled) => registry.setEnabled(id, enabled));
-    return [
-      'Updated Agent-local skill',
-      `  id ${skill.id}`,
-      `  name ${skill.name}`,
-    ].join('\n');
+    const lines: string[] = [];
+    if (fieldsGiven) {
+      lines.push(await skillWrite(run, effects, 'my-skills.update', {
+        skill: id,
+        name: readString(args.name) || undefined,
+        description: readString(args.description) || undefined,
+        procedure: readString(args.procedure) || undefined,
+        triggers: listInput(args.triggers),
+        tags: listInput(args.tags),
+        env: listInput(args.requiresEnv),
+        commands: listInput(args.requiresCommands),
+      }, 'skill'));
+    }
+    if (typeof args.enabled === 'boolean') lines.push(await skillWrite(run, effects, args.enabled ? 'my-skills.enable' : 'my-skills.disable', { skill: id }, 'skill'));
+    return lines.join('\n');
   }
   if (action === 'enable' || action === 'disable') {
     if (action === 'enable') assertActorMayEnable('model', 'skill', requireId(args), registry.get(requireId(args))?.reviewState);
-    const skill = registry.setEnabled(requireId(args), action === 'enable');
-    return [
-      `${action === 'enable' ? 'Enabled' : 'Disabled'} Agent-local skill`,
-      `  id ${skill.id}`,
-      `  name ${skill.name}`,
-    ].join('\n');
+    return skillWrite(run, effects, action === 'enable' ? 'my-skills.enable' : 'my-skills.disable', { skill: requireId(args) }, 'skill');
   }
   if (action === 'review') {
+    // The owner's own act: refused here with what the owner does instead (nothing is sent).
     assertActorMayMarkReviewed('model', 'skill', requireId(args));
-    const skill = registry.markReviewed(requireId(args));
-    return [
-      'Reviewed Agent-local skill',
-      `  id ${skill.id}`,
-    ].join('\n');
+    return skillWrite(run, effects, 'my-skills.review', { skill: requireId(args) }, 'skill');
   }
   if (action === 'stale') {
-    const skill = registry.markStale(requireId(args), readString(args.reason));
-    return [
-      'Marked Agent-local skill stale',
-      `  id ${skill.id}`,
-    ].join('\n');
+    return skillWrite(run, effects, 'my-skills.stale', { skill: requireId(args), reason: readString(args.reason) || 'marked out of date by the Agent' }, 'skill');
   }
   if (action === 'delete') {
-    const deleted = registry.deleteSkill(requireId(args));
-    return [
-      'Deleted Agent-local skill',
-      `  id ${deleted.skill.id}`,
-      `  name ${deleted.skill.name}`,
-      ...formatSkillDeleteBundleLines(deleted),
-    ].join('\n');
+    return skillWrite(run, effects, 'my-skills.delete', { skill: requireId(args) }, 'skill');
   }
   throw new Error(invalidAction(action, 'skills', 'skill'));
 }
 
-function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>): string {
+async function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegistryAction, args: AgentLocalRegistryToolArgs, effects: ReturnType<typeof createAgentLocalRegistryWriteLifecycle>, run: SkillCapabilityRun): Promise<string> {
   const registry = AgentSkillRegistry.fromShellPaths(shellPaths, effects);
   if (action === 'list') return listSkillBundles(registry.listBundles(), 'Agent-local skill bundles');
   if (action === 'search') return listSkillBundles(registry.searchBundles(readString(args.query)), 'Agent-local skill bundles search');
@@ -394,19 +395,12 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
   }
   if (action === 'create') {
     if (args.enabled === true) assertActorMayEnable('model', 'skill bundle', requireName(args), 'fresh');
-    const bundle = registry.createBundle({
+    return skillWrite(run, effects, 'my-skills.bundle-create', {
       name: requireName(args),
       description: requireDescription(args),
-      skillIds: readStringList(args.skillIds ?? args.skills),
-      enabled: args.enabled === true,
-      source: 'agent',
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-    });
-    return [
-      `Created Agent-local skill bundle ${bundle.id}`,
-      `  id ${bundle.id}`,
-      `  name ${bundle.name}`,
-    ].join('\n');
+      skills: readStringList(args.skillIds ?? args.skills).join(', '),
+      enabled: args.enabled === true ? 'yes' : 'no',
+    }, 'bundle');
   }
   if (action === 'update') {
     const id = requireId(args);
@@ -414,50 +408,31 @@ function handleSkillBundle(shellPaths: ShellPathService, action: AgentLocalRegis
       [args.name, args.description, args.skillIds, args.skills].some((value) => value !== undefined) ? 'fresh' : registry.getBundle(id)?.reviewState);
     requireUpdateFields('skill bundle', { name: args.name, description: args.description, skillIds: args.skillIds ?? args.skills, enabled: typeof args.enabled === 'boolean' ? args.enabled : undefined });
     const fieldsGiven = [args.name, args.description, args.skillIds, args.skills].some((value) => value !== undefined);
-    const bundle = updateOrSetEnabled(fieldsGiven, args.enabled, (enabled) => registry.updateBundle(id, {
-      name: readString(args.name) || undefined,
-      description: readString(args.description) || undefined,
-      skillIds: args.skillIds === undefined && args.skills === undefined ? undefined : readStringList(args.skillIds ?? args.skills),
-      provenance: readString(args.provenance) || AGENT_TOOL_PROVENANCE,
-      enabled,
-    }), (enabled) => registry.setBundleEnabled(id, enabled));
-    return [
-      'Updated Agent-local skill bundle',
-      `  id ${bundle.id}`,
-      `  name ${bundle.name}`,
-    ].join('\n');
+    const lines: string[] = [];
+    if (fieldsGiven) {
+      lines.push(await skillWrite(run, effects, 'my-skills.bundle-update', {
+        bundle: id,
+        name: readString(args.name) || undefined,
+        description: readString(args.description) || undefined,
+        skills: args.skillIds === undefined && args.skills === undefined ? undefined : readStringList(args.skillIds ?? args.skills).join(', '),
+      }, 'bundle'));
+    }
+    if (typeof args.enabled === 'boolean') lines.push(await skillWrite(run, effects, args.enabled ? 'my-skills.bundle-enable' : 'my-skills.bundle-disable', { bundle: id }, 'bundle'));
+    return lines.join('\n');
   }
   if (action === 'enable' || action === 'disable') {
     if (action === 'enable') assertActorMayEnable('model', 'skill bundle', requireId(args), registry.getBundle(requireId(args))?.reviewState);
-    const bundle = registry.setBundleEnabled(requireId(args), action === 'enable');
-    return [
-      `${action === 'enable' ? 'Enabled' : 'Disabled'} Agent-local skill bundle`,
-      `  id ${bundle.id}`,
-      `  name ${bundle.name}`,
-    ].join('\n');
+    return skillWrite(run, effects, action === 'enable' ? 'my-skills.bundle-enable' : 'my-skills.bundle-disable', { bundle: requireId(args) }, 'bundle');
   }
   if (action === 'review') {
     assertActorMayMarkReviewed('model', 'skill bundle', requireId(args));
-    const bundle = registry.markBundleReviewed(requireId(args));
-    return [
-      'Reviewed Agent-local skill bundle',
-      `  id ${bundle.id}`,
-    ].join('\n');
+    return skillWrite(run, effects, 'my-skills.bundle-review', { bundle: requireId(args) }, 'bundle');
   }
   if (action === 'stale') {
-    const bundle = registry.markBundleStale(requireId(args), readString(args.reason));
-    return [
-      'Marked Agent-local skill bundle stale',
-      `  id ${bundle.id}`,
-    ].join('\n');
+    return skillWrite(run, effects, 'my-skills.bundle-stale', { bundle: requireId(args), reason: readString(args.reason) || 'marked out of date by the Agent' }, 'bundle');
   }
   if (action === 'delete') {
-    const bundle = registry.deleteBundle(requireId(args));
-    return [
-      'Deleted Agent-local skill bundle',
-      `  id ${bundle.id}`,
-      `  name ${bundle.name}`,
-    ].join('\n');
+    return skillWrite(run, effects, 'my-skills.bundle-delete', { bundle: requireId(args) }, 'bundle');
   }
   throw new Error(invalidAction(action, 'skill bundles', 'skill_bundle'));
 }
@@ -566,7 +541,10 @@ function handleRoutine(shellPaths: ShellPathService, action: AgentLocalRegistryA
   throw new Error(invalidAction(action, 'routines', 'routine'));
 }
 
-export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess): Tool {
+/** How the tool runs a daemon capability (capability-tools.ts `daemonCapabilityRunner`): skill and bundle writes go there. */
+export type AgentLocalRegistryCapabilityRun = (id: string, inputs: Readonly<Record<string, string>>, signal?: AbortSignal) => Promise<DaemonCapabilityAnswer>;
+
+export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess, runCapability: AgentLocalRegistryCapabilityRun): Tool {
   return {
     definition: {
       name: 'agent_local_registry',
@@ -641,8 +619,10 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
         const effects = createAgentLocalRegistryWriteLifecycle(rawArgs, options);
         if (args.domain === 'note') return registryOutput(handleNote(shellPaths, args.action, args, effects));
         if (args.domain === 'persona') return registryOutput(handlePersona(shellPaths, args.action, args, effects));
-        if (args.domain === 'skill') return registryOutput(handleSkill(shellPaths, args.action, args, effects));
-        if (args.domain === 'skill_bundle') return registryOutput(handleSkillBundle(shellPaths, args.action, args, effects));
+        // Skill and bundle writes are the daemon's capabilities (the Skills tab's), so every program's list follows them.
+        const run: SkillCapabilityRun = (id, inputs) => runCapability(id, inputs, options?.signal);
+        if (args.domain === 'skill') return registryOutput(await handleSkill(shellPaths, args.action, args, effects, run));
+        if (args.domain === 'skill_bundle') return registryOutput(await handleSkillBundle(shellPaths, args.action, args, effects, run));
         return registryOutput(handleRoutine(shellPaths, args.action, args, effects));
       } catch (error) {
         // An admission problem or a cancelled call is rethrown for the tool runtime to report.
@@ -654,7 +634,7 @@ export function createAgentLocalRegistryTool(shellPaths: ShellPathService, memor
   };
 }
 
-export function registerAgentLocalRegistryTool(registry: ToolRegistry, shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess): void {
-  registry.register(createAgentLocalRegistryTool(shellPaths, memoryRegistry, memorySpine),
+export function registerAgentLocalRegistryTool(registry: ToolRegistry, shellPaths: ShellPathService, memoryRegistry: MemoryRegistry, memorySpine: MemoryAccess, runCapability: AgentLocalRegistryCapabilityRun): void {
+  registry.register(createAgentLocalRegistryTool(shellPaths, memoryRegistry, memorySpine, runCapability),
     { inputProjection: createAgentLocalRegistryInputProjector(shellPaths, memoryRegistry, memorySpine) });
 }

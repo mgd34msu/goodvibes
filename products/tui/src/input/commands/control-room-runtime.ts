@@ -1,11 +1,9 @@
-import type { CommandRegistry, CommandContext } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
 import { requireReadModels } from './runtime-services.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { AgentsHost } from '@goodvibes/engine/terminal-shell/agents-command';
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { doAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
 
-/** Work contracts and stopping agents for `/agents` (terminal-shell/agents-command.ts) in this app. */
+/** Work contracts and stopping agents (platform builtin/agents.ts, through terminal-shell/agents-command.ts) in this app. */
 export function contractsHost(): Exclude<AgentsHost<CommandContext>['contracts'], { readonly unavailable: string }> {
   const manager = (ctx: CommandContext) => {
     const agents = ctx.ops.agentManager;
@@ -28,7 +26,6 @@ export function contractsHost(): Exclude<AgentsHost<CommandContext>['contracts']
         `  units: ${contract.units.size}`,
         ...[...contract.units.values()].slice(0, 12).map((unit) => `  - ${unit.id} ${unit.role ?? 'unit'} ${unit.status}${unit.title ? ` ${unit.title}` : ''}`),
         ...(contract.reason ? [`  reason: ${contract.reason}`] : []),
-        `  manage it: /workstream status ${contract.id}`,
       ].join('\n');
     },
     running(ctx) {
@@ -44,28 +41,5 @@ export function contractsHost(): Exclude<AgentsHost<CommandContext>['contracts']
       if (cancelled.length === 0) throw commandRefusal(`Agent ${agentId} and the agents it started were not running; nothing was stopped.`);
       return `Stopped ${cancelled.length} agent${cancelled.length === 1 ? '' : 's'}: ${agentId} and the agents it started.`;
     },
-    openView(ctx) {
-      if (!ctx.openOrchestrationView) throw commandRefusal('The work contracts view is not available in this session.', '/agents contract shows the newest contract.');
-      ctx.openOrchestrationView();
-    },
   };
-}
-
-export function registerControlRoomRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(defineCommand<CommandContext>({
-    name: 'communication',
-    title: 'Agent communication',
-    summary: 'The routes agents talk to each other over, and their recent messages',
-    group: 'Agents',
-    actions: [doAction<CommandContext>({
-      id: 'open', label: 'Open agent communication', word: '',
-      sentence: 'Opens the view of the routes agents talk over and their recent messages.',
-      operator: { terminalOnly: 'it opens a view of this terminal' },
-      async run(_values, ctx) {
-        if (!ctx.openCommunicationView) throw commandRefusal('The Agents view is not available in this runtime.');
-        ctx.openCommunicationView();
-        return undefined;
-      },
-    })],
-  }));
 }

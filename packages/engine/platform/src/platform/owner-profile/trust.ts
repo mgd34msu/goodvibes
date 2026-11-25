@@ -212,7 +212,7 @@ function describeProfileTaint(findings: readonly TaintFinding[]): string | undef
   if (first === undefined) return undefined;
   const how = first.kind === 'exact-value' ? 'came word for word from' : 'was taken from';
   return `Not saved to your profile: this ${how} ${first.surface} (${first.origin}), which arrived from outside. `
-    + 'If it is right, save it yourself in Settings › Account › Owner profile, or with /about-me.';
+    + 'If it is right, save it yourself in Settings › Account › Owner profile, or in Memory and knowledge, About you.';
 }
 
 /**
@@ -245,7 +245,7 @@ export async function evaluateProfileWrite(input: ProfileWriteAttempt, options: 
     current();
     if (assessment.kind === 'incomplete') {
       return refuse(`Refused ${describeTarget(input.fieldId)}: ${describeUncheckable(assessment.reason)} `
-        + 'Nothing was saved. You can add it yourself: Settings › Account › Owner profile, or /about-me.');
+        + 'Nothing was saved. You can add it yourself: Settings › Account › Owner profile, or Memory and knowledge, About you.');
     }
     if (assessment.kind === 'tainted') {
       return refuse(describeProfileTaint(assessment.findings) ?? describeContentTaint(describeTarget(input.fieldId), assessment.findings), assessment.findings);

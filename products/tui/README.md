@@ -43,11 +43,11 @@ After that, reads, searches, edits inside the workspace and commands a saved rul
 The other modes:
 
 - `ask-me`: Jev reads each judgment call's risk; calls it reads as critical, irreversible or security-weakening ask you, and the rest run
-- `just-vibes`: nothing interrupts you; anything that needs you is held and listed at the end of the run, and `/held` approves or sets it aside
+- `just-vibes`: nothing interrupts you; anything that needs you is held and listed at the end of the run, and Waiting for you (the menu) approves or sets it aside
 - `yolo` runs every action without approval prompts, except a change asked for from a channel (authentication, containment, secret storage and payment limits still apply, and an act only you perform is refused to the model)
 - `plan` allows read-only tools and refuses every mutating or exec call
 
-`/decisions` lists what Jev decided for you, with undo, never, always and ask. An explicit `permissions.tools.<name>` set to `deny` blocks that tool. Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` as `ask-me`, `safe-jev` and `auto` as `jev-decides`, `allow-all` as `yolo`. How the mode combines with the decision model setting is in [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
+Waiting for you, Decisions lists what Jev decided for you, with undo, never, always and ask. An explicit `permissions.tools.<name>` set to `deny` blocks that tool. Older saved values still load: `safe-owner`, `prompt`, `normal`, `accept-edits` and `custom` as `ask-me`, `safe-jev` and `auto` as `jev-decides`, `allow-all` as `yolo`. How the mode combines with the decision model setting is in [decision-model policies](../../docs/decision-model-policy.md#how-much-you-are-asked).
 
 `Shift+Tab` cycles the mode for the current session only, and asks before switching to `yolo`; the saved default is set in `/settings` (When GoodVibes asks), and `--just-vibes` or `--yolo` picks one for a single launch. `/plan` toggles plan mode directly.
 
@@ -93,7 +93,7 @@ Press `?` on an empty prompt, `Ctrl+P` or `/help` for one searchable list of eve
 | `Ctrl+X` | Inside an agent or process view: stop it (press twice to confirm) |
 | `Ctrl+C` | Clear input, cancel a running turn. Press twice to quit |
 
-Every key the program acts on can be changed, in the Keys place (`Ctrl+G` `m`, then System) or in `~/.goodvibes/tui/keybindings.json`, `Tab`, `Enter`, `Esc` and the arrows included; `/help keys` shows what is currently bound. Each place's own letters are keys of the table too, listed in the Keys place under the place's name. Two keys are fixed: `?` (help) and `@` (file picker). The permission-mode cycle (`Shift+Tab`) is the rebindable `cycle-permission-mode`. The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
+Every key the program acts on can be changed, in the System place's Keys tab (`Ctrl+G` `m`, then System) or in `~/.goodvibes/tui/keybindings.json`, `Tab`, `Enter`, `Esc` and the arrows included; `/help keys` shows what is currently bound. Each place's own letters are keys of the table too, listed in the Keys place under the place's name. Two keys are fixed: `?` (help) and `@` (file picker). The permission-mode cycle (`Shift+Tab`) is the rebindable `cycle-permission-mode`. The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
 
 ---
 
@@ -204,10 +204,12 @@ number, CVV or name).
 
 ### Work on the host
 
-`/work open` opens the work view: each task with where it stands and whether it
-is checked done, and on its key row `s` start, `i` check, `c` stop, `r` resume
-after a stop. `/work new` asks for new work with what done means. Opening the view
-never starts anything. How a request whose answer was lost is recovered, and the
+The Work place (the menu's "Work and agents" row, or `/work`) shows your work,
+held and run by the daemon: each piece with where it stands, what done means, its
+plan as steps and its results, and the keys that apply to it (`s` start, `x` stop,
+`g` go on, `a` answer what it asks, `t` run a failed step again, `b` what it may
+spend, `v` check). `n` asks for new work with what done means; the Checklist list
+is the project's running list of things to do. Opening it never starts anything. How a request whose answer was lost is recovered, and the
 limits on a request, are in [docs/native-work.md](docs/native-work.md).
 
 ### Conversation input
@@ -217,27 +219,15 @@ conversation model. Jev does not approve, reject or reroute these messages.
 Messages submitted during a response are queued. Composer file references,
 paste content and supported images are passed through to the conversation.
 
-### Terminal workstream intake
+### Asking for work in your own words
 
-`/workstream start <request>` explicitly submits to native work intake.
-Jev determines the native outcome; the command name does not force
-work admission. Admitted work enters the existing native execution flow, while an
-ordinary turn requires its durable dispatch claim and native turn permit. There is
-no legacy runner fallback when native intake, the paired host or the journal is
-unavailable.
-
-The terminal captures the command before trimming, splitting or source expansion.
-The command tokens and one whitespace separator after `start` are syntax (CRLF
-counts as one separator). Everything after that separator is the exact request,
-including extra leading spaces, trailing whitespace, line breaks and Unicode.
-File/context references and folded paste/image markers remain declared unsupported
-sources; they are not expanded into replacement owner authority. Generic, model
-and nested command invocations cannot submit a new owner request.
-
-`/work intake` and its `intake-retry`, `intake-resume` and `intake-cancel`
-show and recover input waiting for the host to admit it (see
-[docs/native-work.md](docs/native-work.md)). `/workstream list`, `status`, `stop`
-and `answer` address the older workstreams; use `/work` for work on the host.
+"Ask in your own words" in the Work place sends your exact words to the host's
+intake: the host decides whether they are an answer or a piece of work, and
+admitted work runs on the daemon. Your words are kept exactly as typed, including
+extra leading spaces, trailing whitespace, line breaks and Unicode; a model or a
+script cannot send a request in your name. Input waiting for the host to admit it
+can be seen, sent again, gone on with or dropped (see
+[docs/native-work.md](docs/native-work.md)).
 
 ### TUI host credentials
 

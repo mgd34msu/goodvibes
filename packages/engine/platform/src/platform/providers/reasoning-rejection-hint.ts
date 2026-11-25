@@ -9,5 +9,5 @@ const REASONING_PARAMETER = /reasoning|thinking|effort|budget_tokens/i;
 export function reasoningRejectionHint(status: number, providerText: string, effort: string | undefined): string {
   if (status !== 400 || effort === undefined || !REASONING_PARAMETER.test(providerText)) return '';
   return ` Reasoning effort '${effort}' is the likely cause, this model may not accept that level.`
-    + ' Choose another with /effort, or clear provider.reasoningEffort to use the model default.';
+    + ' Choose another with "Choose how hard the model thinks" in This conversation, or clear provider.reasoningEffort to use the model default.';
 }

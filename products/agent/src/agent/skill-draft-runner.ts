@@ -1,3 +1,4 @@
+import { dirname, join } from 'node:path';
 import { ToolInputProjectionError } from '@goodvibes/engine/platform/platform/tools';
 import { readJsonStore, runStoreFileUpdateSync, writeJsonStore, type JsonStoreSpec } from '@goodvibes/engine/terminal-shell/agent-turn/store-file';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
@@ -70,9 +71,9 @@ export function assertSkillDraftRunResultCurrent(
   options.assertCurrent?.();
 }
 
-/** The ledger sits beside the skill store: `.../skills/skill-draft-ledger.json`. */
+/** The ledger sits beside the skill library file: `~/.goodvibes/skills/skill-draft-ledger.json`. */
 function ledgerPathFor(skillStore: string): string {
-  return skillStore.replace(/skills\.json$/, 'skill-draft-ledger.json');
+  return join(dirname(skillStore), 'skill-draft-ledger.json');
 }
 
 // ---------------------------------------------------------------------------

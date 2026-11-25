@@ -12,17 +12,17 @@ import { activeTheme } from './theme.js';
 
 /**
  * The mid-turn message queue rendered as an EDITABLE list. Each still-undelivered
- * message shows a 1-based number so it can be named to `/queue edit <n> …` /
- * `/queue delete <n>` (the platform editQueuedMessage / deleteQueuedMessage verbs). A
- * delivered message has already left the queue, so the list only ever shows what
- * is still editable, delivery is immutability, made visible.
+ * message shows a 1-based number, the one the queue's controls in This conversation
+ * name it by (queue.edit, queue.delete: the platform editQueuedMessage /
+ * deleteQueuedMessage verbs). A delivered message has already left the queue, so the
+ * list only ever shows what is still editable, delivery is immutability, made visible.
  */
 export function renderQueuedMessageList(width: number, items: readonly { readonly id: string; readonly text: string }[]): Line[] {
   if (items.length === 0) return [];
   const t = activeUiTones();
   const bodyBg = activeTheme().collapsedBodyBg;
   const lines: Line[] = [];
-  const header = `${items.length} queued: /queue edit·delete until delivered`;
+  const header = `${items.length} queued: change or take one back in This conversation until it is sent`;
   lines.push(...renderConversationFragment(header, width, { prefix: ' ⧗ ', prefixFg: t.state.reasoning, text: t.fg.dim, bodyBg }));
   items.forEach((item, index) => {
     lines.push(...renderConversationFragment(item.text, width, { prefix: `   ${index + 1}. `, prefixFg: t.state.reasoning, text: t.fg.dim, bodyBg }));

@@ -1,12 +1,13 @@
 /**
- * `/intelligence install <file|language>`: the owner's explicit action that
+ * Installing a language server (the code capability `intelligence.install`;
+ * Code and changes, Code intelligence): the owner's explicit action that
  * installs a language server into the user's GoodVibes bin directory. A code
- * lookup never installs one; its "no server" answer names this command, so
+ * lookup never installs one; its "no server" answer names this action, so
  * both terminal apps run the same install and print the same result.
  */
 import type { LanguageServerInstallOutcome } from '@goodvibes/engine/platform/platform/intelligence';
 
-export const LANGUAGE_SERVER_INSTALL_USAGE = '/intelligence install <file|language>';
+export const LANGUAGE_SERVER_INSTALL_USAGE = 'Code and changes, Code intelligence: "install a language server", for a language or a file of it';
 
 /** What the install needs from the app: where to print, how to read a path, and a hold on the workspace's code intelligence. */
 export interface LanguageServerInstallDeps {

@@ -27,10 +27,20 @@ export interface DaemonCapabilityBinding<Ctx> {
   readonly caller: (ctx: Ctx) => CapabilityCaller;
 }
 
-interface CapabilityAnswer {
+export interface CapabilityAnswer {
   readonly text?: string | undefined;
   readonly detail?: string | undefined;
   readonly data?: Readonly<Record<string, unknown>> | undefined;
+  /** The value the person must see once (types.ts `reveals`), returned only to the person who asked. */
+  readonly reveal?: CapabilityRevealed | undefined;
+}
+
+/** A revealed value with what its pane says about it. */
+export interface CapabilityRevealed {
+  readonly label: string;
+  readonly note: string;
+  readonly value: string;
+  readonly qr?: string | undefined;
 }
 
 /** A daemon refusal in the person's words: the method's prefix taken off, the daemon's own next step kept. */
@@ -56,6 +66,8 @@ function describedFrom<Ctx>(definition: CapabilityDefinition<never>): Omit<Actio
     ...(definition.ownerOnly ? { ownerOnly: definition.ownerOnly } : {}),
     ...(definition.undoneBy ? { undoneBy: definition.undoneBy } : {}),
     ...(definition.button ? { button: definition.button } : {}),
+    ...(definition.asksItself ? { asksItself: definition.asksItself } : {}),
+    ...(definition.reveals ? { reveals: definition.reveals } : {}),
     example: definition.example,
   };
 }
@@ -86,8 +98,62 @@ export function daemonCapabilityAction<Ctx extends CommandActionContext>(
       fields: { id: `=${JSON.stringify(id)}`, ...Object.fromEntries(definition.inputs.map((input) => [`inputs.${input.id}`, input.id])) },
     },
     async run(values, ctx) {
+      // What this program does itself around the daemon's change (a plugin stopped here before it is switched off, started here after).
+      const around = PROGRAM_SIDE.get(id);
+      await around?.before?.(values, ctx);
       const answer = await runDaemonCapability(id, values, ctx, binding);
+      await around?.after?.(values, ctx);
       return answer.detail ?? '';
+    },
+  };
+}
+
+/** What the program holding the conversation does itself, before or after a daemon capability changed something it runs. */
+export interface ProgramSide {
+  readonly before?: ((values: ActionValues, ctx: CommandActionContext) => Promise<void> | void) | undefined;
+  readonly after?: ((values: ActionValues, ctx: CommandActionContext) => Promise<void> | void) | undefined;
+}
+const PROGRAM_SIDE = new Map<string, ProgramSide>();
+
+/**
+ * Name what this program does around a daemon capability, wherever its action
+ * runs from here (a typed line, a place, a form): the daemon keeps the thing,
+ * and the program starts or stops what it runs of it. A model's or a script's
+ * call through the daemon does not reach it; that program applies the change
+ * the next time it starts the thing.
+ */
+export function programSideOf(id: string, side: ProgramSide): void {
+  PROGRAM_SIDE.set(id, side);
+}
+
+/**
+ * The words of a capability defined in the platform (label, word, inputs, sentence, risk, ...), for a slash action
+ * that keeps its own `run` and `operator` while its command still carries it: the typed line, the form, the web
+ * UI's sheet and find then read one set of words.
+ */
+export function capabilityWords<Ctx>(definition: Omit<CapabilityDefinition<never>, 'run'>): Omit<ActionDescription<Ctx>, 'run' | 'operator'> {
+  return describedFrom<Ctx>(definition as CapabilityDefinition<never>);
+}
+
+/**
+ * The action of a capability that runs through its own daemon method (builtin/method-capability.ts), for a place
+ * whose capability no slash command carries: it asks the daemon (`capabilities.run`, which runs that method), as a
+ * person's request unless a model ran it, and says what the daemon answered.
+ */
+export function methodCapabilityAction<Ctx extends CommandActionContext>(
+  definition: Omit<CapabilityDefinition<never>, 'run'>,
+  binding: DaemonCapabilityBinding<Ctx>,
+): ActionDescription<Ctx> {
+  const id = definition.capability.id;
+  return {
+    ...describedFrom<Ctx>(definition as CapabilityDefinition<never>),
+    operator: {
+      method: CAPABILITY_RUN_METHOD_ID,
+      fields: { id: `=${JSON.stringify(id)}`, ...Object.fromEntries(definition.inputs.map((input) => [`inputs.${input.id}`, input.id])) },
+    },
+    async run(values, ctx) {
+      const answer = await runDaemonCapability(id, values, ctx, binding);
+      return answer.detail ?? answer.text ?? '';
     },
   };
 }

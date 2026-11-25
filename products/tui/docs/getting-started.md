@@ -23,8 +23,8 @@ products. Updates and data-preserving uninstall use the installer you installed 
 
 A missing `rust-analyzer` or `gopls`
 is never installed behind your back: a code lookup says which server is missing
-and how to install it, and `/intelligence install <file|language>` installs it
-into your GoodVibes bin directory when you ask.
+and how to install it, and "install a language server" (Code and changes, Code
+intelligence) installs it into your GoodVibes bin directory when you ask.
 
 ## First run
 
@@ -218,7 +218,7 @@ These slash commands are the fastest way to get oriented once the TUI is running
 | `/model` | Your model and the others you can use, switching, and backup models |
 | `/settings` | The settings screen; every setting is shown by a plain name with its key beside it |
 | `/setup` | Setting GoodVibes up, one topic at a time |
-| `/knowledge status` | The knowledge runtime's current posture |
+| `/memory` | Memory and knowledge: what the project remembers, your knowledge, what is known about you, your templates |
 | `/plugin` and `/marketplace` | Your plugins, and the curated marketplace |
 | `/remote` | Remote peers and node-host runners, if you use them |
 | `/mcp` | Add, edit, remove, reload, and inspect MCP servers while the TUI is running |

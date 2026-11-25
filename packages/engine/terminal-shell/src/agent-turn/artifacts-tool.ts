@@ -772,7 +772,7 @@ export function createAgentArtifactsTool(
           const listed = await formatList(selected, filtered.length, source.length, args, null, executionOptions?.signal);
           const rest = filtered.length - offset - selected.length;
           const text = rest > 0
-            ? `${listed}\nOlder: ${rest} more; read them with agent_artifacts mode:"list" offset:${offset + selected.length} (/artifacts list --from ${offset + selected.length}).`
+            ? `${listed}\nOlder: ${rest} more; read them with agent_artifacts mode:"list" offset:${offset + selected.length} (the artifacts.list capability with from ${offset + selected.length}).`
             : listed;
           executionOptions?.signal?.throwIfAborted();
           return output(`${UNTRUSTED_ARTIFACT_NOTICE}\n${text}`);

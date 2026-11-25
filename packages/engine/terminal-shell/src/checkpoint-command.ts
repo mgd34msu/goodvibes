@@ -4,17 +4,25 @@
  * back to an earlier turn (files, conversation or both). Going back reads the
  * plan, shows it on the Changes preview, asks, and applies exactly the plan it
  * showed: the plan's single-use token is refused when the conversation changed
- * after the preview. What each app can do differently is its policy, read by
- * the actions' `run`; an act an app does not have is refused with the reason.
+ * after the preview. Each action is a control on the conversation
+ * (capabilities/builtin/conversation-controls.ts) run with this app's store,
+ * the same the conversation's list and the model's capability_run reach;
+ * `checkpointsOf` is this app's store as those capabilities take it. What
+ * each app can do differently is its policy; an act an app does not have is
+ * refused with the reason.
  */
 import type { WorkspaceCheckpoint, WorkspaceCheckpointManager } from '@goodvibes/engine/platform/platform/workspace';
 import { getTurnAnchors } from '@goodvibes/engine/platform/platform/rewind';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import {
+  CHECKPOINT_LIST, CHECKPOINT_MAKE, CHECKPOINT_RESTORE, CHECKPOINT_REWIND,
+  type CheckpointServices, type ConversationCheckpoints, type RewindScope,
+} from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
+import { sessionCapabilityAction } from './command-actions/capability-actions.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
-import type { CommandActionContext, FixedChoice } from './command-actions/types.js';
-import { choiceInput, doAction, listInput, readAction, textInput } from './described-command-kit.js';
+import type { CommandActionContext } from './command-actions/types.js';
 import {
   formatCheckpointAge,
   resolveCheckpointRef,
@@ -23,18 +31,15 @@ import {
   type CheckpointCommandContext,
 } from './recovery-commands.js';
 
+export type { RewindScope } from '@goodvibes/engine/platform/platform/capabilities';
+
 export interface CheckpointCommandShape extends CheckpointCommandContext, CommandActionContext {
   readonly renderRequest: () => void;
   readonly workspace: { readonly workspaceCheckpointManager?: WorkspaceCheckpointManager | undefined };
   readonly session: { readonly runtime: { readonly sessionId: string } };
 }
 
-/** What going back to a turn takes back. */
-export type RewindScope = 'files' | 'conversation' | 'both';
-
 export interface CheckpointCommandPolicy<Ctx> {
-  /** Puts the restore receipt where this app keeps such lines (the conversation, or the transcript). */
-  readonly record: (ctx: Ctx, text: string) => void;
   /** Said when there is no checkpoint yet: how this app comes to have one. */
   readonly emptyHint: string;
   /** Makes a checkpoint now, or the reason this app makes none on request. */
@@ -63,7 +68,8 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
 }
 
-const CHECKPOINTS = defineList<CheckpointCommandShape>({
+/** The workspace checkpoints (`checkpoints` in capabilities/builtin/conversation-controls.ts). */
+export const CHECKPOINTS = defineList<CheckpointCommandShape>({
   name: 'checkpoints',
   async read(ctx) {
     const manager = ctx.workspace.workspaceCheckpointManager;
@@ -76,7 +82,8 @@ const CHECKPOINTS = defineList<CheckpointCommandShape>({
   operator: { terminalOnly: 'Checkpoints of this workspace are kept by the terminal app.' },
 });
 
-const TURNS = defineList<CheckpointCommandShape>({
+/** The open conversation's turns (`checkpoint.turns`). */
+export const TURNS = defineList<CheckpointCommandShape>({
   name: 'checkpoint.turns',
   async read(ctx) {
     return [...getTurnAnchors(ctx.session.runtime.sessionId)].reverse().map((turn): ListRow => ({
@@ -86,98 +93,82 @@ const TURNS = defineList<CheckpointCommandShape>({
   operator: { terminalOnly: 'The turns are the open conversation\'s, in the terminal app.' },
 });
 
-const SCOPES: readonly FixedChoice[] = [
-  { value: 'both', label: 'Files and conversation' },
-  { value: 'files', label: 'Files only', help: 'The conversation stays as it is' },
-  { value: 'conversation', label: 'Conversation only', help: 'No file changes' },
-];
+/** This app's checkpoints as the conversation's checkpoint controls take them. */
+export function checkpointsOf<Ctx extends CheckpointCommandShape>(policy: CheckpointCommandPolicy<Ctx>, ctx: Ctx): ConversationCheckpoints {
+  const make = policy.make;
+  const rewind = policy.rewind;
+  return {
+    async list() {
+      const manager = managerOf(ctx);
+      const checkpoints = await listOf(manager);
+      const trimmed = manager.historyTrimmed();
+      const retentionFailure = manager.retentionFailure();
+      const notes = [
+        ...(trimmed ? [`${trimmed.reason} (${trimmed.count} removed ${formatCheckpointAge(trimmed.at)}; the newest is always kept).`] : []),
+        ...(retentionFailure ? [`Automatic retention is failing: ${retentionFailure.error}`] : []),
+      ];
+      if (checkpoints.length === 0) return [`No checkpoints yet. ${policy.emptyHint}`, ...notes].join('\n');
+      // Files-changed counts are not shown per row: each would cost one diff
+      // spawn per checkpoint. A restore loads exactly one diff and shows it.
+      return [
+        `Checkpoints (${checkpoints.length}, newest first):`,
+        ...checkpoints.map((checkpoint, index) => `  ${String(index + 1).padStart(2)}. ${shortCheckpointId(checkpoint.id).padEnd(12)} ${checkpoint.kind.padEnd(9)} ${checkpoint.label}  ${formatCheckpointAge(checkpoint.createdAt)}  ~${formatBytes(checkpoint.sizeBytes)} new`),
+        ...notes,
+        'Put the files back to one with "Put the files back to a checkpoint" in This conversation (the files before it are kept as a checkpoint, and the conversation is unchanged).',
+        ...('refused' in rewind ? [] : ['Go back to an earlier turn, files and conversation, with "Go back to an earlier turn" there.']),
+      ].join('\n');
+    },
+    make: 'refused' in make ? make : async (label) => {
+      let checkpoint: WorkspaceCheckpoint | null;
+      try {
+        checkpoint = await make(ctx, label);
+      } catch (error) {
+        throw commandRefusal(`No checkpoint was made: ${summarizeError(error)}`, undefined, 'NOT_DONE');
+      }
+      return checkpoint
+        ? `Checkpoint ${shortCheckpointId(checkpoint.id)} "${checkpoint.label}" made; it is kept longer than the automatic ones.`
+        : 'Nothing has changed since the last checkpoint, so none was made.';
+    },
+    async restore(ref) {
+      const manager = managerOf(ctx);
+      const resolved = resolveCheckpointRef(await listOf(manager), ref, '"See your checkpoints" in This conversation');
+      if ('error' in resolved) throw commandRefusal(resolved.error, undefined, 'NOT_FOUND');
+      const lines: string[] = [];
+      // What the restore says, its receipt included, is its answer: the line typed prints it, a place shows it, a model reads it.
+      await restoreCheckpointFiles({ ...ctx, print: (text: string) => { lines.push(text); } }, manager, resolved, { yes: false, record: (text) => { lines.push(text); } });
+      return lines.join('\n');
+    },
+    rewind: 'refused' in rewind ? rewind : async (turn, scope) => (await rewind(ctx, { turn, scope })) ?? '',
+  };
+}
 
 const LOCAL = { terminalOnly: 'Checkpoints of this workspace are kept by the terminal app.' } as const;
 
 export function createCheckpointCommand<Ctx extends CheckpointCommandShape>(policy: CheckpointCommandPolicy<Ctx>): DescribedCommand<Ctx> {
+  const services = (ctx: Ctx): CheckpointServices => ({ checkpoints: checkpointsOf(policy, ctx) });
   return defineCommand<Ctx>({
     name: 'checkpoint',
     title: 'Checkpoints',
     summary: 'Snapshots of the workspace\'s files: see them, make one, put the files back, or go back to an earlier turn',
     group: 'Conversation',
     report: 'list',
+    // Unlisted: typed bare, it opens This conversation, where each checkpoint control is a row; typed with an action word it runs that control.
+    firstScreen: false,
+    opens: 'conversation',
     actions: [
-      readAction<Ctx>({
-        id: 'list', label: 'See your checkpoints', readsOnlyThisMachine: true, word: 'list', operator: LOCAL,
-        sentence: 'Lists the workspace checkpoints, newest first, with how old each is and how much it added.',
+      {
+        ...sessionCapabilityAction<Ctx, CheckpointServices>(CHECKPOINT_LIST, services, LOCAL),
+        readsOnlyThisMachine: true,
         async rowValue(ctx) {
           const manager = ctx.workspace.workspaceCheckpointManager;
           if (!manager) return 'not available here';
           const count = (await manager.list()).length;
           return count === 0 ? 'none yet' : `${count} kept`;
         },
-        async run(_values, ctx) {
-          const manager = managerOf(ctx);
-          const checkpoints = await listOf(manager);
-          const trimmed = manager.historyTrimmed();
-          const retentionFailure = manager.retentionFailure();
-          const notes = [
-            ...(trimmed ? [`${trimmed.reason} (${trimmed.count} removed ${formatCheckpointAge(trimmed.at)}; the newest is always kept).`] : []),
-            ...(retentionFailure ? [`Automatic retention is failing: ${retentionFailure.error}`] : []),
-          ];
-          if (checkpoints.length === 0) return [`No checkpoints yet. ${policy.emptyHint}`, ...notes].join('\n');
-          // Files-changed counts are not shown per row: each would cost one diff
-          // spawn per checkpoint. A restore loads exactly one diff and shows it.
-          return [
-            `Checkpoints (${checkpoints.length}, newest first):`,
-            ...checkpoints.map((checkpoint, index) => `  ${String(index + 1).padStart(2)}. ${shortCheckpointId(checkpoint.id).padEnd(12)} ${checkpoint.kind.padEnd(9)} ${checkpoint.label}  ${formatCheckpointAge(checkpoint.createdAt)}  ~${formatBytes(checkpoint.sizeBytes)} new`),
-            ...notes,
-            'Put the files back to one: /checkpoint restore <n|id> (at once; the files before it are kept as a checkpoint, and the conversation is unchanged).',
-            'Go back to an earlier turn, files and conversation: /checkpoint rewind.',
-          ].join('\n');
-        },
-      }),
-      doAction<Ctx>({
-        id: 'make', label: 'Make a checkpoint now', word: 'make', operator: LOCAL,
-        inputs: [textInput({ id: 'label', label: 'Name', help: 'What to call it', why: 'a name you choose', typed: { tail: true }, optional: { default: '', means: 'a name made from the time' } })],
-        sentence: 'The workspace\'s files as they are now are kept as a checkpoint, held longer than the automatic ones; nothing changes in the files.',
-        example: { label: 'before the refactor' },
-        async run(values, ctx) {
-          if ('refused' in policy.make) throw commandRefusal(policy.make.refused, '/checkpoint list shows the checkpoints this workspace has.');
-          let checkpoint: WorkspaceCheckpoint | null;
-          try {
-            checkpoint = await policy.make(ctx, values.label ?? '');
-          } catch (error) {
-            throw commandRefusal(`No checkpoint was made: ${summarizeError(error)}`, undefined, 'NOT_DONE');
-          }
-          return checkpoint
-            ? `Checkpoint ${shortCheckpointId(checkpoint.id)} "${checkpoint.label}" made; it is kept longer than the automatic ones.`
-            : 'Nothing has changed since the last checkpoint, so none was made.';
-        },
-      }),
-      {
-        id: 'restore', label: 'Put the files back to a checkpoint', word: 'restore',
-        inputs: [listInput({ id: 'checkpoint', label: 'Checkpoint', help: 'Your checkpoints, newest first', list: CHECKPOINTS, other: 'a number from the list, newest first, or a checkpoint id' })],
-        sentence: 'The workspace\'s files go back to checkpoint {checkpoint}; the current files are kept as a checkpoint first, which /checkpoint restore brings back, and the conversation is unchanged.',
-        done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'none', asksItself: true,
-        operator: LOCAL, example: { checkpoint: '1' },
-        async run(values, ctx) {
-          const manager = managerOf(ctx);
-          const resolved = resolveCheckpointRef(await listOf(manager), values.checkpoint!, '/checkpoint list');
-          if ('error' in resolved) throw commandRefusal(resolved.error, undefined, 'NOT_FOUND');
-          await restoreCheckpointFiles(ctx, manager, resolved, { yes: false, record: (text) => policy.record(ctx, text) });
-        },
       },
-      {
-        id: 'rewind', label: 'Go back to an earlier turn', word: 'rewind',
-        inputs: [
-          listInput({ id: 'turn', label: 'Turn', help: 'The turns of this conversation, newest first', list: TURNS, other: 'a number from the list, newest first, or a turn id' }),
-          choiceInput({ id: 'scope', label: 'What goes back', help: 'The files, the conversation, or both', choices: SCOPES, typed: { position: 2 }, optional: { default: 'both', means: 'files and conversation' } }),
-        ],
-        sentence: 'What changed after turn {turn} is taken back ({scope}): messages after it are dropped and files go back to how they were then. /undo rewind brings them back only while no new message has been added.',
-        done: '', touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone', asksItself: true,
-        riskDone: 'the dropped messages are gone once a new message is added; /undo rewind brings them back until then',
-        operator: { terminalOnly: 'It rewinds the conversation open in the terminal app.' }, example: { turn: '2', scope: 'files' },
-        async run(values, ctx) {
-          if ('refused' in policy.rewind) throw commandRefusal(policy.rewind.refused, '/checkpoint restore puts the files back to a checkpoint.');
-          return policy.rewind(ctx, { turn: values.turn!, scope: (values.scope || 'both') as RewindScope });
-        },
-      },
+      sessionCapabilityAction<Ctx, CheckpointServices>(CHECKPOINT_MAKE, services, LOCAL),
+      sessionCapabilityAction<Ctx, CheckpointServices>(CHECKPOINT_RESTORE, services, LOCAL),
+      sessionCapabilityAction<Ctx, CheckpointServices>(CHECKPOINT_REWIND, services, { terminalOnly: 'It rewinds the conversation open in the terminal app.' }),
     ],
   });
 }

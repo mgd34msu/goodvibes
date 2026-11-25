@@ -1,10 +1,6 @@
-import {
-  createApprovalCommand,
-  createVoiceExperienceCommand,
-} from '@goodvibes/engine/terminal-shell/experience-commands';
+import { createVoiceExperienceCommand, wakeServicesOf, type VoiceExperiencePolicy } from '@goodvibes/engine/terminal-shell/experience-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
-import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import {
   createVoiceProvisionGateway,
   renderVoiceProvision,
@@ -18,21 +14,19 @@ import { wakeProvisionStatus } from '@goodvibes/engine/platform/platform/voice';
 import type { VoiceSetupOutcome } from '@goodvibes/engine/platform/platform/runtime/voice-setup';
 import { proposesSpeechToText, runWakeSetupPlan } from '../../core/wake-setup-plan.ts';
 import { requireVoiceSetup } from './runtime-services.ts';
+import { systemSessionOf } from './session-capabilities.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
 export function registerExperienceRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(approvalMatrixCommand);
-
-
   registry.register(voiceExperienceCommand);
 }
 
-const approvalMatrixCommand = createApprovalCommand<CommandContext>({
-  openWaiting(ctx) {
-    // Approvals waiting on you are rows in the Agents view (b jumps to them).
-    if (!ctx.openView?.('approval')) throw commandRefusal('The Agents view is not available in this session.', '/questions lists what waits on you.');
-  },
-});
-const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
+/** The wake word on this app's microphone, as `voice.wake-status` and `voice.wake-setup` take it (session-capabilities.ts). */
+export function voiceWakeOf(ctx: CommandContext): ReturnType<typeof wakeServicesOf> {
+  return wakeServicesOf(voicePolicy, ctx);
+}
+
+const voicePolicy: VoiceExperiencePolicy<CommandContext> = {
   reportFailure: false,
   paths: requireShellPaths,
   async wake(args, ctx, shellPaths) {
@@ -79,7 +73,7 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
       }
       ctx.print(['Wake-Word Setup', outcome.rendered, ...(proposesStt
         ? [resolution.available
-          ? '(/voice wake-setup --with-speech-to-text installs it now)'
+          ? '(Set up the wake word again with "Install it too" in the System place, Voice, to install it now.)'
           : `(speech-to-text is installed through the daemon, which is not reachable here: ${resolution.reason})`]
         : [])].join('\n'));
       return;
@@ -111,11 +105,10 @@ const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>({
     ctx.print(await renderVoiceProvision(sub, resolution));
     return;
   },
-  review: (enabled) => [
-    'Voice Review',
-    `  always-speak: ${enabled ? 'on' : 'off'}`,
-    '  setting: ui.voiceEnabled (/voice on and /voice off)',
-    '  posture: optional local TTS output; disabled by default',
-    '  note: voice remains an optional operator convenience, not a required SaaS dependency',
-  ],
-});
+  // Speaking and listening run here, on this app's speaker and microphone (session-capabilities.ts).
+  services: (ctx) => ({ systemSession: systemSessionOf(ctx) }),
+  // The voice runtime is the daemon's (voice.status, voice.setup).
+  capability: capabilityBinding,
+};
+
+const voiceExperienceCommand = createVoiceExperienceCommand<CommandContext>(voicePolicy);

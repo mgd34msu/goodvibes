@@ -13,7 +13,7 @@ import { captureFileIdentities } from '../security/read-source.js';
  * or read a file) and no `oauth` block (it would replace a provider's sign-in
  * endpoints). Such an entry is skipped with a warning. An admissible entry
  * still chooses which stored key goes to which host, so it resolves nothing
- * until the user confirms it once (`/services trust <name>`); until then it is
+ * until the user confirms it once (`services.trust`, Models and providers); until then it is
  * listed as waiting and a request through it is refused by name. An entry of
  * the user's own file always wins over a project entry of the same name.
  *
@@ -239,7 +239,7 @@ export function pendingProjectServiceLines(pending: readonly PendingProjectServi
   return [
     '',
     `Waiting for your confirmation (from ${pending[0]?.path ?? 'the project services file'}; not used until confirmed):`,
-    ...pending.map((service) => `  ${describePendingProjectService(service)}  -> /services trust ${service.name}`),
+    ...pending.map((service) => `  ${describePendingProjectService(service)}  (use it from the Services list in Models and providers)`),
   ];
 }
 
@@ -396,7 +396,7 @@ export class ServiceRegistry {
     if (!pending) return null;
     const keys = pending.keys.length ? pending.keys.join(', ') : 'no stored key';
     const target = pending.providerId ? `${pending.providerId}'s signed-in token or ${keys}` : keys;
-    return `service "${name}" comes from this project's services file (${pending.path}) and is not used until you confirm it: it would send ${target} to ${pending.origin ?? 'no origin'}. Confirm it with /services trust ${name}, or add it to your own services file.`;
+    return `service "${name}" comes from this project's services file (${pending.path}) and is not used until you confirm it: it would send ${target} to ${pending.origin ?? 'no origin'}. Use it from the Services list in Models and providers, or add it to your own services file.`;
   }
 
   private readServices(): { readonly services: Record<string, ServiceConfig>; readonly pending: Map<string, PendingProjectService> } {

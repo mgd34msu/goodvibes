@@ -82,7 +82,7 @@ export function buildProviderHealthDomainSummaries(
       settings.managedLockCount > 0 ? `${settings.managedLockCount} managed lock(s) enforced` : '',
     ].filter(Boolean),
     nextSteps: settingIssueCount > 0
-      ? ['/settings-sync open', '/settings-sync show <key>', '/managed staged']
+      ? ['/settings-sync open', '/settings-sync show <key>', 'Tools and extensions, Managed settings: the staged bundle']
       : ['/settings-sync show <key>'],
   });
 
@@ -151,7 +151,7 @@ export function buildProviderHealthDomainSummaries(
       : intelligenceIssues > 0
         ? `${intelligenceIssues} readiness surface(s) degraded`
         : `ready (${runningServers} of ${intelligence.languageServers.length} language server(s) running)`,
-    next: '/intelligence review',
+    next: 'Code intelligence, in Code and changes',
     details: intelligenceStarted
       ? [
         intelligence.diagnosticsStatus !== 'ready' ? `diagnostics=${intelligence.diagnosticsStatus}` : '',
@@ -160,8 +160,8 @@ export function buildProviderHealthDomainSummaries(
       ].filter(Boolean)
       : ['syntax diagnostics and symbols come from the built-in parser'],
     nextSteps: intelligenceIssues > 0
-      ? ['/intelligence diagnostics', '/intelligence review', '/health check intelligence']
-      : ['/intelligence review'],
+      ? ['Code intelligence, in Code and changes: the files with problems and what is ready', '/health check intelligence']
+      : ['Code intelligence, in Code and changes'],
   });
 
   const maintenance = evaluateSessionMaintenance({
@@ -181,7 +181,7 @@ export function buildProviderHealthDomainSummaries(
         ? 'warn'
         : 'good',
     summary: maintenance.summary,
-    next: maintenance.nextSteps[0] ?? '/guidance review',
+    next: maintenance.nextSteps[0] ?? 'See guidance for now, in This conversation',
     details: maintenance.reasons.slice(0, 3),
     nextSteps: maintenance.nextSteps,
   });
@@ -211,13 +211,13 @@ export function buildProviderHealthDomainSummaries(
     summary: worktreeSummary.total === 0
       ? 'no persisted worktrees'
       : `${worktreeSummary.total} tracked / ${worktreeIssues} need review`,
-    next: worktreeIssues > 0 ? '/worktree recover <session|task> <id>' : '/worktree review',
+    next: worktreeIssues > 0 ? 'Worktrees, in Code and changes: resume a paused one' : 'Worktrees, in Code and changes',
     details: [
       worktreeSummary.paused > 0 ? `${worktreeSummary.paused} paused worktree(s)` : '',
     ].filter(Boolean),
     nextSteps: worktreeIssues > 0
-      ? ['/worktree review', '/worktree recover <session|task> <id>']
-      : ['/worktree review'],
+      ? ['Worktrees, in Code and changes: resume a paused one, or see how to bring back a task\'s worktrees']
+      : ['Worktrees, in Code and changes'],
   });
 
   return summaries;

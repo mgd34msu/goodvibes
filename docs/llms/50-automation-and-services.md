@@ -33,81 +33,82 @@ A routine is a prompt that runs on a schedule. Each time it fires it produces a 
 
 | Kind | Value | Example |
 | --- | --- | --- |
-| `cron` | A five-field cron expression, optional `--tz <IANA zone>` and `--stagger <ms>`. `/schedule` sends this machine's zone when `--tz` is left out; a schedule created through the daemon with no zone at all (an agent's reminder, a script calling `automation.schedules.create`) is kept in `daemon.timezone`, or the daemon host's zone when that is unset, and `automation.schedules.list` reports that zone as `defaultTimezone`. A cron kept in a zone other than yours is listed with the zone's name | `"*/30 * * * *"` |
+| `cron` | A five-field cron expression, with an optional time zone (an IANA zone) and a spread of the start. New schedule sends the daemon's machine's zone when the time zone is left blank; a schedule created through the daemon with no zone at all (an agent's reminder, a script calling `automation.schedules.create`) is kept in `daemon.timezone`, or the daemon host's zone when that is unset, and `automation.schedules.list` reports that zone as `defaultTimezone`. A cron kept in a zone other than yours is listed with the zone's name | `"*/30 * * * *"` |
 | `every` | An interval such as `15m`, `2h`, `1d` | `15m` |
 | `at` | One date and time, ISO form; read in this machine's zone when it has no zone | `2026-12-01T09:00` |
 | `when` | Natural language, read by the decision model into one of the three above | `"every weekday at 9am"` |
 
-### `/schedule`, in both programs
+### Automation, in every program
 
-`/schedule` alone opens its list of actions (in a script or for a model it prints the schedules, as "See your schedules" does). Both programs take the same lines; the terminal app keeps a schedule with the daemon (or runs it itself while the daemon is off), the Agent keeps it on its connected host. A line with something missing opens the step that asks for it.
+Automation is one place, reached from the menu (the leader key, then `m`, in the terminal app and the Agent; the Automation screen in the web UI's command palette). Its tabs are Schedules, Runs, Triggers, Commands (the commands triggers may run), CI watches and Check-ins. Every list is read from the daemon when the place opens and again whenever the daemon says it changed (a schedule paused from the web UI, a trigger stopped by a script, a run that ended), with no key pressed. The keys on the hint row are the actions that apply to the selected item in its state; each is rebindable in Keys. The daemon keeps and runs every schedule, so it runs once whether or not a program is open; the terminal app keeps none of its own, and the Agent's schedules are its connected host's.
 
-| Action | Line | Risk |
-| --- | --- | --- |
-| See your schedules | `/schedule list` | |
-| Schedule something to run | `/schedule add (--when <words> \| --at <date> \| --every <interval> \| --cron <pattern>) [options] <what it does...>` | |
-| Run a schedule now | `/schedule run <schedule>` | |
-| Pause a schedule | `/schedule pause <schedule>` (picked from the ones that run) | |
-| Resume a schedule | `/schedule resume <schedule>` (picked from the paused ones) | |
-| Change a schedule | `/schedule change <schedule> [--when ... \| --at ... \| --every ... \| --cron ...] [--tz <zone>] [--stagger <duration>] [--name <name>] [--task <task> --success-criteria <result>] [<what it does...>]` | |
-| Remove a schedule | `/schedule remove <schedule>` | cannot be undone |
+The same actions are capabilities (`schedule.*`, the daemon's own `automation.*` methods): a model finds and runs them with `capability_find` and `capability_run`, an outside agent with `capabilities.find` and `capabilities.run`, and a script with `goodvibes do <id> --input name=value` (also `goodvibes-agent do` and `goodvibes-daemon do`).
+
+| Action | Capability | Control in Automation | Risk |
+| --- | --- | --- | --- |
+| See your schedules | `schedule.list` | the Schedules tab | |
+| Schedule something to run | `schedule.add` | `n` new schedule (Schedules tab) | |
+| Run a schedule now | `schedule.run` | `g` run now, on a schedule | |
+| Pause a schedule | `schedule.pause` | `p` pause, on a schedule that runs | |
+| Resume a schedule | `schedule.resume` | `p` resume, on a paused schedule | |
+| Change a schedule | `schedule.change` | `c` change, on a schedule | |
+| Remove a schedule | `schedule.remove` | `x` remove, on a schedule (asks first) | cannot be undone |
+| Stop a run that is going | `schedule.stop-run` | `s` stop, on a run waiting or running (asks first) | cannot be undone |
+| Run a failed run again | `schedule.retry-run` | `t` run again, on a failed run | |
 
 ```text
-/schedule add --when "every weekday at 9am" post the standup summary
-/schedule add --cron "0 9 * * 1-5" --tz America/Chicago summarize open pull requests
-/schedule add --every 15m check the build status
-/schedule add --at 2026-12-01T09:00 send the release reminder
-/schedule pause weekly-report
+goodvibes do schedule.add --input prompt="post the standup summary" --input when="every weekday at 9am"
+goodvibes do schedule.add --input prompt="summarize open pull requests" --input how=cron --input cron="0 9 * * 1-5" --input tz=America/Chicago
+goodvibes do schedule.add --input prompt="check the build status" --input how=every --input every=15m
+goodvibes do schedule.pause --input schedule=<schedule id>
 ```
 
-`/schedule list` shows each schedule with what it runs (its task, on the line under it) and its timing in words with the pattern it is kept as beside it: `every weekday at 09:00 (0 9 * * 1-5) [UTC]`, `on the 1st of each month at 07:30 (30 7 1 * *)`, `every hour at :15`, `every 30 minutes`; a pattern of any other shape is shown as written. `Read as:` uses the same words. The Agent lists the schedules of its connected host the same way.
+The Schedules tab shows each schedule by name; its detail gives its timing in words with the pattern it is kept as beside it (`every weekday at 09:00 (0 9 * * 1-5) [UTC]`, `on the 1st of each month at 07:30 (30 7 1 * *)`, `every hour at :15`, `every 30 minutes`), the next and last run, how many runs so far, why it is paused, and what it does. A schedule whose last run failed or was missed is marked, and the menu row of Automation counts them.
 
-A schedule is named by its id, its name or the start of its id (one that names more than one is refused with the candidates). Options of `add` ("Anything else?" in the guided form; each blank keeps the usual setting):
+New schedule's form asks what it does, then when (described in words, once at a date and time, every so often, or a cron pattern; a time zone and a spread of the start), then "Anything else?" (each blank keeps the usual setting):
 
-| Option | Meaning |
+| Input | Meaning |
 | --- | --- |
-| `--name <name>` | Its name; default is the first 40 characters of what it does. |
-| `--model <model>`, `--provider <provider>` | The model to run it with. |
-| `--fallback <a,b>` | Fallback models. |
-| `--reasoning <level>`, `--thinking <mode>` | Reasoning effort and thinking mode. |
-| `--target isolated\|main\|background\|pinned` | Where it runs: a fresh conversation each time (the usual), the main conversation, a background session, or the pinned one. |
-| `--wake now\|next-heartbeat` | Run at once when due, or with the next heartbeat. |
-| `--template <tmpl>` | A prompt template. |
-| `--tool <name>` | Allow only these tools (repeat the option). A run limited this way does not get the mail and calendar tool unless `--tool google` is given. |
-| `--deliver <channel>` | Where each run's answer goes: a channel written as in settings, `telegram`, `slack:C123` and so on (`telegram` alone uses `surfaces.telegram.defaultChatId`). Without it the answer goes to the owner inbox. |
-| `--external-source <kind>` | Marks where outside content comes from. |
-| `--allow-unsafe-external-content` | May act on content from outside sources ("Yes" loosens a protection: only your own line gives it, a model's line is refused; set it back to "No" to undo it). |
-| `--paused` | Kept, but runs only once resumed. |
-| `--light-context` | Run with a small context. |
-| `--tz <zone>`, `--stagger <duration>` | For a pattern, a description or a date and time without a zone: its time zone, and a spread of the start (such as `5m`). |
+| Name | Its name; default is the first 40 characters of what it does. |
+| Model, Provider | The model to run it with. |
+| Fallback models | Fallback models, separated by commas. |
+| How hard it thinks, Thinking | Reasoning effort and thinking mode. |
+| Where it runs | A fresh conversation each time (the usual), the main conversation, a background session, or the pinned one. |
+| When it wakes | Run at once when due, or with the next heartbeat. |
+| Template | A prompt template. |
+| Tools it may use | Only these tools, one per line. A run limited this way does not get the mail and calendar tool unless `google` is listed. |
+| Answer goes to | Where each run's answer goes: a channel written as in settings, `telegram`, `slack:C123` and so on (`telegram` alone uses `surfaces.telegram.defaultChatId`). Blank: the owner inbox. |
+| Outside source | Marks where outside content comes from. |
+| May act on content from outside sources | "Yes" loosens a protection: a model's call of it is put to you, opening on No; set it back to "No" to undo it. |
+| Start paused | Kept, but runs only once resumed. |
+| Light context | Run with a small context. |
 
-In the web UI the same actions are the Schedules screen and its sheets (see "Slash command actions in the web UI" in the daemon part). There a time described in words is read by the daemon (`automation.schedules.preview`, in the browser's time zone when `--tz` is blank) and shown as `Read as: ...` with the next run before the button keeps it; nothing is kept by the reading.
+A time described in words is read by the daemon (`automation.schedules.preview`, in the daemon's time zone when the time zone is blank; the web UI's sheet shows the reading as `Read as: ...` with the next run before its button keeps it). Nothing is kept by the reading.
 
-Successful `add` output (the id is generated):
+What New schedule says when it kept one (the id is generated):
 
 ```text
-Scheduled.
-"check the build status": every 15m; next run 2026-11-18 10:15 America/Chicago (runs once, with or without a terminal open).
-The answer goes to your owner inbox. Id job-3f9c2a1b7d.
+Scheduled. "check the build status": every 15 minutes; next 2026-11-18 10:15 America/Chicago. The answer goes to your owner inbox.
 ```
 
-With `daemon.enabled` off, the terminal that holds the routine lock keeps and runs the routines while it is open (`kept and run by this terminal (daemon off)`); another terminal can list them but not change them. When the daemon is turned on later, routines kept by a terminal are moved to the daemon and the move is reported.
+Run now says what ran and how it stands: `Started "Morning brief". Its run is running.` The Runs tab shows how it ends.
+
+When the terminal app starts, schedules an earlier terminal app kept in its own store for a daemon it could not use (a daemon on another machine or under another home) are handed to the daemon once and the move is reported; the file is renamed, not deleted, so a rollback finds it.
 
 Failures:
 
 | Message | Fix |
 | --- | --- |
-| `Schedules are kept and run by the GoodVibes daemon ... it cannot be reached: <reason> Nothing was scheduled or changed.` | Start the daemon; check `goodvibes status`. |
-| `Not kept: "<value>" is not a date and time. Use one such as 2026-12-01T09:00 (read in <zone> when it has no zone).` | Write it as `YYYY-MM-DDTHH:MM`, read in `--tz` (or this machine's or the browser's zone), or add `Z` or an offset for an exact instant. |
+| `Not done: the daemon did not answer (it may be stopped or still starting)` | Start the daemon; check `goodvibes status`. The place reads its lists again by itself when the daemon is back. |
+| `Not kept: "<value>" is not a date and time. Use one such as 2026-12-01T09:00 (read in <zone> when it has no zone).` | Write it as `YYYY-MM-DDTHH:MM`, read in the time zone given (or the daemon's or the browser's zone), or add `Z` or an offset for an exact instant. |
 | `Not kept: <time> has already passed.` | Pick a future time. |
-| `Not kept: the timing is <reason>; give it as a date (--at), an interval (--every) or a pattern (--cron) instead.` | The decision model could not read the words, or none is set. Use `--at`, `--every` or `--cron`. |
-| `/schedule add has no option --x.` | Use one of the listed options. |
+| `Not kept: the timing is <reason>; give it as a date and time, an interval or a calendar pattern instead.` | The decision model could not read the words, or none is set. Choose "Once, at a date and time", "Every so often" or "On a calendar pattern". |
 
-### The Agent: `/routines promote`, and a schedule's runs
+### Routines on a schedule, and a schedule's runs
 
-An Agent routine becomes a schedule on the connected host with `/routines promote <routine> --how <cron|every|at> --when <pattern, interval or time> [--timezone <tz>] [--name <name>] [--delivery-channel <channel[:route]>]... [--delivery-route <route>]... [--delivery-webhook <url>]... [--delivery-link <name>]... [--provider <id>] [--model <id>] [--disabled]` (or the guided form, "Run a routine on a schedule"); `/routines receipts`, `/routines receipt <receipt>` and `/routines reconcile` read what promotion recorded. From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
+A routine becomes a schedule of the daemon with "Run a routine on a schedule" (`routines.promote`; `e` on a routine on the Routines tab of Automation, `p` on the Routines tab of Memory and knowledge), in every program, the web UI, a model's `capability_run` and `goodvibes do routines.promote`: when (a calendar pattern, an interval or a time, with a time zone for a pattern), where the answer goes (channels, routes, web addresses, linked surfaces, one per line), a name, a provider and model, and whether it starts paused. Only a routine switched on, reviewed and with nothing missing is put on one, and a repeat after a lost answer finds the schedule already made. "See routines put on a schedule" (`routines.receipts`), "See one schedule receipt" (`routines.receipt`) and "Check scheduled routines against their schedules" (`routines.reconcile`) read what was recorded. From the shell: `goodvibes-agent routines promote <routine-id> --cron "0 9 * * *" --timezone America/Chicago --yes`.
 
-A schedule's runs, in both programs, are `/schedule` actions: `run <schedule>`, `pause <schedule>`, `resume <schedule>`, `stop-run <run>` (stops it; `retry-run` runs it again) and `retry-run <run>`.
+A schedule's runs are on Automation's Runs tab in every program: `s` stops one that is waiting or running (`schedule.stop-run`), `t` runs a failed one again (`schedule.retry-run`).
 
 ### The model's `schedule` tool
 
@@ -117,7 +118,7 @@ The model can list and create schedules with the `schedule` tool (its inputs are
 
 - A run uses the permission mode and sandbox of the owner who created its job; a job has no permission setting of its own. A run in a mode that would ask gets its asks through the owner inbox and the attached surfaces.
 - A run ends at the job's own timeout, or `automation.defaultTimeoutMs` (two hours; `0` means no limit). Past it the run fails with `Timed out after <duration>`.
-- A run in flight when the daemon stopped is failed when it starts again (`Interrupted by a restart before it finished. It may already have done part of its work, so it was not retried; run it again by hand if it still needs to run.`). It may already have sent mail, posted or written files, so it is never retried on its own; its failure notice says so and `/schedule retry-run <run>` runs it again. A run whose agent stopped without reporting its end is failed the same way. A check-in whose note was handed to its channel when it failed is not retried either: the note may already have arrived.
+- A run in flight when the daemon stopped is failed when it starts again (`Interrupted by a restart before it finished. It may already have done part of its work, so it was not retried; run it again by hand if it still needs to run.`). It may already have sent mail, posted or written files, so it is never retried on its own; its failure notice says so and Run again on Automation's Runs tab (`schedule.retry-run`) runs it again. A run whose agent stopped without reporting its end is failed the same way. A check-in whose note was handed to its channel when it failed is not retried either: the note may already have arrived.
 - An occurrence that comes due while an earlier run of the same job is still running is skipped.
 - A one-time job whose time passed while the daemon was down for longer than `automation.catchUpWindowMinutes` is recorded as missed and disabled.
 - After a failure, the job waits `automation.failureCooldownMs` before it may run again.
@@ -130,32 +131,30 @@ The model can list and create schedules with the `schedule` tool (its inputs are
 
 ### Where a routine's result goes, and what a routine can use
 
-- Each run's answer goes to the surface named on the routine. `/schedule add` takes `--deliver <channel>` in both programs; `/routines promote` and the Agent model's schedule tools take `--delivery-channel <surface>` (for example `telegram`), `--delivery-channel <surface>:<route id>`, `--delivery-route <route id>`, `--delivery-webhook <url>` or `--delivery-link <name>`. In the Agent's flags the part after `:` is a route binding id, not a chat id. A Telegram delivery with no route or address goes to `surfaces.telegram.defaultChatId`; with neither, that send fails with `Missing Telegram chat id`.
-- A routine that names no surface, or whose every named surface failed, leaves its answer in the owner inbox as a report titled `Scheduled run: <name>` (the answer, cut at about 3,800 characters; when a send failed, the reason first). It stays open until you answer it `read` (`/questions`, the web UI's Work view, or a channel). A failed or missed run leaves `Scheduled run failed: <name>` (or `missed`) there too when its notice reached no one: the routine names no surface, delivery is off, or every surface it names failed. An answer that reached neither a surface nor the owner inbox stays owed on the run and is delivered again when the daemon next starts; so does a failed or missed run's notice that was not yet sent or reached no one when the daemon stopped. Every run is also kept in the run history (the web UI and the `automation.runs.*` methods). The routine itself keeps how its last run ended for the person as `lastOutcome`: `delivered` (a named surface took it), `partly-delivered` (some named surfaces took it and some did not; the owner inbox gets the answer with the surfaces it missed named), `not-delivered` (every named surface failed and it went to the inbox instead, or it names no surface and the owner inbox could not take it), `inbox` (it names no surface) or `failed` (the run failed); It is on the routine's record (`automation.jobs.list`) and on its fleet node (`schedule.lastOutcome`).
+- Each run's answer goes to the surface named on the routine. New schedule takes it as "Answer goes to" (`deliver`) in every program; "Run a routine on a schedule" takes the same targets, one per line; the Agent model's schedule tools take `--delivery-channel <surface>` (for example `telegram`), `--delivery-channel <surface>:<route id>`, `--delivery-route <route id>`, `--delivery-webhook <url>` or `--delivery-link <name>`. In the Agent's flags the part after `:` is a route binding id, not a chat id. A Telegram delivery with no route or address goes to `surfaces.telegram.defaultChatId`; with neither, that send fails with `Missing Telegram chat id`.
+- A routine that names no surface, or whose every named surface failed, leaves its answer in the owner inbox as a report titled `Scheduled run: <name>` (the answer, cut at about 3,800 characters; when a send failed, the reason first). It stays open until you answer it `read` (Waiting for you, the web UI's Work view, or a channel). A failed or missed run leaves `Scheduled run failed: <name>` (or `missed`) there too when its notice reached no one: the routine names no surface, delivery is off, or every surface it names failed. An answer that reached neither a surface nor the owner inbox stays owed on the run and is delivered again when the daemon next starts; so does a failed or missed run's notice that was not yet sent or reached no one when the daemon stopped. Every run is also kept in the run history (the web UI and the `automation.runs.*` methods). The routine itself keeps how its last run ended for the person as `lastOutcome`: `delivered` (a named surface took it), `partly-delivered` (some named surfaces took it and some did not; the owner inbox gets the answer with the surfaces it missed named), `not-delivered` (every named surface failed and it went to the inbox instead, or it names no surface and the owner inbox could not take it), `inbox` (it names no surface) or `failed` (the run failed); It is on the routine's record (`automation.jobs.list`) and on its fleet node (`schedule.lastOutcome`).
 - A routine the terminal app keeps itself (with `daemon.enabled` off) has no owner inbox to fall back to: an answer with no surface is kept only in its run history.
 - A run's answer is owed from the moment the run ends (saved with the run's end) until its delivery is recorded. A daemon that stops in between delivers it at its next start, under the same identity, so a surface that drops repeats drops a second copy. A one-shot routine is removed only once its run's answer was delivered.
-- The model's `schedule` tool with `action:"remind"` does not send its text as is: at each run a model turn is started with the text framed as a reminder ("GoodVibes Agent scheduled reminder. Reminder: <text> ... Keep the reminder concise and state any next action"), and its answer is delivered. `/schedule add` sends what it does as written.
+- The model's `schedule` tool with `action:"remind"` does not send its text as is: at each run a model turn is started with the text framed as a reminder ("GoodVibes Agent scheduled reminder. Reminder: <text> ... Keep the reminder concise and state any next action"), and its answer is delivered. New schedule (`schedule.add`) sends what it does as written.
 - A scheduled run is an agent the daemon starts with the platform's tool set (files, shell, fetch, web search, MCP, channel tools, and the like). Once you have connected mail or a calendar (a Google account with `/google connect`, or a CalDAV server in `surfaces.calendar.caldavUrl` and `surfaces.calendar.caldavUser`), it also gets the `google` tool: `mail.list` and `mail.read` on the connected Gmail, and `calendar.list` on the daemon's calendar (the CalDAV server when one is set, otherwise the Google calendar). Its calls pass the same permission gate as any turn. A send or a calendar event it makes may not carry what it read from mail or a calendar, and `calendar.create` is refused in a scheduled run (nobody asked for that event at that moment). A routine limited with `--tool` gets the tool only when `google` is listed.
 
 ### A daily 8 am summary of mail and calendar delivered to Telegram
 
 1. Connect the mail and calendar to the daemon: in the Agent, `/google connect` (Gmail and Google Calendar over OAuth, Path B in "Google" below: the model's `google` tool reads mail only through it, in a conversation as in a scheduled run), or set a CalDAV server for the calendar. `/google status` shows the connection.
 2. Set up Telegram as in "Telegram" (owner claim accepted) and give it a delivery chat: `/settings set surfaces.telegram.defaultChatId <your-numeric-id>`.
-3. Create the schedule (either program):
+3. Create the schedule (any program): open Automation, press `n` (New schedule), write what it does ("Summarize my unread mail from the last 24 hours and today's calendar events. Group the mail by sender and give the events in time order."), choose "On a calendar pattern" with `0 8 * * *` and the time zone `America/Chicago`, and under "Anything else?" put `telegram` in "Answer goes to". From a script:
 
    ```text
-   /schedule add --cron "0 8 * * *" --tz America/Chicago --deliver telegram Summarize my unread mail from the last 24 hours and today's calendar events. Group the mail by sender and give the events in time order.
+   goodvibes do schedule.add --input prompt="Summarize my unread mail from the last 24 hours and today's calendar events. Group the mail by sender and give the events in time order." --input how=cron --input cron="0 8 * * *" --input tz=America/Chicago --input deliver=telegram
    ```
 
    ```text
-   Scheduled.
-   "Summarize my unread mail from the last": 0 8 * * * [America/Chicago]; next run 2026-11-20 08:00 America/Chicago (runs once, with or without a terminal open).
-   The answer goes to telegram. Id job-3f9c2a1b7d.
+   Scheduled. "Summarize my unread mail from the last": every day at 08:00 (0 8 * * *) [America/Chicago]; next 2026-11-20 08:00 America/Chicago. The answer goes to telegram.
    ```
 
-4. Try it at once: `/schedule run job-3f9c2a1b7d`. The run reads the mail and the calendar with the `google` tool and its answer arrives in your Telegram chat. If the send fails (the bot cannot reach the chat), the answer is in the owner inbox instead, with the reason.
+4. Try it at once: select it on the Schedules tab and press `g` (run now). The run reads the mail and the calendar with the `google` tool and its answer arrives in your Telegram chat. If the send fails (the bot cannot reach the chat), the answer is in the owner inbox instead, with the reason.
 
-In the Agent the same line keeps the schedule on the connected host; its run has the same tools.
+In the Agent the schedule is kept on the connected host the same way; its run has the same tools.
 
 ## Supervised triggers
 
@@ -175,27 +174,27 @@ Triggers are off by default. Nothing runs and nothing is written until they are 
 /settings set watchers.triggers.enabled true
 ```
 
-Stored triggers start being supervised at once. Triggers are saved in `triggers.db` inside the project tree of the process that supervises them: `<working directory>/.goodvibes/<surface>/triggers.db` (for the daemon, its own working directory and `tui`). `/triggers` reads and changes the triggers of the daemon the terminal app is connected to. A trigger's agent turn is started by that process's agent manager, so it runs in the daemon under the daemon's own settings. One process supervises a store at a time; another window can list them and reports `another process supervises them`; a change from that window is refused and names the process to use.
+Stored triggers start being supervised at once. Triggers are saved in `triggers.db` inside the project tree of the process that supervises them: `<working directory>/.goodvibes/<surface>/triggers.db` (for the daemon, its own working directory and `tui`). Automation's Triggers tab reads and changes the triggers of the daemon the program is connected to. A trigger's agent turn is started by that process's agent manager, so it runs in the daemon under the daemon's own settings. One process supervises a store at a time; another window can list them and reports `another process supervises them`; a change from that window is refused and names the process to use.
 
-### `/triggers`
+### Triggers in Automation
 
-`/triggers` alone opens its list of actions (in a script or for a model it prints the supervisor's state and the triggers, as "See your triggers" does). A line with something missing opens the step that asks for it.
+The Triggers tab lists each trigger with its state in words (watching, waiting after a failure, gave up after failing again and again, stopped); its detail says what it watches, how often it acted and when last, when it looks again, and its last problem. The Commands tab lists the commands you let triggers run, with what each runs, who approved it and its digest. Both read again by themselves when a trigger is made, changes state, acts or is stopped anywhere (LIST_CHANGED `triggers`).
 
-| Action | Line | Risk |
-| --- | --- | --- |
-| See your triggers | `/triggers list` (who supervises them, then each trigger) | |
-| Watch for something | `/triggers watch <name> [-- <command>...] [--match <pattern>] [--url <address>] [--file <path>] [--definition <json>] [--every <interval>] [--say <text>] [--deliver <channel>] [--run <approved command>]` | |
-| See what a trigger did | `/triggers history <trigger> [--count <1-200>]` | |
-| Stop a trigger | `/triggers stop <trigger>` | cannot be undone |
-| Start a trigger that gave up | `/triggers restart <trigger>` | |
-| See commands triggers may run | `/triggers commands` | |
-| Let triggers run a command | `/triggers allow-command <name> -- <command>...` | loosens a protection |
+| Action | Capability | Control in Automation | Risk |
+| --- | --- | --- | --- |
+| See your triggers | `triggers.list` | the Triggers tab | |
+| Watch for something | `triggers.watch` | `n` watch for something (Triggers tab) | |
+| See what a trigger did | `triggers.history` | `h` what it did, on a trigger | |
+| Stop a trigger | `triggers.stop` | `x` stop, on a trigger that watches (asks first) | cannot be undone |
+| Start a trigger that gave up | `triggers.restart` | `s` start again, on one that gave up | |
+| See commands triggers may run | `triggers.commands` | the Commands tab | |
+| Let triggers run a command | `triggers.allow-command` | `n` let triggers run a command (Commands tab; asks first) | loosens a protection |
 
-"Watch for something" asks what to watch: a command finishing (the command after `--`; an `on-exit` trigger), a line a command prints (`--match`; a `stream` trigger), a web address changing (`--url`, looked at `--every`, default 5m; a `condition` with an `http` probe and a `change` rule), a file changing (`--file`, likewise with a `file` probe), or something else written out (`--definition`, the `{ "spec": ..., "action": ... }` JSON below, for any probe, rule or action). Its id is made from the name. Then it asks what happens: the agent looks at it (`--say` adds your instructions; `--deliver` names the channel its answer goes to, else the owner inbox), or a command you let triggers run (`--run`).
+"Watch for something" asks what to watch: a command finishing (the program and its arguments, one per line; an `on-exit` trigger), a line a command prints (a pattern; a `stream` trigger), a web address changing (looked at every so often, default 5m; a `condition` with an `http` probe and a `change` rule), a file changing (likewise with a `file` probe), or something else written out (the `{ "spec": ..., "action": ... }` JSON below, for any probe, rule or action). Its id is made from the name. Then it asks what happens: the agent looks at it ("Tell the agent" adds your instructions; "Answer goes to" names the channel its answer goes to, else the owner inbox), or a command you let triggers run. The daemon reads the blanks into the definition (`watchers.triggers.preview`) before it is made.
 
-The model creates, lists, cancels and resets triggers with the `trigger` tool. Only the owner lets triggers run a command: `/triggers allow-command` from a model is refused before anything is asked.
+The model creates, lists, cancels and resets triggers with the `trigger` tool, or through `capability_run`. Letting triggers run a command loosens a protection: a model's `capability_run` of `triggers.allow-command` is put to you in every mode, opening on No.
 
-The web UI's Triggers screen has the same actions; its "Watch for something" sheet asks the same blanks, and the daemon reads them into the definition (`watchers.triggers.preview`, the same reading as the terminal apps') and shows what it will watch before `Watch` makes it.
+The web UI's Automation screen has the same actions, each as a sheet with the same blanks.
 
 ### Definition JSON
 
@@ -219,7 +218,7 @@ Why it fired: <reason>
 Act on what this actually indicates. Verify before assuming anything the trigger did not directly observe.
 ```
 
-`{"kind":"agent-turn","prompt":"<text>"}` puts `<text>`, a blank line, then that message. `{"kind":"agent-turn","model":"<provider:model>"}` runs the turn on that model; without it the supervising process's default model is used. A `sessionId` in an agent-turn action is refused on a new trigger. When the turn ends its answer is delivered: to the channel `deliverTo` names (`{"kind":"agent-turn","deliverTo":"telegram"}`, or `"slack:C123"`; written as in settings), else to the owner inbox as a report titled `Trigger <label>`. A send that fails puts the answer in the owner inbox with the reason. A `deliverTo` that names no delivery surface is refused when the trigger is created. The firing is also recorded in the trigger's runs (`/triggers history <trigger>`, with the action's result, `agent:<id>`) and the turn appears with the supervising process's agents (the web UI Work view for the daemon). The turn gets the same tools as a scheduled run, the `google` mail and calendar tool included once mail or a calendar is connected. `{"kind":"action-grant","grantId":"<id>","digest":"<digest>"}` runs a command the owner let triggers run with `/triggers allow-command`; `/triggers commands` shows each one's digest.
+`{"kind":"agent-turn","prompt":"<text>"}` puts `<text>`, a blank line, then that message. `{"kind":"agent-turn","model":"<provider:model>"}` runs the turn on that model; without it the supervising process's default model is used. A `sessionId` in an agent-turn action is refused on a new trigger. When the turn ends its answer is delivered: to the channel `deliverTo` names (`{"kind":"agent-turn","deliverTo":"telegram"}`, or `"slack:C123"`; written as in settings), else to the owner inbox as a report titled `Trigger <label>`. A send that fails puts the answer in the owner inbox with the reason. A `deliverTo` that names no delivery surface is refused when the trigger is created. The firing is also recorded in the trigger's runs (What it did, `h` on the trigger in Automation, with the action's result, `agent:<id>`) and the turn appears with the supervising process's agents (the web UI Work view for the daemon). The turn gets the same tools as a scheduled run, the `google` mail and calendar tool included once mail or a calendar is connected. `{"kind":"action-grant","grantId":"<id>","digest":"<digest>"}` runs a command the owner let triggers run ("Let triggers run a command" in Automation); the Commands tab shows each one's digest.
 
 Spec fields:
 
@@ -258,17 +257,19 @@ Rules:
 
 Example: fire when a health endpoint stops answering `ok` three checks in a row.
 
+Watch for something, "Something else, written out", named `API health`, with this definition (from a script: `goodvibes do triggers.watch --input name="API health" --input kind=written --input definition='...'`):
+
 ```text
-/triggers watch "API health" --definition '{"spec":{"kind":"condition","probe":{"kind":"http","url":"https://api.example.com/health","capture":"body"},"extract":{"kind":"raw"},"rule":{"kind":"debounce-n","count":3,"inner":{"kind":"value","operator":"ne","operand":"ok"}},"intervalMs":60000}}'
+{"spec":{"kind":"condition","probe":{"kind":"http","url":"https://api.example.com/health","capture":"body"},"extract":{"kind":"raw"},"rule":{"kind":"debounce-n","count":3,"inner":{"kind":"value","operator":"ne","operand":"ok"}},"intervalMs":60000}}
 ```
 
 ### Trigger states and failures
 
-- Only an `on-exit` trigger finishes when it fires (state `fired`, final). A `condition` or `stream` trigger records each firing (`firedCount`, a `fired` entry in its runs) and keeps watching. A cancelled trigger is finished. Cancelling a running `on-exit` trigger stops its process and records the run's termination as `cancel-requested` (not observed) until the supervisor sees the process end, then as what it saw (`signalled` or `exited`, reason `cancelled`); a process started before a daemon restart is not ours to stop, so its cancel records no termination and says the process was not stopped. "Start a trigger that gave up" (`/triggers restart`) applies only to `idle`, `backoff`, `circuit-open` and `failed` triggers; another is refused with what to do instead.
+- Only an `on-exit` trigger finishes when it fires (state `fired`, final). A `condition` or `stream` trigger records each firing (`firedCount`, a `fired` entry in its runs) and keeps watching. A cancelled trigger is finished. Cancelling a running `on-exit` trigger stops its process and records the run's termination as `cancel-requested` (not observed) until the supervisor sees the process end, then as what it saw (`signalled` or `exited`, reason `cancelled`); a process started before a daemon restart is not ours to stop, so its cancel records no termination and says the process was not stopped. "Start a trigger that gave up" (`triggers.restart`; `s` on the trigger) applies only to `idle`, `backoff`, `circuit-open` and `failed` triggers; another is refused with what to do instead.
 - A failing check backs off along `watchers.triggers.backoffLadderMs`; after `watchers.triggers.breakerStrikes` failures in a row the breaker opens (`circuit-open`) until reset.
 - An action that fails to deliver is kept owed and delivered again when due, once at a time: an action slower than the supervision tick is not started a second time, and a batch leaves the owed list only when the attempt that delivered it ends. A stream keeps at most eight undelivered batches; a dropped one is recorded in the trigger's runs.
 - A save that fails sets `lastError` to `not saved: <cause> (<path>)` and is retried on the next tick; the trigger keeps running.
-- `/triggers` answers `<what> was not done: <reason>` when the daemon refuses (for example `Stopping it was not done: ...`).
+- When the daemon refuses, Automation's outcome line says `Not done: <the daemon's reason>`; `capabilities.run` answers with the same reason.
 
 ## Watchers
 
@@ -325,13 +326,13 @@ On a cadence, the daemon assembles a briefing and the decision model judges whet
 /settings set checkin.cadence "0 */4 * * *"
 /settings set checkin.deliveryChannel telegram
 /settings set checkin.quietHours 22:00-07:00
-/checkin            view the settings and recent receipts
-/checkin run        run one now
 ```
+
+Automation's Check-ins tab lists what each check-in did (told you, stayed quiet, skipped and why, failed), newest first, with what it read and what it said; it reads again by itself after each one (LIST_CHANGED `check-ins`). `g` there checks in now (`checkin.run`; it may send a message to the check-in channel, which cannot be called back). `checkin.status` gives the same list to a model or a script.
 
 `checkin.deliveryChannel` is `surfaceKind` or `surfaceKind:address` (for example `slack:C0123456`); empty uses the owner profile's `contactMe.channel`. `checkin.quietHours` is `HH:MM-HH:MM` local time; empty uses the owner profile's `contactMe.quietHours`.
 
-The check-in settings own the scheduled job named `Proactive check-in`, which `/schedules` lists with the other jobs. Removing, enabling, disabling or rescheduling it there is refused (`The check-in job is kept by the check-in settings, so it cannot be <removed> here. Use checkin.config.set: enabled false stops check-ins, enabled true starts them, and cadence changes when they run. Nothing was changed.`); renaming it is allowed. `checkin.config.get` reads its schedule state from that job as it stands: `scheduled` only while the job exists, is enabled and runs on `checkin.cadence`.
+The check-in settings own the scheduled job named `Proactive check-in`, which Automation's Schedules tab lists with the other jobs. Removing, enabling, disabling or rescheduling it there is refused (`The check-in job is kept by the check-in settings, so it cannot be <removed> here. Use checkin.config.set: enabled false stops check-ins, enabled true starts them, and cadence changes when they run. Nothing was changed.`); renaming it is allowed. `checkin.config.get` reads its schedule state from that job as it stands: `scheduled` only while the job exists, is enabled and runs on `checkin.cadence`.
 
 ## Notifications
 
@@ -386,27 +387,35 @@ Mail is read and sent by the daemon over IMAP and SMTP (or Gmail through Google,
    ```
 
    The terminal app files this daemon-owned credential in the daemon's store.
-3. Check the connection: `/mail status`. It prints `Mail: ready` with what is true, or `Mail: needs-setup` with the next steps.
-4. First use: `/mail list`.
+3. Check the connection: open the menu (`Ctrl+G` then `m`) and choose Mail, calendar and channels. Its Inbox lists the newest messages by itself, or says why it could not read them (the mailbox is not set up, the password is missing, the server refused it).
 
-### `/mail` (both apps)
+### Mail (both apps, and the web UI)
 
-`/mail` is one command in both apps; `/mail` alone lists its actions ("See whether mail is connected" first), and a model or script running it bare gets the status. A message is three blanks: To, Subject, Message.
+Mail is the daemon's: one mailbox, the same for the terminal app, the Agent, the web UI and every scheduled run. There is no slash command for it. A person reads and sends it in **Mail, calendar and channels** (the menu's row of that name), on its **Inbox** tab:
+
+| On the Inbox | What it does | Capability |
+| --- | --- | --- |
+| `Enter` on a message | Opens it: sender (as the message claims it), subject, date, files and text. Nothing is marked read. | `mail.read` |
+| `n` | New message: To, Subject, Message; sent at once when the form is submitted (a sent message cannot be recalled). | `mail.send` |
+| `d` | Save a draft in the account's Drafts folder; nothing is sent. | `mail.draft` |
+| `m` | The mailbox settings; the password only as stored or not. | `mail.settings` |
+| `e` | Change one mailbox setting (the table below). | `mail.set` |
+| `p` | Store the mailbox password (typed on a hidden line). | `mail.password` |
+
+The keys are the place's defaults; each can be rebound in the Keys place. The model and outside agents reach the same capabilities with `capability_find` / `capability_run` (and `capabilities.find` / `capabilities.run` over HTTP and `goodvibes-daemon mcp serve`), and scripts with `goodvibes do <id> --input name=value` (also `goodvibes-agent do` and `goodvibes-daemon do`); `mail.status` and `mail.list` complete the set:
 
 ```text
-/mail status                                   whether mail is connected, and the next step if not
-/mail list [n]                                 the n newest messages (default 15)
-/mail read <message>                           open one message (its uid; /mail read alone lists the inbox to choose from)
-/mail draft you@example.com --subject "Status update" The build is green.
-/mail send you@example.com --subject "Status update" The build is green.
-/mail send you@example.com --subject "Status update" --again The build is green.
+goodvibes do mail.status
+goodvibes do mail.list --input count=30
+goodvibes do mail.read --input message=4211
+goodvibes do mail.draft --input to=you@example.com --input subject="Status update" --input body="The build is green."
+goodvibes do mail.send --input to=you@example.com --input subject="Status update" --input body="The build is green."
 ```
 
-- The message is the words after the options; `--subject` takes one quoted value.
-- `send` shows the recipient, subject and message and asks once, because a sent message cannot be recalled. `--yes` typed by the owner right after `send` answers in advance; the same word inside the message is text and still asks (the word itself is dropped from the message). The same holds for `/channels send` and `/notify send`.
-- Each message keeps one send id (the terminal app's `clientSendId`, the Agent's Message-ID) from its first send. A message that was sent is not sent again from the same session unless `--again` ("Send it again"), which sends a new copy. A send that failed or was not confirmed can simply be sent again: it carries the same id, so the terminal app's daemon answers a repeat within ten minutes with the first answer instead of mailing again, and the Agent's repeat keeps the same Message-ID. A send whose outcome is unknown says `The send was not confirmed; it may have gone`; check the Sent folder first.
-- The terminal app reads and sends through the daemon; the Agent uses its own mail service on the same `surfaces.email.*` settings and records each message it reads as untrusted content.
-- In the terminal app message bodies are printed as transcript output only; they never enter the model's history from `/mail read`.
+- A send a person submits is the request and goes at once; a model's send is put to the owner first, because it sends something outside this machine.
+- Each message is sent under one send id made from its recipients, subject and text, so the same message sent again within ten minutes is answered with the first send instead of being mailed twice. "Send it again" (`again=yes`) sends a new copy. A send whose outcome is unknown says `The send was not confirmed; it may have gone`; look in the Sent folder first.
+- The daemon reads every message read-only (IMAP EXAMINE) and records it as untrusted content.
+- On upgrade nothing is carried: the mailbox settings (`surfaces.email.*`) were already the daemon's, and the Agent's own mail service, which read the same settings, is gone. A 3.5.0 program run again after a rollback reads the same settings.
 
 Status failures and fixes:
 
@@ -414,24 +423,17 @@ Status failures and fixes:
 | --- | --- | --- |
 | `EMAIL_NOT_CONFIGURED` | Host or user missing. | Steps 1 and 2 above. |
 | `EMAIL_CREDENTIALS_MISSING` | Password secret missing. | `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>` |
-| `EMAIL_CREDENTIALS_UNREADABLE` (HTTP 412) | The secret store on the daemon's computer could not be read, so the mailbox password, which may well be stored, could not be read; the answer gives the cause. `/mail status` reads "Mail: the secret store could not be read" and the web mail view "The secret store could not be read"; neither asks for the password. | Make the store readable on that computer (its key file, `~/.goodvibes/secrets.key`, must be the one the store was written with); nothing needs to be given again. |
+| `EMAIL_CREDENTIALS_UNREADABLE` (HTTP 412) | The secret store on the daemon's computer could not be read, so the mailbox password, which may well be stored, could not be read; the answer gives the cause. The Inbox says it could not read your inbox because the secret store could not be read, and the web mail view "The secret store could not be read"; neither asks for the password. | Make the store readable on that computer (its key file, `~/.goodvibes/secrets.key`, must be the one the store was written with); nothing needs to be given again. |
 | `EMAIL_NOT_ENABLED` | The mailbox is not set up: an IMAP host, SMTP host or account is missing. | Steps 1 and 2 above. |
 | `EMAIL_CREDENTIALS_REJECTED` (HTTP 424) | The IMAP or SMTP server refused the stored password (an app password revoked or changed). Not a sign-in failure: the daemon answers 424, never 401. | Store a current password with `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>`. |
 | unreachable | The daemon cannot be reached. | Check the daemon with `/health` and `goodvibes status`. |
 
-### Mailbox settings in the Agent: `/mail settings`, `/mail set`, `/mail password`
+### Mailbox settings: `mail.settings`, `mail.set`, `mail.password`
 
-```text
-/mail settings                     every mailbox setting, the password shown only as stored or not
-/mail set <setting> <value>        change one
-/mail password                     store the password (asked for with masked input)
-```
+The Inbox's `m`, `e` and `p` (above), in both programs; the daemon writes its own settings and its own secret store.
 
-- `/mail status` in the Agent shows the IMAP and SMTP host and port, the user, whether the password is stored (`[stored]` or `[missing]`), the from address, `ready: yes|no`, and the problems found. These are the same `surfaces.email.*` settings the daemon uses.
-- `/mail list [n]` in the Agent lists up to `n` unread messages (at most 100) and a two-line preview of the newest. Mail is opened read-only (IMAP EXAMINE); nothing is marked read.
-- The terminal app changes these settings in `/settings` and refuses these three actions saying so.
-
-`/mail set` settings:
+- `mail.settings` (and `mail.status`, which adds whether new mail is watched) shows the IMAP and SMTP host, port and security, the mailbox read, the user, the from address, whether the password is stored, and what is still needed.
+- `mail.set` changes one setting:
 
 | Setting | Key | Value |
 | --- | --- | --- |
@@ -446,23 +448,20 @@ Status failures and fixes:
 | `user` | `surfaces.email.user` | Login name. |
 | `from` | `surfaces.email.from` | From address. |
 
-The settings that decide where and as whom the password is presented (the hosts, ports, TLS switches and user) loosen a protection when changed: only the owner's own `/mail set` changes them (`/mail set` again puts the old value back). `/mail password` is the owner's only.
+The settings that decide where and as whom the password is presented (the hosts, ports, TLS switches and user) loosen a protection when changed: the Inbox asks once before it changes one, a script's `goodvibes do` is the person's own request, and a model's change is put to the owner, opening on No. Storing the password writes a credential: a model's call is put to the owner the same way, and a password the model leaves out is typed by the person on the hidden line.
 
-Worked example (Fastmail):
+Worked example (Fastmail), as a script:
 
 ```text
-/mail set imap.host imap.fastmail.com
-/mail set imap.port 993
-/mail set smtp.host smtp.fastmail.com
-/mail set smtp.port 465
-/mail set smtp.secure true
-/mail set user you@fastmail.com
-/mail set from you@fastmail.com
-/mail password
-/mail status
+goodvibes do mail.set --input setting=imap.host --input value=imap.fastmail.com
+goodvibes do mail.set --input setting=smtp.host --input value=smtp.fastmail.com
+goodvibes do mail.set --input setting=smtp.port --input value=465
+goodvibes do mail.set --input setting=user --input value=you@fastmail.com
+goodvibes do mail.set --input setting=from --input value=you@fastmail.com
+goodvibes do mail.status
 ```
 
-`/mail password` asks for the password with masked input and answers `The mailbox password is stored as a secret (reference goodvibes://secrets/...); settings hold only the reference.` A setting not in the table is refused with the list; a bad port answers `Invalid port number: <value>. Must be an integer between 1 and 65535.` The settings are daemon-owned, so a write fails when no daemon answers.
+The password is stored from the Inbox's `p` (a hidden line). `mail.password` answers `The mailbox password is stored in the daemon's secret store; the settings hold only its reference.` A bad port answers `<value> is not a port: give a whole number from 1 to 65535.` Every mail capability runs in the daemon, so it fails, saying so, when no daemon answers.
 
 ### Inbound mail and notices
 
@@ -488,7 +487,7 @@ The daemon can watch mailboxes and tell the owner when mail arrives. Arrival is 
 - `surfaces.email.inboxTagging` (default off) lets the inbox write its spam, priority and normal labels back to the mailbox as IMAP keywords.
 - Operator methods: `email.inbound.status`, `email.inbox.list`, `email.inbox.read`, `email.inbox.update`, `email.send`, `email.draft.create`, `email.draft.update`, `email.drafts.list`, `email.attachment.get`, `email.expectation.open`, `email.expectation.wait`, `email.expectation.list`, `email.expectation.cancel`.
 - One verification expectation is open per address: `email.expectation.open` for an address that already has one replaces it, and `email.expectation.wait` on the earlier id answers at once with state `replaced` and `replacedBy`, the id to wait on instead. When the open cannot be saved, it fails and the earlier expectation stays open. The other states are `waiting`, `arrived`, `expired`, `capability-lost`, `cancelled` and `unknown` (no expectation with that id is open or remembered).
-- `email.inbox.read` returns the headers even when a body section of the message cannot be fetched; it then carries `bodyUnavailable` (each section and why), the body fields are empty for those sections because they were not read, and `/mail read` says the body could not be fetched instead of "(no plain-text body)". The web UI does not quote a body it did not fetch in a reply.
+- `email.inbox.read` returns the headers even when a body section of the message cannot be fetched; it then carries `bodyUnavailable` (each section and why), the body fields are empty for those sections because they were not read, and `mail.read` (the Inbox's `Enter`) says the text could not be fetched instead of "(no plain-text body)". The web UI does not quote a body it did not fetch in a reply.
 - A message UID names a message only within its mailbox generation: `email.inbox.list` and `email.inbox.read` return `uidValidity`, and `email.inbox.update` and `email.attachment.get` require it, so a mailbox the server reset refuses the change (or the download, with "The mailbox was reset since this message was listed, so nothing was downloaded. Refresh the list and try again.") instead of acting on whichever message now holds the number. In the same way `email.drafts.list` and `email.draft.create` return the Drafts folder's `uidValidity`, and `email.draft.update` replaces a saved draft (by `uid` and `uidValidity`) so the folder keeps one copy instead of two. A draft save the mail server refuses is reported as not saved, with the cause read from its response code (the mailbox is full, the Drafts folder does not exist, the draft is too large, or the mail server refused it); a save whose answer was lost may have been saved, and creating or replacing the same draft again in the same daemon run looks for it in the Drafts folder first instead of saving it twice. `email.draft.create` takes an `Idempotency-Key`: a create sent again under the same key (the web UI sends one per composer) returns the first draft instead of appending a second. `email.drafts.list` reads the newest drafts; `before` (a UID) reads the page older than it, so every draft in the folder can be listed (the web UI's "Load older drafts").
 - A draft is saved with a `Message-ID` of its own. A change to the mailbox (a saved or replaced draft, a message marked, archived or moved) is reported done once the server confirmed it, even when signing out afterwards fails. A save whose answer the server never gave is reported as one that may have been saved; creating the same draft again in the same daemon run looks for it under that `Message-ID` first and returns it instead of saving a second copy.
 
@@ -637,7 +636,7 @@ Scopes requested: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar
 | Symptom | Fix |
 | --- | --- |
 | "This browser or app may not be secure" | Sign in by hand in the window that opened, then re-run. |
-| `IMAP: The mail server rejected the credentials for <address>.` or `SMTP: SMTP AUTH PLAIN failed: 535 …` | The app password is wrong or revoked. The failure shows the steps: delete the `goodvibes-agent` entry at the app passwords page, create a new one there, store it with `/mail password`, and run `/google setup` again. |
+| `IMAP: The mail server rejected the credentials for <address>.` or `SMTP: SMTP AUTH PLAIN failed: 535 …` | The app password is wrong or revoked. The failure shows the steps: delete the `goodvibes-agent` entry at the app passwords page, create a new one there, store it with "Store the mailbox password" in Mail, calendar and channels, and run `/google setup` again. |
 | `IMAP: The mail server did not answer.` or another failure naming a server it could not reach | The failure names the server (`imap.gmail.com:993` or `smtp.gmail.com:587`): this machine's network or that address is the cause, and the app password was not checked. Run `/google setup` again once the network is up. |
 | Worked, then broke about a week later | The OAuth app is in Testing. Publish it; the next Google request starts a fresh consent by itself. |
 | Google is not connected, a scope is missing, or the credential is dead | The request that meets it starts a consent asking for every scope at once and shows its link (in the owner inbox from the daemon, on screen in the Agent); approve it and the request is sent again when the consent completes. One consent at a time: other requests join the open one. `/google reauthorize` starts one by hand. |
@@ -659,7 +658,7 @@ A channel is a chat surface the daemon sits behind: Slack, Discord, Telegram, nt
    - Alternatively set each key with `/settings set surfaces.<surface>.<field> <value>` and switch it on with `/settings set surfaces.<surface>.enabled true` or `goodvibes surfaces enable <surface>`.
    - In the Agent: `/channels setup <id>`, `/channels doctor <id>`, `/channels guide <id>`.
 3. Prove it end to end: `/channels test <surface>` sends a real test message through the daemon and reports the delivered or error outcome.
-4. Send a first message from your own account. On a surface whose allowlists are empty it is not answered: it raises an owner claim (see "Who may talk to the assistant"). Accept it with `/questions`, then `/questions answer <id> accept` (or in the web UI inbox). You are then the surface's owner; send your message again and it is answered.
+4. Send a first message from your own account. On a surface whose allowlists are empty it is not answered: it raises an owner claim (see "Who may talk to the assistant"). Accept it in Waiting for you (the menu, Ctrl+G then m): select the claim and press its accept key (or in the web UI inbox). You are then the surface's owner; send your message again and it is answered.
 5. Check: `goodvibes surfaces check <surface>`, `/channels status`, `/channels rules <surface>`.
 
 A surface switched on, or given a credential, while the daemon runs is picked up without a restart. A surface switched off answers inbound requests with HTTP 503 `SURFACE_DISABLED`.
@@ -709,7 +708,7 @@ Each surface has an ingress policy.
   | Approve or veto a purchase, type a card code | Yes | No |
   | `status`, `cancel`, `retry` on a run, agent or session | Yes, for work started from the same conversation | No: `Not done: <action> <id> was refused. Status, cancel and retry act on any run or agent, so only the owner of this channel may send them. Ask the owner, or have them change the channel's owner.` |
 
-  Where the asks of a guest's turn go: never to the guest's chat. The approval prompt goes to the owner's own direct conversation on that surface (newest first), or when none takes it, to his direct conversations on other surfaces; it is also listed in the owner inbox (`/questions` in either terminal app, the web UI). The owner answers it by replying in any of his own direct conversations, or in the inbox. When none of his conversations takes the prompt, he is alerted ("Approval required for <tool>: ... It was asked for by someone on <surface> who is not you, and none of your own conversations took it. Answer it in the terminal app or the web UI") and the alert is kept as a receipt for the next terminal or web UI the owner uses: an owner alert kept this way is shown to and cleared by the owner only (the operator token, a device he paired himself, the owner sign-in user), never by another signed-in user or a scoped device.
+  Where the asks of a guest's turn go: never to the guest's chat. The approval prompt goes to the owner's own direct conversation on that surface (newest first), or when none takes it, to his direct conversations on other surfaces; it is also listed in the owner inbox (Waiting for you in either terminal app and the web UI). The owner answers it by replying in any of his own direct conversations, or in the inbox. When none of his conversations takes the prompt, he is alerted ("Approval required for <tool>: ... It was asked for by someone on <surface> who is not you, and none of your own conversations took it. Answer it in the terminal app or the web UI") and the alert is kept as a receipt for the next terminal or web UI the owner uses: an owner alert kept this way is shown to and cleared by the owner only (the operator token, a device he paired himself, the owner sign-in user), never by another signed-in user or a scoped device.
 
   Authority belongs to the person, not the surface. The owner's own messages keep the surface's authority: on Telegram (a command-authority surface) his turn runs as if typed in the terminal app, in his permission mode; on every other chat surface a change his turn asks for becomes an approval for him each time (`channel-request`); on email, webhook and ntfy it is refused. A guest's turn runs under the guest form of the surface (`guest:<surface>`), which carries no authority on any surface, Telegram included. A guest's message is also never handed to an agent already running in that conversation; it starts a guest's turn of its own. A surface with no owner (`open`, below) has only guests.
 
@@ -800,7 +799,7 @@ From nothing to the first answered message (Socket Mode, no public address neede
    goodvibes surfaces check slack
    ```
 
-9. In Slack, open a direct message with the bot and send anything. It is not answered; an owner claim appears. In the terminal app: `/questions`, then `/questions answer <id> accept`.
+9. In Slack, open a direct message with the bot and send anything. It is not answered; an owner claim appears. In the terminal app: open Waiting for you from the menu, select the claim and press its accept key.
 10. Send the message again: it is answered. A request for work is proposed back; reply `yes` to start it.
 11. To use it in a channel: `/invite @<bot name>` in that channel, and turn on mentions so the bot answers only when addressed: `/channels set-rules slack --require-mention on`. With mentions off (the default), every message in a channel the bot is in is handled.
 12. To allow a second person, accept their claim, or `/channels set-rules slack --allow-users <your-U-id>,<their-U-id>` (listing replaces the list, so include yourself).
@@ -839,7 +838,7 @@ From nothing to the first answered message:
    For webhook mode instead: set `web.publicBaseUrl` to the daemon's public HTTPS address; the daemon registers `{publicBaseUrl}/webhook/telegram` with Telegram itself and manages the webhook credential.
 3. The daemon log (see "Logs and diagnostics" in "The daemon, the web UI and networking") says `Telegram ingress active` with `mode` `polling` or `webhook` and the reason, or, when it cannot receive, `Telegram is enabled but is NOT receiving messages` (error level, with an `action` field saying what to fix) or `Telegram ingress is inactive` (warning, or info when the surface is switched off).
 4. In Telegram, open a chat with your bot and send any message (tapping Start sends `/start`). It is not answered and binds nothing: it raises an owner claim, `Make <your-numeric-id> (<your-username>) the owner of telegram?`.
-5. In the terminal app: `/questions`, then `/questions answer <id> accept`. You are the owner, and only you are on the user list: the bot answers nobody else until you admit them.
+5. In the terminal app: open Waiting for you from the menu, select the claim and press its accept key. You are the owner, and only you are on the user list: the bot answers nobody else until you admit them.
 6. Send `/start` again: the bot replies with how to use it. Then send a request. A conversation gets a reply; a request for work is proposed back, and `yes` (or `go ahead`) starts it.
 7. Optional, for deliveries (routines, notices) with no conversation to answer: `/settings set surfaces.telegram.defaultChatId <chat-id>`. A private chat's id is your numeric user id from the claim. `/devices pair channel telegram verify` sends its test message to this chat; without it the test reports `delivered:false`.
 
@@ -1093,7 +1092,7 @@ The daemon can buy things for the owner with a stored card, inside budgets the o
 
 Purchases are off, and every budget is `0`. With the defaults, a checkout that adds any tax, fee or paid delivery is refused outright (the daily overage budget of 0 cannot cover it), and one that adds nothing asks you first (the daily item budget and the per-purchase ceiling of 0 send every purchase to you). Set the amounts below before the first purchase.
 
-1. Turn purchases on, choosing how they run. In Settings (both terminal programs: the `Let GoodVibes make purchases` row; the web UI: Settings, payments) turning it on asks which of two ways, and nothing is preselected: `Ask me before every purchase (recommended)` (The safer way: nothing is bought until you approve it, naming the shop, the item and the most it may cost; `payments.confirmEveryPurchase` on) or `Buy, and give me <N> minutes to stop it` (A purchase within your budgets at a shop you can get your money back from goes ahead unless you say stop within N minutes; if the notice cannot reach you, it still goes ahead; `payments.confirmEveryPurchase` off, N is `payments.windows.vetoMinutes`). Both settings are written in one update. From a command line: `/settings set payments.confirmEveryPurchase true` (or `false`), then `/settings set payments.enabled true`. A choice already saved stays as it is until you pick another. While a stop window runs, its card (the terminal's `/questions`, the web UI's Work list, a chat channel) says so on its face: `Inside your daily budget. It goes ahead when the time runs out, even if this notice never reached you.`, with `Stop it` selected.
+1. Turn purchases on, choosing how they run. In Settings (both terminal programs: the `Let GoodVibes make purchases` row; the web UI: Settings, payments) turning it on asks which of two ways, and nothing is preselected: `Ask me before every purchase (recommended)` (The safer way: nothing is bought until you approve it, naming the shop, the item and the most it may cost; `payments.confirmEveryPurchase` on) or `Buy, and give me <N> minutes to stop it` (A purchase within your budgets at a shop you can get your money back from goes ahead unless you say stop within N minutes; if the notice cannot reach you, it still goes ahead; `payments.confirmEveryPurchase` off, N is `payments.windows.vetoMinutes`). Both settings are written in one update. From a command line: `/settings set payments.confirmEveryPurchase true` (or `false`), then `/settings set payments.enabled true`. A choice already saved stays as it is until you pick another. While a stop window runs, its card (the terminal's Waiting for you, the web UI's Work list, a chat channel) says so on its face: `Inside your daily budget. It goes ahead when the time runs out, even if this notice never reached you.`, with `Stop it` selected.
 2. Add a card (each field hidden, sent to the daemon after the last field): `/payments add-card`. Fields: label, kind (`virtual` or `real`), number, expiry, security code (3 or 4 digits), cardholder name. The answer is `[payments] Card stored on the selected daemon: <label> ...`. A virtual card with an issuer cap is recommended: the issuer enforces its cap even when this software is wrong. The terminal apps cannot record the cap; the web UI's card form (Settings, payments) has an optional "Issuer cap" field, and the operator method `payments.cards.create` takes `issuerCapMinorUnits`. A recorded cap is your declaration; a purchase whose full total is over it is refused (`card-limit-exceeded`) before any window. A card cannot be edited: to change its cap, remove it (`/payments remove-card <card>`) and add it again. Adding the same card again (the same label, number and expiry, for example after an answer that did not arrive) returns the card already stored and stores no second copy. A card number (and a security code asked for with `payments.cvvHandling` `prompt`) is taken only from a connection that reaches the daemon from its own machine, over https (`controlPlane.tls`, or a trusted proxy that ended TLS), or over a Tailscale address; over plain http on the local network (a LAN address or a `.local` name) the daemon refuses it with `403` `CARD_ENTRY_TRANSPORT` before reading it, and the web UI shows that reason instead of the card form or the code field.
 3. Set the addresses: `/payments address` in either program (it asks which, then the fields: `name`, `line1`, `line2`, `city`, `region`, `postalCode`, `country`), or the settings workspace (`/settings payments.shippingAddress`).
 4. Set the currency and budgets:
@@ -1107,7 +1106,7 @@ Purchases are off, and every budget is `0`. With the defaults, a checkout that a
    ```
 
    Amounts are written as you would say them (`19.99`). The day resets at midnight in `daemon.timezone` (UTC when empty). Every hold and spend records its currency: changing `payments.currency` starts new daily pools in the new currency for the rest of the day, and `payments.budget.status` lists what was spent earlier that day in the old currency (`earlierSpend`), in that currency, never converted.
-5. Say where approval and veto prompts also go: `/settings set payments.notifyChannels telegram`. The only accepted value today is `telegram` (or empty); any other name is refused with `expected string (a comma-separated list; only 'telegram' can deliver a notice today)`. Every notice, window and confirmation always goes to the owner inbox (`/questions`, the web UI) whatever this says.
+5. Say where approval and veto prompts also go: `/settings set payments.notifyChannels telegram`. The only accepted value today is `telegram` (or empty); any other name is refused with `expected string (a comma-separated list; only 'telegram' can deliver a notice today)`. Every notice, window and confirmation always goes to the owner inbox (Waiting for you, the web UI) whatever this says.
 6. Check: `/payments cards`.
 
 ### `/payments`
@@ -1227,16 +1226,17 @@ CI watch reports a GitHub repository's CI status job by job and can watch a bran
 
 Prerequisites: the `gh` CLI installed and signed in (`gh auth login`) on the daemon's machine.
 
-```text
-/ci status my-org/my-repo
-/ci status my-org/my-repo#42            a pull request
-/ci status my-org/my-repo@main          a branch, tag or commit
-/ci watch my-org/my-repo#42 telegram
-/ci watch my-org/my-repo@main slack:C0123456 --fix-session
-/ci watches
-/ci run <watch>
-/ci unwatch <watch>                    stops the watch (/ci watch sets it up again)
-```
+In every program it is Automation's CI watches tab: each watch with its repository (`my-org/my-repo#42` for a pull request, `my-org/my-repo@main` for a branch, tag or commit), its last verdict, where failures go and whether a fix session starts; it reads again by itself when a watch changes (LIST_CHANGED `ci-watches`).
+
+| Action | Capability | Control in Automation | Risk |
+| --- | --- | --- | --- |
+| See your CI watches | `ci.watches` | the CI watches tab | |
+| Check a repository's CI now | `ci.status` | `k` check a repository | |
+| Watch a repository's CI | `ci.watch` | `n` watch a repository ("On a failure": only tell me, or also start a fix session) | |
+| Check a watch now | `ci.run` | `g` check now, on a watch | |
+| Stop watching a repository | `ci.unwatch` | `x` stop watching, on a watch (asks first) | cannot be undone |
+
+The repository is written the way you say it: `my-org/my-repo`, `my-org/my-repo#42` or `my-org/my-repo@main`; the daemon reads the pull request or branch from it.
 
 ```sh
 goodvibes-agent ci status my-org/my-repo --ref main
@@ -1249,7 +1249,7 @@ goodvibes-agent ci watches delete <watchId> --yes
 
 - Every job and its conclusion is listed; the overall verdict comes from the jobs, never a rollup. A job configured `continue-on-error` cannot be detected through `gh` and is not flagged.
 - The delivery channel is `surfaceKind` or `surfaceKind:address`.
-- `--fix-session` (`--trigger-fix-session` in the Agent) starts a fix session on a red verdict, seeded with the tails of up to five failing jobs' logs.
+- "Also start a fix session" (`--trigger-fix-session` in `goodvibes-agent ci`) starts a fix session on a red verdict, seeded with the tails of up to five failing jobs' logs.
 - A standing watch is polled every `watchers.ciPollIntervalMs` (never faster than 15 seconds), sends its verdict once, then retires. A watch whose branch is gone, or that gets no verdict in time, ends with a "no verdict" notice.
 - A watch that starts a repair on a red verdict stays open until the repair has started: a repair that fails to start is tried again after its back-off, and one that is refused ends the watch once with "CI repair not started" and the reason. The poll summary counts the repairs that did not start.
 - A `git push` or `gh pr create` run through the `exec` tool creates a watch for the pushed branch by itself, delivered to the web UI.
@@ -1357,7 +1357,7 @@ Some settings hold a whole list. Each is read and written as one JSON value; a m
 | `worktree.setup.commands` | Commands run in a new worktree before an isolated agent starts in it. `[]` (auto, the default) runs the install command each lockfile names; `{"mode":"none"}` runs nothing. | `["bun install"]` |
 | `worktree.setup.carryOverGlobs` | Untracked files copied from the main checkout into a new worktree. `[]` (auto) copies `.env` and `.env.*`; `{"mode":"none"}` copies nothing. | `[".env","config/*.local.json"]` |
 
-These are settings only; "lists" in this section means these list-valued settings. GoodVibes has no shopping-list feature. Both apps have the same to-do list, the project's work plan, kept with `/todo` (`list`, `markdown`, `export`, `add <title>`, `edit <item> <title>`, `mark <item> <state>`, `next <item>`, `remove <item>`, `clear-done`; `/todo` alone opens these as a list to choose from). The Agent's model reads and changes it with the `agent_work_plan` tool, the terminal app's with the `work_plan` tool. Both are described in full in "The terminal app (`goodvibes`)" and "The Agent (`goodvibes-agent`)".
+These are settings only; "lists" in this section means these list-valued settings. GoodVibes has no shopping-list feature. Both apps have the same checklist, the project's running list of things to do, kept in the Work place's Checklist list (add, change, mark, move on, take off, clear the finished ones, see or save it as Markdown). The Agent's model reads and changes it with the `agent_work_plan` tool, the terminal app's with the `work_plan` tool. Both are described in full in "The terminal app (`goodvibes`)" and "The Agent (`goodvibes-agent`)".
 
 How to edit one, from each surface:
 

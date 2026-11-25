@@ -20,8 +20,8 @@ export interface SubscriptionEntryHints {
     readonly finish: (provider: string) => string;
 }
 const DEFAULT_HINTS: SubscriptionEntryHints = {
-    login: provider => `Use /provider sign-in ${provider} to begin browser sign-in.`,
-    finish: provider => `Finish with /provider finish ${provider} <code> to activate this session.`,
+    login: provider => `Sign in to ${provider} in Models and providers to begin the browser sign-in.`,
+    finish: provider => `Finish signing in to ${provider} in Models and providers with the code the page showed to activate this session.`,
 };
 export function buildSubscriptionEntries(manager: SubscriptionManager | null, serviceRegistry: Pick<ServiceInspectionQuery, 'getAll'> | null, hints: SubscriptionEntryHints = DEFAULT_HINTS): SubscriptionEntry[] {
     if (!manager)
@@ -126,6 +126,6 @@ export function inferSubscriptionRouteReason(entry: SubscriptionEntry): string |
 
 /** What the settings screen says when a sign-out removed the record but its tokens stayed in the secret store; `reason` is the failure, summarized. */
 export function subscriptionTokensNotRemovedMessage(provider: string, reason: string): string {
-  return `Signed out ${provider}, but its sign-in tokens could not be removed from the secret store: ${reason} Run /provider sign-out ${provider} to try again.`;
+  return `Signed out ${provider}, but its sign-in tokens could not be removed from the secret store: ${reason} Sign out of ${provider} again in Models and providers to try again.`;
 }
 

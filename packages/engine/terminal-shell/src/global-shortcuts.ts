@@ -15,7 +15,11 @@ export interface GlobalShortcutState {
   historySearch: Pick<HistorySearch, 'open'>;
   searchManager: SearchManager;
   conversationManager: (SearchConversation & { nextErrorLine(scrollTop: number): number }) | null;
-  commandContext?: { clearScreen?: (() => void) | undefined } | undefined;
+  commandContext?: {
+    clearScreen?: (() => void) | undefined;
+    /** Run a place's key read in the composer (keybindings.ts KeyContext `global`: This conversation's controls). */
+    runPlaceKey?: ((action: string) => void) | undefined;
+  } | undefined;
   contentWidth: number;
   getScrollTop(): number;
   getWrappedPromptInfo(width: number): {
@@ -84,6 +88,12 @@ export function runGlobalShortcutAction<State extends GlobalShortcutState>(
   viewportHeight?: number,
 ): boolean {
   const page = Math.max(1, (viewportHeight ?? DEFAULT_PAGE_ROWS + 2) - 2);
+  // A key a person bound to one of a place's entries read in the composer (`place.conversation-composer.<control>`).
+  if (action?.startsWith('place.')) {
+    state.commandContext?.runPlaceKey?.(action);
+    state.requestRender();
+    return true;
+  }
   switch (action) {
     // PageUp and PageDown by default; rebindable like every other key.
     case 'scroll-page-up':

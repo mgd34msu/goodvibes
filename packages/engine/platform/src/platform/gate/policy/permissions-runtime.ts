@@ -141,8 +141,8 @@ function ownerRuleId(kind: string, tool: string, now: number): string {
   return `owner-${kind}-${tool.replace(/[^A-Za-z0-9_.-]/g, '')}-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-/** The record `/permissions add` writes, or the reason it cannot. */
-function ownerRuleRecord(args: readonly string[], projectRoot: string | null, now: number): StoredUserPermissionRule | string {
+/** The record `/permissions add` writes, or the reason it cannot (also the daemon's, capabilities/builtin/permissions.ts). */
+export function ownerRuleRecord(args: readonly string[], projectRoot: string | null, now: number): StoredUserPermissionRule | string {
   const first = (args[0] ?? '').toLowerCase();
   if (first === 'never') {
     const command = args.slice(1).join(' ').trim();

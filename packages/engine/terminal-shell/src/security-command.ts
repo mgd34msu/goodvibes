@@ -18,23 +18,24 @@ import { dispatchPolicyCommand, type PolicyCommandContext } from '@goodvibes/eng
 import {
   buildSandboxReview,
   inspectSandboxProbe,
-  inspectSandboxSessionArtifact,
-  listSandboxPresets,
-  listSandboxProfiles,
   renderSandboxProfiles,
   renderSandboxRecommendation,
   renderSandboxReview,
-  renderSandboxSessions,
   type ConfigManagerLike,
   type SandboxSessionRegistry,
 } from '@goodvibes/engine/platform/platform/runtime/sandbox';
-import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import {
+  SECURITY_FOLDER, SECURITY_READ_SANDBOX, SECURITY_RESTRICT_FOLDER, SECURITY_RUN_IN_SANDBOX, SECURITY_SANDBOX_PRESETS, SECURITY_SANDBOX_SESSION,
+  SECURITY_SANDBOX_SESSIONS, SECURITY_SAVE_SANDBOX, SECURITY_START_SANDBOX, SECURITY_STOP_SANDBOX, SECURITY_TOKENS, SECURITY_TRUST_FOLDER,
+  type SandboxSessionServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
 import type { McpIsolationChange } from '@goodvibes/engine/platform/platform/mcp';
-import { commandRefusal, refuseModelWriteOutsideWorkingDirectory } from './command-confirmation.js';
+import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
+import { daemonCapabilityAction, sessionCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
 import type { ActionDescription, CommandActionContext, CommandReport, InputDescription } from './command-actions/types.js';
-import { REPLACE_FILE_INPUT, choiceInput, doAction, readAction, textInput } from './described-command-kit.js';
+import { REPLACE_FILE_INPUT, doAction, readAction, textInput } from './described-command-kit.js';
 
 type AttackPathInput = Parameters<typeof buildMcpAttackPathReview>[0];
 
@@ -72,10 +73,12 @@ export interface SecurityCommandPolicy<Ctx> {
     save(ctx: Ctx, path: string): Promise<string>;
     read(ctx: Ctx, path: string): string;
   };
-  /** This folder's trust decision, where this app makes one. */
+  /** How this app reaches the daemon, which keeps folder trust, the token audit and the sandbox presets. */
+  readonly binding: DaemonCapabilityBinding<Ctx>;
+  /** This folder's trust as this app holds it (the daemon decides it; the app reads the decision again at once). */
   readonly folder?: {
-    status(ctx: Ctx): Promise<string>;
-    set(ctx: Ctx, level: 'trusted' | 'restricted'): Promise<string>;
+    /** Read the shared decision again now (after the daemon changed it), so the folder's hooks and servers start or stop. */
+    reread(ctx: Ctx): Promise<void>;
     /** False while nothing was decided for this folder; undefined where there is no folder trust. */
     decided(ctx: Ctx): boolean | undefined;
   } | undefined;
@@ -98,7 +101,8 @@ interface SandboxSessionsHolder {
   readonly workspace?: { readonly sandboxSessionRegistry?: Pick<SandboxSessionRegistry, 'list'> | null | undefined } | undefined;
 }
 
-const SANDBOX_SESSIONS = defineList<CommandActionContext>({
+/** The sandbox sessions this program started (the list a "Sandbox session" input chooses from). */
+defineList<CommandActionContext>({
   name: 'security.sandbox-sessions',
   async read(ctx) {
     const registry = (ctx as CommandActionContext & SandboxSessionsHolder).workspace?.sandboxSessionRegistry;
@@ -111,10 +115,6 @@ const SANDBOX_SESSIONS = defineList<CommandActionContext>({
 });
 
 const PATH_INPUT = (help: string): InputDescription => textInput({ id: 'path', label: 'File', help, why: 'a file path', kind: 'path', typed: { position: 1 } });
-const SESSION_INPUT: InputDescription = {
-  id: 'session', label: 'Sandbox session', help: 'The sandbox sessions started here', kind: 'choice',
-  choices: { list: SANDBOX_SESSIONS, allowOther: { reason: 'a session id' } }, required: true, typed: { position: 1 },
-};
 const TERMINAL_SESSIONS = { terminalOnly: 'Sandbox sessions belong to the terminal app that started them.' } as const;
 const SCREEN = { terminalOnly: 'It opens a screen of the terminal app.' } as const;
 
@@ -126,11 +126,27 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
     if (!policy.policyContext) return notHere('The policy bundles');
     await dispatchPolicyCommand(args, policy.policyContext(ctx));
   };
-  const sessions = (ctx: Ctx): SandboxSessionRegistry => {
+  const sandboxSessionsOf = (ctx: Ctx): SandboxSessionServices => {
     const registry = policy.sandboxSessions?.(ctx);
-    if (!registry) return notHere('Sandbox sessions');
-    return registry;
+    if (!registry) return {};
+    return {
+      sandboxSessions: {
+        registry, config: policy.sandboxConfig(ctx), resolvePath: (path) => policy.resolvePath(ctx, path),
+        // A model writes a record only inside the working folder.
+        insideOnly: ctx.invokedByModel === true,
+      },
+    };
   };
+  /** A folder trust change: this app reads the shared decision again at once, so its hooks and servers follow now. */
+  const rereadingFolder = (action: ActionDescription<Ctx>): ActionDescription<Ctx> => ({
+    ...action,
+    async run(values, ctx) {
+      const said = await action.run(values, ctx);
+      await policy.folder?.reread(ctx);
+      ctx.renderRequest?.();
+      return said;
+    },
+  });
   const attackPaths = (ctx: Ctx) => {
     const snapshot = policy.security(ctx);
     return { snapshot, review: buildMcpAttackPathReview({ servers: snapshot.mcpServers, recentDecisions: snapshot.recentMcpDecisions }) };
@@ -194,18 +210,8 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
         ].join('\n');
       },
     }),
-    readAction<Ctx>({
-      id: 'tokens', label: 'See paired-device tokens', word: 'tokens',
-      sentence: 'Lists each paired device\'s token with its policy, whether it stays in scope, when it is due for rotation and whether it is blocked.',
-      async run(_values, ctx) {
-        const audit = policy.tokens(ctx).auditAll(Date.now());
-        if (audit.results.length === 0) return 'No paired-device tokens: no device is paired with this machine (the list follows the hourly token audit).';
-        return [
-          `Paired-device tokens (${audit.results.length})`,
-          ...audit.results.map((result) => `  ${result.label}  policy ${result.scope.policyId}  scope ${result.scope.outcome}  rotation ${result.rotation.outcome}  blocked ${result.blocked ? 'yes' : 'no'}`),
-        ].join('\n');
-      },
-    }),
+    // The daemon's audit of the paired devices' tokens (capabilities/builtin/security.ts).
+    daemonCapabilityAction<Ctx>(SECURITY_TOKENS, policy.binding),
     readAction<Ctx>({
       id: 'attack-paths', label: 'See risky routes through MCP servers', word: 'attack-paths',
       sentence: 'Shows the routes by which an MCP server could reach files, the network or other tools further than its trust allows.',
@@ -224,35 +230,11 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
       sentence: 'Shows the permission mode, how many secrets and services are set up, and how far each plugin and MCP server is trusted.',
       async run(_values, ctx) { return policy.trust.review(ctx); },
     }),
-    readAction<Ctx>({
-      id: 'folder', label: 'See whether this folder is trusted', word: 'folder',
-      sentence: 'Shows whether this folder is trusted, restricted or not decided, and what each means here.',
-      async run(_values, ctx) {
-        if (!policy.folder) return notHere('Folder trust');
-        return policy.folder.status(ctx);
-      },
-    }),
-    {
-      id: 'trust-folder', label: 'Trust this folder', word: 'trust-folder', inputs: [],
-      sentence: 'This folder becomes trusted: its own hooks and MCP servers may run and tools may change it, until you change it.',
-      done: '', touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'restrict-folder',
-      ownerOnly: { reason: 'it lets this folder\'s own files decide what runs', instead: 'Ask the owner to trust it: /security trust-folder.' },
-      operator: { terminalOnly: 'Folder trust is decided in the app that opened the folder.' }, example: {},
-      async run(_values, ctx) {
-        if (!policy.folder) return notHere('Folder trust');
-        return policy.folder.set(ctx, 'trusted');
-      },
-    },
-    {
-      id: 'restrict-folder', label: 'Restrict this folder', word: 'restrict-folder', inputs: [],
-      sentence: 'This folder becomes restricted: its own hooks and MCP servers stay off, until you change it.',
-      done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'trust-folder',
-      operator: { terminalOnly: 'Folder trust is decided in the app that opened the folder.' }, example: {},
-      async run(_values, ctx) {
-        if (!policy.folder) return notHere('Folder trust');
-        return policy.folder.set(ctx, 'restricted');
-      },
-    },
+    // This folder's trust is kept in the shared register; the daemon decides it (capabilities/builtin/security.ts),
+    // and this app reads the decision again at once so the folder's own hooks and MCP servers start or stop now.
+    daemonCapabilityAction<Ctx>(SECURITY_FOLDER, policy.binding),
+    rereadingFolder(daemonCapabilityAction<Ctx>(SECURITY_TRUST_FOLDER, policy.binding)),
+    rereadingFolder(daemonCapabilityAction<Ctx>(SECURITY_RESTRICT_FOLDER, policy.binding)),
     {
       id: 'save-trust', label: 'Save the trust summary to a file', word: 'save-trust',
       inputs: [PATH_INPUT('Where to write it; only you can read it'), REPLACE_FILE_INPUT],
@@ -309,6 +291,8 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
       id: 'enforce-policy', label: 'Enforce the candidate policy', word: 'enforce-policy', inputs: [],
       sentence: 'The candidate becomes the policy in force, deciding the calls "See what the candidate policy changes" showed differently, until you change it.',
       done: '', touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'restore-policy',
+      // A policy swap may tighten as well as loosen: the line says what is in force, not that it loosened.
+      riskDone: 'The candidate is the policy in force now: the calls it decides differently go its way, looser or stricter.',
       ownerOnly: { reason: 'a new policy may allow what the one in force refuses', instead: 'Ask the owner to enforce it: /security enforce-policy.' },
       operator: { terminalOnly: 'The policy registry is the terminal app\'s.' }, example: {},
       async run(_values, ctx) { await runPolicy(ctx, ['promote', '--yes']); },
@@ -317,6 +301,7 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
       id: 'restore-policy', label: 'Go back to the previous policy', word: 'restore-policy', inputs: [],
       sentence: 'The policy in force before the last one is enforced again, until you change it.',
       done: '', touches: 'this-machine', lasts: 'kept', risk: 'loosens-a-protection', undoneBy: 'enforce-policy',
+      riskDone: 'The previous policy is in force again: the calls it decides differently go its way, looser or stricter.',
       ownerOnly: { reason: 'the previous policy may allow what the one in force refuses', instead: 'Ask the owner: /security restore-policy.' },
       operator: { terminalOnly: 'The policy registry is the terminal app\'s.' }, example: {},
       async run(_values, ctx) { await runPolicy(ctx, ['rollback']); },
@@ -336,17 +321,7 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
       sentence: 'Lists the sandbox profiles (commands, MCP servers) with what each may reach and the backend that runs it.',
       async run(_values, ctx) { return renderSandboxProfiles(policy.sandboxConfig(ctx)); },
     }),
-    readAction<Ctx>({
-      id: 'sandbox-presets', label: 'See the sandbox presets', word: 'sandbox-presets',
-      sentence: 'Lists the presets for MCP servers, what each sets and its notes.',
-      async run() {
-        return ['Sandbox presets', ...listSandboxPresets().flatMap((preset) => [
-          `  ${preset.label} (${preset.id}): ${preset.summary}`,
-          `    MCP servers: ${preset.config.mcpIsolation === 'contained' ? 'inside the sandbox (/security contain-mcp)' : 'as host processes (/security host-mcp)'}`,
-          ...preset.notes.map((note) => `    ${note}`),
-        ])].join('\n');
-      },
-    }),
+    daemonCapabilityAction<Ctx>(SECURITY_SANDBOX_PRESETS, policy.binding),
     readAction<Ctx>({
       id: 'sandbox-probe', label: 'Probe the sandbox on this machine', word: 'sandbox-probe',
       sentence: 'Probes which process boundary this machine can run now, with any warnings.',
@@ -385,115 +360,9 @@ function securityActions<Ctx extends CommandActionContext>(policy: SecurityComma
         return describeIsolationChange(policy.sandboxConfig(ctx).setMcpIsolation('disabled'), 'MCP servers run as host processes from now on.');
       },
     },
-    readAction<Ctx>({
-      id: 'sandbox-sessions', label: 'See the sandbox sessions', word: 'sandbox-sessions',
-      sentence: 'Lists the sandbox sessions started here, with their profile, backend and state.',
-      async run(_values, ctx) { return renderSandboxSessions(sessions(ctx).list()); },
-    }),
-    {
-      id: 'start-sandbox', label: 'Start a sandbox session', word: 'start-sandbox',
-      inputs: [
-        choiceInput({
-          id: 'profile', label: 'Profile', help: 'What the session is for', typed: { position: 1 },
-          choices: listSandboxProfiles().map((profile) => ({ value: profile.id, label: profile.label })),
-        }),
-        choiceInput({
-          id: 'where', label: 'Boundary', help: 'Inside the sandbox, or on this machine with no boundary', typed: { flag: '--host', switchOn: 'host' },
-          choices: [
-            { value: 'contained', label: 'Inside the sandbox' },
-            { value: 'host', label: 'On this machine, with no boundary', help: 'It reaches the host\'s files and network.', risk: 'loosens-a-protection' },
-          ],
-          optional: { default: 'contained', means: 'inside the sandbox' },
-        }),
-        textInput({ id: 'label', label: 'Name', help: 'A name to tell it apart', why: 'a name you choose', typed: { tail: true }, optional: { default: '', means: 'the profile\'s name' } }),
-      ],
-      sentence: 'A {profile} sandbox session starts and stays until you stop it, for this session only.',
-      done: '', touches: 'this-machine', lasts: 'session', risk: 'none', undoneBy: 'stop-sandbox',
-      operator: TERMINAL_SESSIONS, example: { profile: 'command', label: 'build check' },
-      async run(values, ctx) {
-        const session = await sessions(ctx).start(values.profile as Parameters<SandboxSessionRegistry['start']>[0], values.label || undefined, policy.sandboxConfig(ctx), { host: values.where === 'host' });
-        return [
-          `Started sandbox session ${session.id} for ${session.profileId} (backend ${session.backend}, ${session.state}, start-up ${session.startupStatus ?? 'not reported'}).`,
-          ...(session.startupDetail ? [`  ${session.startupDetail}`] : []),
-        ].join('\n');
-      },
-    },
-    readAction<Ctx>({
-      id: 'sandbox-session', label: 'See a sandbox session', word: 'sandbox-session',
-      inputs: [SESSION_INPUT],
-      sentence: 'Shows sandbox session {session}: its profile, backend, state and the last command it ran.',
-      example: { session: 'sbx-1a2b' },
-      operator: TERMINAL_SESSIONS,
-      async run(values, ctx) {
-        const session = sessions(ctx).get(values.session!);
-        if (!session) throw commandRefusal(`No sandbox session is ${values.session}.`, '/security sandbox-sessions lists them.');
-        return [
-          `Sandbox session ${session.id}`,
-          `  profile: ${session.profileId}`,
-          `  kind: ${session.kind}`,
-          `  state: ${session.state}`,
-          `  backend: ${session.backend}`,
-          `  start-up: ${session.startupStatus ?? 'not reported'}`,
-          ...(session.startupDetail ? [`  detail: ${session.startupDetail}`] : []),
-          ...(session.lastCommandSummary ? [`  last: ${session.lastCommandSummary}`] : []),
-        ].join('\n');
-      },
-    }),
-    {
-      id: 'stop-sandbox', label: 'Stop a sandbox session', word: 'stop-sandbox',
-      inputs: [SESSION_INPUT],
-      sentence: 'Sandbox session {session} stops; what runs in it ends.',
-      done: '', touches: 'this-machine', lasts: 'kept', risk: 'cannot-be-undone',
-      operator: TERMINAL_SESSIONS, example: { session: 'sbx-1a2b' },
-      async run(values, ctx) {
-        const session = sessions(ctx).stop(values.session!);
-        if (!session) throw commandRefusal(`No sandbox session is ${values.session}; nothing was stopped.`, '/security sandbox-sessions lists them.');
-        return `Stopped sandbox session ${session.id}.`;
-      },
-    },
-    doAction<Ctx>({
-      id: 'run-in-sandbox', label: 'Run a command in a sandbox session', word: 'run-in-sandbox',
-      inputs: [
-        SESSION_INPUT,
-        textInput({ id: 'command', label: 'Command', help: 'The program and its arguments', why: 'a command line', typed: { tail: true } }),
-      ],
-      sentence: 'Runs {command} inside sandbox session {session} (at most 10 seconds) and shows what it printed.',
-      operator: TERMINAL_SESSIONS, example: { session: 'sbx-1a2b', command: 'git status' },
-      async run(values, ctx) {
-        const [program, ...args] = values.command!.trim().split(/\s+/);
-        if (!program) throw commandRefusal('Name the program to run; nothing was run.');
-        try {
-          const result = await sessions(ctx).execute(values.session!, program, args, { timeoutMs: 10000 });
-          const stdout = result.stdout.trim();
-          const stderr = result.stderr.trim();
-          return [`Ran in sandbox session ${values.session}`, `  status: ${result.status ?? 'none'}`, ...(stdout ? [`  stdout: ${stdout}`] : []), ...(stderr ? [`  stderr: ${stderr}`] : [])].join('\n');
-        } catch (error) {
-          throw commandRefusal(`Not run in sandbox session ${values.session}: ${summarizeError(error)}`);
-        }
-      },
-    }),
-    {
-      id: 'save-sandbox', label: 'Save a sandbox session\'s record to a file', word: 'save-sandbox',
-      inputs: [SESSION_INPUT, { ...PATH_INPUT('Where to write it'), typed: { position: 2 } }, REPLACE_FILE_INPUT],
-      sentence: 'The record of sandbox session {session} will be written to {path}, until you change it.',
-      done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
-      operator: TERMINAL_SESSIONS, example: { session: 'sbx-1a2b', path: 'sandbox-session.json' },
-      async run(values, ctx) {
-        const target = policy.resolvePath(ctx, values.path!);
-        refuseModelWriteOutsideWorkingDirectory(ctx, policy.resolvePath(ctx, '.'), target);
-        if (existsSync(target) && values.replace !== 'yes') throw commandRefusal(`${target} already exists; nothing was written.`, `Write over it: /security save-sandbox ${values.session} ${values.path} --replace`);
-        sessions(ctx).exportArtifact(values.session!, target, policy.sandboxConfig(ctx));
-        return `Saved the record of sandbox session ${values.session} to ${target}.`;
-      },
-    },
-    readAction<Ctx>({
-      id: 'read-sandbox', label: 'Read a saved sandbox session record', word: 'read-sandbox',
-      inputs: [PATH_INPUT('A sandbox session record saved earlier')],
-      sentence: 'Reads the sandbox session record saved in {path} and shows what it recorded.',
-      example: { path: 'sandbox-session.json' },
-      operator: TERMINAL_SESSIONS,
-      async run(values, ctx) { return inspectSandboxSessionArtifact(sessions(ctx).inspectArtifact(policy.resolvePath(ctx, values.path!))); },
-    }),
+    // The sandbox sessions this app started (capabilities/builtin/security.ts): this program's own, run here.
+    ...[SECURITY_SANDBOX_SESSIONS, SECURITY_START_SANDBOX, SECURITY_SANDBOX_SESSION, SECURITY_STOP_SANDBOX, SECURITY_RUN_IN_SANDBOX, SECURITY_SAVE_SANDBOX, SECURITY_READ_SANDBOX]
+      .map((definition) => sessionCapabilityAction<Ctx, SandboxSessionServices>(definition, sandboxSessionsOf, TERMINAL_SESSIONS)),
     doAction<Ctx>({
       id: 'security-screen', label: 'Open the security screen', word: 'security-screen', touches: 'reads',
       sentence: 'Opens the security screen: tokens, governance, MCP routes and the latest failure.', operator: SCREEN,

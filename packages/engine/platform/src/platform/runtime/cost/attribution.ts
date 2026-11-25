@@ -22,6 +22,7 @@
  * an unknown model stays unpriced regardless.
  */
 import { computeUsageCostUsd, type CacheRatio } from '../../providers/model-pricing.js';
+import { noteListChanged } from '../list-changes.js';
 
 /** A single usage record. Every dimension is optional, the service attributes over whatever a record carries. */
 export interface CostUsageRecord {
@@ -194,6 +195,8 @@ export class CostAttributionService {
     if (this.records.length > this.maxRecords) {
       this.records.splice(0, this.records.length - this.maxRecords);
     }
+    // A screen showing what was spent (the Money place) reads it again.
+    noteListChanged({ list: 'spending', change: 'created' });
   }
 
   /** Price one record with cache-aware rates, honestly unpriced when the model is unknown. */

@@ -217,7 +217,7 @@ export function describeActorAdmission(
     // Nobody is admitted on an unowned surface until the owner accepts a claim: speaking first does not make anyone the owner.
     return {
       admitted: false,
-      reason: 'No owner is set on this surface yet. The first message from an unknown sender raises an owner claim (in /questions, or the web UI inbox); accept it to make that sender the owner, and add other senders with the allowlist edit.',
+      reason: 'No owner is set on this surface yet. The first message from an unknown sender raises an owner claim (in Waiting for you, in each terminal program and the web UI); accept it to make that sender the owner, and add other senders with the allowlist edit.',
     };
   }
   if (decision.allowed) {

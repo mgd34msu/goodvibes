@@ -393,7 +393,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
   methodDescriptor({
     id: 'automation.schedules.preview',
     title: 'Preview a Schedule',
-    description: 'Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the /schedule blanks by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: every weekday at 09:00 (0 9 * * 1-5) [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller\'s time zone, used when tz is blank.',
+    description: 'Read the values of "Schedule something to run" (action add) or "Change a schedule" (action change), the inputs of the schedule.add and schedule.change capabilities by name (prompt, when, at, every, cron, tz, stagger, name, target, model, provider, deliver, outside, source, reasoning, thinking, wake, fallback, tool, template, light, paused; for change: schedule, task, success), into what would be kept: summary is the reading in words ("Read as: every weekday at 09:00 (0 9 * * 1-5) [Europe/Vienna]. Next run: ..."), and input is the body of automation.schedules.create (add) or automation.jobs.update (change). Nothing is kept. A described time (when) is read once, by the decision model when one is set, else only the fixed forms (an ISO time, a cron pattern, every 30m, in 2h) are read. zone is the caller\'s time zone, used when tz is blank.',
     category: 'automation',
     effects: ['automation-content.read'],
     inputSchema: objectSchema({
@@ -443,7 +443,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     id: 'automation.schedules.resume',
     repeat: 'safe',
     title: 'Resume a Schedule',
-    description: 'Let a paused schedule run again at its next time, until you change it. The same as /schedule resume <schedule>.',
+    description: 'Let a paused schedule run again at its next time, until you change it. The same as the schedule.resume capability (Resume in Automation).',
     category: 'automation',
     effects: ['automation.administer'],
     http: { method: 'POST', path: '/api/automation/schedules/{scheduleId}/resume' },
@@ -454,7 +454,7 @@ export const builtinGatewayControlAutomationMethodDescriptors: readonly GatewayM
     id: 'automation.schedules.pause',
     repeat: 'safe',
     title: 'Pause a Schedule',
-    description: 'Stop a schedule from running until it is resumed; it is kept. The same as /schedule pause <schedule>.',
+    description: 'Stop a schedule from running until it is resumed; it is kept. The same as the schedule.pause capability (Pause in Automation).',
     category: 'automation',
     effects: ['automation.administer'],
     http: { method: 'POST', path: '/api/automation/schedules/{scheduleId}/pause' },

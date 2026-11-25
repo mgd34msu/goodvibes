@@ -482,7 +482,9 @@ export async function mediaPostureSummary(context: CommandContext, rawArgs: Agen
           ttsProviderPicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-provider-picker" explicitUserRequest:"<the user request, in their own words>"',
           ttsVoicePicker: 'agent_harness mode:"open_ui_surface" surfaceId:"tts-voice-picker" explicitUserRequest:"<the user request, in their own words>"',
           voiceWorkflowPosture: 'agent_harness mode:"media_posture" query:"push to talk" includeParameters:true',
-          commands: ['/media providers', '/voice review', '/voice speak <message>', '/image <path>'],
+          commands: ['/media providers', '/voice review', '/voice speak <message>'],
+          // Sending an image file with a message is the conversation's own control: the capability conversation.image.
+          imageCapability: 'conversation.image',
         } } : {}),
       };
       current.assertCurrent?.();

@@ -15,14 +15,14 @@ export type RegistryActor = 'owner' | 'model';
 
 export type ReviewedKind = 'memory' | 'note' | 'persona' | 'skill' | 'skill bundle' | 'routine';
 
-/** The command the owner types to review a record of each kind. */
+/** Where the owner marks a record of each kind reviewed. */
 const OWNER_REVIEW_COMMAND: Readonly<Record<ReviewedKind, (id: string) => string>> = {
-  memory: (id) => `/memory review ${id} reviewed`,
-  note: (id) => `/notes review ${id}`,
-  persona: (id) => `/personas review ${id}`,
-  skill: (id) => `/my-skills review ${id}`,
-  'skill bundle': (id) => `/my-skills bundle-review ${id}`,
-  routine: (id) => `/routines review ${id}`,
+  memory: (id) => `mark memory record ${id} reviewed (Memory and knowledge, Memory)`,
+  note: (id) => `mark note ${id} reviewed (Memory and knowledge, Notes)`,
+  persona: (id) => `mark persona ${id} reviewed (Memory and knowledge, Personas)`,
+  skill: (id) => `mark skill ${id} reviewed (Tools and extensions, Skills)`,
+  'skill bundle': (id) => `mark skill bundle ${id} reviewed (Tools and extensions, Skill bundles)`,
+  routine: (id) => `mark routine ${id} reviewed (Memory and knowledge, Routines)`,
 };
 
 function ownerOnly(kind: ReviewedKind, id: string, reason: string): RefusalError {
@@ -30,7 +30,7 @@ function ownerOnly(kind: ReviewedKind, id: string, reason: string): RefusalError
     code: 'OWNER_REVIEW_REQUIRED',
     state: `Agent ${kind} ${id} is unchanged`,
     reason,
-    next: [`Ask the owner to run ${OWNER_REVIEW_COMMAND[kind](id)}`],
+    next: [`Ask the owner to ${OWNER_REVIEW_COMMAND[kind](id)}`],
     status: 403,
   }));
 }

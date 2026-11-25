@@ -192,7 +192,7 @@ export function setupHandoffsForItem(item: SetupPlanItem): readonly SetupHandoff
           label: 'Inspect provider accounts',
           kind: 'diagnostic',
           effect: 'read-only',
-          userRoute: '/accounts',
+          userRoute: 'Models and providers (the menu, Ctrl+G m)',
           modelRoute: 'models action:"providers" includeParameters:true',
           nextStep: 'Review provider account readiness and credential posture without printing secrets.',
           safety: 'Read-only account posture; secret values are never returned.',

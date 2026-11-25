@@ -219,7 +219,7 @@ function promotePersona(paths: ShellPathService, candidate: LearningCandidate, c
     markNotePromotion(paths, candidate, 'persona', created.id);
     return created;
   }, context, options, assertOwnership, onDurable);
-  return `persona:${record.id}  ${name.slice(0, 60)} (not active until the owner selects it: /personas use ${record.id})`;
+  return `persona:${record.id}  ${name.slice(0, 60)} (not in use until the owner uses it: Memory and knowledge, Personas)`;
 }
 
 function promoteRoutine(paths: ShellPathService, candidate: LearningCandidate, collection: LearningCandidateCollection, context: LearningCuratorNativeContext, options: CatalogRankingOptions, assertOwnership: () => void, onDurable?: () => void): string {
@@ -239,7 +239,7 @@ function promoteRoutine(paths: ShellPathService, candidate: LearningCandidate, c
     markNotePromotion(paths, candidate, 'routine', created.id);
     return created;
   }, context, options, assertOwnership, onDurable);
-  return `routine:${record.id}  ${name.slice(0, 60)} (disabled until the owner enables it: /routines enable ${record.id})`;
+  return `routine:${record.id}  ${name.slice(0, 60)} (switched off until the owner switches it on: Memory and knowledge or Automation, Routines)`;
 }
 
 /** Writes already made by a consolidation, kept outside the call so a later failure cannot hide them. */

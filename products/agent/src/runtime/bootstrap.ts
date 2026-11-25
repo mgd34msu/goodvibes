@@ -698,8 +698,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // These run after the initial render so they don't delay startup.
   //
   // Environment-key providers, the saved servers on this computer and a scan of
-  // this computer always run; the scan of the local subnet runs only with the
-  // owner's recorded consent. See src/runtime/lan-scan-consent.ts.
+  // this computer always run; the local network is the daemon's to scan, with the
+  // owner's one decision, and its servers are read from it. See src/runtime/lan-scan-consent.ts.
 
   runGatedLanScan({
     configManager,

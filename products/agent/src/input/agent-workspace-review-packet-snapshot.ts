@@ -470,12 +470,12 @@ export function buildReviewPacketWizard(
       : 'agent_harness mode:"workspace_action" actionId:"document-create-draft"',
     actionId: latestDocument ? 'document-show-draft' : 'document-create-draft',
     ownerLine: !latestDocument
-      ? '/documents create --title <title> <text>'
+      ? 'write a new draft (Memory and knowledge, Drafts)'
       : firstOpenComment
-        ? `/documents resolve-comment ${latestDocument.id} ${firstOpenComment.id}`
+        ? `resolve comment ${firstOpenComment.id} on draft ${latestDocument.id} (Memory and knowledge, Drafts)`
         : firstProposedSuggestion
-          ? `/documents accept-suggestion ${latestDocument.id} ${firstProposedSuggestion.id} (or reject-suggestion)`
-          : `/documents mark-reviewed ${latestDocument.id}`,
+          ? `take or leave suggestion ${firstProposedSuggestion.id} on draft ${latestDocument.id} (Memory and knowledge, Drafts)`
+          : `mark draft ${latestDocument.id} reviewed (Memory and knowledge, Drafts)`,
   }));
   steps.push(buildReviewPacketWizardStep({
     id: 'document-export',
@@ -491,7 +491,7 @@ export function buildReviewPacketWizard(
       ? `agent_documents export documentId:"${latestDocument.id}" confirm:true`
       : 'agent_harness mode:"workspace_action" actionId:"document-export-draft"',
     actionId: 'document-export-draft',
-    ownerLine: latestDocument ? `/documents export ${latestDocument.id}` : '/documents export <draft>',
+    ownerLine: latestDocument ? `save draft ${latestDocument.id} as an artifact (Memory and knowledge, Drafts)` : 'save a draft as an artifact (Memory and knowledge, Drafts)',
     backtrackRoute: defaults.documentExportArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.documentExportArtifactId}"`
       : null,
@@ -579,7 +579,7 @@ export function buildReviewPacketWizard(
       : 'agent_harness mode:"workspace_action" actionId:"document-export-compare"',
     actionId: 'document-export-compare',
     ownerLine: archiveReady
-      ? `/documents share-packet ${defaults.handoffArchiveArtifactId} channel|route|webhook --to <where>`
+      ? `send artifact ${defaults.handoffArchiveArtifactId} as a review packet (Memory and knowledge, Artifacts)`
       : `/compare export ${defaults.handoffArtifactId ?? '<handoff>'} --as archive`,
     backtrackRoute: defaults.handoffArchiveArtifactId
       ? `agent_artifacts mode:"show" artifactId:"${defaults.handoffArchiveArtifactId}"`

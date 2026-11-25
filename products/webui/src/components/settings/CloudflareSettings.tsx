@@ -4,9 +4,9 @@
  * browser: checking the deployed Worker (cloudflare.worker.verify) and turning
  * the integration off (cloudflare.disable, behind the confirm sheet).
  *
- * Provisioning stays in the terminal (`/cloudflare provision`) or onboarding,
- * because it takes a Cloudflare API token; this panel says so when nothing is set
- * up instead of offering a button that cannot work.
+ * Provisioning is in Devices and network (the Cloudflare tab: create the token,
+ * deploy), because it takes a Cloudflare API token; this panel says so when
+ * nothing is set up instead of offering a button that cannot work.
  *
  * Every reading comes from the status document: a component reads as set up only
  * when a provision created or confirmed it, and `ready` already accounts for the
@@ -198,7 +198,7 @@ export function CloudflareSettings() {
       <SettingsBlock
         testId="cloudflare-settings"
         title="Cloudflare"
-        description="Not set up. Cloudflare can run batch jobs on a Worker and queues and reach this daemon through a tunnel behind Access. Set it up from the terminal app with /cloudflare setup or /cloudflare provision, which take a Cloudflare API token."
+        description="Not set up. Cloudflare can run batch jobs on a Worker and queues and reach this daemon through a tunnel behind Access. Set it up in Devices and network, under Cloudflare: create the API token, then deploy; both take a Cloudflare API token."
       />
     );
   }

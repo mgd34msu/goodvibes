@@ -407,26 +407,32 @@ review records remain readable by their matching owner.
 
 ### Using it
 
-From the terminal app or the Agent (type these yourself; the model may only
-list and look up):
+From the terminal app or the Agent: Waiting for you (the menu, Ctrl+G then m),
+its Telegram tab, which lists what waits for you and the review queue and reads
+again by itself when one changes. The owner acts there; the model may only
+list and look up:
 
-```text
-/telegram configure -1001234567890 @my_bot      select a chat (chatId/threadId for one topic)
-/telegram                                        what waits for you and the review queue
-/telegram approve <id>                           accept a waiting message for review
-/telegram deny <id>                              refuse it; its original is released
-/telegram read <id>                              show an approved message's original
-/telegram cancel <id>                            close a review or withdraw a waiting message
-/telegram revoke <configurationId>               capture no new messages; the chat stays held
-/telegram release -1001234567890                 return the chat to normal handling
-```
+| Key | What it does |
+| --- | --- |
+| `h` | Hold a chat's messages for you: a form for the chat id (chatId/threadId for one topic), the bot, how long each message waits and how long the chat is held |
+| `y` on a waiting message | Accept it for review |
+| `n` on a waiting message | Refuse it; its original is released |
+| `o` on a message in the queue | Show its original (and mark the review read) |
+| `c` on a message in the queue | Close the review (asks first: it cannot be undone) |
+| `x` on a message in the queue | Capture no new messages under its configuration; the chat stays held |
+| `b` on a message in the queue | Return the chat to normal handling |
+| `i` | Where a message stands |
 
-`configure` takes `--hold <time>` (how long a waiting message stays in memory,
-default 1h) and `--for <time>` (how long the configuration lasts, default 7d);
-`approve` takes `--keep <time>` (how long the original stays readable, default
-1h, and it must end before the configuration does) and `--record <time>` (how
-long the review row is kept, default 7d). Times are written `90s`, `30m`,
-`2h` or `7d`. Ids are the short ids `/telegram` prints.
+Holding a chat takes how long a waiting message stays in memory (default 1h)
+and how long the configuration lasts (default 7d); accepting takes how long the
+original stays readable (default 1h, and it must end before the configuration
+does) and how long the review row is kept (default 7d). Times are written
+`90s`, `30m`, `2h` or `7d`. The same acts are the capabilities
+`telegram.configure`, `telegram.approve` (`message`, `keep`, `record`),
+`telegram.deny`, `telegram.read`, `telegram.cancel`, `telegram.revoke`
+(`configuration`), `telegram.release` (`chat`, a chat id or a configuration id),
+`telegram.status` and `telegram.list`, for a script or an outside agent;
+a message is named by the short id `telegram.list` prints.
 
 In the web UI the same actions are under Settings, Account, Devices and
 pairing, "Telegram delegated intake".
@@ -434,7 +440,8 @@ pairing, "Telegram delegated intake".
 Reading an original marks its review as read, so the queue shows which
 messages are still unread. A selected chat is not answered normally until it is
 released, even after its configuration ended or the daemon restarted: release
-it with `/telegram release <chatId>` (or the web UI's "Release this chat").
+it from Waiting for you's Telegram tab (`b`, or `telegram.release` with its
+chat id; the web UI's "Release this chat").
 Agents and scripts use the same `inbound.telegram.*` methods
 (`configure`, `decide`, `list`, `status`, `read`, `cancel`, `revoke`,
 `release`); a refused command answers `outcome: "held"` with a `reason`, a

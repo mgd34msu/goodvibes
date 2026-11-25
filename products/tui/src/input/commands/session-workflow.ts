@@ -103,7 +103,8 @@ async function exportSessionTranscript(
   mkdirSync(dirname(target), { recursive: true });
   // Never replaces an existing file.
   writeFileSync(target, redacted, { encoding: 'utf-8', flag: 'wx', mode: 0o600 });
-  ctx.print(`Exported session ${sessionId} (${messages.length} messages, redacted) to ${target}`);
+  // The path on its own line: a screen that shows a short answer keeps the first.
+  ctx.print(`Exported session ${title || sessionId} (${messages.length} messages, keys and paths hidden) to a file.\n${target}`);
 }
 
 // session-mgmt / smgmt was removed in TASK-032.
@@ -249,10 +250,10 @@ export async function resumeSavedSession(ctx: CommandContext, input: { readonly 
             ctx.print(`  ${line}`);
           }
           if ((meta.returnContext.remoteRunners?.length ?? 0) > 0) {
-            ctx.print(`  Remote re-entry: /remote recover ${meta.returnContext.remoteRunners![0]}`);
+            ctx.print(`  Remote runner ${meta.returnContext.remoteRunners![0]}: the Work place, Runners, how to recover`);
           }
           if ((meta.returnContext.worktreePaths?.length ?? 0) > 0) {
-            ctx.print(`  Worktree re-entry: /worktree review`);
+            ctx.print(`  Its worktrees: Code and changes, Worktrees`);
           }
           // The runtime's one helper route: its spend is recorded like any other helper call.
           const helperModel = providerApi.helperModel;

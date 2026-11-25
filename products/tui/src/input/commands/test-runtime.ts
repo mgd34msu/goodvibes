@@ -1,9 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { getContractGateTimeoutMs, projectTestCommandMissing, resolveProjectTestCommand } from '@goodvibes/engine/platform/platform/contract';
 import type { ToolCall } from '@goodvibes/engine/platform/platform/types';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { doAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import type { CommandContext } from '../command-registry.ts';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 
 /**
@@ -171,52 +169,35 @@ function killTestTree(proc: { pid: number; kill: (signal?: number | NodeJS.Signa
 // readers are cancelled, so a process that escaped the group cannot hold the run.
 const KILLED_DRAIN_GRACE_MS = 250;
 
-export function registerTestRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(defineCommand<CommandContext>({
-    name: 'test',
-    title: 'Run the tests',
-    summary: 'Run the project\'s test command and show what passed and failed; Esc stops it',
-    group: 'Changes',
-    actions: [doAction<CommandContext>({
-      id: 'test', label: 'Run the project\'s tests', word: '',
-      inputs: [textInput({ id: 'pattern', label: 'Only', help: 'Words that pick which tests run, passed to the test command', why: 'a test name or file pattern', typed: { tail: true }, optional: { default: '', means: 'every test' } })],
-      sentence: 'The project\'s test command (the test gate, or the package.json test script) runs here and its results are shown; Esc stops it.',
-      operator: { terminalOnly: 'The tests run in the terminal app\'s project.' }, example: { pattern: 'upload' },
-      async run(values, ctx) { await runTestCommand(values.pattern ? values.pattern.split(/\s+/).filter(Boolean) : [], ctx); },
-    })],
-  }));
-}
-
 /**
- * Core /test implementation, factored out of the registered handler so tests
- * can call it directly with a `timeoutMs` override. The command is the
- * project's one test command (contract/gates.ts `resolveProjectTestCommand`);
- * the time limit is `contract.gateTimeoutMs` unless overridden, 0 for none.
+ * The project's tests, run for the code capability `code.test`
+ * (capabilities/builtin/code.ts; Code and changes, t): the project's one test
+ * command (contract/gates.ts `resolveProjectTestCommand`), its output streamed
+ * into the conversation and its result kept there as a notice; the words of
+ * that result are what it answers. The time limit is `contract.gateTimeoutMs`
+ * unless overridden, 0 for none.
  */
 export async function runTestCommand(
   args: string[],
   ctx: CommandContext,
   timeoutMs?: number,
-): Promise<void> {
+): Promise<string> {
   const cwd = requireShellPaths(ctx).workingDirectory;
   const configManager = ctx.platform.configManager;
   const resolved = await resolveProjectTestCommand(cwd, configManager, args);
   if (!resolved) {
     const reason = projectTestCommandMissing(cwd);
-    ctx.print(reason);
     ctx.session.conversationManager.addNotice(`[Test] Not run. ${reason}`, { level: 'error' });
     ctx.renderRequest();
-    return;
+    // A first line a screen can show whole (the reason names the folder and a settings value).
+    return `Not run: this project has no test command; the conversation says how to add one.\n${reason}`;
   }
   const limitMs = timeoutMs ?? getContractGateTimeoutMs(configManager);
   const runs = ctx.testRuns;
   const signal = runs ? runs.begin() : new AbortController().signal;
-  if (!signal) {
-    ctx.print('A test run is still going, or still finishing after a stop; Esc stops it, then run /test again once it has ended.');
-    return;
-  }
+  if (!signal) return 'A test run is still going, or still finishing after a stop; Esc stops it, and the tests can be run again once it has ended.';
   try {
-    await runResolvedTest(resolved.command, resolved.source, args, cwd, limitMs, signal, ctx);
+    return await runResolvedTest(resolved.command, resolved.source, args, cwd, limitMs, signal, ctx);
   } finally {
     runs?.finish(signal);
   }
@@ -230,7 +211,7 @@ async function runResolvedTest(
   timeoutMs: number,
   signal: AbortSignal,
   ctx: CommandContext,
-): Promise<void> {
+): Promise<string> {
   const pattern = args.length > 0 ? args.join(' ') : undefined;
   const toolCall: ToolCall = { id: `test-run-${randomUUID()}`, name: 'test', arguments: pattern ? { pattern } : {} };
 
@@ -313,7 +294,7 @@ async function runResolvedTest(
     ctx.session.conversationManager.logToolResultBlock(toolCall, 'error', 'stopped', durationMs, 'stopped by the owner');
     ctx.session.conversationManager.addNotice('[Test] Stopped before it finished; no result.', { level: 'info' });
     ctx.renderRequest();
-    return;
+    return 'Stopped before it finished; no result.';
   }
 
   if (timedOut) {
@@ -342,7 +323,7 @@ async function runResolvedTest(
       { level: 'error' }
     );
     ctx.renderRequest();
-    return;
+    return `Timed out after ${timeoutSeconds}s and was killed; contract.gateTimeoutMs in Settings is the limit (0 for none).`;
   }
 
   flushDisplay(true);
@@ -357,7 +338,7 @@ async function runResolvedTest(
       { level: 'error' },
     );
     ctx.renderRequest();
-    return;
+    return `Not run: ${reason}. Check the command (${source}) or install the tool it names.`;
   }
 
   const ok = exitCode === 0;
@@ -387,19 +368,20 @@ async function runResolvedTest(
     // after the command completes, not just during the ~1s before the next
     // render wipes the display-only copy.
     ctx.session.conversationManager.addNotice(durableLines.join('\n'), { level: ok ? 'success' : 'error' });
-  } else {
-    ctx.session.conversationManager.logToolResultBlock(
-      toolCall,
-      ok ? 'done' : 'error',
-      `exit code ${exitCode}`,
-      durationMs,
-    );
-    // The output was already shown as it streamed (flushDisplay above): printed once, never again as a tail.
-    ctx.session.conversationManager.addNotice(
-      `[Test] exit code ${exitCode} (could not parse structured test results)`,
-      { level: ok ? 'info' : 'error' }
-    );
+    ctx.renderRequest();
+    return [`${summary.charAt(0).toUpperCase()}${summary.slice(1)}${errorMsg ? `: ${errorMsg}` : ''}; the output is in the conversation.`, ...durableLines.slice(1)].join('\n');
   }
-
+  ctx.session.conversationManager.logToolResultBlock(
+    toolCall,
+    ok ? 'done' : 'error',
+    `exit code ${exitCode}`,
+    durationMs,
+  );
+  // The output was already shown as it streamed (flushDisplay above): printed once, never again as a tail.
+  ctx.session.conversationManager.addNotice(
+    `[Test] exit code ${exitCode} (could not parse structured test results)`,
+    { level: ok ? 'info' : 'error' }
+  );
   ctx.renderRequest();
+  return `The test command ${ok ? 'passed' : 'failed'} (exit code ${exitCode}); its output is in the conversation.`;
 }

@@ -1,6 +1,6 @@
 // VIBE.md is the source of the persona prompt: the files found on disk are read
 // when a prompt is composed, so an edit to the file applies to the next turn, and
-// what `/personas vibe` and the prompt receipt report is what the prompt carries.
+// what "VIBE.md files" (Memory and knowledge, Personas) and the prompt receipt report is what the prompt carries.
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { atomicWriteFileSync, type AtomicWriteOptions } from '@goodvibes/engine/platform/platform/config';
@@ -258,10 +258,9 @@ export function formatVibeStatus(snapshot: AgentVibeSnapshot): string {
   }
   lines.push(
     '',
-    'Next',
-    '  /personas vibe-create',
-    '  /personas vibe-create global',
-    '  /personas vibe-import project --review --use',
+    'Next (Memory and knowledge, Personas)',
+    '  make a VIBE.md for this project or for every project',
+    '  use a VIBE.md as a persona, reviewed and in use',
   );
   return lines.join('\n');
 }

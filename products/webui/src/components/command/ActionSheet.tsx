@@ -44,10 +44,14 @@ import { Radio } from '../ui/Radio';
 import { Select } from '../ui/Select';
 
 /** The command and action a sheet draws, from the generated data; undefined for a name it does not hold. */
-export function findCommandAction(command: string, actionId: string): { readonly command: CommandActionsData; readonly action: ActionData } | undefined {
-  const described = COMMAND_ACTIONS.commands.find((entry) => entry.name === command);
-  const action = described?.actions.find((entry) => entry.id === actionId);
-  return described && action ? { command: described, action } : undefined;
+export function findCommandAction(command: string, actionId: string): { readonly command: CommandActionsData; readonly action: ActionData; readonly typed: boolean } | undefined {
+  // A typed command's action first, then a capability no slash command carries (never typed), by the command it names.
+  for (const [entries, typed] of [[COMMAND_ACTIONS.commands, true], [COMMAND_ACTIONS.capabilities ?? [], false]] as const) {
+    const described = entries.find((entry) => entry.name === command);
+    const action = described?.actions.find((entry) => entry.id === actionId);
+    if (described && action) return { command: described, action, typed };
+  }
+  return undefined;
 }
 
 /** The actions of a command the browser cannot run, with the reason in a sentence (shown greyed under a screen). */
@@ -74,7 +78,8 @@ function sessionOnly(action: ActionData, input: InputData, value: string): strin
   return choice?.lasts === 'session' ? 'Done from the terminal app whose session it is.' : undefined;
 }
 
-function initialValues(action: ActionData, prefill: Readonly<Record<string, string>>): Record<string, string> {
+/** The values a form opens with: what is given, then each blank's usual value (the places' forms open the same way). */
+export function initialValues(action: ActionData, prefill: Readonly<Record<string, string>>): Record<string, string> {
   const values: Record<string, string> = {};
   for (const input of action.inputs) {
     if (prefill[input.id] !== undefined) { values[input.id] = prefill[input.id]!; continue; }
@@ -89,7 +94,7 @@ function initialValues(action: ActionData, prefill: Readonly<Record<string, stri
 }
 
 /** The values of the blanks shown now: one hidden by an earlier choice is not sent, whatever it held. */
-function shownValues(action: ActionData, values: Readonly<Record<string, string>>): Record<string, string> {
+export function shownValues(action: ActionData, values: Readonly<Record<string, string>>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const input of action.inputs) {
     if (!isShown(asInput(input), values)) continue;
@@ -143,7 +148,8 @@ function ListBlank({ input, values, onChange, onLabel, placeholder }: {
   );
 }
 
-function Blank({ action, input, values, onChange, onLabel, current }: {
+/** One blank of an action's form, drawn from its description (a place's form draws the same blanks). */
+export function Blank({ action, input, values, onChange, onLabel, current }: {
   readonly action: ActionData; readonly input: InputData; readonly values: Readonly<Record<string, string>>;
   readonly onChange: (value: string) => void; readonly onLabel: (label: string | undefined) => void; readonly current?: string | undefined;
 }) {
@@ -390,7 +396,7 @@ export function ActionSheet({ open, onClose, command, action: actionId, prefill 
           {problem ? <p className="gv-action-sheet__problem" role="alert">{problem}</p> : null}
         </div>
         {terminalOnly ? <p className="gv-action-sheet__hint">{terminalOnly}</p> : null}
-        <p className="gv-action-sheet__line">From a terminal: <code>{renderTypedLine(asCommandShape(found.command), found.action.id, withoutSecrets(shape, sent))}</code></p>
+        {found.typed ? <p className="gv-action-sheet__line">From a terminal: <code>{renderTypedLine(asCommandShape(found.command), found.action.id, withoutSecrets(shape, sent))}</code></p> : null}
       </div>
     </Dialog>
   );

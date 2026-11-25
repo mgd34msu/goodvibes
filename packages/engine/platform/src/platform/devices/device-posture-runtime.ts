@@ -60,6 +60,7 @@ import {
   type DevicePostureConfigReader,
 } from './device-posture-config.js';
 import type { PermissionPromptDecision, PermissionPromptRequest } from '../permissions/prompt.js';
+import { noteListChanged } from '../runtime/list-changes.js';
 
 /** Metadata key a device node's pair request carries its announcement under. */
 export const DEVICE_NODE_ANNOUNCEMENT_KEY = 'deviceNode';
@@ -383,6 +384,9 @@ export function createDevicePostureRuntime(options: DevicePostureRuntimeOptions)
       },
     },
   });
+
+  // A grant given, used up, revoked or expired, on any machine of the group: every view of the grants reads them again.
+  grants.onChange(() => noteListChanged({ list: 'paired-devices', change: 'changed' }));
 
   const declareNativeData = options.nativeDataWriter?.declare.bind(options.nativeDataWriter);
   const artifacts = new DeviceCaptureArtifactStore(join(stateDirectory, 'captures'), {

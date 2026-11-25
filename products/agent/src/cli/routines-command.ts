@@ -2,7 +2,7 @@ import { commandJsonOrText as jsonOrText } from '@goodvibes/engine/terminal-shel
 import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import { createShellPathService } from '@/runtime/index.ts';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';
-import { discoverRoutines, type DiscoveredRoutineRecord } from '../agent/routine-discovery.ts';
+import { discoverRoutines, type DiscoveredRoutineRecord } from '@goodvibes/engine/terminal-shell/agent-turn/record-discovery';
 import { AgentRoutineRegistry, evaluateAgentRoutineReadiness, type AgentRoutineRecord } from '@goodvibes/engine/terminal-shell/agent-turn/routine-registry';
 import { buildAgentSkillRequirements, formatAgentSkillRequirement } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
 import {
@@ -12,18 +12,16 @@ import {
   routinePromotionBlockers,
   routineScheduleName,
   type RoutineSchedulePromotionPreview,
-} from '../agent/routine-schedule-promotion.ts';
-import { parseRoutineSchedulePromotionArgs } from '../agent/routine-schedule-args.ts';
-import { appendTemporalLabel } from './temporal-label.ts';
-import {
   formatRoutineScheduleCorrelation,
   formatRoutineScheduleFailure,
   formatRoutineSchedulePreview,
   formatRoutineScheduleReceipt,
   formatRoutineScheduleReceipts,
   formatRoutineScheduleSuccess,
-} from '../agent/routine-schedule-format.ts';
-import { fetchLiveSchedules, formatReceiptsOnOtherHosts, reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
+  fetchLiveSchedules, formatReceiptsOnOtherHosts, reconcileRoutineScheduleReceipts, RoutineScheduleReceiptStore,
+} from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
+import { parseRoutineSchedulePromotionArgs } from '../agent/routine-schedule-args.ts';
+import { appendTemporalLabel } from './temporal-label.ts';
 import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { operatorFlagValue, operatorHasFlag, parseOperatorCommandArgs, type ParsedOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';

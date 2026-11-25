@@ -162,6 +162,11 @@ export function createNativeWorkExecutionHost(deps: {
   readonly joinForeground?: (contractId: string) => Promise<void>;
   /** Lifts the fence `cancelForeground` put on a contract whose cancellation was then refused, so it is driven again. */
   readonly releaseForeground?: (contractId: string) => void;
+  /**
+   * The work's plan before it runs (work-plans.ts): a first Start of an attempt asks it whether the plan waits for
+   * the owner, and carries the plan the owner approved into the durable request. Absent: nothing waits.
+   */
+  readonly plans?: Pick<import('./work-plans.js').WorkPlans, 'gate' | 'started'> | undefined;
 }): NativeWorkExecutionHost {
   const projectRoot = realpathSync(deps.projectRoot);
   let runner: NativeRunner | undefined; let closed = false; let closing: Promise<void> | undefined;
@@ -259,7 +264,7 @@ export function createNativeWorkExecutionHost(deps: {
       });
     });
   }
-  function requestFor(current: NativeWorkExecutionTransaction, target: NativeWorkExecutionTarget, expected: NativePairedExecutionSnapshot, expectedScope: NativeExecutionScope, taskEvidence?: string, sourceActionId?: string): DurableContractRequest {
+  function requestFor(current: NativeWorkExecutionTransaction, target: NativeWorkExecutionTarget, expected: NativePairedExecutionSnapshot, expectedScope: NativeExecutionScope, taskEvidence?: string, sourceActionId?: string, draftPlan?: import('../../contract/types.js').DraftedPlan): DurableContractRequest {
     const work = workFor(current, target, expected.principalId), selectedModel = deps.getSelectedModel?.();
     const model = selectedModel === undefined ? undefined : { id: selectedModel.id, provider: selectedModel.provider, registryKey: selectedModel.registryKey, displayName: selectedModel.displayName };
     const previous = current.record ?? current.intent;
@@ -287,14 +292,16 @@ export function createNativeWorkExecutionHost(deps: {
     const binding = { sourceId: source.sourceId, inputRevision: source.inputRevision, actionId: sourceActionId ?? randomBytes(32).toString('hex'), actionRevision: randomUUID(),
       authorityId: randomUUID(), authorityRevision: 'owner-commitment-pending', scopeId: randomUUID(), scopeRevision: randomUUID() };
     return bindNativeExecutionRequest({ key, binding, input: { ask: work.title, nativeSource: source, projectRoot, sessionId: deps.sessionId, origin: 'external', isolation: 'auto',
-      ...(model === undefined ? {} : { selectedModel: model }), ...(taskEvidence ? { taskEvidence } : {}) } }, deps.projectId, ownerFacts(expected, expectedScope), expected.scopes);
+      ...(model === undefined ? {} : { selectedModel: model }), ...(taskEvidence ? { taskEvidence } : {}),
+      // The plan the owner approved before it ran: the contract keeps exactly its steps.
+      ...(draftPlan ? { draftPlan } : {}) } }, deps.projectId, ownerFacts(expected, expectedScope), expected.scopes);
   }
   function assertIntent(current: NativeWorkExecutionTransaction, intent: NativeWorkExecutionIntent): void {
     if (current.intent?.state === 'cancelled') throw new NativeWorkExecutionError('prevented-before-admission');
     if (current.record || !current.intent || current.intent.state !== 'admitting' || current.intent.generation !== intent.generation
       || !equalTarget(current.intent.target, intent.target) || !sameDurableRequest(current.intent.request, intent.request)) throw new NativeWorkExecutionError('stale');
   }
-  async function prepareIntent(target: NativeWorkExecutionTarget, authority: NativePairedExecutionAuthority, delivery: Delivery, resume: boolean, signal: AbortSignal, taskEvidence?: string): Promise<NativeWorkExecutionIntent> {
+  async function prepareIntent(target: NativeWorkExecutionTarget, authority: NativePairedExecutionAuthority, delivery: Delivery, resume: boolean, signal: AbortSignal, taskEvidence?: string, draftPlan?: import('../../contract/types.js').DraftedPlan): Promise<NativeWorkExecutionIntent> {
     const expected = paired(authority); const expectedScope = scope();
     return authority.withCurrent(expected, async assertAuthority => deps.scopes.withCurrentScope(expectedScope, async assertScope =>
       deps.storage.transactionByAttempt(target.attemptId, current => {
@@ -308,7 +315,7 @@ export function createNativeWorkExecutionHost(deps: {
           if (prior.state === 'associated') throw new NativeWorkExecutionError('recovery-required');
           if (!resume) throw new NativeWorkExecutionError(prior.state === 'refused' ? 'refused' : 'pending-intent');
         } else if (resume) throw new NativeWorkExecutionError('not-found');
-        const request = requestFor(current, target, expected, expectedScope, prior?.request.input.taskEvidence ?? taskEvidence, prior ? undefined : authority.continuationSourceAction?.(target));
+        const request = requestFor(current, target, expected, expectedScope, prior?.request.input.taskEvidence ?? taskEvidence, prior ? undefined : authority.continuationSourceAction?.(target), prior ? undefined : draftPlan);
         if (prior && !sameDurableRequest(prior.request, request)) throw new NativeWorkExecutionError('stale');
         const intent = parseNativeWorkExecutionIntent({ version: prior?.version ?? 2, ...(prior ? (prior.owner ? { owner: prior.owner } : {}) : { owner: ownerFacts(expected, expectedScope) }), projectId: deps.projectId, target, authorityScopes: expected.scopes,
           request, generation: (prior?.generation ?? 0) + 1, state: 'admitting' }, prior ?? undefined);
@@ -649,8 +656,20 @@ export function createNativeWorkExecutionHost(deps: {
           if (!equalTarget(record.target, target) || record.state === 'cancelled') throw new NativeWorkExecutionError('conflict');
           inspectAuthority(record, authority);
         } else {
-          const intent = await prepareIntent(target, authority, delivery, false, signal, options.taskEvidence);
+          // "Show me the plan before it runs": the plan is written first and waits for the owner; an approved one goes in.
+          let draftPlan: import('../../contract/types.js').DraftedPlan | undefined;
+          // A CI successor the host chains by itself continues work already approved; only the owner's Start waits.
+          if (deps.plans && authority.continuationSourceAction === undefined) {
+            const work = deps.storage.currentByAttempt(target.attemptId).ledger.works.find((item) => item.id === target.workId);
+            if (work) {
+              const gate = deps.plans.gate({ id: work.id, goal: work.goal, criteria: work.criteria });
+              if (gate.kind === 'waiting') throw new NativeWorkExecutionError('plan-waiting');
+              draftPlan = gate.draftPlan;
+            }
+          }
+          const intent = await prepareIntent(target, authority, delivery, false, signal, options.taskEvidence, draftPlan);
           record = await decide(target, authority, signal, false, intent);
+          if (draftPlan) deps.plans?.started(target.workId);
         }
         claimOwner(record, authority);
         const result = await requireRunner().startDurable(record.request);

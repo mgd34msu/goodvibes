@@ -14,6 +14,7 @@
  */
 import {
   CalendarDays,
+  Compass,
   LayoutGrid,
   LibraryBig,
   PanelLeftClose,
@@ -239,6 +240,14 @@ export function SidebarContent({
             />
           );
         })}
+        {/* Every place, in the fourteen groups the terminal app and the Agent show (views/places). */}
+        <NavItem
+          icon={<Compass aria-hidden="true" />}
+          label="Places"
+          compact={compact}
+          current={view === 'places'}
+          onClick={() => onNavigate('places')}
+        />
       </nav>
 
       {!compact && (

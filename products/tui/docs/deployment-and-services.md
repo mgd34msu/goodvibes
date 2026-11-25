@@ -235,7 +235,7 @@ Key commands:
 | Command | Does |
 | --- | --- |
 | `/services list\|show\|check\|test\|check-auth\|trust\|export\|import\|open` | See, check and move your API services, and use one a project defines |
-| `/presets` | Pick, load and save presets (display, model and behaviour settings), and export, inspect or import them as a file |
+| Tools and extensions, Presets (the menu) | Load and save presets (display, model and behaviour settings), and save, check or add them as a file |
 | `/startup transfer-export\|transfer-inspect\|transfer-import` | Move setup-transfer bundles between environments |
 
 Service entries can use an existing `tokenKey` field, a SecretRef in the key field, or explicit `tokenRef` / `passwordRef` / `webhookUrlRef` / `signingSecretRef` / `publicKeyRef` / `appTokenRef` fields:

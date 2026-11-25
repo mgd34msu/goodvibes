@@ -225,6 +225,8 @@ export { createQueryTool } from './query/index.js';
 export type { QuestionInbox } from './query/index.js';
 export { createRegistryTool } from './registry-tool/index.js';
 export { createRemoteTool } from './remote-trigger/index.js';
+// The same tool's parameters, for the terminal programs' `remote` tool that runs the daemon's runners (terminal-shell daemon-remote-tool.ts).
+export { REMOTE_TRIGGER_TOOL_SCHEMA } from './remote-trigger/schema.js';
 export { createReplTool } from './repl/index.js';
 export { createStateTool } from './state/index.js';
 export { createTaskTool } from './task/index.js';

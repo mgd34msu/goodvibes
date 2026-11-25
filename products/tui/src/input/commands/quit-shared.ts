@@ -143,7 +143,7 @@ export function countWorkingTree(status: Pick<StatusResult, 'files'>): WorkingTr
 const UNTRACKED_SHOWN = 10;
 
 /**
- * `/git commit` (and, without `--yes`, the preview `/git status` ends with):
+ * "Commit every change" (`git.commit`; without `--yes`, the preview "See what changed" ends with):
  * commit the working tree of the repository this session runs in.
  *
  * Without `--yes` it changes nothing: it prints the repository root (which may
@@ -174,7 +174,7 @@ export async function executeCommitAll(
   if (confirmed && ctx.invokedByModel === true) {
     throw new RefusalError(refusal({
       code: 'OWNER_ONLY', state: 'nothing was committed',
-      reason: '/git commit commits the owner\'s whole working tree and runs only when the owner types it',
+      reason: '"Commit every change" commits the owner\'s whole working tree and runs only when the owner asks for it',
       next: ['Use the git tools to stage and commit the files this task changed'],
     }));
   }
@@ -192,7 +192,7 @@ export async function executeCommitAll(
   if (!confirmed) {
     const shown = counts.untracked.slice(0, UNTRACKED_SHOWN);
     ctx.print([
-      `Committing (/git commit) in ${repoRoot}:`,
+      `Committing every change in ${repoRoot}:`,
       `  staged ${counts.staged.length}, unstaged ${counts.unstaged.length}, untracked ${counts.untracked.length}`,
       ...(shown.length > 0 ? [`  untracked: ${shown.join(', ')}${counts.untracked.length > shown.length ? `, and ${counts.untracked.length - shown.length} more` : ''}`] : []),
       handStaged

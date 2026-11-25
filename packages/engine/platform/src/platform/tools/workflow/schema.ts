@@ -13,7 +13,7 @@ export const workflowSchema: ToolDefinition = {
     'and workflow state tracking (does not execute anything). ' +
     'Hook actions and schedules run in the project root with credential variables withheld and inside the exec sandbox when it is on; ' +
     'their command is judged as a shell command once, when added, exactly as an exec call is (a refusal says why), and list shows its boundary. ' +
-    'and last until this process exits; list shows each one\'s last run, exit code and error. For routines that survive restarts use /schedule. ' +
+    'and last until this process exits; list shows each one\'s last run, exit code and error. For routines that survive restarts make a schedule (the schedule.add capability). ' +
     'Modes: hook-actions (manage hook actions), schedule (manage recurring commands), ' +
     'start/status/transition/cancel/list (state tracking only, no execution), ' +
     'except start with definition=contract, which hands the task to a new contract whose units are checked against acceptance criteria while they work.',

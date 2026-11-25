@@ -64,21 +64,8 @@ export function parseEveryInterval(input: string): number {
   }
 }
 
-export function formatEveryInterval(intervalMs: number): string {
-  ensurePositiveFinite(intervalMs, 'intervalMs');
-  const units: ReadonlyArray<readonly [number, string]> = [
-    [86_400_000, 'd'],
-    [3_600_000, 'h'],
-    [60_000, 'm'],
-    [1_000, 's'],
-  ];
-  for (const [size, unit] of units) {
-    if (intervalMs >= size && intervalMs % size === 0) {
-      return `${intervalMs / size}${unit}`;
-    }
-  }
-  return `${intervalMs}ms`;
-}
+// The words of a schedule live where a browser may load them (schedule-words.ts).
+export { formatEveryInterval } from './schedule-words.js';
 
 function parseCronFields(expression: string): string[] {
   return expression.trim().split(/\s+/).filter(Boolean);

@@ -37,7 +37,7 @@ export interface MemoryConfig {
    */
   hardLimitPct: number;
   projection: {
-    /** Folder `/memory sync-files` writes memory records to as files, relative to the project. */
+    /** Folder "Write memory as files" (`memory.sync-files`) writes memory records to, relative to the project. */
     dir: string;
   };
 }
@@ -123,7 +123,7 @@ export const memoryConfigSettings: ConfigSettingDefinition[] = [
     label: 'Folder memories are written to as files',
     type: 'string',
     description:
-      '/memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. /memory review-files reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.',
+      '"Keep as files" (in Memory and knowledge, Copies and files) writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. "What file edits change" reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly.',
     validate: (value: unknown): boolean => typeof value === 'string' && value.trim().length > 0,
     validationHint: 'a folder path, relative to the project or absolute',
   },

@@ -3,15 +3,14 @@ import { routeNativeConversationInput } from '../../runtime/native-conversation-
 import { captureNativeConversationInput } from '@goodvibes/engine/terminal-shell/native';
 import type { WorkHost } from '@goodvibes/engine/terminal-shell/native/work-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { readAction } from '@goodvibes/engine/terminal-shell/described-command-kit';
-import { openModalCommand, requirePlanManager } from './runtime-services.ts';
+import { defineCommand, sessionCapabilityAction } from '@goodvibes/engine/terminal-shell/command-actions';
+import { PLAN_OFF, PLAN_ON, PLAN_STATUS, type PlanModeSessionServices } from '@goodvibes/engine/platform/platform/capabilities';
 import { isPlanMode, togglePlanMode, permissionModeLabel } from '@goodvibes/engine/platform/platform/gate/presets';
 import type { PermissionModeValue } from '../../core/permission-mode.ts';
 
 /**
- * Work requests in your own words, the planner and past planning records:
- * the terminal app's part of `/work` (terminal-shell/native/work-command.ts).
+ * Work requests in your own words: the terminal app's part of `/work`
+ * (terminal-shell/native/work-command.ts).
  */
 export function workRequestsHost(): Exclude<WorkHost<CommandContext>['requests'], { readonly unavailable: string }> {
   return {
@@ -30,103 +29,63 @@ export function workRequestsHost(): Exclude<WorkHost<CommandContext>['requests']
         if (state?.status === 'pending') ctx.restoreDraft?.(`/work request ${goal}`);
         ctx.renderRequest();
       } catch {
-        throw commandRefusal('The request needs a look before anything else happens.', '/work intake shows where the input stands.');
+        throw commandRefusal('The request needs a look before anything else happens.', 'Work, in the menu, shows the input waiting to be admitted.');
       }
     },
-    openHistory(ctx) {
-      openModalCommand(ctx, 'planning-modal');
-    },
-    plans(ctx) {
-      const plans = requirePlanManager(ctx).list();
-      if (plans.length === 0) return 'No past plans. The live plan is the to-do list: /todo.';
-      return [
-        `Past plans (${plans.length}; the live plan is the to-do list, /todo):`,
-        ...plans.map((plan) => `  ${plan.status === 'active' ? '▶' : ' '} ${plan.id.slice(0, 8)}  [${plan.status.padEnd(8)}]  ${plan.title} (${plan.items.length} item${plan.items.length === 1 ? '' : 's'})`),
-      ].join('\n');
-    },
-    plan(ctx, id) {
-      const manager = requirePlanManager(ctx);
-      const plan = manager.list().find((entry) => entry.id === id || entry.id.startsWith(id));
-      if (!plan) throw commandRefusal(`No past plan ${id}.`, '/work plans lists them.');
-      return manager.toMarkdown(plan);
-    },
-    planner(ctx, act, value) {
-      if (!ctx.ops.planRuntime) throw commandRefusal('The planner is not available in this session.');
-      const result = ctx.ops.planRuntime(act, value ? [value] : []);
-      if (!result.ok) throw commandRefusal(result.output);
-      return result.output;
+  };
+}
+
+// Plan mode is this session's read-only posture, set through the platform config surface
+// (permissions.mode), the same value the permission manager reads and Shift+Tab cycles. The mode the
+// session was in when plan mode was turned on here is put back when it is turned off; plan mode entered
+// elsewhere (Shift+Tab) has no remembered mode and leaves to ask-me.
+let modeBeforePlan: PermissionModeValue | undefined;
+let stopWatchingMode: (() => void) | undefined;
+function forgetModeBeforePlan(): void {
+  modeBeforePlan = undefined;
+  stopWatchingMode?.();
+  stopWatchingMode = undefined;
+}
+
+/** This session's plan mode, as the plan capabilities take it (capabilities/builtin/plan.ts): the person's and the model's. */
+export function planModeServices(ctx: CommandContext): PlanModeSessionServices {
+  const configManager = ctx.platform.configManager;
+  const currentMode = () => configManager.get('permissions.mode') as PermissionModeValue | undefined;
+  return {
+    planMode: {
+      isOn: () => isPlanMode(currentMode()),
+      modeLabel: () => permissionModeLabel(currentMode() ?? 'ask-me'),
+      turnOn() {
+        stopWatchingMode?.();
+        modeBeforePlan = currentMode();
+        configManager.setRuntimeOverride('permissions.mode', 'plan');
+        // Leaving plan mode any other way (Shift+Tab) ends the remembered mode, so a later
+        // re-entry by another route cannot put back a stale, possibly looser mode.
+        stopWatchingMode = configManager.subscribe('permissions.mode', (next) => {
+          if (!isPlanMode(next as PermissionModeValue)) forgetModeBeforePlan();
+        });
+        ctx.renderRequest();
+      },
+      turnOff() {
+        const current = currentMode();
+        const restored = modeBeforePlan !== undefined && !isPlanMode(modeBeforePlan) ? modeBeforePlan : togglePlanMode(current);
+        forgetModeBeforePlan();
+        configManager.setRuntimeOverride('permissions.mode', restored);
+        ctx.renderRequest();
+        return permissionModeLabel(restored);
+      },
     },
   };
 }
 
 export function registerPlanningRuntimeCommands(registry: CommandRegistry): void {
-  // /plan enters and leaves the session's plan mode (a read-only posture),
-  // through the platform config surface (permissions.mode), the same value the
-  // permission manager reads and Shift+Tab cycles. The mode the session was in
-  // when /plan turned plan mode on is put back when it is turned off; plan mode
-  // entered elsewhere (Shift+Tab) has no remembered mode and leaves to ask-me.
-  let modeBeforePlan: PermissionModeValue | undefined;
-  let stopWatchingMode: (() => void) | undefined;
-  const forgetModeBeforePlan = (): void => {
-    modeBeforePlan = undefined;
-    stopWatchingMode?.();
-    stopWatchingMode = undefined;
-  };
-  const currentMode = (ctx: CommandContext) => ctx.platform.configManager.get('permissions.mode') as PermissionModeValue | undefined;
+  const options = { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' };
   registry.register(defineCommand<CommandContext>({
     name: 'plan',
     title: 'Plan mode (nothing is changed)',
     summary: 'Plan without changing anything: writes, commands and network calls are blocked for this session',
     group: 'Permissions',
     report: 'status',
-    actions: [
-      readAction<CommandContext>({
-        id: 'status', label: 'See whether plan mode is on', word: 'status',
-        sentence: 'Says whether plan mode is on, and the mode in force.',
-        operator: { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' },
-        async rowValue(ctx) { return isPlanMode(currentMode(ctx)) ? 'on' : 'off'; },
-        async run(_values, ctx) {
-          const current = currentMode(ctx);
-          return isPlanMode(current)
-            ? 'Plan mode is on: writes, commands and network calls are blocked. /plan off leaves it.'
-            : `Plan mode is off; the mode is ${permissionModeLabel(current ?? 'ask-me')}. /plan on enters it.`;
-        },
-      }),
-      {
-        id: 'on', label: 'Turn plan mode on', word: 'on', inputs: [],
-        sentence: 'Writes, commands and network calls are blocked for this session only; your saved mode is not changed.', done: '',
-        touches: 'this-machine', lasts: 'session', risk: 'none', undoneBy: 'off',
-        operator: { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' }, example: {},
-        async run(_values, ctx) {
-          const configManager = ctx.platform.configManager;
-          const current = currentMode(ctx);
-          if (isPlanMode(current)) return 'Plan mode is already on; nothing changed.';
-          stopWatchingMode?.();
-          modeBeforePlan = current;
-          configManager.setRuntimeOverride('permissions.mode', 'plan');
-          // Leaving plan mode any other way (Shift+Tab) ends the remembered mode, so a later
-          // re-entry by another route cannot put back a stale, possibly looser mode.
-          stopWatchingMode = configManager.subscribe('permissions.mode', (next) => {
-            if (!isPlanMode(next as PermissionModeValue)) forgetModeBeforePlan();
-          });
-          return 'Plan mode is on: writes, commands and network calls are blocked until /plan off or Shift+Tab.';
-        },
-      },
-      {
-        id: 'off', label: 'Turn plan mode off', word: 'off', inputs: [],
-        sentence: 'Writes, commands and network calls are allowed again under the mode you had before, for this session only.', done: '',
-        touches: 'this-machine', lasts: 'session', risk: 'loosens-a-protection', undoneBy: 'on',
-        ownerOnly: { reason: 'leaving plan mode lets the session change things again', instead: 'Ask the owner to turn plan mode off with /plan off or Shift+Tab.' },
-        operator: { terminalOnly: 'Plan mode belongs to the terminal app\'s session.' }, example: {},
-        async run(_values, ctx) {
-          const current = currentMode(ctx);
-          if (!isPlanMode(current)) return `Plan mode is not on; the mode stays ${permissionModeLabel(current ?? 'ask-me')}.`;
-          const restored = modeBeforePlan !== undefined && !isPlanMode(modeBeforePlan) ? modeBeforePlan : togglePlanMode(current);
-          forgetModeBeforePlan();
-          ctx.platform.configManager.setRuntimeOverride('permissions.mode', restored);
-          return `Plan mode is off; the mode is ${permissionModeLabel(restored)}.`;
-        },
-      },
-    ],
+    actions: [PLAN_STATUS, PLAN_ON, PLAN_OFF].map((definition) => sessionCapabilityAction<CommandContext, PlanModeSessionServices>(definition, planModeServices, options)),
   }));
 }

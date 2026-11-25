@@ -12,7 +12,7 @@ import { selectHarnessCatalog } from './agent-harness-catalog-selection.ts';
  */
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { CommandContext } from '../input/command-registry.ts';
-import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
+import { resolveAgentConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 import { previewHarnessText } from '@goodvibes/engine/terminal-shell/agent-turn/preview-text';
 import { agentHarnessModes, hostActions, settingsActions } from './agent-harness-route-format.ts';
 import { operatorBriefingRoutes } from '@goodvibes/engine/terminal-shell/agent-turn/operator-briefing-tool';

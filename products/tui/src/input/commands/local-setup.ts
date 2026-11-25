@@ -3,8 +3,9 @@ import { dirname, join } from 'path';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
 import type { CommandContext } from '../command-registry.ts';
-import { defineCommand, type ActionDescription, type ActionValues, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions';
-import { doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { defineCommand, runDaemonCapability, type ActionDescription, type ActionValues, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions';
+import { capabilityBinding } from './capability-binding.ts';
+import { doAction, readAction, REPLACED_DONE, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { listHookPointContracts } from '@goodvibes/engine/platform/platform/hooks';
 import type { SetupTransferBundle } from './local-setup-transfer.ts';
 import {
@@ -23,6 +24,13 @@ import { setupReviewLines } from '@goodvibes/engine/terminal-shell/setup-review'
 import { requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { printedText } from '@goodvibes/engine/terminal-shell/health-command';
+import { sessionCapabilityAction } from '@goodvibes/engine/terminal-shell/command-actions';
+import {
+  CapabilityRefusal, STARTUP_DOCTOR, STARTUP_EXPORT, STARTUP_LINK, STARTUP_OPEN_LINK, STARTUP_REVIEW, STARTUP_SERVICES,
+  type CapabilityDefinition, type SystemSessionServices,
+} from '@goodvibes/engine/platform/platform/capabilities';
+import { systemSessionOf } from './session-capabilities.ts';
 import { assertTarget, targetRef, TargetChangedError, type TargetRef } from '@goodvibes/engine/platform/platform/utils/target-ref';
 
 /** The bundle file a setup import shows, by the digest of what it holds: the import applies only that content. */
@@ -58,7 +66,7 @@ function setupTransferReplacedFiles(bundle: SetupTransferBundle): string[] {
  */
 const OVERWRITE: InputDescription = {
   id: 'overwrite', label: 'If it is already there', help: 'What happens when something is already at that place', kind: 'choice',
-  choices: [{ value: 'keep', label: 'Leave it and stop' }, { value: 'replace', label: 'Replace it', risk: 'cannot-be-undone' }],
+  choices: [{ value: 'keep', label: 'Leave it and stop' }, { value: 'replace', label: 'Replace it', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }],
   required: { default: 'keep', defaultMeans: 'leave it and stop' }, typed: { flag: '--overwrite', switchOn: 'replace' },
 };
 const placeInput = (id: string, label: string, help: string): InputDescription =>
@@ -69,10 +77,32 @@ function startupRead(id: string, label: string, sentence: string, sub: string): 
   return readAction<CommandContext>({ id, label, word: id, sentence, async run(_values, ctx) { await runStartupTool([sub], ctx); } });
 }
 
+/**
+ * This app's own start, as the System capabilities `startup.*` take it (capabilities/builtin/system-program.ts;
+ * session-capabilities.ts `systemSessionOf`): each runs one branch of `runStartupTool` and returns what it printed.
+ */
+export function startupOf(ctx: CommandContext): NonNullable<NonNullable<SystemSessionServices['systemSession']>['startup']> {
+  const words = (args: readonly string[]): Promise<string> => printedText(ctx, (collecting) => runStartupTool(args, collecting));
+  return {
+    review: () => words(['review']),
+    doctor: () => words(['doctor']),
+    services: () => words(['services']),
+    save: (path, replace) => words(['export', path, ...(replace ? ['--overwrite'] : [])]),
+    link: (view, target) => buildDeepLink(view, target || undefined),
+    openLink(uri) {
+      const parsed = parseDeepLink(uri);
+      if (!parsed) throw new CapabilityRefusal(`Not opened: ${uri} is not a goodvibes://open/<view> link.`);
+      return openDeepLink(ctx, parsed.surface, parsed.target);
+    },
+  };
+}
+
+const moved = (definition: CapabilityDefinition<SystemSessionServices>): ActionDescription<CommandContext> =>
+  sessionCapabilityAction<CommandContext, SystemSessionServices>(definition, (ctx) => ({ systemSession: systemSessionOf(ctx) }), { terminalOnly: 'It reviews the terminal app you are using.' });
+
 export const STARTUP_TOOL_ACTIONS: readonly ActionDescription<CommandContext>[] = [
-  startupRead('review', 'See what this setup has', 'Shows the providers, services, plugins, hooks and servers this setup has.', 'review'),
-  startupRead('doctor', 'Check this setup for problems', 'Checks this setup and lists what is not working.', 'doctor'),
-  startupRead('services', 'See the services and sign-ins', 'Shows the configured services, provider sign-ins and their problems.', 'services'),
+  // System (capabilities/builtin/system-program.ts): this app's own start, reviewed here.
+  moved(STARTUP_REVIEW), moved(STARTUP_DOCTOR), moved(STARTUP_SERVICES),
   startupRead('hooks', 'See the hooks', 'Shows how many hooks and hook chains this setup manages.', 'hooks'),
   startupRead('remote', 'See the remote runners', 'Shows the remote runners this setup can hand work to.', 'remote'),
   startupRead('sandbox', 'See the sandbox', 'Shows how commands are contained on this computer.', 'sandbox'),
@@ -90,13 +120,7 @@ export const STARTUP_TOOL_ACTIONS: readonly ActionDescription<CommandContext>[] 
     example: { dir: 'support' },
     async run(values, ctx) { await runStartupTool(['support-bundle', 'inspect', values.dir!], ctx); },
   }),
-  doAction<CommandContext>({
-    id: 'export', label: 'Save the setup review to a file', word: 'export',
-    inputs: [placeInput('path', 'File', 'The file the setup review is written to'), OVERWRITE],
-    sentence: 'The setup review is written as JSON to {path}.',
-    example: { path: 'setup-review.json' },
-    async run(values, ctx) { await runStartupTool(['export', values.path!, ...withOverwrite(values)], ctx); },
-  }),
+  moved(STARTUP_EXPORT),
   doAction<CommandContext>({
     id: 'transfer-export', label: 'Save this setup to move it', word: 'transfer-export',
     inputs: [placeInput('path', 'File', 'The file the setup is written to'), OVERWRITE],
@@ -148,23 +172,8 @@ export const STARTUP_TOOL_ACTIONS: readonly ActionDescription<CommandContext>[] 
       await runStartupTool(['transfer', 'import', pathArg], ctx, setupImportRef(pathArg, parsed));
     },
   }),
-  readAction<CommandContext>({
-    id: 'link', label: 'Make a link to a view', word: 'link',
-    inputs: [
-      textInput({ id: 'surface', label: 'View', help: `The view the link opens: ${DEEP_LINK_SURFACES.join(', ')}`, why: 'A view name, as /deeplink review lists them.', typed: { position: 1 } }),
-      textInput({ id: 'target', label: 'Item', help: 'One item in that view, by its id', why: 'An id inside the view, typed as it is shown there.', typed: { position: 2 }, optional: { default: '', means: 'the view itself' } }),
-    ],
-    sentence: 'Shows a goodvibes:// link that opens {surface}.',
-    example: { surface: DEEP_LINK_SURFACES[0]! },
-    async run(values, ctx) { await runStartupTool(['link', values.surface!, ...(values.target ? [values.target] : [])], ctx); },
-  }),
-  doAction<CommandContext>({
-    id: 'open-link', label: 'Open a goodvibes:// link', word: 'open-link', touches: 'reads',
-    inputs: [textInput({ id: 'uri', label: 'Link', help: 'A goodvibes://open/… link', why: 'A link someone gave you, pasted as it is.', typed: { position: 1 } })],
-    sentence: 'Opens the view the link {uri} names.',
-    example: { uri: 'goodvibes://open/settings' },
-    async run(values, ctx) { await runStartupTool(['open-link', values.uri!], ctx); },
-  }),
+  moved(STARTUP_LINK),
+  moved(STARTUP_OPEN_LINK),
 ];
 
 /** `/startup`: check, export or move this setup. */
@@ -265,11 +274,10 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
 
     if (sub === 'remote') {
       const snapshot = await getSnapshot();
-      const runners = ctx.ops.remoteRuntime?.listContracts() ?? [];
       ctx.print([
-        'Startup Remote',
-        `  runner contracts: ${snapshot.remoteRunnerCount}`,
-        ...runners.map((runner) => `  ${runner.id}  [${runner.trustClass}]  ${runner.label}`),
+        'Startup Remote (the daemon\'s runners)',
+        ...(snapshot.remoteRunnersUnreadable ? [`  Could not read them: ${snapshot.remoteRunnersUnreadable}.`] : [`  runner contracts: ${snapshot.remoteRunnerCount}`]),
+        ...snapshot.remoteRunners.map((runner) => `  ${runner.runnerId}  [${runner.trustClass}]  ${runner.label}`),
       ].join('\n'));
       return;
     }
@@ -306,15 +314,20 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
         return;
       }
       const { targetDir, masked } = await exportSetupSupportBundle(dirArg, snapshot, ctx);
-      writeFileSync(join(targetDir, 'remote-summary.json'), JSON.stringify({
-        runners: ctx.ops.remoteRuntime?.listContracts() ?? [],
-        artifacts: (ctx.ops.remoteRuntime?.listArtifacts() ?? []).map((artifact) => ({
-          id: artifact.id,
-          runnerId: artifact.runnerId,
-          status: artifact.task.status,
-          createdAt: artifact.createdAt,
-        })),
-      }, null, 2) + '\n', 'utf-8');
+      // The daemon's runners and what they handed back; a daemon that could not be asked is written as such.
+      let remoteSummary: Record<string, unknown>;
+      try {
+        const data = (await runDaemonCapability('remote.list', {}, ctx, capabilityBinding)).data as Record<string, unknown> | undefined;
+        const artifacts = Array.isArray(data?.['artifacts']) ? data['artifacts'] as Record<string, unknown>[] : [];
+        remoteSummary = {
+          ...(typeof data?.['unreadable'] === 'string' ? { unreadable: data['unreadable'] } : {}),
+          runners: Array.isArray(data?.['contracts']) ? data['contracts'] : [],
+          artifacts: artifacts.map((artifact) => ({ id: artifact['id'], runnerId: artifact['runnerId'], status: artifact['status'], createdAt: artifact['createdAt'] })),
+        };
+      } catch (error) {
+        remoteSummary = { unreadable: `the daemon could not be asked (${summarizeError(error)})` };
+      }
+      writeFileSync(join(targetDir, 'remote-summary.json'), JSON.stringify(remoteSummary, null, 2) + '\n', 'utf-8');
       ctx.print(`Exported support bundle to ${targetDir}${masked > 0 ? ` (${masked} literal credential value(s) masked)` : ''}`);
       return;
     }
@@ -328,8 +341,7 @@ async function runStartupTool(args: readonly string[], ctx: CommandContext, revi
       }
       const targetPath = getShellPaths().resolveWorkspacePath(pathArg);
       if (existsSync(targetPath) && !args.includes('--overwrite')) {
-        ctx.print(`${targetPath} already exists; nothing was written. Choose another path or add --overwrite.`);
-        return;
+        throw commandRefusal(`${targetPath} already exists; nothing was written. Choose another file, or choose to write over it.`);
       }
       mkdirSync(dirname(targetPath), { recursive: true });
       writeFileSync(targetPath, JSON.stringify(snapshot, null, 2) + '\n', 'utf-8');

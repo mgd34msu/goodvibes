@@ -9,7 +9,6 @@ import { isCodeInjectionSettingEnabled } from '@goodvibes/engine/platform/platfo
 export type OrchestratorCoreServicesSource = Pick<
   RuntimeServices,
   | 'planManager'
-  | 'adaptivePlanner'
   | 'sessionMemoryStore'
   | 'sessionLineageTracker'
   | 'idempotencyStore'

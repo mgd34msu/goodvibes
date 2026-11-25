@@ -21,7 +21,7 @@ import { formatAgentRecordSource } from '@goodvibes/engine/terminal-shell/agent-
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
 import { defineCommand, defineList, type ActionDescription, type InputDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
-import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { choiceInput, listInput, readAction, REPLACED_DONE, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { requireShellPaths } from './runtime-services.ts';
 import { resolveCommandFilePath } from './agent-local-library-args.ts';
 import { readRefusal } from '@goodvibes/engine/errors';
@@ -167,7 +167,7 @@ const STARTER: InputDescription = listInput({ id: 'starter', label: 'Starter', h
 const PATH: InputDescription = textInput({ id: 'path', label: 'File', help: 'A starter JSON file', why: 'a file on this machine', kind: 'path', typed: { position: 2 } });
 const REPLACE_STARTER: InputDescription = choiceInput({
   id: 'replace', label: 'If a starter has that id', help: 'One of your starters may already use it',
-  choices: [{ value: 'no', label: 'Stop and say so' }, { value: 'yes', label: 'Replace it', help: 'What it holds now is lost.', risk: 'cannot-be-undone' }],
+  choices: [{ value: 'no', label: 'Stop and say so' }, { value: 'yes', label: 'Replace it', help: 'What it holds now is lost.', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }],
   typed: { flag: '--replace', switchOn: 'yes' }, optional: { default: 'no', means: 'stop and say so' },
 });
 const VIBE: InputDescription = choiceInput({
@@ -329,7 +329,7 @@ export function registerAgentRuntimeProfileRuntimeCommands(registry: CommandRegi
         id: 'export-starter', label: 'Save a starter to a file', word: 'export-starter',
         inputs: [STARTER, PATH, VIBE, choiceInput({
           id: 'overwrite', label: 'If the file exists', help: 'Keep it, or write over it',
-          choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
+          choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }],
           typed: { flag: '--overwrite', switchOn: 'yes' }, optional: { default: 'no', means: 'keep it and stop' },
         })],
         sentence: 'Starter {starter} is written to {path} to change and add back, until you change it.', example: { starter: 'research', path: 'agent-starter.json' },

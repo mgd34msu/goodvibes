@@ -1,7 +1,7 @@
 import type { Secret } from '@goodvibes/engine/platform/platform/security';
 import type { SubscriptionManager } from '@goodvibes/engine/platform/platform/config';
 import { BUILTIN_PROVIDER_ENV_KEYS } from '@goodvibes/engine/platform/platform/providers';
-import { customProviderKeyName } from './local-provider-commands.js';
+import { customProviderKeyName } from '@goodvibes/engine/platform/platform/capabilities';
 export function deriveConfiguredVia(
   providerId: string,
   configuredIds: Set<string>,

@@ -1,16 +1,10 @@
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-import { defineCommand, type FixedChoice } from '@goodvibes/engine/terminal-shell/command-actions';
-import { choiceInput, doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { daemonCapabilityAction, defineCommand, type FixedChoice } from '@goodvibes/engine/terminal-shell/command-actions';
+import { choiceInput, doAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { BUDGET_ALERT_USD_CONFIG_KEY } from '@goodvibes/engine/platform/platform/providers';
-import { describeOperatorRpcError, getOperatorRpc } from './operator-rpc.ts';
-import {
-  COST_ATTRIBUTION_OPTIONAL_DIMENSIONS,
-  COST_ATTRIBUTION_PRIMARY_DIMENSIONS,
-  formatCostAttributionSection,
-  type CostAttributionResult,
-  type CostWindow,
-} from './cost-attribution-format.ts';
+import { USAGE_BY_SOURCE } from '@goodvibes/engine/platform/platform/capabilities';
+import { capabilityBinding } from './capability-binding.ts';
 
 const USAGE_TABS: readonly FixedChoice[] = [
   { value: 'overview', label: 'Overview', help: 'Context pressure, tokens and cost' },
@@ -51,43 +45,8 @@ const USAGE_COMMAND = defineCommand<CommandContext>({
         return usd > 0 ? `Spending alert set to $${usd.toFixed(2)}.` : 'Spending alert turned off.';
       },
     },
-    readAction<CommandContext>({
-      id: 'attribution', label: 'See cost by who spent it', word: 'by-source',
-      inputs: [
-        choiceInput({ id: 'window', label: 'Over', help: 'How far back', choices: [{ value: '24h', label: 'The last 24 hours' }, { value: '7d', label: 'The last 7 days' }], typed: { position: 1 }, optional: { default: '24h', means: 'the last 24 hours' } }),
-        choiceInput({ id: 'as', label: 'As', help: 'Text, or JSON for programs', choices: [{ value: 'text', label: 'Text' }, { value: 'json', label: 'JSON' }], typed: { flag: '--as' }, optional: { default: 'text', means: 'text' } }),
-        // The daemon's method answers one split at a time; here every split is shown, from the web or a script one.
-        choiceInput({ id: 'by', label: 'Split by', help: 'Which way to split it when one split is asked for (the web UI, a script, a model)',
-          choices: [{ value: 'model', label: 'Model' }, { value: 'provider', label: 'Provider' }, { value: 'agent', label: 'Agent' }, { value: 'tool', label: 'Tool' },
-            { value: 'hook', label: 'Hook' }, { value: 'mcp', label: 'Tool server' }, { value: 'session', label: 'Session' }],
-          typed: { flag: '--by' }, optional: { default: 'model', means: 'by model' } }),
-      ],
-      sentence: 'Shows what the daemon spent, split by agent, model, provider and the other ways it records cost.',
-      operator: { method: 'cost.attribution.get', fields: { window: 'window', dimension: 'by' } }, example: { window: '7d' },
-      async run(values, ctx) {
-      const window = (values.window || '24h') as CostWindow;
-      const asJson = values.as === 'json';
-      const rpc = getOperatorRpc(ctx);
-      if (!rpc.available) throw commandRefusal(`Cost attribution needs the daemon: ${rpc.reason}`);
-      const dimensions = [...COST_ATTRIBUTION_PRIMARY_DIMENSIONS, ...COST_ATTRIBUTION_OPTIONAL_DIMENSIONS];
-      const results: CostAttributionResult[] = [];
-      try {
-        for (const dimension of dimensions) {
-          results.push(await rpc.platformClient.operator.invoke('cost.attribution.get', { window, dimension }));
-        }
-      } catch (error) {
-        throw commandRefusal(`The daemon did not answer: ${describeOperatorRpcError(error)}`);
-      }
-      if (asJson) return JSON.stringify(results, null, 2);
-      const lines: string[] = [`Cost by who spent it, last ${window === '7d' ? '7 days' : '24 hours'}`];
-      for (const result of results) {
-        const isOptional = (COST_ATTRIBUTION_OPTIONAL_DIMENSIONS as readonly string[]).includes(result.dimension);
-        const section = formatCostAttributionSection(result, isOptional);
-        if (section) lines.push('', ...section);
-      }
-        return lines.join('\n');
-      },
-    }),
+    // Money (platform capabilities/builtin/money.ts): the daemon's cost records, every split, in the daemon.
+    daemonCapabilityAction<CommandContext>(USAGE_BY_SOURCE, capabilityBinding),
   ],
 });
 

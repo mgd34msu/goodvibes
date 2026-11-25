@@ -3,6 +3,7 @@ import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { externalUrlLaunchers } from '@goodvibes/engine/platform/platform/utils';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 import { createMediaCommand } from '@goodvibes/engine/terminal-shell/media-command';
+import { capabilityBinding } from './capability-binding.ts';
 
 /** Ask the system viewer to open a file; false where there is no desktop to show it on. */
 function openInViewer(path: string): Promise<boolean> {
@@ -25,7 +26,7 @@ function openInViewer(path: string): Promise<boolean> {
 /**
  * `/media`: one description shared with the Agent (terminal-shell/media-command.ts).
  * What a provider makes is saved as a file and opened in the system viewer
- * where there is a desktop. `/image <file>` (local-runtime.ts) is the other
+ * where there is a desktop. conversation.image (local-command-actions.ts) is the other
  * direction: it attaches a local image to the next message.
  */
 export function registerImageRuntimeCommands(
@@ -38,5 +39,6 @@ export function registerImageRuntimeCommands(
     artifactStore: (ctx) => ctx.platform.artifactStore,
     paths: requireShellPaths,
     openFile: options.openFile ?? openInViewer,
+    binding: capabilityBinding,
   }));
 }

@@ -1,13 +1,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
 import { listInstalledEcosystemEntries, loadEcosystemCatalog } from '@goodvibes/engine/platform/platform/runtime/ecosystem/catalog';
 import { discoverTasks } from '@/runtime/index.ts';
 import { DEFAULT_TASK_SUITE_DIR } from './eval.ts';
 import { requireEcosystemCatalogPaths, requireShellPaths } from './runtime-services.ts';
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { choiceInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
-import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
+import { CapabilityRefusal } from '@goodvibes/engine/platform/platform/capabilities';
 
 interface ReleaseBundle {
   readonly version: 1;
@@ -96,72 +94,27 @@ function formatReleaseBundle(title: string, bundle: ReleaseBundle): string {
   ].join('\n');
 }
 
-const TERMINAL = { terminalOnly: 'The evidence is read from the terminal app\'s own session.' } as const;
-
-/** `/release`, described once (command-actions/): whether this project is ready to release, and the evidence as a file. */
-export function registerProductRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(defineCommand<CommandContext>({
-    name: 'release',
-    title: 'Release readiness',
-    summary: 'See whether this project is ready to release, and keep the evidence as a file',
-    group: 'Product',
-    report: 'review',
-    actions: [
-      readAction<CommandContext>({
-        id: 'review', label: 'See release readiness', word: 'review',
-        sentence: 'Shows the model in use, the project\'s eval tasks, this session\'s failure reports, remote work and the plugins and skills installed.',
-        operator: TERMINAL,
-        async run(_values, ctx) { return formatReleaseBundle('Release readiness', buildReleaseBundle(ctx)); },
-      }),
-      readAction<CommandContext>({
-        id: 'checklist', label: 'See the release checklist', word: 'checklist',
-        sentence: 'Lists the checks to run before a release, each with its line.',
-        async run() {
-          return [
-            'Release checklist',
-            '  1. /setup and /health: everything is set up and working',
-            '  2. /security and /security trust: nothing needs attention, and you know what is trusted',
-            '  3. /security preflight and /security simulate-policy: the policy is what you mean to enforce',
-            '  4. /eval gate over the project\'s eval tasks',
-            '  5. /health failure and /remote: no failure or remote work is left unexplained',
-            '  6. /release save <file>: keep the evidence',
-          ].join('\n');
-        },
-      }),
-      {
-        id: 'save', label: 'Save the release evidence to a file', word: 'save',
-        inputs: [
-          textInput({ id: 'path', label: 'File', help: 'Where to write it', why: 'a file path', kind: 'path', typed: { position: 1 } }),
-          choiceInput({
-            id: 'replace', label: 'If the file exists', help: 'Keep it, or write over it', typed: { flag: '--replace', switchOn: 'yes' },
-            choices: [{ value: 'no', label: 'Keep it and stop' }, { value: 'yes', label: 'Write over it', risk: 'cannot-be-undone' }],
-            optional: { default: 'no', means: 'keep it and stop' },
-          }),
-        ],
-        sentence: 'The release evidence (what "See release readiness" shows) will be written to {path}, until you change it.',
-        done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
-        operator: TERMINAL, example: { path: 'release-evidence.json' },
-        async run(values, ctx) {
-          const targetPath = requireShellPaths(ctx).resolveWorkspacePath(values.path!);
-          if (existsSync(targetPath) && values.replace !== 'yes') throw commandRefusal(`${targetPath} already exists; nothing was written.`, `Write over it: /release save ${values.path} --replace`);
-          mkdirSync(dirname(targetPath), { recursive: true });
-          writeFileSync(targetPath, JSON.stringify(buildReleaseBundle(ctx), null, 2) + '\n', 'utf-8');
-          return `Saved the release evidence to ${targetPath}.`;
-        },
-      },
-      readAction<CommandContext>({
-        id: 'read', label: 'Read saved release evidence', word: 'read',
-        inputs: [textInput({ id: 'path', label: 'File', help: 'Release evidence saved earlier', why: 'a file path', kind: 'path', typed: { position: 1 } })],
-        sentence: 'Reads the release evidence saved in {path} and shows what it recorded.',
-        example: { path: 'release-evidence.json' },
-        async run(values, ctx) {
-          try {
-            return inspectReleaseBundle(requireShellPaths(ctx).resolveWorkspacePath(values.path!));
-          } catch (error) {
-            throw commandRefusal(`Could not read ${values.path}: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        },
-      }),
-    ],
-  }));
+/**
+ * Release readiness of this project from this session, as the System capabilities `release.*` take it
+ * (capabilities/builtin/system-program.ts; session-capabilities.ts `systemSessionOf`). No slash command carries them:
+ * the System place's Release tab, a model and find reach them.
+ */
+export function releaseOf(ctx: CommandContext): { review(): string; save(path: string, replace: boolean): string; read(path: string): string } {
+  return {
+    review: () => formatReleaseBundle('Release readiness', buildReleaseBundle(ctx)),
+    save(path, replace) {
+      const targetPath = requireShellPaths(ctx).resolveWorkspacePath(path);
+      if (existsSync(targetPath) && !replace) throw new CapabilityRefusal(`${targetPath} already exists; nothing was written. Choose "Write over it" to replace it.`);
+      mkdirSync(dirname(targetPath), { recursive: true });
+      writeFileSync(targetPath, JSON.stringify(buildReleaseBundle(ctx), null, 2) + '\n', 'utf-8');
+      return `Saved the release evidence to ${targetPath}.`;
+    },
+    read(path) {
+      try {
+        return inspectReleaseBundle(requireShellPaths(ctx).resolveWorkspacePath(path));
+      } catch (error) {
+        throw new CapabilityRefusal(`Could not read ${path}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  };
 }

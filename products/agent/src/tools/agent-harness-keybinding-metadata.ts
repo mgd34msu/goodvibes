@@ -449,9 +449,8 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         supported: true,
         effect: 'shell-action',
         preferredMode: 'run_keybinding',
-        command: '/paste',
         confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
-        note: 'Runs the paste route and reports whether text, image, or nothing was pasted.',
+        note: 'Runs the paste route and reports whether text, image, or nothing was pasted (the capability paste.clipboard does the same).',
       };
     case 'block-save':
       return {

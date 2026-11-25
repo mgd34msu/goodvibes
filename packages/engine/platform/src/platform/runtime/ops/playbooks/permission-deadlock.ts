@@ -66,8 +66,8 @@ export const permissionDeadlockPlaybook: Playbook = {
     },
   ],
   steps: [
-    { step: 1, title: 'Answer the waiting approvals', action: 'Open /questions and answer what is waiting; an answer from any surface releases the call.', kind: 'command', command: '/questions', expectedOutcome: 'The held calls run or are refused.', automatable: false },
-    { step: 2, title: 'Remember the answer', action: 'Answer with "always" for a call you want to stop being asked about; review remembered answers with /decisions.', kind: 'command', command: '/decisions', expectedOutcome: 'The same call no longer asks.', automatable: false },
+    { step: 1, title: 'Answer the waiting approvals', action: 'Open Waiting for you from the menu and answer what is waiting; an answer from any surface releases the call.', kind: 'observe', expectedOutcome: 'The held calls run or are refused.', automatable: false },
+    { step: 2, title: 'Remember the answer', action: 'Answer with "always" for a call you want to stop being asked about; what Jev decided for you is under Decisions in Waiting for you.', kind: 'observe', expectedOutcome: 'The same call no longer asks.', automatable: false },
     { step: 3, title: 'Stop the turn', action: 'If you do not want the held calls to run, press Esc to cancel the turn.', kind: 'command', command: 'Esc', expectedOutcome: 'The turn ends and the asks are withdrawn.', automatable: false },
   ],
   escalationCriteria: [

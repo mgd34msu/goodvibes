@@ -124,6 +124,15 @@ export const CHANNEL_SETUP_SCHEMA_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['surface', 'version', 'label', 'setupMode', 'description', 'fields', 'secretTargets', 'externalSteps', 'metadata']);
 
+/** What a channel's state was derived from (ChannelRuntimeObservation): `reason` says why, and what to change. */
+const CHANNEL_RUNTIME_OBSERVATION_SCHEMA = objectSchema({
+  observable: BOOLEAN_SCHEMA,
+  running: nullableSchema(BOOLEAN_SCHEMA),
+  reason: STRING_SCHEMA,
+  lastError: STRING_SCHEMA,
+  observedAt: NUMBER_SCHEMA,
+}, ['observable', 'running', 'reason']);
+
 const CHANNEL_DOCTOR_CHECK_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   label: STRING_SCHEMA,
@@ -137,6 +146,8 @@ export const CHANNEL_DOCTOR_REPORT_SCHEMA = objectSchema({
   surface: STRING_SCHEMA,
   accountId: STRING_SCHEMA,
   state: STRING_SCHEMA,
+  // What this node sees of the live path, the basis for `state` (ChannelDoctorReport.runtime): every built-in doctor sends it.
+  runtime: CHANNEL_RUNTIME_OBSERVATION_SCHEMA,
   summary: STRING_SCHEMA,
   checkedAt: NUMBER_SCHEMA,
   checks: arraySchema(CHANNEL_DOCTOR_CHECK_SCHEMA),
@@ -250,15 +261,6 @@ export const CHANNEL_GROUP_POLICY_SCHEMA = objectSchema({
   allowedCommands: STRING_LIST_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['id']);
-
-/** What a channel's state was derived from (ChannelRuntimeObservation): `reason` says why, and what to change. */
-const CHANNEL_RUNTIME_OBSERVATION_SCHEMA = objectSchema({
-  observable: BOOLEAN_SCHEMA,
-  running: nullableSchema(BOOLEAN_SCHEMA),
-  reason: STRING_SCHEMA,
-  lastError: STRING_SCHEMA,
-  observedAt: NUMBER_SCHEMA,
-}, ['observable', 'running', 'reason']);
 
 export const CHANNEL_STATUS_SCHEMA = objectSchema({
   id: STRING_SCHEMA,

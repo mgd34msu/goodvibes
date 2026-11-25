@@ -9,7 +9,8 @@
 import { defineCommand, type ActionDescription, type InputDescription } from '@goodvibes/engine/terminal-shell/command-actions';
 import { choiceInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { artifactInput } from './artifacts-runtime.ts';
+// Saved artifacts are the daemon's (capabilities/builtin/artifacts.ts); their list is read from it.
+import { artifactPick as artifactInput } from '@goodvibes/engine/platform/platform/capabilities';
 import { given, ownerRead, ownerToolCall, positiveNumber, runOwnerToolCall, splitWords } from './owner-tool-call.ts';
 
 const TOOL = 'agent_model_compare';
@@ -39,7 +40,7 @@ const RUN_OPTIONS: readonly InputDescription[] = [
 ];
 
 type CompareAction = ActionDescription<CommandContext>;
-function keep(fields: Pick<CompareAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<CompareAction, 'risk'>>): CompareAction {
+function keep(fields: Pick<CompareAction, 'id' | 'label' | 'word' | 'inputs' | 'sentence' | 'example' | 'run'> & Partial<Pick<CompareAction, 'risk' | 'riskDone'>>): CompareAction {
   return { done: '', touches: 'this-machine', lasts: 'kept', risk: 'none', operator: LOCAL_ONLY, ownerOnly: ownerToolCall(TOOL), ...fields };
 }
 
@@ -110,6 +111,8 @@ export function registerCompareRuntimeCommands(registry: CommandRegistry): void 
       }),
       keep({
         id: 'benchmark', label: 'Benchmark local models', word: 'benchmark', risk: 'spends-money',
+        // The models on this machine charge nothing: "This spent money." would not be true of what ran.
+        riskDone: 'This ran on the models on this machine: it used this machine\'s time, not money.',
         inputs: [
           textInput({ id: 'prompt', label: 'Task', help: 'The task every model is given', why: 'your own words', kind: 'long-text', typed: { tail: true }, optional: { default: '', means: 'the standard task (summarize the project, name a setup risk, propose a next step)' } }),
           ...RUN_OPTIONS,

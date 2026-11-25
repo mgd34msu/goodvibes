@@ -20,7 +20,7 @@ const GROUPS = {
     'focusTracker',
     'policyRuntimeState',
   ],
-  planning: ['planManager', 'adaptivePlanner', 'projectPlanningService', 'projectPlanningProjectId', 'workPlan'],
+  planning: ['planManager', 'projectPlanningService', 'projectPlanningProjectId', 'workPlan'],
   coordination: ['approvalBroker'],
   runtime: ['distributedRuntime', 'remoteRunnerRegistry', 'remoteSupervisor'],
 } as const;

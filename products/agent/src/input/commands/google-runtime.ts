@@ -31,7 +31,7 @@ import { requireSecretsManager, requireShellPaths } from './runtime-services.ts'
 import { routeConfigWrite } from '../../config/daemon-config-routing.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { defineCommand, defineList, type ActionDescription, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
-import { choiceInput, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { choiceInput, listInput, readAction, REPLACED_DONE, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { renderGoogleSetupReport } from '@goodvibes/engine/platform/platform/google';
 import { renderGoogleSetupRunbook } from '@goodvibes/engine/platform/platform/google';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS, detectGcloud } from '@goodvibes/engine/platform/platform/google';
@@ -315,7 +315,7 @@ export function createGoogleCommand(fetcher?: FeedFetcher) {
       id: 'adopt', label: 'Take up Google credentials found on this machine', word: 'adopt',
       inputs: [choiceInput({
         id: 'replace', label: 'If some are stored', help: 'Credentials already stored for Google', typed: { flag: '--replace', switchOn: 'yes' },
-        choices: [{ value: 'no', label: 'Keep them and stop' }, { value: 'yes', label: 'Replace them', risk: 'cannot-be-undone' }],
+        choices: [{ value: 'no', label: 'Keep them and stop' }, { value: 'yes', label: 'Replace them', risk: 'cannot-be-undone', riskDone: REPLACED_DONE }],
         optional: { default: 'no', means: 'keep them and stop' },
       })],
       sentence: 'Google credentials in files on this machine (~/.gmail-mcp) are taken up and stored until you change it.',

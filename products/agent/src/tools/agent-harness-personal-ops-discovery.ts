@@ -540,7 +540,7 @@ export function reminderWorkflows(methodIds: readonly string[], deliveryConfigur
           : 'Update the connected GoodVibes host until schedule/reminder creation methods are available.',
       modelRoute: 'schedule action:"remind"',
       inspectRoutes: [
-        'workspace action:"action" actionId:"schedule-reminder"',
+        'capability_run id:"schedule.add"',
         'channels action:"status"',
         ...methodIds.filter((methodId) => methodId.startsWith('automation.schedules.')).slice(0, 6).map((methodId) => `host action:"method" methodId:"${methodId}"`),
       ],

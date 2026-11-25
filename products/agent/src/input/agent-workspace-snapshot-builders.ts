@@ -14,7 +14,7 @@ import { AgentNoteRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/n
 import { AgentPersonaRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
 import { AgentResearchRunRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/research-run-registry';
 import { AgentSkillRegistry } from '@goodvibes/engine/terminal-shell/agent-turn/skill-registry';
-import { RoutineScheduleReceiptStore } from '../agent/routine-schedule-receipts.ts';
+import { RoutineScheduleReceiptStore } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 import {
   getAgentRuntimeProfilesRoot,
   listAgentRuntimeProfiles,

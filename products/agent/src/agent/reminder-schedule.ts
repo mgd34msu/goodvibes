@@ -5,12 +5,12 @@
  * re-exported here for this file's importers.
  */
 import { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, type ReminderSchedulePreview, type ReminderScheduleResult } from '@goodvibes/engine/terminal-shell/agent-turn/reminder-schedule';
-import { createConnectedSchedule } from './connected-schedule.ts';
 import {
+  createConnectedSchedule,
   resolveAgentConnectedHostConnection,
   type AgentConnectedHostConfigReader,
   type AgentConnectedHostConnection,
-} from './routine-schedule-promotion.ts';
+} from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 
 export { REMINDER_SCHEDULE_METHOD, REMINDER_SCHEDULE_ROUTE, buildReminderSchedulePayload, buildReminderSchedulePreview, buildReminderSchedulePrompt, parseReminderScheduleArgs, type ParsedReminderScheduleArgs, type ReminderScheduleFailure, type ReminderSchedulePreview, type ReminderScheduleResult, type ReminderScheduleSuccess } from '@goodvibes/engine/terminal-shell/agent-turn/reminder-schedule';
 

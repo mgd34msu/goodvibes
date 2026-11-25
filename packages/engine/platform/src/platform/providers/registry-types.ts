@@ -45,7 +45,7 @@ export type ContextWindowProvenance = 'provider_api' | 'configured_cap' | 'obser
  * Where a resolved context window came from, in more detail than its
  * provenance. `describeContextWindowSource` turns it into a label.
  *
- * - `user_override` , set with /context window or the model picker
+ * - `user_override` , set through the daemon's context.set-window (This conversation) or the model picker
  * - `provider_file` , the model's entry in a custom provider file
  * - `catalog`       , the model's own catalog provider lists it
  * - `consensus`     , an estimate from other catalog providers, not a known endpoint limit
@@ -145,4 +145,10 @@ export interface ProviderRegistryOptions {
   readonly runtimeBus?: RuntimeEventBus | null | undefined;
   /** Own subscriptions when this registry borrows a longer-lived configuration. */
   readonly registerDispose?: ((release: () => void) => void) | undefined;
+  /**
+   * The context window file (context-window-overrides.ts): the daemon's, one for every program. `writes: false` in a
+   * terminal program, which reads it and never writes it. Default: `context-window-overrides.json` in this
+   * registry's control-plane config folder, written.
+   */
+  readonly contextWindows?: { readonly path: string; readonly writes: boolean } | undefined;
 }

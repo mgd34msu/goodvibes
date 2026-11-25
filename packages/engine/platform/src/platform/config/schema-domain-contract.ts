@@ -69,7 +69,7 @@ export const contractConfigSettings: ConfigSettingDefinition[] = [
     key: 'contract.gateTimeoutMs',
     label: 'Longest a quality check may run (ms)',
     type: 'number',
-    description: 'Timeout in ms for each quality gate command and for a /test run (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation',
+    description: 'Timeout in ms for each quality gate command and for a run of the project\'s tests from Code and changes (default 15 minutes); a gate past it is stopped and reported unverified; 0 runs until completion or cancellation',
     ...intRange(0, 2_147_483_647),
   },
   {

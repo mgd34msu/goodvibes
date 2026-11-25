@@ -159,8 +159,8 @@ function failureKeyOf(watch: CiWatchSubscription, jobs: readonly CiJob[]): strin
   return createHash('sha256').update(identity).digest('hex');
 }
 
-const NEW_WATCH_HINT = 'To watch it again, create a new watch (/ci watch in the terminal, or ci.watches.create).';
-const REPAIR_REFUSED_HINT = 'Repair it in a session of your own; to watch the next push, create a new watch (/ci watch in the terminal, or ci.watches.create).';
+const NEW_WATCH_HINT = 'To watch it again, make a new watch ("Watch a repository" in Automation, on the CI watches tab, or ci.watches.create).';
+const REPAIR_REFUSED_HINT = 'Repair it in a session of your own; to watch the next push, make a new watch ("Watch a repository" in Automation, on the CI watches tab, or ci.watches.create).';
 
 /** Thrown by the claim when another watch of the same failure already started its repair. */
 class RepairClaimedError extends Error {

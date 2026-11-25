@@ -22,7 +22,7 @@ export const MEMORY_SNAPSHOT_TABLES = ['memory_records', 'memory_links', 'memory
 export type MemorySnapshotTable = typeof MEMORY_SNAPSHOT_TABLES[number];
 
 export interface MemorySnapshotInfo {
-  /** The copy's file name; what `/memory restore` and `memory.snapshots.restore` take. */
+  /** The copy's file name; what `memory.restore` and `memory.snapshots.restore` take. */
   readonly name: string;
   /** Why it was taken: daily, pre-migration, pre-restore, tripwire. */
   readonly reason: string;
@@ -217,7 +217,7 @@ export function resolveMemorySnapshot(dbPath: string | null, selector: string): 
     throw new MemorySnapshotError('MEMORY_SNAPSHOT_AMBIGUOUS',
       `${matches.length} memory copies start with "${wanted}" (${matches.map((copy) => basename(copy.path)).join(', ')}); name one in full. Nothing was changed.`);
   }
-  throw new MemorySnapshotError('MEMORY_SNAPSHOT_NOT_FOUND', `No memory copy is named "${wanted}"; list them with /memory snapshots. Nothing was changed.`);
+  throw new MemorySnapshotError('MEMORY_SNAPSHOT_NOT_FOUND', `No memory copy is named "${wanted}"; the copies are listed in Memory and knowledge, Copies and files. Nothing was changed.`);
 }
 
 /** Read every row of the copy, after checking it is a memory store this build can read. */

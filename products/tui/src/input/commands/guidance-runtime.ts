@@ -4,10 +4,10 @@ import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/
 import { evaluateSessionMaintenance, formatSessionMaintenanceLines, getGuidanceMode } from '@/runtime/index.ts';
 import { dismissGuidance, evaluateContextualGuidance, formatGuidanceItems, resetGuidance } from '@/runtime/index.ts';
 import type { GuidancePersistenceOptions, Notification } from '@/runtime/index.ts';
-import type { CommandContext, CommandRegistry } from '../command-registry.ts';
+import type { CommandContext } from '../command-registry.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
-import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
-import { listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
+import type { ConversationGuidance } from '@goodvibes/engine/platform/platform/capabilities';
 import { requireReadModels, requireSessionMemoryStore, requireShellPaths } from './runtime-services.ts';
 
 /** Where this app keeps its guidance dismissals. */
@@ -57,57 +57,35 @@ function currentGuidance(ctx: CommandContext, guidanceOptions: GuidancePersisten
   return { items, maintenance };
 }
 
-export function registerGuidanceRuntimeCommands(registry: CommandRegistry): void {
-  registry.register(defineCommand<CommandContext>({
-    name: 'guidance',
-    title: 'Guidance',
-    summary: 'Advice for what is happening now (an approval waiting, a server that needs sign-in, a long conversation), without interrupting the chat',
-    group: 'Help',
-    report: 'review',
-    actions: [
-      readAction<CommandContext>({
-        id: 'review', label: 'See guidance for now', word: 'review',
-        sentence: 'Shows the advice that applies now, with the line that acts on each, and how this session is doing for size.',
-        operator: { terminalOnly: 'It reads this terminal\'s session.' },
-        async run(_values, ctx) {
-          const { items, maintenance } = currentGuidance(ctx, guidanceOptionsFor(ctx));
-          return [
-            `Guidance (${getGuidanceMode(ctx.platform.configManager)})`,
-            '',
-            ...formatGuidanceItems(items),
-            '',
-            ...formatSessionMaintenanceLines(maintenance, maintenance.guidanceMode === 'guided' ? 'guided' : 'minimal'),
-          ].join('\n');
-        },
-      }),
-      {
-        id: 'dismiss', label: 'Dismiss a piece of guidance', word: 'dismiss',
-        inputs: [listInput({ id: 'item', label: 'Guidance', help: 'The guidance showing now', list: CURRENT_GUIDANCE, other: 'a guidance id' })],
-        sentence: 'Guidance {item} is hidden for what it reports now; a new occurrence shows again, until you change it.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'reset',
-        operator: { terminalOnly: 'Dismissals are kept by this terminal.' }, example: { item: 'approval-pending' },
-        async run(values, ctx) {
-          const options = guidanceOptionsFor(ctx);
-          // A dismissal hides the occurrence showing now; the same condition coming back later shows again.
-          const item = currentGuidance(ctx, options).items.find((candidate) => candidate.id === values.item);
-          if (!item) throw commandRefusal(`Guidance ${values.item} is not showing now, so there is nothing to dismiss.`, '/guidance lists what is.');
-          if (!dismissGuidance(item, options)) throw commandRefusal(`The dismissal of ${values.item} could not be saved: the guidance store is busy or unreadable. Nothing was changed; try again.`);
-          return `Dismissed ${values.item} for what it reports now. It shows again for a new occurrence: another approval, session, provider or server set.`;
-        },
-      },
-      {
-        id: 'reset', label: 'Show dismissed guidance again', word: 'reset',
-        inputs: [textInput({ id: 'item', label: 'Guidance', help: 'One dismissed piece of guidance, by id', why: 'a guidance id you dismissed', typed: { position: 1 }, optional: { default: '', means: 'every dismissed piece' } })],
-        sentence: 'Dismissed guidance {item} shows again when it applies, until you change it.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'dismiss',
-        operator: { terminalOnly: 'Dismissals are kept by this terminal.' }, example: { item: 'approval-pending' },
-        async run(values, ctx) {
-          if (!resetGuidance(values.item || undefined, guidanceOptionsFor(ctx))) throw commandRefusal('Guidance could not be reset: the guidance store is busy or unreadable. Nothing was changed; try again.');
-          return values.item ? `${values.item} shows again when it applies.` : 'Every dismissed piece of guidance shows again when it applies.';
-        },
-      },
-    ],
-  }));
+/**
+ * This app's guidance as the conversation's guidance controls take it (capabilities/builtin/conversation-controls.ts:
+ * guidance.review, guidance.dismiss, guidance.reset), run from This conversation's list and by the model.
+ */
+export function guidanceOf(ctx: CommandContext): ConversationGuidance {
+  return {
+    async review() {
+      const { items, maintenance } = currentGuidance(ctx, guidanceOptionsFor(ctx));
+      return [
+        `Guidance (${getGuidanceMode(ctx.platform.configManager)})`,
+        '',
+        ...formatGuidanceItems(items),
+        '',
+        ...formatSessionMaintenanceLines(maintenance, maintenance.guidanceMode === 'guided' ? 'guided' : 'minimal'),
+      ].join('\n');
+    },
+    async dismiss(id) {
+      const options = guidanceOptionsFor(ctx);
+      // A dismissal hides the occurrence showing now; the same condition coming back later shows again.
+      const item = currentGuidance(ctx, options).items.find((candidate) => candidate.id === id);
+      if (!item) throw commandRefusal(`Guidance ${id} is not showing now, so there is nothing to dismiss.`, 'See guidance for now, in This conversation, lists what is.');
+      if (!dismissGuidance(item, options)) throw commandRefusal(`The dismissal of ${id} could not be saved: the guidance store is busy or unreadable. Nothing was changed; try again.`);
+      return `Dismissed ${id} for what it reports now. It shows again for a new occurrence: another approval, session, provider or server set.`;
+    },
+    async reset(id) {
+      if (!resetGuidance(id || undefined, guidanceOptionsFor(ctx))) throw commandRefusal('Guidance could not be reset: the guidance store is busy or unreadable. Nothing was changed; try again.');
+      return id ? `${id} shows again when it applies.` : 'Every dismissed piece of guidance shows again when it applies.';
+    },
+  };
 }
 
 /** The turn events the guidance notices listen to. */
@@ -118,7 +96,7 @@ export interface GuidanceNoticeTurnEvents {
 /**
  * Push each new guidance occurrence into the notification history (counted
  * on the status bar) once, at the end of a turn, so the owner is
- * told without running /guidance. An occurrence already announced is not
+ * told without opening This conversation. An occurrence already announced is not
  * announced again; one that clears and later comes back is. Dismissed items
  * and guidance mode `off` push nothing, because evaluateContextualGuidance
  * already leaves them out. Cost per finished turn: five read-model snapshots
@@ -138,7 +116,7 @@ export function wireGuidanceNotices(
     try {
       items = currentGuidance(ctx, guidanceOptionsFor(ctx), contextTokens()).items;
     } catch {
-      // Guidance is advisory; a read that fails here is shown by /guidance itself.
+      // Guidance is advisory; a read that fails here is shown by guidance.review itself.
       return;
     }
     const current = new Set<string>();
@@ -151,7 +129,7 @@ export function wireGuidanceNotices(
         domain: 'guidance',
         level: item.category === 'recovery' ? 'warning' : 'info',
         title: item.title,
-        body: `${item.summary}${item.commands.length > 0 ? ` Next: ${item.commands.join('  ')}` : ''} (dismiss: /guidance dismiss ${item.id})`,
+        body: `${item.summary}${item.commands.length > 0 ? ` Next: ${item.commands.join('  ')}` : ''} (dismiss it from This conversation, in the menu)`,
         timestamp: Date.now(),
       });
     }
@@ -161,7 +139,8 @@ export function wireGuidanceNotices(
 }
 
 
-const CURRENT_GUIDANCE = defineList<CommandContext>({
+/** The guidance showing now (`guidance.current` in capabilities/builtin/conversation-controls.ts). */
+export const CURRENT_GUIDANCE = defineList<CommandContext>({
   name: 'guidance.current',
   async read(ctx) {
     return currentGuidance(ctx, guidanceOptionsFor(ctx)).items.map((item): ListRow => ({ value: item.id, label: item.title, detail: item.summary }));

@@ -28,12 +28,14 @@ export type ViewId =
   | 'work'
   | 'library'
   | 'personal'
-  | 'phone';
+  | 'phone'
+  // Every place, drawn from the terminal programs' declarations: `tab` is the place's id (views/places).
+  | 'places';
 
 /** The Work view's kind filter, plus `waiting` (only what waits for you), `checkpoints` (a session's Checkpoints tab) and `plan` (the work plan). */
 export type WorkTab = 'all' | 'waiting' | 'sessions' | 'agents' | 'processes' | 'checkpoints' | 'plan';
-export type LibraryTab = 'memory' | 'knowledge' | 'review';
-export type PersonalTab = 'calendar' | 'mail' | 'occasions';
+export type LibraryTab = 'memory' | 'knowledge' | 'review' | 'about-you' | 'templates';
+export type PersonalTab = 'calendar' | 'mail' | 'channels' | 'occasions';
 
 export interface AppUrlState {
   view: ViewId;
@@ -78,6 +80,7 @@ const VALID_VIEWS: ReadonlySet<string> = new Set<ViewId>([
   'library',
   'personal',
   'phone',
+  'places',
 ]);
 
 /**

@@ -31,6 +31,7 @@ import { fallbackUpdateCommand, type UpdateFetchLike } from '../../runtime/updat
 import type { CliServiceNameSource } from '../../cli/service-posture.ts';
 import { requireProfileManager, requireSecretsManager, requireShellPaths, requireSubscriptionManager } from './runtime-services.ts';
 import { createDaemonVerbCaller } from '../../runtime/client/operator-endpoint.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
 const REPO_RELEASES_LATEST_URL = DAEMON_REPO_RELEASES_LATEST_URL;
 
@@ -185,6 +186,7 @@ const selfUpdateCommand = createSelfUpdateCommand<CommandContext>({
   apply: async (options, ctx) => { await applyUpdate({ ...options, configManager: ctx.platform.configManager }); },
   rollback: (options, ctx) => rollbackUpdate({ ...options, configManager: ctx.platform.configManager }),
   daemon: (ctx) => createDaemonVerbCaller({ configManager: ctx.platform.configManager, homeDirectory: () => requireShellPaths(ctx).homeDirectory }),
+  capability: capabilityBinding,
   install: {
     channel: REPO_RELEASES_LATEST_URL,
     resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),

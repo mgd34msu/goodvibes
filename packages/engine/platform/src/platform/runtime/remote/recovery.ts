@@ -15,7 +15,6 @@ export function deriveRemoteRecoveryActions(
   heartbeat?: RemoteHeartbeatSnapshot,
 ): RemoteRecoveryAction[] {
   const actions: RemoteRecoveryAction[] = [];
-  const runnerId = contract?.runnerId ?? connection?.agentId ?? 'selected';
   const taskId = contract?.taskId;
 
   if (connection?.lastError || contract?.transport?.lastError) {
@@ -30,7 +29,8 @@ export function deriveRemoteRecoveryActions(
     actions.push({
       id: 'inspect',
       label: 'Inspect the remote connection',
-      command: `/remote show ${runnerId}`,
+      // The Work place opens on the runners, where the connection is one key away.
+      command: `/work`,
       reason: heartbeat.detail,
     });
   }
@@ -44,8 +44,8 @@ export function deriveRemoteRecoveryActions(
   }
   actions.push({
     id: 'remote-panel',
-    label: 'Open remote workspace',
-    command: '/remote',
+    label: 'Open the runners in the Work place',
+    command: '/work',
     reason: 'Inspect transport, runner contracts, and artifacts together.',
   });
 

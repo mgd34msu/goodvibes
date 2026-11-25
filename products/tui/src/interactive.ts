@@ -136,6 +136,9 @@ import { watchDaemonPowerEvents, type PowerState } from '@goodvibes/engine/platf
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
 import { createDaemonVerbCaller, resolveDaemonEndpoint } from './runtime/client/operator-endpoint.ts';
 import { wirePlaces } from '@goodvibes/engine/terminal-shell/places';
+import { sessionsPlaceSources } from '@goodvibes/engine/terminal-shell/places';
+import { recordedRunsPlaceSource } from '@goodvibes/engine/terminal-shell/places';
+import { sessionsPlaceHostOf } from './input/commands/sessions-place-host.ts';
 import { onDaemonAttached } from './runtime/daemon-attach-signal.ts';
 import { wireGuidanceNotices } from './input/commands/guidance-runtime.ts';
 import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
@@ -158,6 +161,9 @@ import { installBackgroundThemeProbe } from './renderer/terminal-bg-probe.ts';
 import { registerThemeRefresh } from './renderer/theme.ts';
 import { VERSION } from './version.ts';
 import { SessionViews } from './shell/session-views.ts';
+import { capabilityBinding } from './input/commands/capability-binding.ts';
+import { setupPlace } from './input/commands/onboarding-runtime.ts';
+import { sessionCapabilityServices, systemSessionOf } from './input/commands/session-capabilities.ts';
 
 let releaseFailedStartupSession: (() => Promise<void>) | undefined;
 
@@ -423,7 +429,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   let stopSpokenOutputForExit: (() => Promise<void>) | null = null;
   // The optional "used N memories" provenance chip (default OFF), see interaction-seams.ts.
   const memoryProvenanceUi = createMemoryProvenanceUi({ render: () => render(), memorySpine: ctx.services.memorySpine });
-  // Topology-aware keep-awake: power.keepAwake is daemon-owned, so every toggle from /power, Alt+A or the
+  // Topology-aware keep-awake: power.keepAwake is daemon-owned, so every toggle from the System place, Alt+A or the
   // settings modal is a settings write that goes to the daemon (or, with none running, into its settings
   // file). In adopted-external mode the chip renders the daemon's state (power-chip-source.ts).
   const isExternalDaemon = () => uiServices.platform.externalServices?.inspect()?.daemonStatus?.mode === 'external';
@@ -1413,6 +1419,14 @@ async function main(prepared: PreparedShellCliRuntime) {
     executeFromOwner: (name, args, context) => commandRegistry.executeFromOwner(name, args, context as typeof commandContext),
     keys: ctx.services.keybindingsManager,
     invoke: (method, input) => placeVerbs.invoke(method, input),
+    // A daemon capability no slash command here carries runs with this app's binding, as the owner's press.
+    capabilityBinding,
+    // The System place's Setup list: this app's settings, skip file and "Who decides" record.
+    setup: setupPlace(commandContext),
+    // The System place's "This session" list: this app's status report and print level.
+    systemSession: () => systemSessionOf(commandContext),
+    // A capability of this app's own conversation no slash command carries runs with this app's services (session-capabilities.ts).
+    sessionServices: () => sessionCapabilityServices(commandContext),
     daemonEndpoint: async () => {
       const endpoint = await resolveDaemonEndpoint({ configManager, homeDirectory });
       return endpoint.available ? { baseUrl: endpoint.baseUrl, token: endpoint.token } : { unavailable: endpoint.reason };
@@ -1420,12 +1434,30 @@ async function main(prepared: PreparedShellCliRuntime) {
     // A place opened while the daemon was down reads again when this program's daemon connection is back.
     onDaemonBack: onDaemonAttached,
     program: 'tui',
+    // The hooks this app runs, posted to the daemon's one hook trace (Tools and extensions, Hook runs).
+    hookRuns: ctx.services.hookActivityTracker,
+    // The Work place's Your agents and Work contracts: read again on each change to this app's agents.
+    agentChanges: (listener) => {
+      const stops = (['AGENT_SPAWNING', 'AGENT_RUNNING', 'AGENT_COMPLETED', 'AGENT_FAILED', 'AGENT_CANCELLED'] as const)
+        .map((type) => uiServices.events.agents.on(type, () => listener()));
+      return () => { for (const stop of stops) stop(); };
+    },
+    // The Sessions place's lists this app holds: its saved sessions, the conversation's branches, the hosted session it joined.
+    sources: {
+      ...sessionsPlaceSources(sessionsPlaceHostOf(commandContext)),
+      // The Work place's recorded runs: this app's own, a new one at each turn's end.
+      ...recordedRunsPlaceSource(commandContext.platform.replayEngine, (listener) => uiServices.events.turns.on('TURN_COMPLETED', () => listener())),
+    },
+    // This app's turns read the daemon's context window sizes again whenever the daemon changes one.
+    providerRegistry,
     modals: input.surfaceModals,
     requestRender: render,
   });
   unsubs.push(() => places.stop());
   commandContext.openPlaceMenu = places.openMenu;
-  commandContext.openPlace = (id) => { places.openPlace(id); };
+  commandContext.openPlace = (id, start) => { places.openPlace(id, start); };
+  // This conversation's controls a person bound to a key in the composer (Keys place, "This conversation, while writing a message").
+  commandContext.runPlaceKey = (action) => { places.runKey(action); };
   // Key-table actions that act on a screen of this program (keybinding-catalog.ts).
   commandContext.answerContractQuestionPlainly = () => { contractQuestions.sendNextAsOrdinary(); };
   commandContext.cycleModelPickerGroup = () => { if (input.modelPicker.active && input.modelPicker.mode === 'model') input.modelPicker.cycleGroupBy(); };

@@ -44,7 +44,7 @@ leads to everything deeper.
 - [Pairing the Agent with a daemon](../products/agent/docs/setup-explicit-pairing.md): when pairing is needed and how to do it.
 - [Channels, remote access and API](../products/agent/docs/channels-remote-and-api.md): reaching the Agent from other surfaces through its host.
 - [Google scopes](../products/agent/docs/google-scope-strategy.md): which Google permissions GoodVibes asks for, and why.
-- [Importing older work](../products/agent/docs/legacy-ledger-migration.md): `/work import` and recovering an interrupted import.
+- [Old planning records](../products/agent/docs/legacy-ledger-migration.md): work brought in from earlier versions' planning, kept as history in the Work place.
 - [Accessibility](../products/agent/docs/accessibility.md): using the Agent with a screen reader.
 
 ## Use the web app

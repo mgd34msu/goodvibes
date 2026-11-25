@@ -147,8 +147,8 @@ The shipped calibration record covers the hosted endpoint and `jev-latest`
 only when the endpoint, the model and every fallback target that can answer
 match that record. Choosing `jev-decides` yourself (in `/settings`,
 with Shift+Tab, for a hosted session or in a channel profile)
-lets Jev decide on any working decision model. `/held` lists, approves or sets aside what `just-vibes` held, and
-`/decisions` lists what Jev decided for you with undo, never, always and ask.
+lets Jev decide on any working decision model. Waiting for you (the menu) lists, approves or sets aside what
+`just-vibes` held, and its Decisions tab lists what Jev decided for you with undo, never, always and ask.
 `yolo` still keeps authentication, workspace containment, secret storage and
 spending limits.
 
@@ -201,11 +201,11 @@ The five modes are listed under "How much you are asked" above.
   `goodvibes-agent` picks a mode without changing settings.
 - **For good:** `/settings` (When GoodVibes asks) saves the default; a channel
   profile can set one per channel.
-- **`/decisions`** lists what Jev decided for you, and for each one lets you
-  undo it, turn it into a standing rule (never, always, or always ask me), or
-  keep it.
-- **`/held`** lists what `just-vibes` held, and approves or sets aside one
-  item or all of them.
+- **Waiting for you, Decisions** (the menu) lists what Jev decided for you, and
+  for each one lets you undo it, turn it into a standing rule (never, always,
+  or always ask me), or keep it.
+- **Waiting for you, Held calls** lists what `just-vibes` held, and approves or
+  sets aside each one.
 - **`/permissions`** shows the permission settings and where each came from,
   and `/permissions rules` lists and revokes remembered approval rules. An
   explicit `permissions.tools.<name>` set to `deny` blocks that tool.

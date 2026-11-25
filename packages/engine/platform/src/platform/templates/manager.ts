@@ -194,7 +194,7 @@ export class TemplateManager {
         code: 'TEMPLATE_NOT_FOUND',
         state: `no ${scope} template named "${safeName || name}"`,
         reason: safeName === '' ? `Template name "${name}" keeps no characters once stored, so no template has it` : `There is no ${targetPath}`,
-        next: ['List templates with /template list'],
+        next: ['Your templates are listed in Memory and knowledge, Templates'],
       }),
     };
   }

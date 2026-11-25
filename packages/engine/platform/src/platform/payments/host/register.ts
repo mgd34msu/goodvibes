@@ -44,6 +44,7 @@ import type {
   PaymentsGatewayService,
 } from '../../control-plane/routes/payments.js';
 import { logger } from '../../utils/logger.js';
+import { noteListChanged } from '../../runtime/list-changes.js';
 import { registerCatalogHandlers } from '../../control-plane/host-handlers.js';
 import { GatewayVerbError } from '../../control-plane/routes/gateway-verb-error.js';
 import { describeCardTransportRefusal, mayCrossWithCardDetails } from '../entry-policy.js';
@@ -429,6 +430,12 @@ export function registerPaymentsMethods(
   const cardsDelete: TypedHandler<unknown, Record<string, unknown>> = async ({ body }) => {
     const id = readString(asRecord(body), 'id');
     const result = await service.deleteCard(id);
+    // A card it does not hold, with nothing left behind under its id either, is not found: nothing was removed.
+    if (!result.deleted && result.secretsCleared === 0) {
+      throw new GatewayVerbError(`Card not found: the daemon holds no card ${id} (it may have been removed already); nothing was removed.`, 'NOT_FOUND', 404, 'id');
+    }
+    // Every screen showing the cards reads them again (the Money place, the web UI).
+    if (result.deleted) noteListChanged({ list: 'payments', change: 'deleted', id });
     return { id, deleted: result.deleted, secretsCleared: result.secretsCleared };
   };
 
@@ -479,6 +486,7 @@ export function registerPaymentsMethods(
       cardholderName,
       issuerCapMinorUnits: typeof rawCap === 'number' ? rawCap : null,
     });
+    noteListChanged({ list: 'payments', change: 'created', id: card.id });
     return { card };
   };
 

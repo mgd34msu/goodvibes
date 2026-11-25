@@ -40,6 +40,8 @@ export interface SurfaceHitTarget {
   readonly height: number;
   readonly keys?: (readonly string[]) | undefined;
   readonly onClick?: (() => void) | undefined;
+  /** The wheel over this target scrolls it (a place's detail): one call per wheel step, -1 up, 1 down. */
+  readonly onWheel?: ((direction: -1 | 1) => void) | undefined;
 }
 
 /** A rectangle of cells stamped over the composed screen. */

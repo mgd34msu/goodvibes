@@ -38,8 +38,6 @@ const AGENT_WORKSPACE_CATEGORY_ALIASES = {
   routine: 'routines',
   schedule: 'automation',
   schedules: 'automation',
-  plan: 'work',
-  planning: 'work',
   task: 'host',
   tasks: 'host',
   note: 'notes',
@@ -47,8 +45,8 @@ const AGENT_WORKSPACE_CATEGORY_ALIASES = {
   kb: 'knowledge',
   artifacts: 'documents',
   artifact: 'documents',
-  delegate: 'work',
-  delegation: 'work',
+  delegate: 'delegate',
+  delegation: 'delegate',
 } as const satisfies Readonly<Record<string, AgentWorkspaceCategoryId>>;
 
 type AgentWorkspaceCategoryAlias = keyof typeof AGENT_WORKSPACE_CATEGORY_ALIASES;

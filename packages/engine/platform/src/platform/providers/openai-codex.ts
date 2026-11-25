@@ -517,7 +517,7 @@ export class OpenAISubscriptionRoute {
     // silently here, so the ordinary expiry case never surfaces anything.
     const resolved = await resolveFreshOpenAIAccessToken(this.subscriptionManager);
     if (resolved.kind === 'unconfigured') {
-      throw new ProviderError('No active OpenAI subscription sign-in. Run /provider sign-in openai.', {
+      throw new ProviderError('No active OpenAI subscription sign-in. Sign in to OpenAI in Models and providers.', {
         statusCode: 401,
         provider: OPENAI_CODEX_PROVIDER_NAME,
         operation: 'chat',
@@ -556,7 +556,7 @@ export class OpenAISubscriptionRoute {
     const status = retryError.statusCode === 403 ? 403 : 401;
     const next = status === 403
       ? 'Check that the ChatGPT account has a plan with Codex access and is not blocked.'
-      : 'Sign in to OpenAI again (/provider sign-in openai).';
+      : 'Sign in to OpenAI again in Models and providers.';
     return new ProviderError(
       `The OpenAI subscription sign-in was refreshed, but OpenAI still refused the request (status ${status}). ${next} OpenAI's answer: ${retryError.message}`,
       {
@@ -570,7 +570,7 @@ export class OpenAISubscriptionRoute {
 
   private subscriptionEndedError(): ProviderError {
     return new ProviderError(
-      'Your OpenAI subscription sign-in has ended and could not be refreshed. Sign in to OpenAI again (/provider sign-in openai) to keep using the subscription.',
+      'Your OpenAI subscription sign-in has ended and could not be refreshed. Sign in to OpenAI again in Models and providers to keep using the subscription.',
       {
         statusCode: 401,
         provider: OPENAI_CODEX_PROVIDER_NAME,

@@ -1,4 +1,4 @@
-import { discoverPersonas, type DiscoveredPersonaRecord } from '../agent/persona-discovery.ts';
+import { discoverPersonas, type DiscoveredPersonaRecord } from '@goodvibes/engine/terminal-shell/agent-turn/record-discovery';
 import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/cli-parser-engine';
 import type { AgentPersonaRecord } from '@goodvibes/engine/terminal-shell/agent-turn/persona-registry';
 import { formatAgentRecordOrigin, formatAgentRecordReviewState } from '@goodvibes/engine/terminal-shell/agent-turn/record-labels';

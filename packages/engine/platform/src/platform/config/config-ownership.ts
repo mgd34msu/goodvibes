@@ -31,9 +31,10 @@
  *   - `shared-wins` (the voice/tts keys, unchanged since the shared tier
  *     shipped): the shared value overlays the surface value, so every surface
  *     speaks with one voice.
- *   - `local-override` (model / reasoning effort): the shared value is a
- *     DEFAULT that applies only where the surface has not set the key itself,
- *     which is what "a client may override locally" means.
+ *   - `local-override`: the shared value is a DEFAULT that applies only where
+ *     the surface has not set the key itself. No key uses it now: the model
+ *     and reasoning effort it held are the daemon's shared defaults, and a
+ *     conversation's own choice is its program's runtime override.
  */
 
 import type { ConfigKey } from './schema.js';
@@ -207,6 +208,19 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   // which it reads at start) and every surface reads that one value, so a change
   // the daemon had not taken is never lost to a surface's older copy.
   'power.keepAwake',
+  // The shared defaults every conversation starts from, one each for every
+  // program on this machine (and the daemon's own turns): the model and how
+  // hard it thinks, its backups and how requests are routed, and the
+  // permission mode. A conversation changes its own (the model picker, its
+  // effort control, Shift+Tab) as a runtime override of its program, which
+  // never touches these; the default is set in Settings, in Models and
+  // providers, or by `models.current.set`.
+  'provider.model',
+  'provider.reasoningEffort',
+  'provider.fallbackModels',
+  'provider.optimizerMode',
+  'provider.optimizerPinnedModel',
+  'permissions.mode',
 ];
 
 
@@ -279,10 +293,9 @@ export const USER_SHARED_WINS_CONFIG_KEYS: readonly string[] = [
  * an ordinary `set` on one of these writes the surface-local override, which is
  * the behavior every existing installation already has.
  */
-export const USER_LOCAL_OVERRIDE_CONFIG_KEYS: readonly string[] = [
-  'provider.model',
-  'provider.reasoningEffort',
-];
+// The model and reasoning effort were the two keys here; they are the daemon's shared defaults now
+// (DAEMON_OWNED_CONFIG_KEYS), and a conversation's own choice is its program's runtime override.
+export const USER_LOCAL_OVERRIDE_CONFIG_KEYS: readonly string[] = [];
 
 const DAEMON_KEY_SET = new Set<string>(DAEMON_OWNED_CONFIG_KEYS);
 const DAEMON_NON_SCHEMA_PATH_SET = new Set<string>(DAEMON_OWNED_NON_SCHEMA_CONFIG_PATHS);

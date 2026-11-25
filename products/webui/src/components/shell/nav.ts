@@ -50,6 +50,9 @@ export const LIBRARY: Destination<LibraryTab> = {
     { tab: 'memory', label: 'Memory' },
     { tab: 'knowledge', label: 'Knowledge' },
     { tab: 'review', label: 'Review' },
+    // The Memory and knowledge place's About you and Templates lists (views/library/AboutYouTab.tsx, TemplatesTab.tsx).
+    { tab: 'about-you', label: 'About you' },
+    { tab: 'templates', label: 'Templates' },
   ],
 };
 
@@ -61,6 +64,8 @@ export const PERSONAL: Destination<PersonalTab> = {
   tabs: [
     { tab: 'calendar', label: 'Calendar' },
     { tab: 'mail', label: 'Mail' },
+    // The daemon's channels, one state each (views/channels/ChannelsView.tsx).
+    { tab: 'channels', label: 'Channels' },
     { tab: 'occasions', label: 'Occasions' },
   ],
 };
@@ -91,6 +96,7 @@ export function resolveTab<T extends string>(destination: Destination<T>, tab: s
 /** The page title the header shows for a view. */
 export function viewTitle(view: ViewId): string {
   if (view === 'chat') return 'Chat';
+  if (view === 'places') return 'Places';
   const destination = DESTINATIONS.find((d) => d.view === view);
   if (destination) return destination.label;
   return ACCOUNT_VIEWS.find((entry) => entry.view === view)?.label ?? 'GoodVibes';

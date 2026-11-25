@@ -13,6 +13,13 @@ import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { ActionDescription, CommandActionContext, FixedChoice, InputDescription } from './command-actions/types.js';
 import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
+import { CALENDAR_ADD, CALENDAR_CHANGE, CALENDAR_DELETE, CALENDAR_GET, CALENDAR_UPCOMING, type MethodCapabilityDefinition } from '@goodvibes/engine/platform/platform/capabilities';
+import { capabilityWords } from './command-actions/capability-actions.js';
+
+/** A moved action's words and the method its capability runs through (the web UI's sheet calls it the same way). */
+function movedWords<Ctx>(definition: MethodCapabilityDefinition): Omit<ActionDescription<Ctx>, 'run'> {
+  return { ...capabilityWords<Ctx>(definition), operator: { method: definition.method.id, fields: definition.method.fields } };
+}
 
 export interface CalendarNewEvent {
   readonly title: string;
@@ -82,8 +89,8 @@ const FEEDS = defineList<unknown>({
   operator: { terminalOnly: AGENT_ONLY },
 });
 
-const EVENT: InputDescription = listInput({ id: 'event', label: 'Event', help: 'The events ahead', list: EVENTS, other: 'an event id shown by /calendar upcoming' });
-const TIME_WHY = 'a date (2026-08-01) or an ISO-8601 time (2026-08-01T14:00, with Z or an offset for another zone)';
+/** The event list the capabilities' Event input chooses from, under the name they give it (builtin/messages.ts). */
+export const CALENDAR_EVENTS = EVENTS;
 const PROVIDERS: readonly FixedChoice[] = [{ value: 'google', label: 'Google Calendar' }, { value: 'outlook', label: 'Outlook calendar' }];
 const PROVIDER: InputDescription = { id: 'provider', label: 'Account', help: 'Which calendar account', kind: 'choice', choices: PROVIDERS, required: true, typed: { position: 1 } };
 const FEED: InputDescription = listInput({ id: 'name', label: 'Feed', help: 'The calendar feeds you subscribe to', list: FEEDS });
@@ -98,35 +105,18 @@ function daysOf(raw: string | undefined): number {
 export function registerCalendarCommand<Ctx extends CommandActionContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, host: CalendarHost<Ctx>): void {
   hostOf = host as unknown as CalendarHost<unknown>;
   const actions: ActionDescription<Ctx>[] = [
-    readAction<Ctx>({
-      id: 'upcoming', label: 'See what is coming up', word: 'upcoming',
-      inputs: [{ id: 'days', label: 'How many days', help: 'How far ahead', kind: 'number', required: { default: '7', defaultMeans: 'the next seven days' }, typed: { flag: '--days' } }],
-      sentence: 'Lists the events of the days ahead, from every calendar this program reads.', example: { days: '14' },
+    {
+      // A handler capability in the daemon (its window of days is the handler's); the web UI's sheet lists the next 30 days.
+      ...capabilityWords<Ctx>(CALENDAR_UPCOMING),
       operator: { method: 'calendar.events.list', fields: {} },
       async run(values, ctx) { return await host.upcoming(ctx, daysOf(values.days ?? '7')); },
-    }),
-    readAction<Ctx>({
-      id: 'get', label: 'See one event', word: 'get', inputs: [EVENT],
-      sentence: 'Shows {event} with its times, place, guests and notes.', example: { event: 'evt-42' },
-      operator: { method: 'calendar.events.get', fields: { 'body.eventId': 'event' } },
-      async run(values, ctx) { return await host.get(ctx, values.event!); },
-    }),
+    },
     {
-      id: 'add', label: 'Add an event', word: 'add',
-      inputs: [
-        textInput({ id: 'title', label: 'Title', help: 'What it is', why: 'your own words', typed: { flag: '--title' } }),
-        textInput({ id: 'start', label: 'Starts', help: 'When it starts; a time without a zone is read in this machine\'s zone', why: TIME_WHY, typed: { flag: '--start' } }),
-        textInput({ id: 'end', label: 'Ends', help: 'When it ends (the daemon\'s calendar needs one)', why: TIME_WHY, typed: { flag: '--end' }, optional: { default: '', means: 'no end time' } }),
-        textInput({ id: 'location', label: 'Where', help: 'Where it is', why: 'a place in your own words', typed: { flag: '--location' }, optional: { default: '', means: 'no place' } }),
-        textInput({ id: 'notes', label: 'Notes', help: 'Anything to note with it', why: 'your own words', typed: { flag: '--notes' }, optional: { default: '', means: 'no notes' } }),
-        { id: 'again', label: 'Already added', help: 'Whether to add it when this exact event was already added from this session', kind: 'choice',
-          choices: [{ value: 'no', label: 'Do not add it twice' }, { value: 'yes', label: 'Add it again' }],
-          required: { default: 'no', defaultMeans: 'do not add it twice' }, typed: { flag: '--again', switchOn: 'yes' } },
-      ],
-      sentence: '"{title}" starting {start} is added to the calendar, until you change it; a shared calendar tells its guests.', done: '',
-      touches: 'another-machine', lasts: 'kept', risk: 'none', undoneBy: 'delete',
-      operator: { method: 'calendar.events.create', fields: { 'body.title': 'title', 'body.start': 'start', 'body.end': 'end', 'body.location': 'location', 'body.description': 'notes', 'body.confirm': '=true' } },
-      example: { title: 'Design review', start: '2026-08-01T14:00', end: '2026-08-01T15:00' },
+      ...movedWords<Ctx>(CALENDAR_GET),
+      async run(values, ctx) { return await host.get(ctx, values.event!); },
+    },
+    {
+      ...movedWords<Ctx>(CALENDAR_ADD),
       async run(values, ctx) {
         return await host.add(ctx, {
           title: values.title!, start: values.start!,
@@ -135,17 +125,7 @@ export function registerCalendarCommand<Ctx extends CommandActionContext>(regist
       },
     },
     {
-      id: 'change', label: 'Change an event', word: 'change',
-      inputs: [
-        EVENT,
-        textInput({ id: 'title', label: 'Title', help: 'A new title; blank keeps it', why: 'your own words', typed: { flag: '--title' }, optional: { default: '', means: 'unchanged' } }),
-        textInput({ id: 'start', label: 'Starts', help: 'A new start; blank keeps it', why: TIME_WHY, typed: { flag: '--start' }, optional: { default: '', means: 'unchanged' } }),
-        textInput({ id: 'end', label: 'Ends', help: 'A new end; blank keeps it', why: TIME_WHY, typed: { flag: '--end' }, optional: { default: '', means: 'unchanged' } }),
-      ],
-      sentence: '{event} changes to what you gave, until you change it again; its guests are told.', done: '',
-      touches: 'another-machine', lasts: 'kept', risk: 'sends-out',
-      operator: { method: 'calendar.events.update', fields: { 'body.eventId': 'event', 'body.title': 'title', 'body.start': 'start', 'body.end': 'end', 'body.confirm': '=true' } },
-      example: { event: 'evt-42', start: '2026-08-01T15:00' },
+      ...movedWords<Ctx>(CALENDAR_CHANGE),
       async run(values, ctx) {
         if (!host.change) return missing('Changing an event', 'the Agent\'s own events are removed and added again; run it in goodvibes for the daemon\'s calendar');
         if (!values.title && !values.start && !values.end) throw commandRefusal(`Nothing to change for ${values.event}: give a new title, start or end.`);
@@ -155,11 +135,7 @@ export function registerCalendarCommand<Ctx extends CommandActionContext>(regist
       },
     },
     {
-      id: 'delete', label: 'Remove an event', word: 'delete', inputs: [EVENT],
-      sentence: '{event} is removed from the calendar; a shared calendar tells its guests.', done: '',
-      touches: 'another-machine', lasts: 'kept', risk: 'cannot-be-undone',
-      operator: { method: 'calendar.events.delete', fields: { 'body.eventId': 'event', 'body.confirm': '=true' } },
-      example: { event: 'evt-42' },
+      ...movedWords<Ctx>(CALENDAR_DELETE),
       async run(values, ctx) { return await host.remove(ctx, values.event!); },
     },
     readAction<Ctx>({

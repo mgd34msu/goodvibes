@@ -35,6 +35,8 @@ import { buildContinuationSpawnInput } from './continuation-spawn.js';
 import { WatcherRegistry } from '../watchers/index.js';
 import { createTriggerSupervisor } from '../triggers/compose.js';
 import { ArtifactStore } from '../artifacts/index.js';
+import { carryAgentArtifactsOnce } from '../artifacts/agent-artifact-carry.js';
+import { DAEMON_STATE_SURFACE_ROOT } from '../daemon/lifecycle-marker.js';
 import {
   HomeGraphService,
   HOME_GRAPH_KNOWLEDGE_EXTENSION,
@@ -53,6 +55,7 @@ import {
   HOME_GRAPH_KNOWLEDGE_DB_FILE,
   REGULAR_KNOWLEDGE_DB_FILE,
 } from '../knowledge/store-config.js';
+import { startAgentKnowledgeCarry } from '../knowledge/agent-knowledge-carry.js';
 import { MediaProviderRegistry, ensureBuiltinMediaProviders } from '../media/index.js';
 import { MultimodalService } from '../multimodal/index.js';
 import { cancelAllAgentRuns } from '../tools/agent/index.js';
@@ -66,7 +69,6 @@ import { WorkspaceCheckpointManager } from '../workspace/checkpoint/index.js';
 import { MemoryRegistry } from '../state/memory-registry.js';
 import { MemoryStore } from '../state/memory-store.js';
 import { emitProviderVoiceUsage } from './emitters/providers.js';
-import { emitPlanStrategySelected } from './emitters/planner.js';
 import { emitAuthorityChanged } from './emitters/security.js';
 import { noteListChanged } from './list-changes.js';
 import { openAuthorityRecordFile } from '../cluster/authority-record-file.js';
@@ -114,7 +116,6 @@ import { SessionMemoryStore } from '../core/session-memory.js';
 import { SessionLineageTracker } from '../core/session-lineage.js';
 import { SessionChangeTracker } from '../sessions/change-tracker.js';
 import { ExecutionPlanManager } from '../core/execution-plan.js';
-import { AdaptivePlanner } from '../core/adaptive-planner.js';
 import { FileStateCache } from '../state/file-cache.js';
 import { FileWatcher } from '../state/file-watcher.js';
 import { ProjectIndex } from '../state/project-index.js';
@@ -239,7 +240,10 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   // Provider subscriptions live in the SHARED tier so a login completed on one
   // surface is visible to every other.
   const subscriptionManager = new SubscriptionManager(sharedSubscriptionsPath(shellPaths), { secrets: secretsManager });
-  const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(surfaceRoot, 'services.json'), project: shellPaths.resolveProjectPath(surfaceRoot, 'services.json') }, {
+  // The services file and the pinned models are the daemon's, one copy for every program (SurfaceRoots.providerStoresRoot);
+  // a project's services file stays the program's own (`<project>/.goodvibes/<surface root>/services.json`).
+  const providerStoresRoot = roots.providerStoresRoot ? requireSurfaceRoot(roots.providerStoresRoot, 'RuntimeServicesOptions providerStoresRoot') : surfaceRoot;
+  const serviceRegistry = new ServiceRegistry({ user: shellPaths.resolveUserPath(providerStoresRoot, 'services.json'), project: shellPaths.resolveProjectPath(surfaceRoot, 'services.json') }, {
     secretsManager,
     subscriptionManager,
   });
@@ -263,6 +267,9 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     runtimeBus,
     shellPaths,
     surfaceRoot,
+    providerStoresRoot,
+    // The context window sizes are the daemon's file: a terminal program reads it and never writes it.
+    writesContextWindows: product.surface !== 'tui' && product.surface !== 'agent',
     providerRegistryFactory: seams.providerRegistryFactory,
     modelDiscovery: seams.modelDiscovery,
     trustScannedServer: seams.trustScannedServer,
@@ -403,7 +410,19 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
       : {},
   );
   scope.ownUntilRegistered('cross-session task registry', () => sessionOrchestration.dispose());
-  const artifactStore = new ArtifactStore({ configManager });
+  // One artifact store for every program on this machine, the daemon's (capabilities/builtin/artifacts.ts): the Agent
+  // uses it too, and the daemon carries the Agent's own earlier store into it once, before it reads it.
+  if (product.surface === 'daemon') {
+    try {
+      const carried = carryAgentArtifactsOnce({ agentRoot: shellPaths.resolveUserPath('agent', 'artifacts'), daemonRoot: join(configManager.getControlPlaneConfigDir(), 'artifacts') });
+      if (carried && carried.carried.length > 0) logger.info('[artifacts] the Agent\'s saved artifacts were carried into the daemon\'s store', { carried: carried.carried.length, skipped: carried.skipped.length });
+    } catch (error) {
+      logger.warn('[artifacts] the Agent\'s saved artifacts could not be carried into the daemon\'s store; they stay in the Agent\'s folder', { error: summarizeError(error) });
+    }
+  }
+  const artifactStore = new ArtifactStore(surfaceRoot === 'agent'
+    ? { configManager, rootDir: shellPaths.resolveUserPath(DAEMON_STATE_SURFACE_ROOT, 'artifacts') }
+    : { configManager });
   const memoryEmbeddingRegistry = new MemoryEmbeddingProviderRegistry({ configManager });
   const memoryDbPath = resolveMemoryDbPath(product.memoryStore, roots, surfaceRoot);
   const memoryStore = new MemoryStore(memoryDbPath, { embeddingRegistry: memoryEmbeddingRegistry });
@@ -490,6 +509,11 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   agentKnowledgeService.attachRuntimeBus(runtimeBus);
   // With no wiki, the project's knowledge service is the agent's own.
   const knowledgeService = wikiService ?? agentKnowledgeService;
+  // ONE knowledge store, the daemon's: the Agent's own is carried into it once, the daemon its single writer.
+  // The Agent program kept its own file under its own folder (`~/.goodvibes/agent/`), beside the daemon's (`~/.goodvibes/tui/`).
+  if (product.surface === 'daemon' && wikiStore) {
+    startAgentKnowledgeCarry(agentKnowledgeStore, wikiStore, join(dirname(configManager.getControlPlaneConfigDir()), 'agent', GOODVIBES_AGENT_KNOWLEDGE_DB_FILE));
+  }
   const homeGraphService = new HomeGraphService(homeGraphKnowledgeStore, artifactStore, { semanticService: homeGraphSemanticService, admitExpensiveWork });
   const { service: projectPlanningService, projectId: projectPlanningProjectId } = ProjectPlanningService.forConfiguredWorkspace(knowledgeStore, configManager, workingDirectory, {
     waitForStartup: () => knowledgeService.whenReady(),
@@ -617,14 +641,6 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   const sessionLineageTracker = new SessionLineageTracker();
   const sessionChangeTracker = new SessionChangeTracker();
   const planManager = new ExecutionPlanManager(workPlan);
-  // Each strategy decision /workstream's drafting asks for is published as PLAN_STRATEGY_SELECTED.
-  const adaptivePlanner = new AdaptivePlanner({
-    onDecision: (decision) => emitPlanStrategySelected(runtimeBus, {
-      sessionId: 'system',
-      traceId: `planner:select:${decision.timestamp}`,
-      source: 'adaptive-planner',
-    }, decision),
-  });
   const idempotencyStore = new IdempotencyStore();
   const overflowHandler = new OverflowHandler({
     baseDir: workingDirectory,
@@ -1175,7 +1191,6 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     sessionLineageTracker,
     sessionChangeTracker,
     planManager,
-    adaptivePlanner,
     idempotencyStore,
     overflowHandler,
     policyRuntimeState,

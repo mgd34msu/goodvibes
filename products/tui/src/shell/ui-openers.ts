@@ -248,7 +248,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
     ...modelPickerCatalogServices({
       picker: input.modelPicker,
       getPinned,
-      refreshLiveModels: async () => (await providerRegistry.refreshLiveModelDiscovery?.()) ?? [],
+      // An empty picker reads every list again past each stored one (force); otherwise each list's own age decides.
+      refreshLiveModels: async (force) => (await providerRegistry.refreshLiveModelDiscovery?.(undefined, force ? { force: true } : {})) ?? [],
     }),
     picker: input.modelPicker,
     render,

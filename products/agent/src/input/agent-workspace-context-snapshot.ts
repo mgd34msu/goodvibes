@@ -24,9 +24,9 @@ export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSum
       truncated: 0,
       projectInitPath: null,
       globalInitPath: null,
-      statusRoute: '/personas vibe',
-      initProjectRoute: '/personas vibe-create',
-      initGlobalRoute: '/personas vibe-create global',
+      statusRoute: 'capability personas.vibe',
+      initProjectRoute: 'capability personas.vibe-create where:"project"',
+      initGlobalRoute: 'capability personas.vibe-create where:"global"',
       next: 'Open a normal Agent workspace before relying on VIBE.md personality files.',
     };
   }
@@ -41,9 +41,9 @@ export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSum
       truncated,
       projectInitPath: snapshot.projectInitPath,
       globalInitPath: snapshot.globalInitPath,
-      statusRoute: '/personas vibe',
-      initProjectRoute: '/personas vibe-create',
-      initGlobalRoute: '/personas vibe-create global',
+      statusRoute: 'capability personas.vibe',
+      initProjectRoute: 'capability personas.vibe-create where:"project"',
+      initGlobalRoute: 'capability personas.vibe-create where:"global"',
       next: snapshot.blocked.length > 0
         ? 'Inspect blocked VIBE.md files before relying on custom personality.'
         : snapshot.files.length > 0
@@ -58,10 +58,10 @@ export function buildVibeSummary(context: CommandContext): AgentWorkspaceVibeSum
       truncated: 0,
       projectInitPath: null,
       globalInitPath: null,
-      statusRoute: '/personas vibe',
-      initProjectRoute: '/personas vibe-create',
-      initGlobalRoute: '/personas vibe-create global',
-      next: 'VIBE.md discovery failed; use /personas vibe for a focused diagnostic.',
+      statusRoute: 'capability personas.vibe',
+      initProjectRoute: 'capability personas.vibe-create where:"project"',
+      initGlobalRoute: 'capability personas.vibe-create where:"global"',
+      next: 'VIBE.md discovery failed; "VIBE.md files" on Personas in Memory and knowledge says why.',
     };
   }
 }

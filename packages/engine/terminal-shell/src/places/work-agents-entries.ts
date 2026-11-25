@@ -1,0 +1,499 @@
+/**
+ * work-agents-entries.ts, the Work place's lists and actions for remote
+ * runners (the second half of the Work and agents group; the place itself is
+ * declared in the Work place file, which spreads these in).
+ *
+ * Every list reads the daemon's runners (`remote.list` through
+ * `capabilities.run`, one call per refresh for all three) and follows the
+ * daemon's `remote-runners` list change and its `agents` events, so a runner
+ * started, ending, failing or stopped anywhere, a pool made or an artifact
+ * handed back shows with no key pressed. Every action is a `remote.*`
+ * capability, which runs in the daemon.
+ *
+ * The live lists the capabilities' inputs choose from (`remote.runners`,
+ * `remote.pools`, ...) and the Recorded runs source are the terminal's side,
+ * in work-agents-lists.ts, read from the same daemon answer, so a form opened
+ * from the place offers the daemon's runners. This file holds no terminal
+ * code: the web UI draws these lists too (places/browser.ts).
+ */
+import type { PlaceAction, PlaceDetailLine, PlaceFollow, PlaceItem, PlaceList } from './place-types.js';
+
+/** A remote runner the daemon knows: one with a contract, or a live connection. */
+export interface RunnerItem extends PlaceItem {
+  readonly kind: 'runner';
+  /** running: connected or connecting; degraded: its transport is struggling; ended: it finished, failed or stopped; local: no transport. */
+  readonly state: 'running' | 'degraded' | 'ended' | 'local';
+  readonly label: string;
+  readonly template: string;
+  readonly transport: string;
+  readonly pool?: string | undefined;
+  readonly trust: string;
+  readonly tools: readonly string[];
+  readonly writeScope: readonly string[];
+  readonly folder?: string | undefined;
+  readonly errors: number;
+  readonly lastError?: string | undefined;
+  readonly heartbeat?: string | undefined;
+  readonly recovery: readonly string[];
+}
+
+export interface PoolItem extends PlaceItem {
+  readonly kind: 'pool';
+  readonly state: 'empty' | 'holding' | 'full';
+  readonly label: string;
+  readonly runners: readonly string[];
+  readonly limit?: number | undefined;
+  readonly trust: string;
+  readonly template?: string | undefined;
+  readonly description?: string | undefined;
+}
+
+export interface HandedBackItem extends PlaceItem {
+  readonly kind: 'handed-back';
+  /** The task's state when it was captured. */
+  readonly state: 'completed' | 'failed' | 'cancelled' | 'running' | 'pending' | 'unknown';
+  readonly runner: string;
+  readonly task: string;
+  readonly summary: string;
+  readonly template: string;
+  readonly tools: readonly string[];
+  readonly at?: number | undefined;
+  readonly error?: string | undefined;
+  readonly toolCalls: number;
+  readonly errors: number;
+}
+
+/** A run this program recorded of one of its turns (builtin/replay.ts); `loaded` is the one being stepped through. */
+export interface RecordedRunItem extends PlaceItem {
+  readonly kind: 'recorded-run';
+  readonly state: 'loaded' | 'recorded';
+  readonly rev?: number | undefined;
+  readonly total?: number | undefined;
+}
+
+/** An agent this program started (builtin/agents.ts); `in-group` is one running as part of a group of agents. */
+export interface YourAgentItem extends PlaceItem {
+  readonly kind: 'agent';
+  readonly state: 'running' | 'in-group' | 'ended';
+  readonly task: string;
+  readonly status: string;
+  readonly group?: string | undefined;
+}
+
+/** A work contract this program keeps: what was asked and its state. */
+export interface ContractItem extends PlaceItem {
+  readonly kind: 'contract';
+  readonly state: string;
+  readonly ask: string;
+}
+
+/** An agent archetype (built in, or in this project's agents folder). */
+export interface ArchetypeItem extends PlaceItem {
+  readonly kind: 'archetype';
+  readonly state: 'ok' | 'problems';
+  readonly label: string;
+  readonly family: string;
+  readonly issues: number;
+}
+
+/** A third-party coding agent the daemon found on this machine and can host. */
+export interface CodingAgentItem extends PlaceItem {
+  readonly kind: 'coding-agent';
+  readonly state: 'installed';
+  readonly title: string;
+  readonly binaryPath: string;
+}
+
+export type WorkAgentItem = RunnerItem | PoolItem | HandedBackItem | RecordedRunItem | YourAgentItem | ContractItem | ArchetypeItem | CodingAgentItem;
+
+/** The session sources a program that runs its own agents supplies (work-agents-lists.ts `agentsPlaceSources`). */
+export const YOUR_AGENTS_SOURCE = 'agents-running';
+export const CONTRACTS_SOURCE = 'agents-contracts';
+export const ARCHETYPES_SOURCE = 'agents-archetypes';
+
+const ENDED_AGENT = new Set(['completed', 'failed', 'cancelled', 'done', 'stopped']);
+
+export function yourAgentItems(raw: unknown): readonly YourAgentItem[] {
+  return (Array.isArray(raw) ? raw : []).map(record).filter((row) => text(row['id'])).map((row): YourAgentItem => {
+    const status = text(row['status']);
+    const group = text(row['graphId']);
+    return {
+      kind: 'agent', id: text(row['id']), task: plain(row['task']), status, ...(group ? { group } : {}),
+      state: ENDED_AGENT.has(status) ? 'ended' : group ? 'in-group' : 'running',
+    };
+  });
+}
+
+export function contractItems(raw: unknown): readonly ContractItem[] {
+  return (Array.isArray(raw) ? raw : []).map(record).filter((row) => text(row['id'])).map((row): ContractItem => ({ kind: 'contract', id: text(row['id']), state: text(row['status']) || 'unknown', ask: plain(row['ask']) }));
+}
+
+export function archetypeItems(raw: unknown): readonly ArchetypeItem[] {
+  return (Array.isArray(raw) ? raw : []).map(record).filter((row) => text(row['id'])).map((row): ArchetypeItem => {
+    const issues = count(row['issues']);
+    return { kind: 'archetype', id: text(row['id']), state: issues > 0 ? 'problems' : 'ok', label: plain(row['label']), family: text(row['family']), issues };
+  });
+}
+
+export function codingAgentItems(output: unknown): readonly CodingAgentItem[] {
+  const agents = listed(output)['agents'];
+  return (Array.isArray(agents) ? agents : []).map(record).filter((agent) => text(agent['id'])).map((agent): CodingAgentItem => ({
+    kind: 'coding-agent', id: text(agent['id']), state: 'installed', title: plain(agent['title']) || text(agent['id']), binaryPath: plain(agent['binaryPath']),
+  }));
+}
+
+/** The session source a program holding recorded runs supplies: `{ runs: newest first, loaded, rev, total }`. */
+export const RECORDED_RUNS_SOURCE = 'replay-runs';
+
+export function recordedRunItems(raw: unknown): readonly RecordedRunItem[] {
+  const value = record(raw);
+  const loaded = text(value['loaded']);
+  return strings(value['runs']).map((id): RecordedRunItem => ({
+    kind: 'recorded-run', id, state: id === loaded ? 'loaded' : 'recorded',
+    ...(id === loaded && typeof value['rev'] === 'number' ? { rev: value['rev'] } : {}),
+    ...(id === loaded && typeof value['total'] === 'number' ? { total: value['total'] } : {}),
+  }));
+}
+
+const text = (value: unknown): string => typeof value === 'string' ? value : '';
+const strings = (value: unknown): readonly string[] => Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
+const count = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+const record = (value: unknown): Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+/** Text from another machine (a runner's label, task or error), with control characters taken out. */
+const plain = (value: unknown): string => text(value).replace(/[\u0000-\u001f\u007f-\u009f]+/g, ' ').trim();
+
+/** The `data` of the daemon's `remote.list` answer. */
+function listed(output: unknown): Record<string, unknown> {
+  return record(record(output)['data']);
+}
+
+const LIVE = new Set(['initializing', 'authenticating', 'connected', 'syncing']);
+const STRUGGLING = new Set(['degraded', 'reconnecting']);
+
+function runnerState(transport: string, live: boolean): RunnerItem['state'] {
+  if (!transport) return 'local';
+  if (!live) return 'ended';
+  if (LIVE.has(transport)) return 'running';
+  if (STRUGGLING.has(transport)) return 'degraded';
+  return 'ended';
+}
+
+export function runnerItems(output: unknown): readonly RunnerItem[] {
+  const data = listed(output);
+  const connections = new Map((Array.isArray(data['connections']) ? data['connections'] : []).map((entry) => [text(record(entry)['id']), record(entry)]));
+  const supervised = new Map((Array.isArray(data['supervised']) ? data['supervised'] : []).map((entry) => [text(record(entry)['runnerId']), record(entry)]));
+  const items: RunnerItem[] = [];
+  const seen = new Set<string>();
+  for (const raw of Array.isArray(data['contracts']) ? data['contracts'] : []) {
+    const contract = record(raw);
+    const id = text(contract['runnerId']);
+    if (!id || seen.has(id)) continue;
+    seen.add(id);
+    const connection = connections.get(id);
+    const session = supervised.get(id);
+    const ceiling = record(contract['capabilityCeiling']);
+    const transport = text(connection?.['transportState']) || text(record(contract['transport'])['state']);
+    items.push({
+      kind: 'runner', id, state: runnerState(transport, connection !== undefined),
+      label: plain(contract['label']) || id, template: text(contract['template']) || 'general', transport,
+      ...(text(contract['poolId']) ? { pool: text(contract['poolId']) } : {}),
+      trust: text(contract['trustClass']), tools: strings(ceiling['allowedTools']), writeScope: strings(ceiling['writeScope']),
+      ...(text(contract['workspaceRoot']) ? { folder: text(contract['workspaceRoot']) } : {}),
+      errors: count(connection?.['errorCount'] ?? record(contract['transport'])['errorCount']),
+      ...(plain(connection?.['lastError'] ?? record(contract['transport'])['lastError']) ? { lastError: plain(connection?.['lastError'] ?? record(contract['transport'])['lastError']) } : {}),
+      ...(session ? { heartbeat: `${text(session['heartbeat'])}${text(session['heartbeatDetail']) ? ` (${plain(session['heartbeatDetail'])})` : ''}` } : {}),
+      recovery: (Array.isArray(session?.['recovery']) ? session['recovery'] as unknown[] : []).map((step) => [plain(record(step)['label']), plain(record(step)['reason'])].filter(Boolean).join(': ')).filter(Boolean),
+    });
+  }
+  // A connection with no contract yet (it is still starting) is shown too.
+  for (const [id, connection] of connections) {
+    if (!id || seen.has(id)) continue;
+    const transport = text(connection['transportState']);
+    items.push({ kind: 'runner', id, state: runnerState(transport, true), label: plain(connection['label']) || id, template: 'general', transport, trust: 'self-hosted-acp', tools: [], writeScope: [], errors: count(connection['errorCount']), recovery: [] });
+  }
+  return items;
+}
+
+export function poolItems(output: unknown): readonly PoolItem[] {
+  return (Array.isArray(listed(output)['pools']) ? listed(output)['pools'] as unknown[] : []).map(record).filter((pool) => text(pool['id'])).map((pool): PoolItem => {
+    const runners = strings(pool['runnerIds']);
+    const limit = typeof pool['maxRunners'] === 'number' ? pool['maxRunners'] : undefined;
+    return {
+      kind: 'pool', id: text(pool['id']), state: runners.length === 0 ? 'empty' : limit !== undefined && runners.length >= limit ? 'full' : 'holding',
+      label: plain(pool['label']) || text(pool['id']), runners, ...(limit !== undefined ? { limit } : {}), trust: text(pool['trustClass']),
+      ...(text(pool['preferredTemplate']) ? { template: text(pool['preferredTemplate']) } : {}),
+      ...(plain(pool['description']) ? { description: plain(pool['description']) } : {}),
+    };
+  });
+}
+
+const HANDED_BACK_STATES = new Set<HandedBackItem['state']>(['completed', 'failed', 'cancelled', 'running', 'pending', 'unknown']);
+
+export function handedBackItems(output: unknown): readonly HandedBackItem[] {
+  return (Array.isArray(listed(output)['artifacts']) ? listed(output)['artifacts'] as unknown[] : []).map(record).filter((artifact) => text(artifact['id'])).map((artifact): HandedBackItem => {
+    const status = text(artifact['status']) as HandedBackItem['state'];
+    return {
+      kind: 'handed-back', id: text(artifact['id']), state: HANDED_BACK_STATES.has(status) ? status : 'unknown',
+      runner: text(artifact['runnerId']), task: plain(artifact['task']), summary: plain(artifact['summary']), template: text(artifact['template']),
+      tools: strings(artifact['tools']), ...(typeof artifact['createdAt'] === 'number' ? { at: artifact['createdAt'] } : {}),
+      ...(plain(artifact['error']) ? { error: plain(artifact['error']) } : {}),
+      toolCalls: count(artifact['toolCallCount']), errors: count(artifact['errorCount']),
+    };
+  });
+}
+
+/** One read of the daemon's runners for all three lists. */
+const RUNNERS_SOURCE = { kind: 'daemon', method: 'capabilities.run', input: { id: 'remote.list' } } as const;
+
+/** A runner started, ended or stopped (agents events), and every change made to pools, contracts or artifacts. */
+const RUNNER_EVENTS: PlaceFollow = { domains: ['agents', 'workspace'], events: ['agents'], lists: ['remote-runners'] };
+
+const RUNNER_STATE_WORDS: Readonly<Record<RunnerItem['state'], string>> = { running: 'running', degraded: 'struggling', ended: 'ended', local: 'in the daemon' };
+
+function when(at: number | undefined): string {
+  return at ? new Date(at).toLocaleString() : 'not known';
+}
+
+const runnersList: PlaceList<WorkAgentItem> = {
+  id: 'runners',
+  label: 'Runners',
+  noun: 'the remote runners',
+  source: { ...RUNNERS_SOURCE, items: runnerItems },
+  follows: RUNNER_EVENTS,
+  empty: 'No remote runners: none has been started.',
+  row: (item) => {
+    const runner = item as RunnerItem;
+    return {
+      title: runner.label,
+      ...(runner.state === 'running' ? {} : { right: RUNNER_STATE_WORDS[runner.state] }),
+      mark: runner.state === 'running' ? 'running' : runner.state === 'degraded' ? 'attention' : runner.state === 'ended' ? 'paused' : 'ok',
+    };
+  },
+  detail: (item) => {
+    const runner = item as RunnerItem;
+    const lines: PlaceDetailLine[] = [
+      { label: 'State', text: RUNNER_STATE_WORDS[runner.state] },
+      { label: 'Kind of agent', text: runner.template },
+      ...(runner.pool ? [{ label: 'Pool', text: runner.pool }] : []),
+      ...(runner.folder ? [{ label: 'Works in', text: runner.folder }] : []),
+      { label: 'Tools', text: runner.tools.length > 0 ? runner.tools.join(', ') : 'none set' },
+      { label: 'May write', text: runner.writeScope.length > 0 ? runner.writeScope.join(', ') : 'its folder, under the permission rules' },
+      ...(runner.heartbeat ? [{ label: 'Heartbeat', text: runner.heartbeat }] : []),
+      ...(runner.errors > 0 ? [{ label: 'Errors', text: String(runner.errors), tone: 'warning' as const }] : []),
+      ...(runner.lastError ? [{ label: 'Last error', text: runner.lastError, tone: 'warning' as const }] : []),
+      ...runner.recovery.map((step) => ({ label: 'To recover', text: step })),
+    ];
+    return lines;
+  },
+};
+
+const poolsList: PlaceList<WorkAgentItem> = {
+  id: 'pools',
+  label: 'Runner pools',
+  noun: 'your runner pools',
+  source: { ...RUNNERS_SOURCE, items: poolItems },
+  follows: RUNNER_EVENTS,
+  empty: 'No runner pools yet.',
+  row: (item) => {
+    const pool = item as PoolItem;
+    return { title: pool.label, right: pool.state === 'full' ? 'full' : `${pool.runners.length} runner${pool.runners.length === 1 ? '' : 's'}`, mark: pool.state === 'full' ? 'attention' : 'ok' };
+  },
+  detail: (item) => {
+    const pool = item as PoolItem;
+    return [
+      { label: 'Runners', text: pool.runners.length > 0 ? pool.runners.join(', ') : 'none yet' },
+      { label: 'Limit', text: pool.limit !== undefined ? String(pool.limit) : 'none' },
+      { label: 'Trust', text: pool.trust || 'not said' },
+      { label: 'Usual agent', text: pool.template ?? 'general' },
+      ...(pool.description ? [{ label: 'About', text: pool.description }] : []),
+    ];
+  },
+};
+
+const STATUS_WORDS: Readonly<Record<HandedBackItem['state'], string>> = { completed: 'finished', failed: 'failed', cancelled: 'stopped', running: 'still running when saved', pending: 'not started when saved', unknown: 'state not known' };
+
+const handedBackList: PlaceList<WorkAgentItem> = {
+  id: 'handed-back',
+  label: 'Handed back',
+  noun: 'what runners handed back',
+  source: { ...RUNNERS_SOURCE, items: handedBackItems },
+  follows: RUNNER_EVENTS,
+  empty: 'Nothing handed back yet: save a runner\'s work to review it here.',
+  row: (item) => {
+    const artifact = item as HandedBackItem;
+    return { title: artifact.summary || artifact.task || artifact.id, right: STATUS_WORDS[artifact.state], mark: artifact.state === 'failed' ? 'attention' : artifact.state === 'completed' ? 'ok' : 'paused' };
+  },
+  detail: (item) => {
+    const artifact = item as HandedBackItem;
+    return [
+      { label: 'Task', text: artifact.task || 'not said' },
+      { label: 'Result', text: STATUS_WORDS[artifact.state] },
+      { label: 'Runner', text: artifact.runner },
+      { label: 'Saved', text: when(artifact.at) },
+      { label: 'Tools it had', text: artifact.tools.length > 0 ? artifact.tools.join(', ') : 'none' },
+      { label: 'Evidence', text: `${artifact.toolCalls} tool call${artifact.toolCalls === 1 ? '' : 's'}, ${artifact.errors} error${artifact.errors === 1 ? '' : 's'}` },
+      ...(artifact.error ? [{ label: 'What went wrong', text: artifact.error, tone: 'warning' as const }] : []),
+      { text: '' },
+      { label: 'Summary', text: artifact.summary || 'none' },
+    ];
+  },
+};
+
+const recordedRunsList: PlaceList<WorkAgentItem> = {
+  id: 'recorded-runs',
+  label: 'Recorded runs',
+  noun: 'recorded runs',
+  source: { kind: 'session', name: RECORDED_RUNS_SOURCE, items: recordedRunItems },
+  // Only the terminal app records its turns: the Agent has no recorded runs and shows no such tab.
+  programs: ['tui'],
+  empty: 'No runs recorded yet: each turn in this project is recorded as one.',
+  row: (item) => {
+    const run = item as RecordedRunItem;
+    return { title: run.id, ...(run.state === 'loaded' ? { right: run.total !== undefined ? `loaded, event ${run.rev ?? 0} of ${run.total}` : 'loaded', mark: 'running' as const } : { mark: 'ok' as const }) };
+  },
+  detail: (item) => {
+    const run = item as RecordedRunItem;
+    return [
+      { label: 'Run', text: run.id },
+      { label: 'State', text: run.state === 'loaded' ? `loaded${run.total !== undefined ? `, at event ${run.rev ?? 0} of ${run.total}` : ''}` : 'recorded' },
+    ];
+  },
+};
+
+const AGENT_STATE_WORDS: Readonly<Record<YourAgentItem['state'], string>> = { running: 'running', 'in-group': 'running in a group', ended: 'ended' };
+
+const yourAgentsList: PlaceList<WorkAgentItem> = {
+  id: 'agents',
+  label: 'Your agents',
+  noun: 'the agents started here',
+  source: { kind: 'session', name: YOUR_AGENTS_SOURCE, items: yourAgentItems },
+  // The terminal app runs agents of its own; the Agent hands work on instead.
+  programs: ['tui'],
+  empty: 'No agents running: start one in a team mode, from a recipe or from an archetype.',
+  row: (item) => {
+    const agent = item as YourAgentItem;
+    return { title: agent.task || agent.id, ...(agent.state === 'running' ? {} : { right: AGENT_STATE_WORDS[agent.state] }), mark: agent.state === 'ended' ? 'paused' : 'running' };
+  },
+  detail: (item) => {
+    const agent = item as YourAgentItem;
+    return [
+      { label: 'Task', text: agent.task || 'not said' },
+      { label: 'State', text: agent.status || AGENT_STATE_WORDS[agent.state] },
+      ...(agent.group ? [{ label: 'Group', text: agent.group }] : []),
+    ];
+  },
+};
+
+const contractsList: PlaceList<WorkAgentItem> = {
+  id: 'contracts',
+  label: 'Work contracts',
+  noun: 'the work contracts here',
+  source: { kind: 'session', name: CONTRACTS_SOURCE, items: contractItems },
+  programs: ['tui'],
+  empty: 'No work contracts yet: one is kept for each piece of work agents take on here.',
+  row: (item) => {
+    const contract = item as ContractItem;
+    return { title: contract.ask || contract.id, right: contract.state, mark: contract.state === 'failed' ? 'attention' : contract.state === 'running' ? 'running' : 'ok' };
+  },
+  detail: (item) => {
+    const contract = item as ContractItem;
+    return [{ label: 'Asked', text: contract.ask || 'not said' }, { label: 'State', text: contract.state }, { label: 'Contract', text: contract.id }];
+  },
+};
+
+const archetypesList: PlaceList<WorkAgentItem> = {
+  id: 'archetypes',
+  label: 'Archetypes',
+  noun: 'the agent archetypes',
+  source: { kind: 'session', name: ARCHETYPES_SOURCE, items: archetypeItems },
+  programs: ['tui'],
+  empty: 'No agent archetypes found.',
+  row: (item) => {
+    const archetype = item as ArchetypeItem;
+    return { title: archetype.id, right: archetype.issues > 0 ? `${archetype.issues} problem${archetype.issues === 1 ? '' : 's'}` : archetype.family, mark: archetype.issues > 0 ? 'attention' : 'ok' };
+  },
+  detail: (item) => {
+    const archetype = item as ArchetypeItem;
+    return [{ label: 'What it is', text: archetype.label || 'not said' }, { label: 'Family', text: archetype.family || 'not said' }, ...(archetype.issues > 0 ? [{ label: 'Problems', text: String(archetype.issues), tone: 'warning' as const }] : [])];
+  },
+};
+
+const codingAgentsList: PlaceList<WorkAgentItem> = {
+  id: 'coding-agents',
+  label: 'Coding agents',
+  noun: 'the coding agents on this machine',
+  source: { kind: 'daemon', method: 'capabilities.run', input: { id: 'agents.hostable' }, items: codingAgentItems },
+  // A hosted one shows on the agents domain the daemon announces.
+  follows: { domains: ['agents'], events: ['agents'] },
+  empty: 'No third-party coding agents found. Install Claude Code, Codex or opencode on PATH to host one.',
+  row: (item) => ({ title: (item as CodingAgentItem).title }),
+  detail: (item) => [{ label: 'Coding agent', text: (item as CodingAgentItem).title }, { label: 'Program', text: (item as CodingAgentItem).binaryPath || 'not said' }],
+};
+
+export const WORK_AGENT_LISTS: readonly PlaceList<WorkAgentItem>[] = [yourAgentsList, contractsList, archetypesList, codingAgentsList, runnersList, poolsList, handedBackList, recordedRunsList];
+
+const LIVE_RUNNER = ['running', 'degraded'];
+
+export const WORK_AGENT_ACTIONS: readonly PlaceAction<WorkAgentItem>[] = [
+  // Your agents: start them in a team mode or from a recipe, see the modes, stop one or its group.
+  { key: 's', id: 'start-agent', list: 'agents', whole: true, capability: 'agents.start', label: 'start an agent' },
+  { key: 'R', id: 'run-recipe', list: 'agents', whole: true, capability: 'agents.recipe', label: 'run a recipe' },
+  { key: 't', id: 'team-modes', list: 'agents', whole: true, capability: 'agents.team', label: 'team modes and recipes' },
+  { key: 'x', id: 'stop-agent', list: 'agents', states: ['running', 'in-group'], capability: 'agents.stop-branch', label: 'stop it and what it started', fill: { agent: 'id' } },
+  { key: 'X', id: 'stop-group', list: 'agents', states: ['in-group'], capability: 'agents.stop-group', label: 'stop its group', fill: { group: (item) => (item as YourAgentItem).group ?? '' } },
+  // Work contracts.
+  { key: 'enter', id: 'contract', list: 'contracts', capability: 'agents.contract', label: 'see it', fill: { contract: 'id' } },
+  // Archetypes: see one, start an agent from one; the tab is the list of them.
+  { key: 'enter', id: 'archetype', list: 'archetypes', capability: 'agents.archetype', label: 'see it', fill: { archetype: 'id' } },
+  { key: 's', id: 'start-from-archetype', list: 'archetypes', capability: 'agents.start-archetype', label: 'start an agent from it', fill: { archetype: 'id' } },
+  { key: 'l', id: 'all-archetypes', list: 'archetypes', whole: true, capability: 'agents.archetypes', label: 'list them all' },
+  // Coding agents the daemon hosts.
+  { key: 'enter', id: 'host', list: 'coding-agents', capability: 'agents.host', label: 'host it', fill: { agent: 'id' } },
+  { key: 'l', id: 'coding-agents', list: 'coding-agents', whole: true, capability: 'agents.hostable', label: 'list them' },
+  // A media job a provider was still making when its answer came back: collected by the daemon, from anywhere in the place.
+  { key: 'J', id: 'collect-media-job', capability: 'media.collect', label: 'collect a media job' },
+  // The Agent's briefing of its own state (the terminal app keeps none: the capability refuses there).
+  { key: 'O', id: 'briefing', capability: 'work.brief', label: 'your briefing' },
+  // Runners: start one, look at one, stop one, save its work.
+  { key: 'd', id: 'start-runner', list: 'runners', capability: 'remote.dispatch', label: 'start a runner' },
+  { key: 'D', id: 'start-from-pool', list: 'runners', capability: 'remote.dispatch-pool', label: 'start from a pool' },
+  { key: 'enter', id: 'runner-contract', list: 'runners', capability: 'remote.contract', label: 'contract', fill: { runner: 'id' } },
+  { key: 'v', list: 'runners', states: LIVE_RUNNER, capability: 'remote.supervisor', label: 'supervisor', fill: { runner: 'id' } },
+  { key: 'k', list: 'runners', states: LIVE_RUNNER, capability: 'remote.capabilities', label: 'what it can do', fill: { runner: 'id' } },
+  { key: 'h', list: 'runners', states: ['degraded'], capability: 'remote.recover', label: 'how to recover', fill: { runner: 'id' } },
+  { key: 'o', list: 'runners', states: LIVE_RUNNER, capability: 'remote.show', label: 'connection', fill: { connection: 'id' } },
+  { key: 'x', id: 'stop-runner', list: 'runners', states: LIVE_RUNNER, capability: 'remote.stop', label: 'stop', fill: { connection: 'id' } },
+  { key: 'e', id: 'save-work', list: 'runners', capability: 'remote.export', label: 'save its work', fill: { runner: 'id' } },
+  { key: 'a', id: 'put-in-pool', list: 'runners', capability: 'remote.assign', label: 'put in a pool', fill: { runner: 'id' } },
+  { key: 'u', id: 'setup', list: 'runners', capability: 'remote.setup', label: 'setup' },
+  { key: 'U', id: 'save-setup', list: 'runners', capability: 'remote.setup-export', label: 'save setup' },
+  { key: 'E', id: 'environment', list: 'runners', capability: 'remote.env', label: 'environment' },
+  { key: 'w', id: 'save-environment', list: 'runners', capability: 'remote.env-export', label: 'save environment' },
+  { key: 'b', id: 'save-startup-bundle', list: 'runners', capability: 'remote.bootstrap-export', label: 'start-up bundle' },
+  { key: 'B', id: 'open-startup-bundle', list: 'runners', capability: 'remote.bootstrap-inspect', label: 'look in a start-up bundle' },
+  { key: 'S', id: 'save-runner-bundle', list: 'runners', capability: 'remote.session-export', label: 'save runners' },
+  { key: 'L', id: 'look-in-runner-bundle', list: 'runners', capability: 'remote.session-inspect', label: 'look in a runner bundle' },
+  { key: 'I', id: 'bring-in-runner-bundle', list: 'runners', capability: 'remote.session-import', label: 'bring in runners' },
+  // Pools.
+  { key: 'm', id: 'make-pool', list: 'pools', capability: 'remote.create-pool', label: 'make a pool' },
+  { key: 'enter', id: 'pool-detail', list: 'pools', capability: 'remote.pool', label: 'pool', fill: { pool: 'id' } },
+  { key: 'd', id: 'start-in-pool', list: 'pools', states: ['empty', 'holding'], capability: 'remote.dispatch-pool', label: 'start a runner here', fill: { pool: 'id' } },
+  { key: 'a', id: 'add-runner', list: 'pools', states: ['empty', 'holding'], capability: 'remote.assign', label: 'add a runner', fill: { pool: 'id' } },
+  { key: 'u', id: 'take-runner-out', list: 'pools', states: ['holding', 'full'], capability: 'remote.unassign', label: 'take a runner out', fill: { pool: 'id' } },
+  // What runners handed back.
+  { key: 'enter', id: 'review', list: 'handed-back', capability: 'remote.review', label: 'review', fill: { artifact: 'id' } },
+  { key: 'e', id: 'save-artifact', list: 'handed-back', capability: 'remote.artifact-export', label: 'save to a file', fill: { artifact: 'id' } },
+  { key: 'g', id: 'run-here', list: 'handed-back', capability: 'remote.rerun-local', label: 'run its task here', fill: { artifact: 'id' } },
+  { key: 'i', id: 'bring-in', list: 'handed-back', capability: 'remote.import', label: 'bring one in' },
+  // Recorded runs of this program's turns.
+  { key: 'enter', id: 'load-run', list: 'recorded-runs', states: ['recorded'], capability: 'replay.load', label: 'load', fill: { run: 'id' } },
+  { key: 'enter', id: 'run-status', list: 'recorded-runs', states: ['loaded'], capability: 'replay.status', label: 'where am I' },
+  { key: 'l', id: 'step-run', list: 'recorded-runs', states: ['loaded'], capability: 'replay.step', label: 'step' },
+  { key: 'j', id: 'jump-in-run', list: 'recorded-runs', states: ['loaded'], capability: 'replay.seek', label: 'jump to' },
+  { key: 'c', id: 'compare-runs', list: 'recorded-runs', states: ['recorded'], capability: 'replay.diff', label: 'compare with the loaded one', fill: { run: 'id' } },
+  { key: 'e', id: 'save-replay-report', list: 'recorded-runs', states: ['loaded'], capability: 'replay.export', label: 'save the report' },
+  { key: 'L', id: 'list-runs', list: 'recorded-runs', capability: 'replay.runs', label: 'list them' },
+];
+
+/** What the terminal side of these lists reads (work-agents-lists.ts: the Recorded runs source, the forms' live lists). */
+export { LIVE_RUNNER, RUNNER_STATE_WORDS, listed as listedRunners };

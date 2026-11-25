@@ -1,0 +1,362 @@
+/*
+ * Places (views/places/PlacesView.tsx): the fourteen groups as a rail beside
+ * the open place, a data-view page per place. Desktop: rail 260 wide, the place
+ * beside it, its list and detail split. Phone: the rail is the page until a
+ * place is opened; then the place, with a way back.
+ */
+
+.shell-main[data-view="places"] > .view-frame {
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+}
+
+.shell-main[data-view="places"] > .view-frame > .view-frame__body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+
+.places {
+  display: grid;
+  flex: 1;
+  grid-template-columns: 260px minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
+.places[data-phone] {
+  grid-template-columns: minmax(0, 1fr);
+  overflow-y: auto;
+}
+
+.places-rail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 12px 24px 16px;
+  border-right: 1px solid var(--line);
+}
+
+.places[data-phone] .places-rail {
+  padding: 16px;
+  border-right: 0;
+}
+
+.places-rail__title {
+  margin: 0 0 12px;
+  color: var(--text);
+  font-size: var(--text-xl);
+  font-weight: var(--weight-semibold);
+}
+
+.places-rail__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.places-rail__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 6px 10px;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.places-rail__row:hover {
+  background: var(--surface);
+}
+
+.places-rail__row[aria-current="page"] {
+  background: var(--surface-2);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.places-rail__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.places-rail__row[data-elsewhere] .places-rail__name {
+  color: var(--text-2);
+}
+
+.places-rail__text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.places-rail__name {
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.places-rail__line {
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  line-height: var(--leading-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.places[data-phone] .places-rail__line {
+  white-space: normal;
+}
+
+.places-rail__count {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.places-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.place-body {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* The place's split owns the body's height, as a data view's split does; its panes scroll instead. */
+.dv-body:has(> .place-body) {
+  overflow: hidden;
+  padding: 0;
+}
+
+.place-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.place-tabs__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 4px 12px;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-full);
+  cursor: pointer;
+}
+
+.place-tabs__tab:hover {
+  color: var(--text);
+}
+
+.place-tabs__tab[aria-selected="true"] {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: transparent;
+}
+
+.place-tabs__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.place-tabs__count {
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.place-richer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.place-richer__label {
+  color: var(--text-3);
+  font-size: var(--text-meta);
+}
+
+.place-outcome {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  margin: 0 32px 12px;
+  padding: 10px 14px;
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-ui);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+
+.place-outcome p {
+  flex: 1 1 280px;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.place-outcome[data-empty] {
+  display: none;
+}
+
+.place-outcome[data-tone="warning"] {
+  border-color: var(--warn);
+}
+
+.place-stale,
+.place-elsewhere {
+  flex: none;
+  margin: 0 32px 12px;
+  color: var(--text-3);
+  font-size: var(--text-meta);
+  line-height: var(--leading-meta);
+}
+
+.place-stale {
+  color: var(--text-2);
+}
+
+.place-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.place-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.place-notice p {
+  margin: 0 0 4px;
+}
+
+.place-row__right {
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  white-space: nowrap;
+}
+
+.place-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.place-paragraph {
+  margin: 0;
+  color: var(--text);
+  line-height: var(--leading-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.place-paragraph[data-tone="muted"],
+.place-facts .dv-facts__row[data-tone="muted"] dd {
+  color: var(--text-3);
+}
+
+.place-paragraph[data-tone="warning"],
+.place-facts .dv-facts__row[data-tone="warning"] dd {
+  color: var(--warn);
+}
+
+.place-facts .dv-facts__row dd {
+  white-space: pre-wrap;
+}
+
+.place-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.place-reveal__value,
+.place-reveal__qr {
+  margin: 0 0 12px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  color: var(--text);
+  font: var(--weight-regular) var(--text-sm) / var(--leading-ui) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--code);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.place-reveal__qr {
+  line-height: 1;
+  white-space: pre;
+}
+
+.place-reveal__note {
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--text-sm);
+}
+
+.place-form .dv-facts {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 899px) {
+  .dv-body:has(> .place-body) {
+    overflow-y: auto;
+  }
+
+  .place-outcome,
+  .place-stale,
+  .place-elsewhere {
+    margin-right: 16px;
+    margin-left: 16px;
+  }
+
+  .place-richer {
+    margin-left: 0;
+  }
+
+  .place-facts .dv-facts__row {
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .place-facts .dv-facts__row dd {
+    text-align: left;
+  }
+}
+
+@media (pointer: coarse) {
+  .place-tabs__tab {
+    min-height: 44px;
+  }
+}

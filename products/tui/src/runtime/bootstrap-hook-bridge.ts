@@ -144,8 +144,8 @@ export function createResumeSessionHandler(options: ResumeSessionOptions): (sess
         reentry: (summary) => {
           const lines: string[] = [];
           const runner = summary.remoteRunners?.[0];
-          if (runner) lines.push(`Resume: Remote re-entry -> /remote recover ${runner}`);
-          if ((summary.worktreePaths?.length ?? 0) > 0) lines.push('Resume: Worktree re-entry -> /worktree review');
+          if (runner) lines.push(`Resume: remote runner ${runner} -> the Work place, Runners, how to recover`);
+          if ((summary.worktreePaths?.length ?? 0) > 0) lines.push('Resume: its worktrees are in Code and changes, Worktrees');
           return lines;
         },
         hookError: 'Hook bridge fire error',

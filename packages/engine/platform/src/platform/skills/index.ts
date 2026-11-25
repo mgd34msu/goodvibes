@@ -57,6 +57,25 @@ export {
   type SkillStore,
 } from './store.js';
 export {
+  SkillLibrary,
+  SKILL_LIBRARY_FILE,
+  agentSkillStorePath,
+  buildAgentSkillRequirements,
+  evaluateAgentSkillBundleReadiness,
+  evaluateAgentSkillReadiness,
+  formatAgentSkillRequirement,
+  normalizeAgentSkillRequirements,
+  parseSkillStandardMarkdown,
+  renderSkillStandardMarkdown,
+  skillLibraryPath,
+  skillMayLoad,
+  skillStandardFilePath,
+  type SkillLibraryOptions,
+  type SkillLibraryWriteEffects,
+  type SkillStandardParsed,
+} from './library.js';
+export type * from './library-types.js';
+export {
   SkillService,
   SkillServiceError,
   type CreateSkillInput,

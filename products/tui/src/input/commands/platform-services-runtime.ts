@@ -3,9 +3,13 @@ import { dirname } from 'node:path';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { defineCommand, defineList, type ListRow } from '@goodvibes/engine/terminal-shell/command-actions';
-import { doAction, listInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { sessionCapabilityAction } from '@goodvibes/engine/terminal-shell/command-actions';
+import { CapabilityRefusal, DEEPLINK_INSPECT, DEEPLINK_OPEN, DEEPLINK_REVIEW, type DeepLinkCapabilityServices } from '@goodvibes/engine/platform/platform/capabilities';
+import type { SessionCapabilityServices } from '@goodvibes/engine/terminal-shell/agent-turn/capability-tools';
 import { requireShellPaths } from './runtime-services.ts';
 import { DEEP_LINK_SURFACES, buildDeepLink, openDeepLink, parseDeepLink } from './deep-link.ts';
+import { sessionCapabilityServices } from './session-capabilities.ts';
 
 interface DeepLinkBundle {
   readonly version: 1;
@@ -14,7 +18,7 @@ interface DeepLinkBundle {
 }
 
 /** The views a link can open, as a live list (a static one: the views this terminal has). */
-const DEEP_LINK_VIEWS = defineList<CommandContext>({
+defineList<CommandContext>({
   name: 'deeplink.views',
   async read() { return DEEP_LINK_SURFACES.map((surface): ListRow => ({ value: surface, label: surface, detail: buildDeepLink(surface) })); },
   operator: { terminalOnly: 'the links open views of this terminal' },
@@ -65,27 +69,10 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
     group: 'Views',
     report: 'review',
     actions: [
-      readAction<CommandContext>({
-        id: 'review', label: 'See the links to each view', word: 'review',
-        sentence: 'Lists the goodvibes://open link of each view.',
-        operator: { terminalOnly: 'the links open views of this terminal' },
-        async run() { return ['Links to views:', ...DEEP_LINK_SURFACES.map((surface) => `  ${buildDeepLink(surface)}`), '  /deeplink open <view> [target] opens one.'].join('\n'); },
-      }),
-      doAction<CommandContext>({
-        id: 'open', label: 'Open a view by its link', word: 'open',
-        inputs: [
-          listInput({ id: 'view', label: 'View', help: 'A view, or a whole goodvibes://open/... link', list: DEEP_LINK_VIEWS, other: 'a goodvibes://open/... link' }),
-          textInput({ id: 'target', label: 'Target', help: 'A process to select in the Agents view', why: 'a process id', typed: { position: 2 }, optional: { default: '', means: 'nothing selected' } }),
-        ],
-        sentence: 'Opens {view}, with its target selected when one is given.', example: { view: 'tasks' },
-        operator: { terminalOnly: 'the links open views of this terminal' },
-        async run(values, ctx) {
-          const subject = values.view!;
-          const parsed = subject.includes('://') ? parseDeepLink(subject) : { surface: subject, ...(values.target ? { target: values.target } : {}) };
-          if (!parsed) throw commandRefusal(`Not opened: ${subject} is not a goodvibes://open/<view> link.`);
-          return openDeepLink(ctx, parsed.surface, parsed.target);
-        },
-      }),
+      // System (capabilities/builtin/system-program.ts deeplink.review): run here, on this app's views (session-capabilities.ts viewLinks).
+      sessionCapabilityAction<CommandContext, SessionCapabilityServices>(DEEPLINK_REVIEW as never, sessionCapabilityServices, { terminalOnly: 'the links open views of this terminal' }),
+      // Memory and knowledge (capabilities/builtin/deeplink.ts): run here, on this app's views (session-capabilities.ts).
+      sessionCapabilityAction<CommandContext, SessionCapabilityServices>(DEEPLINK_OPEN as never, sessionCapabilityServices, { terminalOnly: 'the links open views of this terminal' }),
       doAction<CommandContext>({
         id: 'export', label: 'Save the links to a file', word: 'export',
         inputs: [textInput({ id: 'path', label: 'File', help: 'Where to write them, in the workspace', why: 'a file path', kind: 'path', typed: { position: 1 } })],
@@ -99,20 +86,26 @@ export function registerPlatformServicesRuntimeCommands(registry: CommandRegistr
           return `Links saved to ${targetPath}`;
         },
       }),
-      readAction<CommandContext>({
-        id: 'inspect', label: 'Read a saved link file', word: 'inspect',
-        inputs: [textInput({ id: 'path', label: 'File', help: 'A file saved by /deeplink export', why: 'a file path', kind: 'path', typed: { position: 1 } })],
-        sentence: 'Shows when {path} was saved and how many links it holds.', example: { path: 'links.json' },
-        operator: { terminalOnly: 'the file is read from this terminal\'s workspace' },
-        async run(values, ctx) {
-          const targetPath = requireShellPaths(ctx).resolveWorkspacePath(values.path!);
-          try {
-            return inspectDeepLinkBundle(JSON.parse(readFileSync(targetPath, 'utf-8')) as DeepLinkBundle);
-          } catch (error) {
-            throw commandRefusal(`${targetPath} could not be read as a link file: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        },
-      }),
+      sessionCapabilityAction<CommandContext, SessionCapabilityServices>(DEEPLINK_INSPECT as never, sessionCapabilityServices, { terminalOnly: 'the file is read from this terminal\'s workspace' }),
     ],
   }));
+}
+
+/** This app's views and its link files, as the link capabilities that run here take them (builtin/deeplink.ts). */
+export function deepLinksOf(ctx: CommandContext): NonNullable<DeepLinkCapabilityServices['deepLinks']> {
+  return {
+    open(subject, target) {
+      const parsed = subject.includes('://') ? parseDeepLink(subject) : { surface: subject, ...(target ? { target } : {}) };
+      if (!parsed) throw new CapabilityRefusal(`Not opened: ${subject} is not a goodvibes://open/<view> link.`);
+      return openDeepLink(ctx, parsed.surface, parsed.target);
+    },
+    inspect(path) {
+      const targetPath = requireShellPaths(ctx).resolveWorkspacePath(path);
+      try {
+        return inspectDeepLinkBundle(JSON.parse(readFileSync(targetPath, 'utf-8')) as DeepLinkBundle);
+      } catch (error) {
+        throw new CapabilityRefusal(`${targetPath} could not be read as a link file: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    },
+  };
 }

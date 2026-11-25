@@ -8,7 +8,8 @@
  */
 import { createSecurityCommand } from '@goodvibes/engine/terminal-shell/security-command';
 import { createTrustReviewTools } from '@goodvibes/engine/terminal-shell/trust-review';
-import { registerPluginCommand } from '@goodvibes/engine/terminal-shell/plugin-trust-command';
+// Plugins are in Tools and extensions (capabilities/builtin/plugins.ts); the lists a form picks one from read the daemon.
+import '@goodvibes/engine/terminal-shell/plugin-trust-command';
 import { atomicWriteFileSync } from '@goodvibes/engine/platform/platform/config';
 import type { PolicyCommandContext } from '@goodvibes/engine/platform/platform/gate/policy';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
@@ -23,6 +24,7 @@ import {
 import { commandRefusal } from './confirmation.ts';
 import { describePermissionModeInForce } from '@goodvibes/engine/platform/platform/permissions';
 import { readExecutionModeInForce } from '../../permissions/execution-mode.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
 const { buildTrustReviewBundle, formatTrustReview, inspectTrustBundle } = createTrustReviewTools<CommandContext>({
   listSecrets: (ctx) => requireSecretsManager(ctx).list(),
@@ -73,27 +75,11 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
         }
       },
     },
+    // The daemon decides this folder's trust in the shared register; the Agent reads it again at once, so the
+    // folder's hooks file loads or stops and its MCP servers start or stop now.
+    binding: capabilityBinding,
     folder: {
-      async status(ctx) {
-        const manager = await trustManager(ctx);
-        return [
-          `${manager.workspaceRoot} is ${manager.isTrusted() ? 'trusted' : manager.isDecided() ? 'restricted' : 'not decided yet (restricted until you decide)'}.`,
-          manager.isTrusted()
-            ? 'Its hooks file loads and the MCP servers its files name start.'
-            : 'Its hooks file is not loaded and the MCP servers its files name do not start; your own hooks and MCP files are not affected.',
-        ].join('\n');
-      },
-      async set(ctx, level) {
-        const manager = await trustManager(ctx);
-        const saved = await manager.setLevel(level);
-        ctx.renderRequest();
-        return [
-          level === 'trusted'
-            ? `${manager.workspaceRoot} is trusted: its hooks file loads and the MCP servers its files name start.`
-            : `${manager.workspaceRoot} is restricted: its hooks file and the MCP servers its files name are stopped now; your own hooks and MCP files are not affected.`,
-          ...(saved.saved ? [] : [`This applies to this session only: ${saved.fault ?? 'the decision could not be saved'}. It will be asked again next time.`]),
-        ].join('\n');
-      },
+      reread: async (ctx) => { await trustManager(ctx); },
       decided: (ctx) => ctx.workspace.workspaceTrustManager?.isDecided(),
     },
     policyContext,
@@ -111,6 +97,4 @@ export function registerSecurityRuntimeCommands(registry: CommandRegistry): void
     resolvePath: (ctx, path) => requireShellPaths(ctx).resolveWorkspacePath(path),
     elsewhere: 'the terminal app (goodvibes)',
   }));
-  // Plugins load here as in the terminal app, so /plugin is here too; the plugins screen and the local curated catalog are the terminal app's.
-  registerPluginCommand<CommandContext>(registry, { manager: (ctx) => ctx.extensions.pluginManager });
 }

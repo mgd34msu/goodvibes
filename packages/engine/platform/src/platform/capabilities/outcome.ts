@@ -49,14 +49,34 @@ export function shownValues(action: Pick<Worded, 'inputs'>, values: ActionValues
 }
 
 /**
- * What a run says: the done line, the result's own words, and what its risk
- * did ("This loosened a protection."). The lines a person reads under the
- * command, and the text a model or a script is given.
+ * What a run says: the done line, the result's own words, and what the act
+ * did. That last line is chosen by what ran, not by the risk class: the
+ * capability's own `riskDone` when it has one ("Nothing has been bought yet:
+ * ..." for approving a purchase ahead, whose risk names what may follow), else
+ * its risk's words ("This loosened a protection."). The lines a person reads
+ * under the command, and the text a model or a script is given.
  */
 export function capabilityOutcomeText(action: Worded, values: ActionValues, result: CapabilityResult): string {
   const shown = shownValues(action, values);
   const done = action.done ? fillSentence(action.done, shown, lastsWords(action, values)) : '';
-  const risk = effectiveRisk(action, values);
-  const riskDone = risk === 'none' ? '' : `This ${RISK_DONE_WORDS[risk]}${action.riskDone ? `: ${fillSentence(action.riskDone, shown, '')}` : ''}.`;
+  const riskDone = result.riskDone !== undefined ? result.riskDone : riskDoneLine(action, values, shown);
   return [done, result.text, riskDone].filter((line) => line.length > 0).join('\n');
+}
+
+/**
+ * The line said after an act that ran, about what its risk names: chosen by what the act did, never asserted from
+ * the risk class alone. The action's own `riskDone` when its own risk applies; the chosen value's `riskDone` when a
+ * choice raised the risk ("Write over it"); else the risk's words ("This loosened a protection."). Empty for no risk.
+ * `shown` fills the blanks (secret values hidden).
+ */
+export function riskDoneLine(action: Pick<Worded, 'risk' | 'riskDone' | 'inputs'>, values: ActionValues, shown: ActionValues = values): string {
+  const risk = effectiveRisk(action, values);
+  if (risk === 'none') return '';
+  if (action.risk !== 'none') return action.riskDone ? fillSentence(action.riskDone, shown, '') : `This ${RISK_DONE_WORDS[risk]}.`;
+  for (const input of action.inputs) {
+    if (!Array.isArray(input.choices)) continue;
+    const chosen = (input.choices as readonly FixedChoice[]).find((choice) => choice.value === values[input.id]);
+    if (chosen?.risk === risk && chosen.riskDone) return fillSentence(chosen.riskDone, shown, '');
+  }
+  return action.riskDone ? fillSentence(action.riskDone, shown, '') : `This ${RISK_DONE_WORDS[risk]}.`;
 }

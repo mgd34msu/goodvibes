@@ -1,6 +1,5 @@
 import { composeTerminalCommandContext } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import type { ConfigManager } from '@goodvibes/engine/platform/platform/config';
-import type { AdaptivePlanner } from '@goodvibes/engine/platform/platform/core';
 import type { ConversationManager } from '../core/conversation';
 import type { KnowledgeApi } from '@goodvibes/engine/platform/platform/knowledge';
 import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runtime/memory-spine';
@@ -39,7 +38,7 @@ import type {
   ShellPlanManagerService,
   ShellSessionOrchestrationService,
 } from '@/runtime/index.ts';
-import { createBootstrapCommandShellServices, type PlanRuntimeService, type RemoteCommandService } from '@/runtime/index.ts';
+import { createBootstrapCommandShellServices, type RemoteCommandService } from '@/runtime/index.ts';
 import type { OperatorClient } from '@/runtime/index.ts';
 import type { PeerClient } from '@/runtime/index.ts';
 import type { DirectTransport } from '@/runtime/index.ts';
@@ -83,7 +82,6 @@ export type CreateBootstrapCommandContextOptions = {
   /** The runtime's declare-once session-storage handle (runtime/services.ts). */
   surface: SessionSurface;
   remoteRuntime?: RemoteCommandService;
-  planRuntime?: PlanRuntimeService;
   fileUndoManager: FileUndoManager;
   workspaceCheckpointManager?: WorkspaceCheckpointManager;
   gatewayMethods?: GatewayMethodCatalog;
@@ -118,7 +116,6 @@ export type CreateBootstrapCommandContextOptions = {
   sessionMemoryStore?: import('@goodvibes/engine/platform/platform/core').SessionMemoryStore;
   changeTracker?: import('@goodvibes/engine/platform/platform/sessions').SessionChangeTracker;
   planManager?: ShellPlanManagerService;
-  adaptivePlanner?: AdaptivePlanner;
   sessionOrchestration?: ShellSessionOrchestrationService;
   operatorClient?: OperatorClient;
   userPermissionRuleStore?: import('@goodvibes/engine/platform/platform/permissions').UserPermissionRuleStore;
@@ -138,7 +135,6 @@ export type CreateBootstrapCommandContextOptions = {
   contractRunner?: import('@goodvibes/engine/platform/platform/contract').ContractRunner;
   hydrateSessionUsage?: () => void;
   contractOperator?: import('@goodvibes/engine/platform/platform/contract').ContractOperatorService;
-  workstreamDrafts?: import('@goodvibes/engine/platform/platform/orchestration').WorkstreamDraftService;
   codeIndexStore?: import('@goodvibes/engine/platform/platform/state').CodeIndexStore;
   codeIndexReindexScheduler?: import('@goodvibes/engine/platform/platform/state').CodeIndexReindexScheduler;
   isPassiveCodeInjectionFlagEnabled?: () => boolean;

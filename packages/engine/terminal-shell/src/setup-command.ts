@@ -100,7 +100,22 @@ export interface SetupCommandOptions<Ctx> {
   readonly settings?: ((ctx: Ctx) => SetupSettings | undefined) | undefined;
   /** The recommended topics the person chose to skip for now, kept by the program. */
   readonly skipped?: { read(ctx: Ctx): ReadonlySet<string>; skip(ctx: Ctx, id: SetupTopicId): void; unskip(ctx: Ctx, id: SetupTopicId): void } | undefined;
+  /**
+   * First run's "Who decides" step as the checklist reads it: not done while
+   * the mode lets a decision model decide and none can be asked (put off at
+   * first run, or never answered); done once Ask me is chosen or one answers.
+   */
+  readonly whoDecides?: ((ctx: Ctx) => Promise<WhoDecidesState>) | undefined;
 }
+
+/** "Who decides" on the checklist: whether it is settled, and what is in force or missing. */
+export interface WhoDecidesState {
+  readonly done: boolean;
+  readonly note: string;
+}
+
+/** The checklist line of "Who decides", which is first run's step rather than a topic of its own. */
+export const WHO_DECIDES_LABEL = 'Who decides when GoodVibes would stop and ask';
 
 /** The settings the checklist reads. */
 export type SetupSettings = Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'isExplicitlySet'>>;
@@ -194,18 +209,30 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
     const skipped = skippedOf(ctx);
     return { done: items.filter((item) => item.done).length, total: items.length, open: items.filter((item) => !item.done && !skipped.has(item.id)) };
   };
+  // "Who decides" counts with the recommended topics; it is first run's step, opened from the System place's Setup list.
+  const fullProgress = async (ctx: Ctx): Promise<{ done: number; total: number; whoDecides: WhoDecidesState | undefined }> => {
+    const p = progress(ctx);
+    let whoDecides: WhoDecidesState | undefined;
+    try { whoDecides = await options.whoDecides?.(ctx); } catch { whoDecides = undefined; }
+    return { done: p.done + (whoDecides?.done ? 1 : 0), total: p.total + (whoDecides ? 1 : 0), whoDecides };
+  };
   const actions: ActionDescription<Ctx>[] = [];
   if (options.settings) {
     actions.push(readAction<Ctx>({
       id: 'checklist', label: 'See what is set up', word: 'checklist', readsOnlyThisMachine: true,
       sentence: 'Shows which of the things most people set once are done, and the line that sets each one that is not.',
-      rowValue: async (ctx) => { const p = progress(ctx); return `${p.done} of ${p.total} set up`; },
+      rowValue: async (ctx) => { const p = await fullProgress(ctx); return `${p.done} of ${p.total} set up`; },
       async run(_values, ctx): Promise<CommandReport> {
         const p = progress(ctx);
+        const full = await fullProgress(ctx);
+        const open = [
+          ...(full.whoDecides && !full.whoDecides.done ? [{ sentence: `${WHO_DECIDES_LABEL}: ${full.whoDecides.note}. It is on the Setup list in the System place.` }] : []),
+          ...p.open.map((item) => ({ sentence: `${SETUP_TOPICS[item.id].label}: ${item.note}.`, fix: { label: SETUP_TOPICS[item.id].label, line: `/setup ${SETUP_TOPICS[item.id].word}` } })),
+        ];
         return {
-          verdict: p.open.length === 0 ? 'ok' : 'attention',
-          headline: `${p.done} of ${p.total} set up.`,
-          items: p.open.map((item) => ({ sentence: `${SETUP_TOPICS[item.id].label}: ${item.note}.`, fix: { label: SETUP_TOPICS[item.id].label, line: `/setup ${SETUP_TOPICS[item.id].word}` } })),
+          verdict: open.length === 0 ? 'ok' : 'attention',
+          headline: `${full.done} of ${full.total} set up.`,
+          items: open,
         };
       },
     }));
@@ -272,5 +299,125 @@ export function setupCommandDescription<Ctx>(options: SetupCommandOptions<Ctx>):
       },
     },
     actions,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// The System place's Setup list (places/system-place.ts): the checklist with
+// "Who decides" first, then the topics of System this program sets up, each
+// opened by its own action; read from this program's own settings, its skip
+// file and its "Who decides" record, and read again on every settings change.
+// ---------------------------------------------------------------------------
+
+/** One row of the Setup list. */
+export interface SetupPlaceItem {
+  readonly id: SetupTopicId | SetupExtraId | 'who-decides';
+  /**
+   * `done` / `not-done` / `skipped` for the checklist (`undecided`: "Who decides" not done, which cannot be
+   * skipped); `topic` for the rest.
+   */
+  readonly state: 'done' | 'not-done' | 'undecided' | 'skipped' | 'topic';
+  readonly label: string;
+  /** What is set, or what is missing. */
+  readonly note: string;
+  /** What opening it does. */
+  readonly sentence: string;
+}
+
+/** The topics of System the Setup list offers after the checklist (the others are in their own places). */
+const SYSTEM_SETUP_TOPICS: readonly (SetupTopicId | SetupExtraId)[] = [
+  'local-only', 'browser', 'connect-daemon', 'who-signs-in', 'telemetry', 'provider-behaviour', 'advanced', 'import-settings', 'pair', 'unpair', 'first-run',
+];
+
+const EXTRA_WORDS: Readonly<Record<SetupExtraId, SetupTopicWords>> = {
+  pair: { label: 'Pair the Agent with a GoodVibes host', word: 'pair', sentence: 'Pairs this Agent with your GoodVibes host, after you confirm here.' },
+  unpair: { label: 'Unpair the Agent from the GoodVibes host', word: 'unpair', sentence: 'This Agent forgets its GoodVibes host credential and stops reaching that host.' },
+};
+
+/** What the Setup list does with one program's `/setup` options and its live context. */
+export interface SetupPlaceHooks {
+  /** The list's source: read now (what was read last, read again behind it), told of every change. */
+  readonly source: { read(): unknown; subscribe(onChange: () => void): () => void };
+  /** Open a row: "Who decides" itself, or the topic's own action run as the owner's press; what to say, if anything. */
+  open(id: string, runTopic: (capabilityId: string) => Promise<{ readonly ok: true; readonly lines: readonly string[] } | { readonly ok: false; readonly reason: string }>): Promise<string | undefined>;
+  /** Skip a checklist topic for now, or bring a skipped one back. */
+  skip(id: string, back: boolean): string;
+}
+
+export function setupPlaceHooks<Ctx>(options: SetupCommandOptions<Ctx>, ctx: Ctx, program: {
+  /** Open "Who decides" alone for the model in use; false when it is not needed. */
+  readonly openWhoDecides: () => Promise<boolean>;
+  /** Told on every change of this program's settings; returns the stop. */
+  readonly onSettingsChange?: ((listener: () => void) => () => void) | undefined;
+}): SetupPlaceHooks {
+  const served = (id: SetupTopicId | SetupExtraId): boolean => options.runs[id] !== undefined;
+  const wordsOf = (id: SetupTopicId | SetupExtraId): SetupTopicWords => (id === 'pair' || id === 'unpair' ? EXTRA_WORDS[id] : SETUP_TOPICS[id]);
+  const syncItems = (): SetupPlaceItem[] => {
+    const settings = options.settings?.(ctx);
+    const skipped = options.skipped?.read(ctx) ?? new Set<string>();
+    const checklist = (settings ? readSetupChecklist(settings) : []).map((item): SetupPlaceItem => ({
+      id: item.id, state: item.done ? 'done' : skipped.has(item.id) ? 'skipped' : 'not-done',
+      label: SETUP_TOPICS[item.id].label, note: item.note, sentence: SETUP_TOPICS[item.id].sentence,
+    }));
+    const topics = SYSTEM_SETUP_TOPICS.filter(served).map((id): SetupPlaceItem => ({ id, state: 'topic', label: wordsOf(id).label, note: '', sentence: wordsOf(id).sentence }));
+    return [...checklist, ...topics];
+  };
+  const fullItems = async (): Promise<SetupPlaceItem[]> => {
+    const rest = syncItems();
+    let decides: WhoDecidesState | undefined;
+    try { decides = await options.whoDecides?.(ctx); } catch (error) {
+      decides = { done: false, note: `could not be read: ${error instanceof Error ? error.message : String(error)}` };
+    }
+    if (!decides) return rest;
+    return [{
+      id: 'who-decides', state: decides.done ? 'done' : 'undecided', label: WHO_DECIDES_LABEL, note: decides.note,
+      sentence: 'Opens first run\'s "Who decides" step: a decision model (Jev) decides, or GoodVibes asks you.',
+    }, ...rest];
+  };
+  // Read when the list is first read, not when the program wires its places.
+  let items: readonly SetupPlaceItem[] | undefined;
+  let seq = 0;
+  const listeners = new Set<() => void>();
+  // Read again behind every read; the list is told only when something changed, so a read never starts another.
+  const refresh = (): void => {
+    const mine = ++seq;
+    void fullItems().then((next) => {
+      if (mine !== seq || JSON.stringify(next) === JSON.stringify(items)) return;
+      items = next;
+      for (const listener of [...listeners]) listener();
+    }, () => { /* the settings were read above; nothing else to say */ });
+  };
+  return {
+    source: {
+      read: () => {
+        items ??= syncItems();
+        refresh();
+        return items;
+      },
+      subscribe(onChange) {
+        listeners.add(onChange);
+        // After the change is made: the listener is told as it starts.
+        const stop = program.onSettingsChange?.(() => { queueMicrotask(refresh); });
+        return () => { listeners.delete(onChange); stop?.(); };
+      },
+    },
+    async open(id, runTopic) {
+      if (id === 'who-decides') {
+        if (await program.openWhoDecides()) return undefined;
+        return 'Nothing to decide here: GoodVibes asks you, or a decision model can answer.';
+      }
+      const outcome = await runTopic(`setup.${id}`);
+      if (!outcome.ok) throw new Error(outcome.reason);
+      return outcome.lines.join(' ') || undefined;
+    },
+    skip(id, back) {
+      if (!options.skipped) throw new Error('this program keeps no list of skipped topics');
+      const known = RECOMMENDED_SETUP_TOPICS.find((topic) => topic === id);
+      if (!known) throw new Error('only a topic of the checklist can be skipped');
+      if (back) options.skipped.unskip(ctx, known);
+      else options.skipped.skip(ctx, known);
+      refresh();
+      return back ? `${SETUP_TOPICS[known].label} is back on the checklist.` : `${SETUP_TOPICS[known].label} is skipped for now; it stays on the list as skipped.`;
+    },
   };
 }

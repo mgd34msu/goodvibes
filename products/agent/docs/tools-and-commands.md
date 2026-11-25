@@ -13,7 +13,7 @@ GoodVibes Agent is a TUI-first operator assistant. The workspace is the primary 
 - First-class `terminal` and `process` adapters expose the expected `terminal(command, background:true)` and `process(action:"list|poll|wait|log|kill|write")` UX over the same tracked ProcessManager lifecycle.
 - Lower-level `execution_posture`, `execution_route`, `background_processes`, `background_process`, `run_background_process`, `execution_history`, `execution_history_item`, `file_recovery`, and `run_file_recovery` modes remain available for detailed compatibility inspection and confirmed recovery/lifecycle effects.
 - Visible Agent subagents stay serial-by-default unless parallelism helps the user. `agent_orchestration` and `agent_orchestration_agent` expose live Agent state, managed multi-agent plan cards, work-plan links, dispatch receipts, closeout review cards, remote-runner evidence, certified daemon/platform live remote capture/export/closeout outcome records, and certified workspace/worktree isolation evidence with schema/version/publication/publisher/provenance/freshness-cursor/receipt metadata and missing-signal surfacing.
-- The same orchestration modes carry auto-attached remote artifact review routes, spawn/batch-spawn policy, and safe first-class `agent` control routes, while `agent_work_plan` is the Agent's todo list: it records work and its status and does not run it. Owner-started work uses `/work submit-file <JSON-path>`; submission and execution are separate. Work handed to agents goes through the `agent` tool (`mode:"spawn"` or `mode:"batch-spawn"`). Agents start when you asked for them earlier in the conversation and have not since forbidden or limited them (a later message about something else does not withdraw that); a plain "do not use agents" or "do it yourself" refuses the call with your words quoted. Only when your words do not settle it is the decision model asked; when it cannot answer, `yolo` and `just-vibes` start the agents and `ask-me` asks you once in the approval prompt, and your answer stands for the rest of the conversation.
+- The same orchestration modes carry auto-attached remote artifact review routes, spawn/batch-spawn policy, and safe first-class `agent` control routes, while `agent_work_plan` is the Agent's todo list: it records work and its status and does not run it. Work you ask for is sent from the Work place (New work, Work from a file) or the chat; sending it and starting it are separate. Work handed to agents goes through the `agent` tool (`mode:"spawn"` or `mode:"batch-spawn"`). Agents start when you asked for them earlier in the conversation and have not since forbidden or limited them (a later message about something else does not withdraw that); a plain "do not use agents" or "do it yourself" refuses the call with your words quoted. Only when your words do not settle it is the decision model asked; when it cannot answer, `yolo` and `just-vibes` start the agents and `ask-me` asks you once in the approval prompt, and your answer stands for the rest of the conversation.
 - Delegation is for isolation, parallelism, remote execution, separate worktrees, or user-requested delegated review; `delegation action:"status|routes|route"` exposes local-first, TUI handoff, delegated-review, remote-inspection, and hidden-fanout-blocked lanes with required fields, success evidence, status routes, and recovery routes.
 - External delivery, notifications, reminders, media generation, setting writes, keybinding writes, UI routing, slash-command execution, workspace-action execution, local destructive changes, and connected-host operator actions require the user's explicit request and a current recorded admission.
 - Autonomous scheduled work uses the first-class `schedule` adapter, `schedule action:"list|create|remind|edit|run|pause|resume|delete"`. Creation still requires an explicit task or reminder, cadence, success criteria for autonomous work, and a current recorded admission (`confirm` and `explicitUserRequest` are optional request context).
@@ -26,13 +26,13 @@ High-signal TUI routes:
 | --- | --- |
 | `/agent` | Open the Agent workspace (also `Ctrl+G` `w`), at a page when one is named. |
 | `/work` | Work on the connected host: open it, ask for work in your own words (`request`), start, cancel or resume a piece of work, submit work from a file (`submit-file`), recover input waiting to be admitted, import old planning records (`import-preview`, `import`), and see how the planner spreads work. |
-| `/workstream` | Plan work as a draft (`plan`), review and change it (`plans`, `show`, `replan`, `edit`, `drop`, `move`), then `approve` and `launch` it, or `discard` it; `start` work on a request, `list`, `status`, `stop` or `answer` running workstreams, `retry` to run a step again, and `budget` to change a workstream's spending limit. |
+| `/work` | Opens the Work place: your work and its plans (a plan can wait for your approval before it runs, with its steps changed, moved or taken out), the questions it asks, a failed step run again, its spending limit, past work, the checklist and the tasks running in the background. |
 | `/help` | Every command and every key in one searchable list (also `?` and `Ctrl+P`). |
 | `/health`, `/auth` | Inspect runtime, connected-host, compatibility, and auth posture. |
-| `/model`, `/provider`, `/effort` | Inspect or change provider/model/reasoning routes. |
-| `/knowledge` | Use isolated Agent Knowledge. |
-| `/memory`, `/notes`, `/personas` (VIBE.md too), `/my-skills`, `/routines` | Manage VIBE.md personality and Agent-local behavior libraries. |
-| `/approval`, `/questions`, `/schedule` | What each approval asks about, answer one, and run, pause, stop or retry schedules and their runs. |
+| `/model`, `/provider` | Inspect or change provider and model routes; how hard the model thinks is in This conversation (the menu). |
+| `/memory` | Opens Memory and knowledge (also the menu, `Ctrl+G` then `m`): memory, your knowledge, what is known about you, your templates. |
+| Memory and knowledge (the menu): Notes, Personas (VIBE.md too), Routines | Your notes, personas, VIBE.md personality and routines, kept by the daemon; switching a routine on and putting it on a schedule are also on the Routines tab of Automation; skills are in Tools and extensions (the menu). |
+| Waiting for you (the menu) | What waits on you (questions, approvals, held calls, held sends, Telegram messages), what Jev decided, what was answered, and what each kind of approval asks about; answer or change one with its keys. Schedules and their runs (run, pause, stop or retry), triggers, CI watches and check-ins are in Automation (the menu). |
 | `/channels`, `/notify`, `/devices` | Pair companions, inspect channel readiness, review delivery receipts, and send confirmed messages. |
 | `/media`, `/voice` | Inspect media/voice readiness, make media, and hear answers spoken (`/voice speak`). |
 | `/mcp`, `/secrets`, `/settings` | Inspect or update Agent-local configuration. |
@@ -100,7 +100,7 @@ A typed message that starts or ends with `@model:<id>` (`@model:opus summarize t
 | `personal_ops` | Read the daily briefing, saved review queue, connector readiness, and request intake; run one confirmed read-only inbox/calendar read. |
 | `process` | List, poll, read bounded logs from, wait on, stop, and write to tracked background processes through confirmation gates. |
 | `profile` | Read and record what GoodVibes knows about the owner, field by field, with provenance. |
-| `query` | Leave the owner a question in the owner inbox (one per home, `~/.goodvibes/shared/owner-inbox.sqlite`, shared by the daemon, this app, the TUI and every other terminal at once; read through the connected host while it is reachable) and carry on; the question is recorded as asked by the session. The owner answers in `/questions`, the web UI or from a phone push, and the answer comes back on the next model request of the agent that asked while it runs, otherwise of the asking conversation: on its next model request while that session is open, otherwise once when it is next opened (any resume, headless included), and the owner is told which. Deleting the session withdraws its open questions and marks waiting answers not deliverable. `/questions all` and `/decisions` show each answer as delivered, waiting for its session, or not deliverable with the reason. `show`, `list` and `withdraw` read or take back a question. |
+| `query` | Leave the owner a question in the owner inbox (one per home, `~/.goodvibes/shared/owner-inbox.sqlite`, shared by the daemon, this app, the TUI and every other terminal at once; read through the connected host while it is reachable) and carry on; the question is recorded as asked by the session. The owner answers in Waiting for you, the web UI or from a phone push, and the answer comes back on the next model request of the agent that asked while it runs, otherwise of the asking conversation: on its next model request while that session is open, otherwise once when it is next opened (any resume, headless included), and the owner is told which. Deleting the session withdraws its open questions and marks waiting answers not deliverable. Waiting for you's Answered tab shows each answer as delivered, waiting for its session, or not deliverable with the reason. `show`, `list` and `withdraw` read or take back a question. |
 | `sessions` | List, search, and inspect saved sessions and bookmark posture. |
 | `settings` | List, get, set, and reset Agent settings; preview and apply shared GoodVibes settings import. |
 | `support` | Read redacted support bundle posture and bundle routes. |
@@ -229,9 +229,9 @@ The connected browser cockpit/PWA is `surfaceId:"connected-browser-cockpit"`; it
 Execution routes:
 
 - GoodVibes settings import previews changed setting/subscription counts without mutation; confirmed execution imports only Agent-owned settings and provider subscription state, redacts secret values, stores raw secret-backed values through the secret manager, and does not mutate source package stores. A project settings file travels with a repository, so it is not trusted for permission, approval, provider, tool, surface, automation or helper settings: the preview lists those keys as skipped with a reason, and only the user settings file can change them.
-- VIBE.md personality files are discovered from project/global locations, secret-scanned, surfaced in setup and the learning curator when blocked or truncated, and applied to the serial Agent prompt. Use `vibe action:"status|show"` for direct read-only inspection, `vibe action:"init|import_persona" confirm:true explicitUserRequest:"..."` for confirmed changes, or `/personas vibe` and the Personas workspace for the visible command surface. Unconfirmed init/import previews return model and CLI `confirmationRoutes` so users can approve the exact same personality action without reconstructing syntax.
+- VIBE.md personality files are discovered from project/global locations, secret-scanned, surfaced in setup and the learning curator when blocked or truncated, and applied to the serial Agent prompt. Use `vibe action:"status|show"` for direct read-only inspection, `vibe action:"init|import_persona" confirm:true explicitUserRequest:"..."` for confirmed changes, or the VIBE.md actions on the Personas tab of Memory and knowledge. Unconfirmed init/import previews return model and CLI `confirmationRoutes` so users can approve the exact same personality action without reconstructing syntax.
 - Project context files are discovered from the sources tabled in [getting-started.md](getting-started.md), secret-scanned, bounded, target-aware for subdirectory work, and inspectable through `context action:"files"` and `context action:"file"`.
-- Local memory posture, provider inspection, curator review, search, and lookup prefer `memory`. Confirmed memory record create/update/review/stale/delete actions on `memory` forward to the local registry's confirmation gates; notes, personas, skills, routines, bundles, and detailed local record mutations dispatch through `agent_local_registry`. Marking a memory record, note, persona, skill, bundle or routine reviewed is the owner's act: the model's request is refused with `OWNER_REVIEW_REQUIRED` and the command the owner types (`/memory review <id> reviewed`, `/notes review <id>`, `/personas review <id>`, `/my-skills review <id>`, `/my-skills bundle-review <id>`, `/routines review <id>`).
+- Local memory posture, provider inspection, curator review, search, and lookup prefer `memory`. Confirmed memory record create/update/review/stale/delete actions on `memory` forward to the local registry's confirmation gates; notes, personas, skills, routines, bundles, and detailed local record mutations dispatch through `agent_local_registry`. Marking a memory record, note, persona, skill, bundle or routine reviewed is the owner's act: the model's request is refused with `OWNER_REVIEW_REQUIRED` and the owner's own way to do it (`v` on the record, the note, the persona or the routine in Memory and knowledge; a skill or bundle is marked reviewed on its tab in Tools and extensions).
 - Runtime prompt context applies safe VIBE.md files, safe project context files, and only reviewed, high-confidence memory plus reviewed setup-ready behavior. Blocked or truncated VIBE.md/context files and enabled but unreviewed, stale, low-confidence, or setup-blocked local behavior are surfaced as suppressed review work.
 - Prompt builds write durable receipts with ids, turn/source/model/provider, selected and suppressed record refs, segment counts, prompt hash, size, timestamp, and sanitized completed/error/cancelled outcome without storing raw prompt or response text; Agent Workspace -> Local Context shows the compact receipt outcome timeline, exact latest-receipt route, and outcome filter routes for users. Use `context action:"prompt|receipts|receipt"` for current applied order, recent receipt ids, `receiptId`/`turnId`/`outcomeStatus` filters, turn outcomes, selected records, suppressed records, and approximate token budget before relying on persistent context; use setup, project context inspection, the Memory -> Prompt plan action, or the learning curator to fix suppressed work.
 - Read-only learning review uses `memory action:"curator"` and `memory action:"candidate"`, over what the last `memory action:"curate"` pass stored; the curator returns a prompt plan with prompt-active records, suppressed review/setup/low-confidence/personality/consolidation counts, proposal queues, consolidation queues, usefulness/freshness/source-quality/risk ordering rules, and exact routes before durable context expands.
@@ -329,11 +329,11 @@ Use `autonomy action:"intake"` first when the user asks for ongoing work and the
 
 Webhook, watcher, Gmail, or event-trigger requests point to the published `watchers.create` contract when applicable, but watcher creation is an admin connected-host mutation that requires trusted source/scope, a task or run target, success criteria, `confirm:true`, and `explicitUserRequest`. The intake action also returns watcher receipt success criteria plus a read-only watcher evidence contract for platform/daemon-owned durable run-history receipts, provider source records, redacted event payload descriptors, and autonomy queue correlation. Confirmed `agent_operator_method` calls summarize `watchers.create/update/run/start/stop/delete` receipts into certified or follow-up outcomes without exposing operator tokens.
 
-Use `schedule action:"create"` for one visible autonomous schedule, `schedule action:"remind"` for reminders, `schedule action:"edit"` for one exact schedule edit, and `schedule action:"run|pause|resume|delete"` for lifecycle controls; it forwards to the same preview, read-only current-state diff, confirmation, and connected-host routes as `agent_autonomy_schedule`, `agent_reminder_schedule`, `agent_schedule_edit`, and allowlisted `agent_operator_action`, then returns post-action next routes for schedule list, autonomy queue inspection, run, edit, pause, resume, and delete where the schedule still exists. Unconfirmed schedule and routine-promotion previews return `confirmationRoutes` so the user or model can confirm the same intent without guessing the next command. Confirmed routine schedule promotion through the workspace, `/routines promote` or `goodvibes-agent routines promote` returns the same post-action schedule next routes. A routine is promoted only when it is enabled, reviewed (`/routines review <id>`) and has no missing requirements; the preview lists what is missing and a confirmed promotion is refused until it is fixed, from the terminal and from the command line alike.
+Use `schedule action:"create"` for one visible autonomous schedule, `schedule action:"remind"` for reminders, `schedule action:"edit"` for one exact schedule edit, and `schedule action:"run|pause|resume|delete"` for lifecycle controls; it forwards to the same preview, read-only current-state diff, confirmation, and connected-host routes as `agent_autonomy_schedule`, `agent_reminder_schedule`, `agent_schedule_edit`, and allowlisted `agent_operator_action`, then returns post-action next routes for schedule list, autonomy queue inspection, run, edit, pause, resume, and delete where the schedule still exists. Unconfirmed schedule and routine-promotion previews return `confirmationRoutes` so the user or model can confirm the same intent without guessing the next command. Routine schedule promotion through "Run a routine on a schedule" (Memory and knowledge or Automation) or `goodvibes-agent routines promote` returns the same post-action schedule next routes. A routine is promoted only when it is enabled, reviewed (`v` on it, Routines tab of Memory and knowledge) and has no missing requirements; the preview lists what is missing and a confirmed promotion is refused until it is fixed, from the terminal and from the command line alike.
 
 Use `autonomy action:"queue"` before creating recurring autonomous work, reminders, routine schedules, delegated work, run controls, schedule edits, approval decisions, watcher triggers, or follow-up delivery. The queue is read-only and normalizes work-plan, research-run, connected task, approval, automation, schedule, reminder, routine-promotion, delegated-agent (counting running and pending agents), tracked background process, and delivery cards. A list longer than the queue shows is reported as "N of M". Research runs, connected-host tasks, approvals, automation runs, platform/daemon watcher run/source records, and schedules include live records with status/progress, source ids, next steps, log tails when available, task retry/output/correlation diagnostics, bounded redacted host task and watcher output route/preview descriptors, automation telemetry/delivery/route diagnostics, watcher run-history/source diagnostics, available controls, unavailable controls with reasons, and exact inspect/checkpoint/pause/resume/cancel/approve/deny/retry/run/edit/enable/disable/delete routes where supported.
 
-Provider-source watcher records are read-only context with inspect/refresh controls; watcher run effects appear only when the owning platform or daemon publishes exact confirmed routes. Schedule records expose pause/resume aliases over daemon enable/disable lifecycle routes so users do not have to translate scheduler terminology. Connected-host task cancel/retry uses `agent_operator_method` exact daemon methods with `confirm:true` plus `explicitUserRequest`; slash `/tasks` remains inspection-only.
+Provider-source watcher records are read-only context with inspect/refresh controls; watcher run effects appear only when the owning platform or daemon publishes exact confirmed routes. Schedule records expose pause/resume aliases over daemon enable/disable lifecycle routes so users do not have to translate scheduler terminology. Connected-host task cancel/retry uses `agent_operator_method` exact daemon methods with `confirm:true` plus `explicitUserRequest`; the Agent's tasks in the Work place are read only.
 
 Inspect one card with `autonomy action:"item"`; lower-level `agent_harness mode:"autonomy_intake|autonomy_queue|autonomy_queue_item"` remains available for detailed route inspection. Create, edit, run, pause, resume, cancel, approve, deny, send, schedule, and schedule lifecycle effects stay on the owning confirmed route returned by that card.
 
@@ -357,29 +357,15 @@ goodvibes-agent knowledge import-urls <path> --yes
 goodvibes-agent knowledge import-bookmarks <path> --yes
 goodvibes-agent knowledge import-browser-history --yes
 goodvibes-agent knowledge reindex --yes
-/knowledge queue
-/knowledge review-issue <issue-id> resolve
-/knowledge packet <task>
-/knowledge explain <task>
-/knowledge consolidate light
 ```
 
-Agent rejects route-selection flags that would target another knowledge space, including `--space`, `--knowledge-space`, `--knowledge-space-id`, and `--include-all-spaces`. Parseable public Agent-route scope aliases are normalized; contaminated connected-host responses return `scope_contamination`.
+Inside the Agent the same is Memory and knowledge (the menu, `Ctrl+G` then `m`, or `/memory`): its Issues tab reviews an issue (`v`), its Entries tab shows what a task would get (`k`) and tidies (`z`), and every tab reads by itself. These routes and the place reach the daemon's one knowledge store, the terminal app's too.
+
+Agent rejects route-selection flags that would target another knowledge space, including `--space`, `--knowledge-space`, `--knowledge-space-id`, and `--include-all-spaces`. Parseable public Agent-route scope aliases are normalized.
 
 ## Approvals, automation, and schedules
 
-Read views are safe by default. An approval is answered with `/questions answer`; `/approval kinds` says what each kind asks about. A schedule and its runs are changed with `/schedule` (a change you type runs at once; one that cannot be undone says so with its result):
-
-```text
-/questions answer <approval> <choice> [note]
-/schedule stop-run <run>
-/schedule retry-run <run>
-/schedule run <schedule>
-/schedule pause <schedule>
-/schedule resume <schedule>
-/schedule remove <schedule>
-/schedule change <schedule> [--cron <expr>|--every <interval>|--at <iso-time>|--when <words>] [--tz <tz>] [--name <text>] [--task <text> --success-criteria <text>] [<what it does...>]
-```
+Read views are safe by default. An approval is answered in Waiting for you (the menu) with its own keys; its Kinds tab says what each kind of approval asks about. A schedule and its runs are changed in Automation (the menu, the leader then `m`), kept on the connected host: on the Schedules tab `n` makes one, and on a schedule `g` runs it now, `p` pauses or resumes it, `c` changes it (its timing, name, what it does, or a task with the result that shows it is done) and `x` removes it; on the Runs tab `s` stops a run and `t` runs a failed one again. A pressed key is the request and runs at once; only what cannot be undone asks first. Triggers, the commands they may run, CI watches and check-ins are its other tabs.
 
 Routine promotion is an explicit scheduling route. Local routines stay local until a user confirms promotion. Delivery targets are opt-in with explicit channel/route/webhook/link flags.
 
@@ -392,8 +378,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/agent` | Open the Agent workspace (also Ctrl+G then w). |
 | `/agents` | Your agents: open the live view, and hand build, fix or review work to the terminal app (`hand-off`, with reason, success criteria, workspace hint, priority and review intent) and follow it (`handed-off`). |
 | `/agent-home` | Separate Agent homes and the starters they are made from, including opt-in VIBE.md starter export/import with `--include-vibe`. |
-| `/approval` | What each kind of approval asks about, and the approvals waiting on you; answer one with `/questions answer`. |
-| `/artifacts` | The saved artifacts (uploads, exports, media, reports, comparisons): list, look at one, copy one to a file, or several into a folder or ZIP. |
+| Waiting for you (the menu) | What each kind of approval asks about, and the approvals waiting on you; answer one with its keys there. |
 | `/auth` | Review provider auth posture and export redacted auth review bundles. |
 | `/session bookmarks` | List bookmarked transcript blocks. |
 | `/brief` | Show a concise Agent operator briefing and next actions. |
@@ -401,43 +386,34 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/calendar` | The terminal app's command on the Agent's own events, its calendar feeds and calendar accounts: what is coming up, every event, add or remove one, import or export .ics files, subscribe to feeds, sign in or out of Google or Outlook. Removing deletes for good (add it again to bring it back). |
 | `/checkpoint` | The workspace checkpoints: `list` (newest first), `restore <n\|id>` (shows the files that would change, asks, and restores them; files only). `make` and `rewind` are refused: the Agent takes checkpoints by itself in a registered workspace and does not go back to a turn. |
 | `/channels` | The terminal app's command with the connected host's channels: status, setup, repairs, who may reach the assistant, per-channel profiles (`/channels profiles`), a test message; and the Agent's own readiness, setup guide, inbox, confirmed sends and delivery receipts. |
-| `/ci` | Check a repo or PR's CI with per-job conclusions and manage standing CI watches with channel delivery; removing a watch stops it (`/ci watch` sets it up again). |
 | `/clear` | Start a fresh conversation; the current one is saved as its own session first. |
 | `/session collapse` | Collapse rendered blocks by type. |
 | `/compact` | Summarize the conversation to free context window. |
 | `/compare` | Blind model comparisons: send one prompt to two to four models with their names hidden (it spends money), benchmark the local models, judge, switch to the winner or record keeping the model, and save a report, handoff or ZIP. |
-| `/context` | Inspect context-window usage and token breakdown; `/context window [<size>\|clear]` shows where the current model's window came from, or sets or clears a custom window. |
+| This conversation (menu) | What fills the context: "See what fills the context" (token breakdown), "See the project instruction files", "See what the last turns were given"; the context window size, the daemon's for every program: "See the context window size", "Set the context window size", "Go back to the automatic window size". |
 | `/session events` | Review the conversation's record entry by entry; `/session groups`, `/session hotspots` and `/session composer` show its turns, where it spent most, and what the composer waits on. |
 | `/devices` | The terminal app's command: device tokens on the connected host (`list`, `rename`, `revoke`, which cuts the device off for good; pair it again to bring it back), "Pair something" (`pair device` mints a named, separately revocable device token and shows its link and QR; `pair host` pairs this Agent with its connected host as `/setup pair` does), `host-status` and `unpair-host` (as `/setup pair` preview and `/setup unpair`), the connected host's relay (`pair relay`, `relay-status`, `relay-codes`, `relay-revoke`), and the paired phones: `nodes`, `grants`, `revoke-grant`, `captures`, `delete-capture` (deleted for good). |
-| `/documents` | Your Markdown drafts: write, revise, comment, take or leave a suggested change, put or attach an artifact, export, and the review packet (readiness, steps, presets, sending it). |
-| `/effort` | See or choose how hard the model thinks (`/effort set <level>`). |
+| `/documents` | The review packet reports: what stands in the way of review, its steps and its timeline. The drafts themselves, their comments, suggestions, artifacts, export, presets and sending a packet are the Drafts and Artifacts tabs of Memory and knowledge. |
 | `/cloudflare` | The connected host's optional Cloudflare integration: `status`, `requirements`, `discover`, `validate`, `verify`, and (typed by the owner only) `create-token [--new]`, `provision` and `disable`. Flags are the terminal app's; see its Cloudflare guide. |
 | `/session expand` | Expand rendered blocks by type. |
 | `/session` | Sessions: resume, save, copy, save the conversation as a Markdown or text file, read the cross-session task graph. |
 | `/google` | Connect the Google account behind mail and calendar: adopt credentials already on this machine, or run the setup flow. |
 | `/health` | Opens its list; from a model or script prints the short status (`✓ Everything is working.`, or each problem with `Fix:` and its line). Actions: See what needs attention (`report`), Check one area (`check <area>`), Describe a problem (`diagnose <symptom>`), See the runtime store (`state`), Check the connected host's compatibility (`compat [--json]`, Agent Knowledge route readiness). |
 | `/help` | Every command and every key in one searchable list (also `?` and `Ctrl+P`); `/help <command>` prints one command's actions. |
-| `/image` | Attach an image file to the next message. |
 | `/help keys` | List keyboard bindings and the file that changes them. |
-| `/knowledge` | Use isolated Agent Knowledge. |
 | `/research` | Research a question or look at a page in the conversation; keep a research run, add a source to the queue, save a sourced report. |
 | `/resume` | Resume a saved Agent session. |
-| `/mail` | The terminal app's command over the Agent's own mail service: whether mail is connected, the unread inbox, read one message, save a draft, send one (at once, as typed; a sent mail cannot be called back), and the mailbox settings and password. |
 | `/hooks` | The terminal app's hook actions without its screen: `contracts`, `scaffold`, `chain`, `enable`, `disable`, `remove`, `simulate`, `reload`, `export`, `inspect`, `import`. |
 | `/mcp` | Manage MCP servers, trust posture, and tool inventory. |
 | `/media` | See the media providers (`providers`), make an image or video (`make`: it may charge), and collect a job that was still being made (`collect <provider> <job> [key=value ...]`). |
-| `/memory` | Add, search, review, stale, or delete Agent-local memory records. `/memory sync-files` writes standing records as markdown files and commits them in their own repository; `files review` shows what editing those files would change; `files apply <id>...` applies the proposals you name. A command run by the model may sync and review but not apply. `/memory snapshots` lists the copies of memory (daily, before an upgrade, before a restore) with their record counts; `/memory restore <name|latest|date>` replaces all memory with one copy after one confirmation, copies the records it replaces first and names that copy so the restore can be undone by that name; `latest` is the newest copy not taken by a restore. |
+| `/memory` | Opens Memory and knowledge: memory records (remember, search, correct, review, forget), the copies of memory and replacing memory with one, memory kept as files in the project (write them, see what your edits change, take edits in: the model may write and compare but not take them in), your knowledge, what is known about you (People listed, since you are reading it), and your templates. Each is a key on the thing it acts on. |
 | `/verbosity` | Set how much the Agent prints (`/verbosity set quiet\|balanced\|operator`) and each kind of notification's level. |
 | `/model` | Choose the model your conversations use and its backups (`use`, `backup`, `drop-backup`), and read the list of models again (`refresh`). |
 | `/network-scan` | Turn local-network scanning for model servers on or off, or check its status. Model servers on this computer and providers whose API key is in the environment are registered at every start; the network is scanned only after `/network-scan on`, which scans at once and then at each start. |
 | `/session next error` | Jump to the next error message in the conversation. |
-| `/notes` | Your scratchpad notes: list, read, find, write, change, mark reviewed or out of date, delete (for good), and make a memory record, persona, skill or routine from one, or add its web page to Agent Knowledge. The same description as the terminal app's `/notes`. |
 | `/notifications` | Show every notice and notification in full, newest first. The status bar counts unread notices, and `Ctrl+N` opens them. |
 | `/notify` | Manage and send configured Agent webhook notifications. |
-| `/paste` | Insert clipboard text or image into the prompt. |
-| `/about-me` | Your profile: read what GoodVibes knows about you, show one field, look one person up by name, trace where a fact came from, correct one, add a note, undo the last change to a field, or forget one. Here the People section is counted rather than listed, because this output lands in the transcript; the same command at a shell prints the full list on a terminal and counts it when stdout is captured (a pipe, or a shell tool a model drives). |
 | `/payments` | Opens its list of actions: See your cards (`/payments cards`), See what is waiting for your answer (`/payments pending`), Approve one purchase ahead of time (`/payments approve <shop> --most <amount> <item>`), Allow a repeat purchase (`/payments repeat --shop <shop> --item <item> --each <amount> --per-period <amount> [--days <n>] [--until <date>]`), See repeat purchases you have allowed (`/payments repeats`), Stop a repeat purchase (`/payments stop-repeat <repeat purchase>`), Add a card (`/payments add-card`, each field hidden), Remove a card (`/payments remove-card <card>`), Set your billing or shipping address (`/payments address <billing\|shipping>`). Card material is stored at daemon scope and never shown back; budgets, windows and security-code handling live in Settings > Payments. |
-| `/personas` | Manage Agent-local personas and VIBE.md personality files. |
 | `/pin` | Pin a model to the favorites list. |
 | `/plugin` | List plugins with their trust tier, enable, disable, reload or quarantine one (`/plugin enable <name>`, `disable <name>`, `reload`, `quarantine <name>`, `lift <name>`), and set what each one may register: `/plugin trust <name> <untrusted\|limited\|trusted>`, `capabilities <name>`, `verify <name>`, `trust-key <name> <key.pem>`. An untrusted plugin gets panels, commands and file reads only; `limited` adds the tools, providers and hooks its manifest declares and gateway methods, channels and delivery strategies; `trusted` adds its high-risk capabilities. The tier is shared with the terminal app and the daemon. Marking a plugin trusted when its signature does not verify needs `--yes`. `/plugin dirs` shows the folders plugins are loaded from, `inspect <name>` shows one plugin's version, state, tier, capabilities, signature and quarantine, and `review` counts your plugins by state and trust tier. `open` (the plugins screen), `publish-local` and `unpublish` (the local catalog the terminal app's `/marketplace` installs from) are the terminal app's and are refused here saying so. |
 | `/session prev error` | Jump to the previous error message in the conversation. |
@@ -446,17 +422,14 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | `/quit` | Close this program (a model cannot run it). |
 | `/redo` | Redo the last undone conversation turn; `/redo file` re-applies the last reverted file change. |
 | `/retry` | Re-send the last user message, optionally with modified text. |
-| `/routines` | Manage Agent-local routines and explicit routine schedule promotion. |
-| `/save` | Save the current session. |
-| `/schedule` | Inspect schedules, create confirmed reminders, and promote routines to connected schedules. |
+| Automation (the menu, the leader then `m`) | Your schedules and their runs, triggers and the commands they may run, CI watches (a repository's CI job by job, and standing watches that tell you when it fails) and what the check-ins did, all on the connected host, each acted on from its tab. |
 | `/secrets` | Manage secrets, external secret refs, and storage policy. |
 | `/security` | Opens its list; from a model or script prints the short status. Actions: the review, paired-device tokens, risky MCP routes; what is trusted, this folder's trust (`folder`, `trust-folder`, `restrict-folder`: until you trust the folder, its repository's hooks file is not loaded and the MCP servers its `.mcp/mcp.json` and `.goodvibes/mcp.json` name do not start), the trust summary file (`save-trust`, `read-trust`); the policy bundles; the sandbox and MCP containment. |
 | `/settings` | Open, inspect, set, or reset Agent settings. |
 | `/setup` | Set GoodVibes up, one topic at a time: each topic opens one form; `/setup first-run` runs the three-step first run again. |
-| `/my-skills` | Manage Agent-local skills and skill bundles. |
+| Tools and extensions (the menu, the leader then `m`) | Your skills and skill bundles (the one skill store every program reads), the skill folders you published to the local catalog, your presets and your managed settings, each acted on from its tab. |
 | `/status` | Shows the current model and its context window, with where the window came from (its catalog provider, the consensus of catalog providers, a family default, or a user override). |
-| `/tasks` | Read runtime tasks here and on the connected host; changes are refused with the reason. |
-| `/title` | Show or set the conversation title. |
+| This conversation (the menu, the leader then `m`) | The controls on the conversation itself, each run with `Enter` from its row: name it, send an image with a message, paste the clipboard, read the folded pastes, see what fills the context and the project instruction files, see and choose how hard the model thinks, save this session under a name or as a file, fold or open its blocks, and see or put back the workspace checkpoints. |
 | `/voice` | Hear answers spoken (`speak <message>`, `stop`, `on`, `off`), the local voice runtime (`status`, `setup`), the wake word (`wake-status`, `wake-setup`, `wake-again`) and the voice settings as a file (`export`, `inspect`, `import`). |
 | `/undo` | Undo the last conversation turn; `/undo file` reverts every file the last write/edit call changed. |
 | `/pin remove` | Unpin a model from the favorites list (`/pin add` pins one, `/pin list` lists them). |
@@ -469,26 +442,12 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 - [Knowledge, artifacts, and multimodal](knowledge-artifacts-and-multimodal.md)
 - [Channels, remote access, and API](channels-remote-and-api.md)
 
-## Native work ledger (read only)
+## Work
 
-`/work open` opens the native work view and reads the configured, authenticated connected
-host. With no selected project, Agent asks `projectPlanning.status` with empty
-input for the host's project identity. That passive discovery requires
-`read:knowledge`; it does not grant it. If discovery is unavailable, use
-`/work open <daemon-project-id>` to explicitly select a project. The daemon still
-checks project identity and `read:work-ledger` on every ledger read. Agent never
-uses its local planning ID or configuration directory as a shared ledger store.
-
-The native section displays intent, stable work/attempt IDs, criteria revisions,
-reported state separately from verification, attention, evidence targets and
-references, and durable history. PgUp/PgDn scroll the Work detail pane when no action result is shown.
-When a task or approval result is present, PgUp/PgDn scroll that result and
-Ctrl+PgUp/PgDn independently scroll ledger details. R retries
-observation. Closing releases only this view's reader; reopening acquires a fresh
-reader and catches up durable history. Host, token, or workspace replacement
-invalidates the old binding and its pending responses. Disconnection, denial,
-closed view, loading, and an authenticated empty project remain distinct states.
-
-The legacy operator work/approvals section remains available with its existing
-identities and confirmations. Native ledger inspection supplies no execution
-permission and exposes no claim, report, revise, approve, or other ledger writes.
+The Work place (the menu's "Work and agents" row, or `/work`) is the same in the
+Agent as in the terminal app: your work on the connected daemon, each piece with
+where it stands, its plan and results, a plan that waits for you, past work, the
+checklist and the tasks running in the background. It is read by itself and again
+whenever anything in it changes. The daemon checks your access on every read; a
+connection that cannot be read says so in the list instead of showing it empty.
+See [the terminal app's work page](../../tui/docs/native-work.md) for the keys.

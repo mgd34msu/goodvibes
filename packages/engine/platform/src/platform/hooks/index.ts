@@ -31,6 +31,9 @@ export type {
   HooksConfig,
 } from './types.js';
 export type { HookActivityRecord } from './activity.js';
+export { HookTraceStore } from './trace.js';
+export { HOOK_TRACE_PROGRAM_WORDS, hookRunOutcome, hookTraceRecordOf, readHookTraceRecord } from './trace-words.js';
+export type { HookTraceProgram, HookTraceRecord } from './trace-words.js';
 export type { HookAuthoringAction, HookConfigInspection, HookSimulationResult, HooksFileDescription } from './workbench.js';
 export type { HookExecutionMode, HookAuthority, HookPointContract } from './contracts.js';
 export {

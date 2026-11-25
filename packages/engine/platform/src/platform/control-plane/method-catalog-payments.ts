@@ -134,7 +134,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     effects: ['payments.administer', 'record.destroy'],
     title: 'Remove a Payment Card',
     description:
-      'Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. payments.defaultCardId is not cleared by a delete; payments.cards.list shows a stale id as empty, and every purchase must name its card anyway.',
+      'Delete a card: its config metadata and every secret derived from its config path, reporting how many secret entries were cleared so a partial deletion is visible rather than silent. An id the daemon holds no card for, and no material under, answers 404 NOT_FOUND with nothing removed (so a delete sent again after it went through says the card is no longer there); an id with no card left but material a crashed add stranded answers deleted: false with the entries it cleared. payments.defaultCardId is not cleared by a delete; payments.cards.list shows a stale id as empty, and every purchase must name its card anyway.',
     category: 'payments',
     http: { method: 'DELETE', path: '/api/payments/cards/{id}' },
     inputSchema: PAYMENTS_CARDS_DELETE_INPUT_SCHEMA,
@@ -146,7 +146,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     confirmation: 'owner-request',
     title: 'Approve One Purchase',
     description:
-      'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Its confirmation is owner-request: confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon\'s machine), else 403 CONFIRMATION_REQUIRED (400 when confirm is missing); /payments approve and the web UI send both. The response never carries card material; this verb never touches a card at all.',
+      'The owner approves one purchase in advance, out of band from the conversation that will run it: the merchant\'s registrable domain, the item, and the most it may cost. Optional unless payments.confirmEveryPurchase is on. The amount is read in the budget currency, payments.currency ("25" and "25.00" are the same amount), and an amount no purchase could match is refused before anything is recorded. Mints a persisted, single-use approval bound to those fields and that currency (returned as currency), expiring in five minutes; a begin after payments.currency changed is a different purchase and does not spend it; a matching payments.checkout.begin spends it, and it answers that purchase\'s approval window for a total up to its amount. Its confirmation is owner-request: confirm: true from a credential that states a person asked (a sign-in, a paired device or an app on the daemon\'s machine), else 403 CONFIRMATION_REQUIRED (400 when confirm is missing); the Money place (payments.approve) and the web UI send both. The response never carries card material; this verb never touches a card at all.',
     category: 'payments',
     effects: ['purchase.approve'],
     http: { method: 'POST', path: '/api/payments/checkout/approve' },
@@ -184,7 +184,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     confirmation: 'owner-request',
     title: 'Authorise a Purchase in Advance',
     description:
-      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments repeat sends both. The owner\'s own act: an agent cannot add one.',
+      'The owner authorises, in advance, a purchase a schedule or trigger may start without asking him: the item in his words, the shops, the most one purchase may come to, the most all of them may come to every periodDays days, and an optional last day. Amounts are read in the budget currency. Every other limit still applies to each purchase: the budgets, the per-purchase ceiling and the veto or approval window. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.repeat) sends both. The owner\'s own act: an agent cannot add one.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,
@@ -198,7 +198,7 @@ export const builtinGatewayPaymentsMethodDescriptors: readonly GatewayMethodDesc
     confirmation: 'owner-request',
     title: 'Withdraw a Standing Authorisation',
     description:
-      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; /payments stop-repeat sends both. The owner\'s own act.',
+      'Remove one standing purchase authorisation by its id. No new purchase can start under it, and one under it that a daemon restart interrupted is not resumed; a purchase already running keeps its window, where the owner can still stop it. Its confirmation is owner-request: confirm: true from a credential that states a person asked, else CONFIRMATION_REQUIRED; the Money place (payments.stop-repeat) sends both. The owner\'s own act.',
     category: 'payments',
     effects: ['purchase.approve'],
     dangerous: true,

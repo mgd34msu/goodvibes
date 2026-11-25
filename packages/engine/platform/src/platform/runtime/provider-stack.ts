@@ -93,6 +93,16 @@ export interface ProviderStackOptions {
   readonly shellPaths: ShellPathService;
   /** The product's storage root (`tui`, `agent`, `daemon`, …); the per-user stores hang off it. */
   readonly surfaceRoot: string;
+  /**
+   * The root the pinned models (`favorites.json`) are read from: the daemon's, one copy for every program
+   * (runtime/services.ts SurfaceRoots.providerStoresRoot). Default `surfaceRoot`.
+   */
+  readonly providerStoresRoot?: string | undefined;
+  /**
+   * Whether this stack writes the context window file (`context-window-overrides.json` under `providerStoresRoot`,
+   * the daemon's): false in a terminal program, which reads the daemon's file and never writes it. Default: true.
+   */
+  readonly writesContextWindows?: boolean | undefined;
   /** How to construct the registry. Default: `new ProviderRegistry(...)`. */
   readonly providerRegistryFactory?: ProviderRegistryFactory | undefined;
   /** Whether to run model discovery and the benchmark load at construction. Default: `run`. */
@@ -161,9 +171,10 @@ function coalesceCredentialRefreshes(registry: ProviderRegistry): void {
 
 export function createProviderStack(options: ProviderStackOptions): ProviderStack {
   const { configManager, shellPaths, surfaceRoot } = options;
+  const storesRoot = options.providerStoresRoot ?? surfaceRoot;
   const providerCapabilityRegistry = new ProviderCapabilityRegistry();
   const cacheHitTracker = new CacheHitTracker();
-  const favoritesStore = new FavoritesStore({ dir: shellPaths.resolveUserPath(surfaceRoot) });
+  const favoritesStore = new FavoritesStore({ dir: shellPaths.resolveUserPath(storesRoot) });
   const hostFacts = options.hostFacts;
   const benchmarkStore = hostFacts?.benchmarkStore ?? new BenchmarkStore({ dir: shellPaths.resolveUserPath(surfaceRoot) });
   const modelLimitsService = new ModelLimitsService({
@@ -185,6 +196,11 @@ export function createProviderStack(options: ProviderStackOptions): ProviderStac
     featureFlags: options.featureFlags,
     runtimeBus: options.runtimeBus,
     registerDispose: options.registerDispose,
+    // The context window sizes are the daemon's file, one for every program; only the daemon writes it.
+    contextWindows: {
+      path: shellPaths.resolveUserPath(storesRoot, 'context-window-overrides.json'),
+      writes: options.writesContextWindows ?? true,
+    },
   });
   // The local servers a scan saved are known to every composition, so a scanned
   // model saved as the default resolves in every command, not only the

@@ -1,6 +1,5 @@
 import { nativeSubmissionJournalPath } from '@goodvibes/engine/terminal-shell/native';
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { createWorkstreamDraftService } from '@goodvibes/engine/platform/platform/orchestration';
 import { chosenSystemMessageTarget, configuredSystemMessageTarget } from '@goodvibes/engine/terminal-shell/system-message-router';
 import { projectBootstrapShellCommandOptions } from '@goodvibes/engine/terminal-shell/bootstrap-command-context';
 import { createNativeWorkLedgerHost, registerNativeWorkLedgerCommand } from './native-work-ledger-host.ts';
@@ -32,7 +31,7 @@ import { createResumeSessionHandler } from './bootstrap-hook-bridge.ts';
 import { confirmLiveResume } from './session-resume-liveness-confirm.ts';
 import { logger } from '@goodvibes/engine/platform/platform/utils';
 import { loadBootstrapSystemPrompt } from '@/runtime/index.ts';
-import { createShellPlanRuntime, createShellRemoteCommandService } from '@/runtime/index.ts';
+import { createShellRemoteCommandService } from '@/runtime/index.ts';
 import { createRuntimeFoundationClients } from '@/runtime/index.ts';
 import type { ToolRegistry } from '@goodvibes/engine/platform/platform/tools';
 import type { ForensicsRegistry } from '@/runtime/index.ts';
@@ -157,10 +156,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     hydrateSessionUsage,
     selectModel: (model) => providerApi.selectModel(model),
   });
-  const planRuntime = createShellPlanRuntime({
-    adaptivePlanner: services.adaptivePlanner,
-    runtimeBus,
-  });
 
   // initial cost-budget alert threshold (USD; 0/unset = disabled).
   // Once the session starts, the Usage modal's 'b' key and /usage alert <dollars>
@@ -238,7 +233,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
       policyRuntimeState,
       uiServices,
       remoteRuntime,
-      planRuntime,
       providerApi,
       directTransport,
       hookApi,
@@ -262,17 +256,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     contractRunner: services.contractRunner,
     contractOperator: services.contractOperator,
     acpManager,
-    workstreamDrafts: createWorkstreamDraftService({
-      agentManager: services.agentManager,
-      configManager,
-      adaptivePlanner: services.adaptivePlanner,
-      projectRoot: services.workingDirectory,
-      contractRunner: services.contractRunner,
-      sessionId: () => runtime.sessionId,
-      remoteSupervisor: services.remoteSupervisor,
-      runtimeStore,
-      pricing: services.providerRegistry,
-    }),
     codeIndexStore: services.codeIndexStore,
     codeIndexReindexScheduler: services.codeIndexReindexScheduler,
     isPassiveCodeInjectionFlagEnabled: () => services.featureFlags.isEnabled('agent-passive-code-injection'),

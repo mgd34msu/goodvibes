@@ -10,6 +10,7 @@ import { describeContextWindowSource } from '@goodvibes/engine/platform/platform
 import { abbreviateCount } from '../../utils/format-number.ts';
 import { worktreeStatusLines } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { createStatusCommand } from '@goodvibes/engine/terminal-shell/health-command';
+import { systemSessionOf } from './session-capabilities.ts';
 
 /** The /status text for a model, its known window (null when unknown) and any user override. */
 export function buildAgentStatusText(model: ModelDefinition, knownWindow: number | null, override: number | null): string {
@@ -24,7 +25,7 @@ export function buildAgentStatusText(model: ModelDefinition, knownWindow: number
     row('model', `${model.displayName} (${model.provider})`),
     row('context', window),
     row('window from', describeContextWindowSource(model)),
-    row('override', override === null ? 'none (automatic); set with /context window <size>' : `${override.toLocaleString()} tokens`),
+    row('override', override === null ? 'none (automatic); set it with "Set the context window size" in This conversation' : `${override.toLocaleString()} tokens`),
   ].join('\n');
 }
 
@@ -58,5 +59,5 @@ export function handleStatusCommand(ctx: CommandContext): string {
 
 export function registerStatusRuntimeCommands(registry: CommandRegistry): void {
   // One description shared with the terminal app (terminal-shell/health-command.ts); this is the Agent's report.
-  registry.register(createStatusCommand<CommandContext>(agentStatusText));
+  registry.register(createStatusCommand<CommandContext>((ctx) => ({ systemSession: systemSessionOf(ctx) })));
 }

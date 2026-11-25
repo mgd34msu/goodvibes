@@ -118,7 +118,22 @@ export function rememberRefusedOutwardAction(input: Omit<PendingOutwardAction, '
   const same = entries.find((entry) => sameDeed(entry, input.action, input.content));
   const entry: PendingOutwardAction = { ...input, id: same?.id ?? nextPendingId++, at: Date.now() };
   pending = [...entries.filter((existing) => existing !== same), entry].slice(-MAX_PENDING);
+  changed();
   return entry;
+}
+
+const listeners = new Set<() => void>();
+
+/** Told when a refusal is added or taken (a list showing them reads again); returns the stop. */
+export function onRefusedOutwardActionsChange(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+}
+
+function changed(): void {
+  for (const listener of [...listeners]) {
+    try { listener(); } catch { /* a list that failed to read again reads on its next change */ }
+  }
 }
 
 /** Every refusal still approvable, oldest first. */
@@ -133,6 +148,7 @@ export function takeRefusedOutwardAction(id?: number): PendingOutwardAction | nu
   if (!held) return null;
   // The approval covers this send: any other waiting entry for the same deed goes with it.
   pending = entries.filter((entry) => !sameDeed(entry, held.action, held.content));
+  changed();
   return held;
 }
 

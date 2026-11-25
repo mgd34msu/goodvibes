@@ -141,22 +141,7 @@ export function registerNotifyCommands<Context extends NotifyContext & CommandAc
   notifyHost: NotifyHost<Context>,
 ): void {
   hostOf = notifyHost as unknown as NotifyHost<NotifyContext>;
-  registry.register(defineCommand<Context>({
-    name: 'notifications',
-    title: 'Notification history',
-    summary: 'Every notice and notification in full, newest first; Enter goes to its subject',
-    group: 'Notifications',
-    actions: [doAction<Context>({
-      id: 'open', label: 'Open the notification history', word: '',
-      sentence: 'Opens every notice and notification collected, newest first.',
-      operator: { terminalOnly: 'it opens a view of this terminal' },
-      async run(_values, context) {
-        if (!context.openNotifications) throw commandRefusal('The notification history needs the interactive shell.');
-        context.openNotifications();
-        return undefined;
-      },
-    })],
-  }));
+  // The notice history is the System place's Notices list (places/system-place.ts); no command opens it.
   registry.register({
     ...defineCommand<Context>({
     // --yes answers the question only right after the action word: the same word inside a message is text.

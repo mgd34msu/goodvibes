@@ -42,9 +42,9 @@ import type { ApprovalsView } from '../runtime/client/approvals-view.ts';
 import type { CommandWorkspaceShellServices } from '@/runtime/index.ts';
 import type { CommandPlatformShellServices } from '@/runtime/index.ts';
 import type { CommandExtensionShellServices } from '@/runtime/index.ts';
-import type { CommandOpsShellServices, RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
+import type { CommandOpsShellServices, RemoteCommandService } from '@/runtime/index.ts';
 
-export type { RemoteCommandService, PlanRuntimeService } from '@/runtime/index.ts';
+export type { RemoteCommandService } from '@/runtime/index.ts';
 
 export interface CommandRuntimeState extends TerminalCommandRuntimeState {}
 
@@ -68,20 +68,17 @@ export interface CommandUiActions extends TerminalCommandUiActions<import('./mod
    * Ask the composer for one line of MASKED entry (see input/concealed-input.ts).
    * The typed characters are never echoed, never added to input history, and
    * never printed to the transcript; the plaintext reaches `onSubmit` exactly
-   * once. Used by `/payments add-card` for card number, expiry, CVV and cardholder
-   * name.
+   * once. Used for a purchase's card security code (payment-window-command.ts).
    *
    * Optional because a command context can be built without a live composer
    * (CLI paths, tests). A caller that needs concealment MUST refuse to fall
-   * back to plaintext entry when this is absent rather than degrade, see
-   * commands/payment-card-intake.ts.
+   * back to plaintext entry when this is absent rather than degrade.
    */
 
   /**
    * Ask the composer for one line of ORDINARY, echoed entry, the unmasked
-   * sibling of beginConcealedInput, used by `/payments address` for the seven
-   * billing / shipping fields. Deliberately a separate call rather than a flag
-   * on the concealed request; see input/plain-line-input.ts.
+   * sibling of beginConcealedInput. Deliberately a separate call rather than a
+   * flag on the concealed request; see input/plain-line-input.ts.
    */
   beginPlainInput?: (request: import('./plain-line-input.ts').PlainLineInputRequest) => void;
   /** Live terminal-owned pairing operation; never authority on its own. */
@@ -123,6 +120,8 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openPlaceMenu?: () => void;
   /** Open one place by id (`automation`, `waiting`, `keys`). */
   openPlace?: (placeId: string) => void;
+  /** Run what a place's key read in the composer names (`place.conversation-composer.<control>`: This conversation's controls). */
+  runPlaceKey?: (action: string) => void;
   /** A contract's open question on offer: the next message is sent as an ordinary one (contract-question-composer.ts). */
   answerContractQuestionPlainly?: () => void;
   /** The model list's grouping, while the list is open (model-picker-token-route.ts). */

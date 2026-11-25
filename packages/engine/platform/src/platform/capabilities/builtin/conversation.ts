@@ -29,8 +29,8 @@ export interface UndoServices {
   readonly conversation: Pick<LiveConversation, 'isGenerating' | 'undoTurn'>;
   /** The per-call file undo stack the write and edit tools fill. */
   readonly files?: (Pick<FileUndoManager, 'undo' | 'redo'> & Partial<Pick<FileUndoManager, 'discard'>>) | undefined;
-  /** Undo the last /checkpoint rewind; absent in a program that has no rewind. */
-  readonly rewind?: { undo(): Promise<string> } | undefined;
+  /** Undo the last /checkpoint rewind (and redo the one undone last); absent in a program that has no rewind. */
+  readonly rewind?: { undo(): Promise<string>; redo?: (() => Promise<string>) | undefined } | undefined;
 }
 
 /** The refusal every conversation capability gives while a turn runs. */
@@ -41,7 +41,7 @@ function refuseWhileTurnRuns(conversation: Pick<LiveConversation, 'isGenerating'
 export const CONVERSATION_CLEAR: CapabilityDefinition<ClearServices> = {
   capability: { id: 'conversation.clear', group: 'conversation', home: 'session', repeat: 'unsafe' },
   actionId: 'clear', label: 'Start a fresh conversation', word: '', inputs: [],
-  sentence: 'The current conversation is saved as its own session and a fresh one starts; /resume brings the saved one back.', done: '',
+  sentence: 'Starts over: the current conversation is saved as its own session and a fresh chat starts; /resume brings the saved one back.', done: '',
   touches: 'this-machine', lasts: 'not-a-change', risk: 'none', example: {},
   async run(_values, services) {
     if (services.conversation.isGenerating()) throw new CapabilityRefusal('A turn is still running, so nothing was cleared.', 'Stop it with Esc or let it finish, then /clear.', 'TURN_RUNNING');

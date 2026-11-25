@@ -255,7 +255,7 @@ function withoutArgv<T extends { argv?: readonly string[] | undefined }>(entry: 
 }
 
 /** What `add` says about how long an automation lives. */
-export const WORKFLOW_AUTOMATION_LIFETIME = 'until this process exits; it is not saved and does not come back after a restart. For a routine that survives restarts use /schedule.';
+export const WORKFLOW_AUTOMATION_LIFETIME = 'until this process exits; it is not saved and does not come back after a restart. For a routine that survives restarts make a schedule (the schedule.add capability; New schedule in Automation).';
 
 export class HookActionManager {
   private actions = new Map<string, HookActionDefinition>();

@@ -2,34 +2,27 @@ import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions'
 import { settingsCommandDescription } from '@goodvibes/engine/terminal-shell/settings-command';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { ConfigSetting } from '@goodvibes/engine/platform/platform/config';
-import {
-  createContextInspectionCommand,
-} from '@goodvibes/engine/terminal-shell/context-inspection-command';
+import type { ContextInspectionPolicy } from '@goodvibes/engine/terminal-shell/context-inspection-command';
+import { systemSessionOf } from './session-capabilities.ts';
 import { registerInteractionModeCommand } from '@goodvibes/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
-import { handleContextWindowSubcommand } from './context-window.ts';
 import { setSettingValue } from './setting-write.ts';
 
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {
   registry.register(SETTINGS_COMMAND);
 
-  registry.register(contextInspectionCommand);
-
-
-
-
-  registerInteractionModeCommand<CommandContext>(registry);
+  registerInteractionModeCommand<CommandContext>(registry, (ctx) => ({ systemSession: systemSessionOf(ctx) }));
 
 }
 
 
-const contextInspectionCommand = createContextInspectionCommand<CommandContext>({
-  window: handleContextWindowSubcommand,
+/** How this app measures its context, for the conversation's context controls (session-capabilities.ts). */
+export const contextInspectionPolicy: ContextInspectionPolicy<CommandContext> = {
   estimate: (message) => estimateConversationTokens([message]),
   total: (messages) => estimateConversationTokens(messages),
-});
+};
 
 /** One line per setting: its name, the key small beside it, and its value. */
 function settingLine(setting: ConfigSetting, value: unknown): string {

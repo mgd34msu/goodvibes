@@ -21,7 +21,6 @@ import { AgentsModal } from '../input/agents-modal.ts';
 import { UsageModal } from '../input/usage-modal.ts';
 import { ChangesModal, type ChangesDeps } from '../input/changes-modal.ts';
 import { NotificationsModal } from '../input/notifications-modal.ts';
-import { MaskedEntryModal } from '../input/masked-entry-modal.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { resolveViewName, type ViewTarget } from '../input/views.ts';
 import { getSharedNotificationFeed } from '../views/notifications-feed.ts';
@@ -36,6 +35,19 @@ export interface WireViewOpenersOptions {
   readonly viewPanelAdapter: ViewPanelAdapter;
   readonly render: () => void;
 }
+
+/** The old provider, sign-in and services screens' names, and the Models and providers list each opens on. */
+const MODELS_PLACE_NAMES: Readonly<Record<string, string>> = {
+  providers: 'providers', 'providers-modal': 'providers', 'provider-health': 'providers', accounts: 'providers',
+  subscription: 'providers', 'subscription-modal': 'providers', subscriptions: 'providers',
+  services: 'services', 'services-modal': 'services', models: 'models',
+};
+
+/** The old work screens' names, and the Work place's list each opens on. */
+const WORK_PLACE_NAMES: Readonly<Record<string, string>> = {
+  work: 'work', 'native-work-ledger-modal': 'work', 'project-planning': 'history', 'planning-modal': 'history',
+  'work-plan': 'checklist', 'work-plan-modal': 'checklist', todo: 'checklist',
+};
 
 /** Split a preview text into a diff and a note: `@@ label @@\n text` is a note, not a hunk. */
 function previewParts(text: string): { diff: string | null; note: string | null } {
@@ -180,20 +192,21 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     }));
   };
 
-  // ── Local-auth password prompt ────────────────────────────────────────────
-  const openMaskedEntry = (kind: 'add-user' | 'rotate-password', username?: string): void => {
-    show(new MaskedEntryModal({
-      kind,
-      username,
-      auth: views.localUserAuthManager,
-      onDone: (message) => { commandContext.print(message); render(); },
-    }));
-  };
-  views.bridge.openMaskedEntry = openMaskedEntry;
-  commandContext.openLocalAuthMaskedEntry = openMaskedEntry;
-
   // ── Any view by name ──────────────────────────────────────────────────────
   const openView = (name: string, target?: ViewTarget): boolean => {
+    // Memory and knowledge is a place now (terminal-shell places/memory-place.ts): its old screens' names open it.
+    const lowered = name.trim().toLowerCase();
+    if ((lowered === 'memory' || lowered === 'knowledge') && commandContext.openPlace) { commandContext.openPlace('memory'); return true; }
+    // Who may sign in is in Permissions and safety (terminal-shell places/safety-place.ts): the old screen's name opens it.
+    if (lowered === 'local-auth' && commandContext.openPlace) { commandContext.openPlace('safety'); return true; }
+    // The remote runners are the daemon's, shown in the Work place (work-agents-entries.ts): the old screen's name opens it on Runners.
+    if (lowered === 'remote' && commandContext.openPlace) { commandContext.openPlace('work', { list: 'runners' }); return true; }
+    // Work is a place (terminal-shell places/work-place.ts): the old work, planning, to-do and tasks screens' names open it.
+    const workList = WORK_PLACE_NAMES[lowered];
+    if (workList && commandContext.openPlace) { commandContext.openPlace('work', { list: workList }); return true; }
+    // Models and providers is a place (terminal-shell places/models-place.ts): the old provider, sign-in and services screens' names open it.
+    const modelsList = MODELS_PLACE_NAMES[lowered];
+    if (modelsList && commandContext.openPlace) { commandContext.openPlace('models', { list: modelsList }); return true; }
     const route = resolveViewName(name, redirect);
     if (!route) return false;
     switch (route.kind) {
@@ -226,13 +239,13 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
   commandContext.openForensicsView = () => { openView('forensics'); };
   commandContext.openIncidentView = () => { openView('incident'); };
   commandContext.openPolicyView = () => { openView('policy'); };
-  commandContext.openHooksView = () => { openView('hooks'); };
+  // The hooks are a tab of Tools and extensions (terminal-shell places/tools-place.ts).
+  commandContext.openHooksView = () => { commandContext.openPlace?.('tools'); };
   commandContext.openCommunicationView = () => { openView('communication'); };
   commandContext.openOrchestrationView = () => { openView('orchestration'); };
   commandContext.openCockpitView = () => { openView('cockpit'); };
   commandContext.openSecurityView = () => { openView('security'); };
   commandContext.openKnowledgeView = () => { openView('knowledge'); };
   commandContext.openMemoryView = () => { openView('memory'); };
-  commandContext.openRemoteView = () => { openView('remote'); };
   commandContext.openSubscriptionView = () => { openView('subscription'); };
 }

@@ -148,6 +148,10 @@ export {
   carryProgramSecretsToDaemon, describeSecretsCarryForward, secretsCarryForwardRecordPath, SECRET_CARRY_PROGRAMS,
   type SecretsCarryForward, type SecretsCarryForwardOptions,
 } from './secrets-carry-forward.js';
+export {
+  carryAgentProviderStoresToDaemon, describeProviderStoresCarryForward,
+  type ProviderStoresCarryForward, type ProviderStoresCarryForwardOptions,
+} from './provider-stores-carry-forward.js';
 
 import { readFileSync } from 'fs';
 import { ConfigManager } from './manager.js';

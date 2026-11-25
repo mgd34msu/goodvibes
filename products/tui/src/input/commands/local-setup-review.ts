@@ -1,5 +1,7 @@
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../../config/surface.ts';
 import { createSetupReviewCollector } from '@goodvibes/engine/terminal-shell/setup-review';
+import { readRemoteRunnersHealth } from '@goodvibes/engine/terminal-shell/health-command';
+import { capabilityBinding } from './capability-binding.ts';
 import { join } from 'node:path';
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import type { CommandContext } from '../command-registry.ts';
@@ -139,7 +141,9 @@ const collectSetupReview = createSetupReviewCollector<
   CommandContext,
   { sandboxMcpIsolation: string; sandboxSecureModeReady: boolean }
 >(
-  { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, requireHookWorkbench, discoverSkills },
+  { requireShellPaths, requireServiceRegistry, requireProviderApi, requireReadModels, requireSubscriptionManager, requireHookWorkbench, discoverSkills,
+    // The remote runners are the daemon's (terminal-shell remote-health.ts).
+    readRemoteRunners: (context) => readRemoteRunnersHealth(context, capabilityBinding) },
   {
     serviceArea: 'services',
     serviceNoun: 'service',
@@ -150,14 +154,16 @@ const collectSetupReview = createSetupReviewCollector<
     }),
     // Remote runners are optional: none configured is information, not an issue.
     extraChecks: (snapshot) => [
-      {
-        severity: snapshot.remoteRunnerCount > 0 ? 'pass' : 'info',
-        area: 'remote',
-        message:
-          snapshot.remoteRunnerCount > 0
-            ? snapshot.remoteRunnerCount + ' remote runner contract(s)'
-            : 'no remote runner contracts registered',
-      },
+      snapshot.remoteRunnersUnreadable
+        ? { severity: 'warn', area: 'remote', message: `the remote runners could not be read: ${snapshot.remoteRunnersUnreadable}` }
+        : {
+          severity: snapshot.remoteRunnerCount > 0 ? 'pass' : 'info',
+          area: 'remote',
+          message:
+            snapshot.remoteRunnerCount > 0
+              ? snapshot.remoteRunnerCount + ' remote runner contract(s) in the daemon'
+              : 'no remote runners: none has been started',
+        },
       {
         severity: snapshot.sandboxSecureModeReady ? 'pass' : 'info',
         area: 'sandbox',

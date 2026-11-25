@@ -24,7 +24,6 @@ import { FocusTracker } from '@goodvibes/engine/platform/platform/runtime/operat
 import type { SharedSessionContinuationOutcome } from '@goodvibes/engine/platform/platform/control-plane';
 import { buildContinuationSpawnInput, composeRuntimeServices } from '@goodvibes/engine/platform/platform/runtime/bootstrap';
 import { forwardGatewayMethodsToDaemon } from './gateway-daemon-forward.ts';
-import { terminalRunsRoutines } from './terminal-routines.ts';
 import { gateConsolidationToLocalWriter } from './memory-consolidation-gate.ts';
 import { createNotificationDispatcher, wireRuntimeNotificationBridge, wireMemoryPressureNotice } from './notification-dispatch.ts';
 import { resolveDaemonEnabled } from '@goodvibes/engine/platform/platform/config';
@@ -206,8 +205,8 @@ export function createRuntimeServices(options: RuntimeServicesOptions): RuntimeS
       },
       // Consolidation writes the store, so it runs here only while no daemon owns it.
       consolidationTarget: (registry, spine) => gateConsolidationToLocalWriter(registry, spine),
-      // The daemon catches its routines up on wake; a terminal does only while it runs them itself (daemon off).
-      runsRoutines: terminalRunsRoutines,
+      // The daemon keeps and runs every schedule and catches them up on wake; the terminal app runs none.
+      runsRoutines: () => false,
       workspaceCheckpoints: (input) => ({
         manager: createWorkspaceCheckpointing({ workspaceRoot: input.workspaceRoot, surface: input.surface, runtimeBus: input.runtimeBus, configManager: input.configManager }),
       }),

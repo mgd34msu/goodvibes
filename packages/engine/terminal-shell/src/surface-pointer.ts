@@ -23,6 +23,9 @@ export class SurfacePointer {
     const hit = layer.hitTargets?.findLast(h => x >= h.x && x < h.x + h.width && y >= h.y && y < h.y + h.height);
     if (token.button === 64 || token.button === 65) {
       this.down = null;
+      // A target that scrolls by itself (a place's detail) takes the wheel over it.
+      const wheeled = layer.hitTargets?.findLast(h => h.onWheel && x >= h.x && x < h.x + h.width && y >= h.y && y < h.y + h.height);
+      if (wheeled?.onWheel) { for (let step = 0; step < 3; step++) wheeled.onWheel(token.button === 64 ? -1 : 1); return []; }
       return Array.from({ length: 3 }, () => pointerKey(token.button === 64 ? 'up' : 'down'));
     }
     if (token.button === 0 && token.action === 'press') this.down = hit ? { id: hit.id, row: token.row, col: token.col } : null;

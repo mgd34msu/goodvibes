@@ -18,10 +18,16 @@ import type { CommandContext } from '../command-registry.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { requireOperatorClient, requireShellPaths } from './runtime-services.ts';
 
-import { createTasksRuntimeCommands } from '@goodvibes/engine/terminal-shell/tasks-runtime-commands';
-import { commandRefusal } from './confirmation.ts';
+import { installTasksPolicy, type TasksPolicy } from '@goodvibes/engine/terminal-shell/tasks-runtime-commands';
+import type { CommandRegistry } from '../command-registry.ts';
 import { backgroundCommandsReport } from './agent-context-reports.ts';
-export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<CommandContext>({
+
+/** The Agent's tasks, shown in the Work place (capabilities/builtin/tasks.ts): read only here. */
+export function registerTasksRuntimeCommands(_registry: CommandRegistry): void {
+  installTasksPolicy<CommandContext>(TASKS_POLICY);
+}
+
+const TASKS_POLICY: TasksPolicy<CommandContext> = {
   listTitle: 'Tasks',
   processes: backgroundCommandsReport,
   local: (ctx) => requireOperatorClient(ctx).tasks,
@@ -30,11 +36,7 @@ export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<Comma
 
   // Normal work stays in the main conversation, durable work in /todo, and
   // implementation work goes to the terminal app through /agents hand-off.
-  mutations: { readOnly: 'Tasks are read only in the Agent: normal work stays in the conversation, lasting work goes in /todo, and building or fixing goes to the terminal app with /agents hand-off. Nothing was changed.' },
-  open(ctx) {
-    if (!ctx.openAgentWorkspace) throw commandRefusal('The Agent workspace needs the interactive shell.', '/tasks list prints them.');
-    ctx.openAgentWorkspace('work');
-  },
+  mutations: { readOnly: 'Tasks are read only in the Agent: normal work stays in the conversation, lasting work goes on the checklist, and building or fixing goes to the terminal app (hand it off from Work and agents). Nothing was changed.' },
   row: ({ task, origin }) =>
     `  ${task.id}  ${task.status.padEnd(9)} ${task.kind.padEnd(11)} ${task.owner.padEnd(10)} ${origin.padEnd(6)} ${task.title}`,
   detail(_ctx, entry) {
@@ -58,4 +60,4 @@ export const { registerTasksRuntimeCommands } = createTasksRuntimeCommands<Comma
       [],
     );
   },
-});
+};

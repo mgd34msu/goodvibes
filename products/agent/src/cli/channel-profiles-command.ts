@@ -3,7 +3,7 @@ import { commandArgsWithLiteralMarker } from '@goodvibes/engine/terminal-shell/c
 import { isSettableGatePresetName, SESSION_GATE_PRESET_NAMES } from '@goodvibes/engine/platform/platform/gate/presets';
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { formatOperatorGatewayFailure, invokeOperatorGatewayMethod } from '../agent/operator-gateway-call.ts';
-import { resolveAgentConnectedHostConnection } from '../agent/routine-schedule-promotion.ts';
+import { resolveAgentConnectedHostConnection } from '@goodvibes/engine/terminal-shell/agent-turn/routine-schedules';
 import { operatorFlagValue, parseOperatorCommandArgs } from './operator-command-args.ts';
 import type { CliCommandOutput } from './types.ts';
 import type { CliCommandRuntime } from './management.ts';

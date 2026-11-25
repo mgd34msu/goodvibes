@@ -100,6 +100,8 @@ import { bindApprovals } from './shell/approvals-binding.ts';
 import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
 import { createConnectedHost, resolveConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
 import { wirePlaces } from '@goodvibes/engine/terminal-shell/places';
+import { sessionsPlaceSources } from '@goodvibes/engine/terminal-shell/places';
+import { sessionsPlaceHostOf } from './input/commands/sessions-place-host.ts';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
 import { cancelConversationGeneration, installRemoteConversationRouting } from './shell/remote-conversation-wiring.ts';
 import { applyAtModelSwitches } from './input/at-model-switch.ts';
@@ -108,6 +110,9 @@ import { createTerminalPaintWindow } from './shell/terminal-paint-window.ts';
 import { createSessionContractViews, wireWorkTree } from './core/work-tree-wiring.ts';
 import { createContractQuestionComposer } from '@goodvibes/engine/terminal-shell/contract-question-composer';
 import { SessionViews } from './shell/session-views.ts';
+import { capabilityBinding } from './input/commands/capability-binding.ts';
+import { setupPlace } from './input/commands/onboarding-runtime.ts';
+import { sessionCapabilityServices, systemSessionOf } from './input/commands/session-capabilities.ts';
 import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
 
 // Escape bytes and enter/exit sequencing live in renderer/terminal-escapes.ts (re-exported from @goodvibes/engine/terminal-shell) so this file never holds its own drifting copy.
@@ -202,7 +207,6 @@ async function main(prepared: PreparedShellCliRuntime) {
     providerRegistry,
     favoritesStore: ctx.services.favoritesStore,
     planManager: ctx.services.planManager,
-    adaptivePlanner: ctx.services.adaptivePlanner,
     sessionMemoryStore: ctx.services.sessionMemoryStore,
     sessionLineageTracker: ctx.services.sessionLineageTracker,
     idempotencyStore: ctx.services.idempotencyStore,
@@ -984,6 +988,14 @@ async function main(prepared: PreparedShellCliRuntime) {
     executeFromOwner: (name, args, context) => commandRegistry.executeFromOwner(name, args, context as typeof commandContext),
     keys: ctx.services.keybindingsManager,
     invoke: (method, input) => automationHost.invoke(method as never, input as never),
+    // A daemon capability no slash command here carries runs with this Agent's binding, as the owner's press.
+    capabilityBinding,
+    // The System place's Setup list: this Agent's settings, skip file and "Who decides" record.
+    setup: setupPlace(commandContext),
+    // The System place's "This session" list: this Agent's status report and print level.
+    systemSession: () => systemSessionOf(commandContext),
+    // A capability of this Agent's own conversation no slash command carries runs with its services (session-capabilities.ts).
+    sessionServices: () => sessionCapabilityServices(commandContext),
     daemonEndpoint: async () => {
       const connection = resolveConnectedHost({ configManager, homeDirectory });
       return connection.token !== null ? { baseUrl: connection.baseUrl, token: connection.token } : { unavailable: connection.unavailable?.reason ?? 'no connected-host credential was found' };
@@ -991,12 +1003,20 @@ async function main(prepared: PreparedShellCliRuntime) {
     // A place opened while the daemon was down reads again when the Agent attaches to it again.
     onDaemonBack: onDaemonAttached,
     program: 'agent',
+    // The hooks this Agent runs, posted to the daemon's one hook trace (Tools and extensions, Hook runs).
+    hookRuns: ctx.services.hookActivityTracker,
+    // The Sessions place's lists this Agent holds: its saved sessions with the open one.
+    sources: sessionsPlaceSources(sessionsPlaceHostOf(commandContext)),
+    // This Agent's turns read the daemon's context window sizes again whenever the daemon changes one.
+    providerRegistry,
     modals: input.surfaceModals,
     requestRender: () => render(),
   });
   unsubs.push(() => places.stop());
   commandContext.openPlaceMenu = places.openMenu;
   commandContext.openPlace = (id) => { places.openPlace(id); };
+  // This conversation's controls a person bound to a key in the composer (Keys place, "This conversation, while writing a message").
+  commandContext.runPlaceKey = (action) => { places.runKey(action); };
   // Key-table actions that act on a screen of this program (keybinding-catalog.ts).
   commandContext.answerContractQuestionPlainly = () => { contractQuestions.sendNextAsOrdinary(); };
   commandContext.cycleModelPickerGroup = () => { if (input.modelPicker.active && input.modelPicker.mode === 'model') input.modelPicker.cycleGroupBy(); };

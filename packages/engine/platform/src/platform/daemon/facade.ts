@@ -479,19 +479,29 @@ export class DaemonServer {
       tailscaleOrigin: () => activeTailscaleServeOrigin(),
       ...(config.serveToNetwork ? { serveToNetwork: config.serveToNetwork } : {}),
     });
+    // A join that turned sharing on finishes after a restart: the daemon restarts itself through its service.
+    // The same verbs serve the `/api/cluster/*` routes and the machine-group capabilities.
+    const lifecycleForGroup = this.lifecycle;
+    const groupVerbs = config.clusterGroupVerbs
+      ? withRestartForPendingGroupAction(config.clusterGroupVerbs, () => lifecycleForGroup.restartThroughService())
+      : null;
     // capabilities.find and capabilities.run: every capability by need and by id, through this daemon's own dispatch and gate.
-    registerDaemonCapabilities(this.runtimeServices, (input) => this.invokeGatewayMethodCall(input));
+    // A nested call is described as the outer one was: the operator token from this machine stays the `local` credential.
+    registerDaemonCapabilities(this.runtimeServices, ({ localOrigin, transport, daemonTurn, ...given }) => {
+      // A call nested in one of the daemon's own turns carries no credential: it goes with the daemon's own, its
+      // effects already admitted for that turn's actor (capability-wiring.ts).
+      const input = daemonTurn === true ? { ...given, authToken: this.authToken ?? '' } : given;
+      const described = localOrigin === true || transport !== undefined ? this.controlPlaneHelper.describeRequestPrincipal(input.authToken, localOrigin === true) : null;
+      const principal = described && transport !== undefined ? { ...described, transport } : described;
+      return this.invokeGatewayMethodCall({ ...input, ...(principal ? { principal } : {}) });
+    }, { clusterVerbs: () => groupVerbs });
     // A group's machines share the secure address of the one that set it up (lan-https/group-share.ts).
     if (config.secureAddressGroup) {
       const share = new SecureAddressGroupShare(config.secureAddressGroup, this.lanHttps.secureAddress);
       this.stopSecureAddressGroup = share.start();
       this.lanHttps.observe((on, state) => share.noteSynced(on, state.source ?? 'local-authority', state.from === 'this-machine' && state.source === 'lets-encrypt' ? state.hostName ?? '' : ''));
     }
-    // A join that turned sharing on finishes after a restart: the daemon restarts itself through its service.
-    if (config.clusterGroupVerbs) {
-      const lifecycle = this.lifecycle;
-      this.httpRouter.setClusterGroupVerbs(withRestartForPendingGroupAction(config.clusterGroupVerbs, () => lifecycle.restartThroughService()));
-    }
+    if (groupVerbs) this.httpRouter.setClusterGroupVerbs(groupVerbs);
     // Relay reachability read through the SAME controller getRelayReachability()
     // returns, so an in-process surface and a client over the wire cannot
     // disagree about whether this daemon is reachable, see routes/relay.ts.

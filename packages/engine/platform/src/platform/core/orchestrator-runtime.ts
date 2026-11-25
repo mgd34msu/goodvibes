@@ -5,7 +5,6 @@ import type { CacheHitTracker } from '../providers/cache-strategy.js';
 import type { SessionLineageTracker } from './session-lineage.js';
 import type { IdempotencyStore } from '../runtime/idempotency/index.js';
 import { estimateTokens } from './context-compaction.js';
-import type { AdaptivePlanner } from './adaptive-planner.js';
 import type { ExecutionPlanManager } from './execution-plan.js';
 import type { SessionMemoryStore } from './session-memory.js';
 import type { FavoritesStore } from '../providers/favorites.js';
@@ -31,10 +30,6 @@ export type OrchestratorCoreServices = {
   sessionLineageTracker?: SessionLineageTracker | undefined;
   idempotencyStore?: IdempotencyStore | undefined;
   planManager?: Pick<ExecutionPlanManager, 'getActive' | 'getInProgress' | 'toMarkdown'>;
-  adaptivePlanner?: Pick<
-    AdaptivePlanner,
-    'select' | 'getMode' | 'setMode' | 'explain' | 'override' | 'clearOverride' | 'getOverride' | 'getLatest'
-  >;
   sessionMemoryStore?: Pick<SessionMemoryStore, 'list'> | undefined;
   favoritesStore?: Pick<FavoritesStore, 'recordUsage'> | undefined;
   /**

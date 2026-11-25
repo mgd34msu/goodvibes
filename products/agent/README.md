@@ -109,10 +109,11 @@ daemon holds (never the number, CVV or name) and the addresses.
 
 ### Work on the host
 
-`/work open` opens the work view (`/work open <project id>` for another project);
-`/work start`, `status` (check), `cancel` (stop) and `resume <work id>` act on one
-work. Opening the view never starts anything, and no key approves anything for
-you. See [the terminal app's work page](../tui/docs/native-work.md).
+The Work place (the menu's "Work and agents" row, or `/work`) shows your work,
+held and run by the daemon, the same as in the terminal app: start, stop, go on,
+answer what it asks, run a failed step again, change what it may spend, and the
+project's checklist. Opening it never starts anything, and no key approves
+anything for you. See [the terminal app's work page](../tui/docs/native-work.md).
 
 ### Ordinary conversation and first-start prerequisites
 
@@ -127,11 +128,11 @@ path. Neither path uses a second legacy classification or source-less work
 start. Missing authority, unsupported attachments or an unknown dispatch
 produce a visible diagnostic; there is no legacy conversation fallback.
 
-The exact original and delivery mode survive restart. `/work intake`
-inspects and reopens observation; `intake-retry`, `intake-resume` and
-`intake-cancel` recover or cancel that same original. A lost reply never creates
+The exact original and delivery mode survive restart. In the Work place, the input
+waiting to be admitted can be seen, sent again, gone on with or dropped: the same
+original each time. A lost reply never creates
 fresh IDs or switches delivery modes. An input whose journal save failed never
-reached the host; `intake-cancel` discards it so the next input can be sent.
+reached the host; dropping it lets the next input be sent.
 The intake journal holds only inputs in flight (see below) and never refuses a
 new input for being full.
 
@@ -163,11 +164,10 @@ the environment is used before the saved one; the result says so
 
 ### Asking for work and recovering a lost request
 
-`/work new` asks for new work with what done means, `/work request` in your own
-words, `/work submit-file <path>` from a JSON file (a path with spaces needs no
-quoting). A request whose answer was lost is recovered with `/work submission`,
-`submission-retry` and `submission-discard`; input waiting to be admitted with
-`/work intake` and its steps. The same command in both programs:
+In the Work place, New work asks for new work with what done means, and Work
+from a file takes a JSON file; in the chat, what you say is the request. A request
+whose answer was lost, and input waiting to be admitted, can be seen, sent again or
+dropped there too. The same in both programs:
 [the terminal app's work page](../tui/docs/native-work.md).
 
 ---

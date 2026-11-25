@@ -654,10 +654,10 @@ function approvalRefusalMessage(mismatch: string, amount: Money | undefined): st
     return 'The owner approval on file was for a different purchase: its merchant, item, amount or currency does not '
       + `match this begin call (the amount is compared against requestedMax${amount ? `, ${formatMoney(amount)}` : ''}; an approval is for an amount in the currency `
       + 'payments.currency named when it was given, so a currency change since then is a different purchase). payments.confirmEveryPurchase is on, '
-      + 'so ask the owner to approve exactly this merchant, item and amount with /payments approve (payments.checkout.approve), then begin again.';
+      + 'so ask the owner to approve exactly this merchant, item and amount with "Approve one purchase ahead of time" in the Money place (payments.approve; payments.checkout.approve), then begin again.';
   }
   return 'payments.confirmEveryPurchase is on and this purchase has no owner approval on file. Ask the owner to '
-    + 'approve it with /payments approve <shop> --most <amount> <item> (payments.checkout.approve; the amount is this begin call\'s requestedMax), '
+    + 'approve it with "Approve one purchase ahead of time" in the Money place (payments.approve; payments.checkout.approve; the amount is this begin call\'s requestedMax), '
     + 'then begin within five minutes.';
 }
 

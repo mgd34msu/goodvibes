@@ -54,7 +54,7 @@ function describeCandidate(candidate: LearningCandidate, includeParameters: bool
         create: candidate.createRoute ?? null,
         delete: candidate.deleteRoute ?? null,
       },
-      policy: 'Learning curator rows are read-only. VIBE.md personality issues route to the /personas VIBE.md actions (vibe, vibe-create, vibe-import). Duplicate consolidation phases use agent_learning_consolidation under current recorded admission; create, review, promote, enable, schedule, and non-batch local effects require current recorded admission on their owning routes.',
+      policy: 'Learning curator rows are read-only. VIBE.md personality issues route to the VIBE.md actions on Personas in Memory and knowledge (personas.vibe, personas.vibe-create, personas.vibe-import). Duplicate consolidation phases use agent_learning_consolidation under current recorded admission; create, review, promote, enable, schedule, and non-batch local effects require current recorded admission on their owning routes.',
     } : {}),
   };
 }

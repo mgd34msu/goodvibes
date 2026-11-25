@@ -127,11 +127,12 @@ export function selectedModelPickerRoute(
 export function modelPickerCatalogServices(options: {
   readonly picker: { pinnedIds: Set<string>; pinEdits?: number | undefined; loadRecentModels(): Promise<void>; keepingSelection?(change: () => void): void };
   readonly getPinned: () => Promise<string[]>;
-  readonly refreshLiveModels: () => Promise<readonly { readonly added: readonly unknown[]; readonly removed: readonly unknown[] }[]>;
+  /** `force` reads past each provider's stored list (the picker opened with no model). */
+  readonly refreshLiveModels: (force?: boolean) => Promise<readonly { readonly added: readonly unknown[]; readonly removed: readonly unknown[] }[]>;
 }) {
   return {
-    refreshLiveModels: async () =>
-      (await options.refreshLiveModels()).some((result) => result.added.length > 0 || result.removed.length > 0),
+    refreshLiveModels: async (force?: boolean) =>
+      (await options.refreshLiveModels(force)).some((result) => result.added.length > 0 || result.removed.length > 0),
     prefetch: async () => {
       const editsBefore = options.picker.pinEdits;
       const stored = await options.getPinned();

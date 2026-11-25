@@ -1,9 +1,6 @@
 import type { ExternalOperationSource } from '../permissions/external-request.js';
-import { handlePlanCommand } from '../core/plan-command-handler.js';
-import type { AdaptivePlanner } from '../core/adaptive-planner.js';
 import type { SubagentTask } from '../acp/protocol.js';
 import { exportRemoteArtifactForAgent } from './remote/runner-registry.js';
-import type { RuntimeEventBus } from './events/index.js';
 import type { RuntimeStore } from './store/index.js';
 import type { AgentInput } from '../tools/agent/schema.js';
 import type { AgentRecord } from '../tools/agent/manager.js';
@@ -123,11 +120,6 @@ export interface RemoteCommandService {
   importSessionBundle(path: string): Promise<RemoteSessionBundle>;
 }
 
-export type PlanRuntimeService = (subcommand: string, args: string[]) => {
-  readonly output: string;
-  readonly ok: boolean;
-};
-
 export interface CommandOpsShellServices {
   readonly agentManager?: ShellAgentManagerService | undefined;
   readonly acpManager?: ShellAcpManagerService | undefined;
@@ -136,7 +128,6 @@ export interface CommandOpsShellServices {
   readonly planManager?: ShellPlanManagerService | undefined;
   readonly sessionOrchestration?: ShellSessionOrchestrationService | undefined;
   readonly remoteRuntime?: RemoteCommandService | undefined;
-  readonly planRuntime?: PlanRuntimeService | undefined;
 }
 
 export function createShellRemoteCommandService(options: {
@@ -174,18 +165,4 @@ export function createShellRemoteCommandService(options: {
     exportSessionBundle: (path) => remoteRunnerRegistry.exportSessionBundle(runtimeStore, path),
     importSessionBundle: (path) => remoteRunnerRegistry.importSessionBundle(path),
   };
-}
-
-/**
- * The execution-strategy runtime behind `/work planner`, `planner-mode`, `planner-override`, `planner-explain` and `planner-reset`.
- * The planner it configures is the one /workstream drafting consults, so it is
- * always available; its answers say that is where a strategy takes effect.
- */
-export function createShellPlanRuntime(options: {
-  readonly adaptivePlanner?: AdaptivePlanner | undefined;
-  readonly runtimeBus?: RuntimeEventBus | undefined;
-}): PlanRuntimeService | undefined {
-  const { adaptivePlanner, runtimeBus } = options;
-  if (!adaptivePlanner) return undefined;
-  return (subcommand, args) => handlePlanCommand({ adaptivePlanner, runtimeBus }, subcommand, args);
 }

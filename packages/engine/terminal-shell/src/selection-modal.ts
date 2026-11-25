@@ -1,6 +1,6 @@
 /**
  * SelectionModal - Generic reusable selection modal with fuzzy search.
- * Used by /template, /sessions, /session bookmarks, /tools, and focused pickers.
+ * Used by /sessions, /session bookmarks, /tools, and focused pickers.
  */
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
 import { cardAwaitsTab, routeCardInput, type CardTypeahead } from './blocking-permission-input.js';

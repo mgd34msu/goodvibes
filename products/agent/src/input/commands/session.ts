@@ -1,5 +1,5 @@
 /**
- * `/session`, `/resume` and `/save` are one description shared with the other
+ * `/session` and `/resume` are one description shared with the other
  * terminal app (terminal-shell/session-command.ts). The Agent resumes, saves,
  * copies and exports sessions as Markdown or text; it reads the cross-session
  * task graph but does not change it, keeps no conversation branches and
@@ -39,6 +39,9 @@ const commands = createSessionCommands<CommandContext>({
   async upload() {
     throw commandRefusal('The Agent does not upload conversations.', 'Save it as a file: /session save-file');
   },
+  // The Sessions place offers no branch or upload control here (capabilities/builtin/sessions.ts `available`).
+  keepsBranches: false,
+  uploads: false,
   branches: {
     create() { throw commandRefusal(NO_BRANCHES); },
     list() { throw commandRefusal(NO_BRANCHES); },
@@ -70,4 +73,7 @@ const commands = createSessionCommands<CommandContext>({
 
 export const sessionCommand: SlashCommand = commands.session;
 export const resumeCommand: SlashCommand = commands.resume;
-export const saveCommand: SlashCommand = commands.save;
+/** The Agent's routines for the conversation's record, as its controls take them (session-capabilities.ts). */
+export const conversationRecord = commands.record;
+/** This app's session routines, as the session capabilities take them (session-capabilities.ts). */
+export const liveSessions = commands.live;

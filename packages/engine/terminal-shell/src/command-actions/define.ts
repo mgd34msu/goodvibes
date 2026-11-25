@@ -116,6 +116,8 @@ export function defineCommand<Ctx extends CommandActionContext>(description: Com
       const dialog = ctx.invokedByModel !== true && ctx.openSelection !== undefined;
       const names = description.actions.map((action) => `${action.word} (${action.label})`).join(', ');
       if ('bare' in parsed) {
+        // A command that stays typed to open its place (`opens`) opens it: its actions are that place's controls.
+        if (dialog && description.opens && ctx.openPlace) { ctx.openPlace(description.opens); return; }
         // A command whose screen is the point (`/work`) opens it: its other actions are reached from that screen.
         const opens = description.bareOpens ? description.actions.find((action) => action.id === description.bareOpens) : undefined;
         if (dialog && opens) { await runComplete(description, opens, defaultsOf(opens as ActionDescription<never>), ctx); return; }

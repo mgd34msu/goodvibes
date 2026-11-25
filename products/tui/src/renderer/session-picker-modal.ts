@@ -206,6 +206,6 @@ export const { renderSessionPickerModal } = createSessionPickerRenderer<SessionP
   mouseNavigation: true,
   openLabel: 'open',
   deleteLabel: 'delete',
-  saveHint: 'Use /save [name] to save the current session.',
+  saveHint: 'Save the current session from This conversation, in the menu.',
   pinned: (modal) => [...hostedRows(modal), ...crossSurfaceRows(modal)],
 });

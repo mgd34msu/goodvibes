@@ -8,7 +8,7 @@ import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { choiceInput, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
+import { choiceInput, readAction, REPLACED_DONE, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import type { CliCommandRuntime } from '../../cli/management.ts';
 import { handleBundleCommand } from '../../cli/bundle-command.ts';
@@ -72,7 +72,7 @@ const BUNDLE_COMMAND = defineCommand<CommandContext>({
         { ...FILE, help: 'Where to write it', required: { default: DEFAULT_BUNDLE_FILENAME, defaultMeans: `${DEFAULT_BUNDLE_FILENAME} in this folder` } },
         choiceInput({ id: 'existing', label: 'If the file exists', help: 'Stop, or write over what it holds', choices: [
           { value: 'stop', label: 'Stop and say so' },
-          { value: 'replace', label: 'Replace it', help: 'What it holds now cannot be recovered.', risk: 'cannot-be-undone' },
+          { value: 'replace', label: 'Replace it', help: 'What it holds now cannot be recovered.', risk: 'cannot-be-undone', riskDone: REPLACED_DONE },
         ], typed: { flag: '--replace', switchOn: 'replace' }, optional: { default: 'stop', means: 'stop and say so' } }),
       ],
       sentence: 'This Agent\'s settings and setup, with every secret taken out, are written to {path}.', done: '',

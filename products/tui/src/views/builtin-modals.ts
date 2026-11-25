@@ -1,40 +1,23 @@
 import { GOODVIBES_TUI_SURFACE_ROOT } from '../config/surface.ts';
-import { createNativeWorkLedgerModalSurface } from './modals/native-work-ledger-modal.ts';
 import type { ModalSurfaceRegistry } from './modal-surface-registry.ts';
 import type { ResolvedBuiltinViewDeps } from './view-deps.ts';
 import type { ConfigModalSurface, ConfigModalView } from '../input/config-modal-types.ts';
-import { createProviderRuntimeInspectionQuery } from '@/runtime/index.ts';
-import { createRuntimeProviderApi } from '@/runtime/index.ts';
 import { copyToClipboard } from '../utils/clipboard.ts';
 import { pairingNoWebUiLines, pairingOriginUsesStableHost, pairingReachFromSettings, pairingThisMachineLines, refreshStableHostInputs, resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { availablePairingOffers, mintPairingHandoff, defaultPairingTokenName, PAIRING_HANDOFF_OFFER_KINDS, type OriginPosture, type PairingHandoffOfferKind } from '@goodvibes/engine/platform/platform/pairing';
 import { probePairingTailscale, runPairingTailscaleServe, stopPairingTailscaleServe } from '../core/pairing-tailscale-gateway.ts';
-// ── Providers & Connectivity + Security subset ────────────────────────────────
-import { createServicesModalSurface } from './modals/services-modal.ts';
-import { createSubscriptionModalSurface } from './modals/subscription-modal.ts';
-import { createRemoteModalSurface } from './modals/remote-modal.ts';
-import { createSettingsSyncModalSurface } from './modals/settings-sync-modal.ts';
-import { createProviderHealthModalSurface } from './modals/provider-health-modal.ts';
-import { createLocalAuthModalSurface } from './modals/local-auth-modal.ts';
+// ── Security subset ──────────────────────────────────────────────────────────
 import { createSandboxModalSurface } from './modals/sandbox-modal.ts';
 // ── Ecosystem & Governance ─────────────────────────────────────────────────
 import { createMarketplaceModalSurface } from './modals/marketplace-modal.ts';
-import { createPluginsModalSurface } from './modals/plugins-modal.ts';
-import { createSkillsModalSurface } from './modals/skills-modal.ts';
-import { createHooksModalSurface } from './modals/hooks-modal.ts';
 import { createSecurityModalSurface } from './modals/security-modal.ts';
 import { createPolicyModalSurface } from './modals/policy-modal.ts';
-import { createKnowledgeModalSurface } from './modals/knowledge-modal.ts';
-import { createMemoryModalSurface, type MemoryModalDeps } from './modals/memory-modal.ts';
-import { createMemoryConsolidationGateway } from './memory-consolidation-gateway.ts';
-import { createWorkPlanModalSurface } from './modals/work-plan-modal.ts';
 import { createKeybindingsModalSurface } from './modals/keybindings-modal.ts';
 import { createPairingModalSurface, type PairingConnectionRequest, type PairingModalConnectionInfo, type PairingModalUnreachable } from './modals/pairing-modal.ts';
 import { createDevicesModalSurface } from './modals/devices-modal.ts';
 import { describeOperatorRpcError, resolveDaemonEndpoint, resolveOperatorRpc } from '../runtime/client/operator-endpoint.ts';
 import { subscribeDaemonListChanges } from '@goodvibes/engine/platform/platform/runtime/client';
 import { revokeSharedTokenOnDaemon } from '../runtime/client/shared-token-revocation.ts';
-import { createPlanningModalSurface } from './modals/planning-modal.ts';
 
 /**
  * Register the config-modal surfaces and the old names that open them. Called
@@ -44,43 +27,21 @@ import { createPlanningModalSurface } from './modals/planning-modal.ts';
  *   2. registerModalRedirect, so deep links, notifications and any
  *      alias still resolve to the modal (views.ts consults these).
  *
- * `openMaskedEntry` opens the local-auth password prompt (a kit modal), which
- * is how the Local Auth modal's add-user and rotate-password actions keep the
- * password out of argv, history and the transcript.
+ * Who may sign in is in the Permissions and safety place (terminal-shell
+ * places/safety-place.ts): its form takes a password on a hidden line.
  */
 export function registerBuiltinModals(
   manager: ModalSurfaceRegistry,
   deps: ResolvedBuiltinViewDeps,
-  openMaskedEntry: (kind: 'add-user' | 'rotate-password', username?: string) => void,
 ): void {
   const ui = deps.uiServices;
-  manager.registerModalSurface(createNativeWorkLedgerModalSurface(deps.nativeWorkLedgerSelection ?? (() => ({ available: false, identity: 'unwired', reason: 'No authenticated native work host selected.' }))));
-  manager.registerModalRedirect('work', 'native-work-ledger-modal');
+  // Work is a place (terminal-shell places/work-place.ts); view-openers.ts opens it by the old work, planning and to-do screens' names.
 
-  // ── Providers & Connectivity ─────────────────────────────────────────────────
-  manager.registerModalSurface(createServicesModalSurface(deps.serviceRegistry, deps.subscriptionManager));
-  manager.registerModalRedirect('services', 'services-modal');
-
-  manager.registerModalSurface(createSubscriptionModalSurface(deps.serviceRegistry, deps.subscriptionManager));
-  manager.registerModalRedirect('subscription', 'subscription-modal');
-
-  manager.registerModalSurface(createRemoteModalSurface(
-    ui.readModels.remote,
-    () => ui.platform.externalServices?.inspect().daemonStatus,
-  ));
-  manager.registerModalRedirect('remote', 'remote-modal');
-
-  manager.registerModalSurface(createBuiltinProviderHealthModalSurface(deps));
-  manager.registerModalRedirect('provider-health', 'providers-modal');
-  manager.registerModalRedirect('providers', 'providers-modal');
-  manager.registerModalRedirect('accounts', 'providers-modal');
+  // Providers, their sign-ins and the services are the Models and providers place (terminal-shell
+  // places/models-place.ts); view-openers.ts opens it by the old screens' names.
 
   // ── Security & Governance ────────────────────────────────────────────────────
-  manager.registerModalSurface(createSettingsSyncModalSurface(deps.configManager));
-  manager.registerModalRedirect('settings-sync', 'settings-sync-modal');
-
-  manager.registerModalSurface(createLocalAuthModalSurface(deps.localUserAuthManager, openMaskedEntry));
-  manager.registerModalRedirect('local-auth', 'local-auth-modal');
+  // Settings sync is the Devices and network place's Settings sync tab (terminal-shell places/devices-place.ts).
 
   manager.registerModalSurface(createSandboxModalSurface(deps.configManager, deps.sandboxSessionRegistry, deps.requestRender));
   manager.registerModalRedirect('sandbox', 'sandbox-modal');
@@ -102,29 +63,8 @@ export function registerBuiltinModals(
   // release-gate harness), register a degraded placeholder rather than throw,
   // so the surface + redirect always resolve (the "always register, degrade
   // honestly" charter pattern).
-  manager.registerModalSurface(deps.pluginManager
-    ? createPluginsModalSurface({ pluginManager: deps.pluginManager })
-    : unwiredSurface('plugins-modal', 'Plugins', 'Plugin manager not wired into this session.'));
-  manager.registerModalRedirect('plugins', 'plugins-modal');
-
-  manager.registerModalSurface(createSkillsModalSurface({
-    shellPaths: {
-      workingDirectory: ui.environment.shellPaths.workingDirectory,
-      homeDirectory: ui.environment.shellPaths.homeDirectory,
-    },
-    ecosystemPaths: {
-      cwd: ui.environment.shellPaths.workingDirectory,
-      homeDir: ui.environment.shellPaths.homeDirectory,
-      projectCatalogRoot: ui.environment.shellPaths.resolveProjectPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
-      userCatalogRoot: ui.environment.shellPaths.resolveUserPath(GOODVIBES_TUI_SURFACE_ROOT, 'ecosystem'),
-    },
-  }));
-  manager.registerModalRedirect('skills', 'skills-modal');
-
-  manager.registerModalSurface(deps.hookDispatcher && deps.hookWorkbench && deps.hookActivityTracker
-    ? createHooksModalSurface({ hookDispatcher: deps.hookDispatcher, hookWorkbench: deps.hookWorkbench, hookActivityTracker: deps.hookActivityTracker })
-    : unwiredSurface('hooks-modal', 'Hooks', 'Hook dispatcher/workbench not wired into this session.'));
-  manager.registerModalRedirect('hooks', 'hooks-modal');
+  // Skills, plugins and hooks (with the trace of which hooks ran) are tabs of Tools and extensions
+  // (terminal-shell places/tools-place.ts, tools-skills-entries.ts): no screen of their own.
 
   // The daemon's LIST_CHANGED `paired-devices`, followed while the Security or Paired Devices screen is open:
   // a phone paired, renamed or revoked through the daemon redraws them with no key.
@@ -143,25 +83,8 @@ export function registerBuiltinModals(
   manager.registerModalSurface(createPolicyModalSurface({ policyRuntimeState: deps.policyRuntimeState }));
   manager.registerModalRedirect('policy', 'policy-modal');
 
-  manager.registerModalSurface(deps.knowledgeApi
-    ? createKnowledgeModalSurface({ knowledgeApi: deps.knowledgeApi })
-    : unwiredSurface('knowledge-modal', 'Knowledge', 'Knowledge API not wired into this session.'));
-  manager.registerModalRedirect('knowledge', 'knowledge-modal');
+  // Memory and knowledge is a place (terminal-shell places/memory-place.ts); view-openers.ts opens it by these names.
 
-  manager.registerModalSurface(createMemoryModalSurface({
-    memoryRegistry: deps.memoryRegistry as MemoryModalDeps['memoryRegistry'],
-    // Lazily resolved, a fresh factory call per Proposals-tab fetch, exactly
-    // like the Fleet gateway (fleet-gateway.ts), so a daemon that comes up
-    // AFTER this session started is still reachable on the next refresh.
-    resolveConsolidationGateway: () => createMemoryConsolidationGateway({
-      configManager: deps.configManager,
-      homeDirectory: ui.environment.shellPaths.homeDirectory,
-    }),
-  }));
-  manager.registerModalRedirect('memory', 'memory-modal');
-
-  manager.registerModalSurface(createWorkPlanModalSurface({ workPlan: deps.workPlan }));
-  manager.registerModalRedirect('work-plan', 'work-plan-modal');
 
   manager.registerModalSurface(createKeybindingsModalSurface({
     toolRegistry: deps.toolRegistry,
@@ -197,12 +120,6 @@ export function registerBuiltinModals(
   }));
   manager.registerModalRedirect('devices', 'devices-modal');
 
-  manager.registerModalSurface(createPlanningModalSurface({
-    service: deps.projectPlanningService,
-    projectId: deps.projectPlanningProjectId,
-    requestRender: deps.requestRender,
-  }));
-  manager.registerModalRedirect('project-planning', 'native-work-ledger-modal');
 
   // The retired 'sessions' view folds into the EXISTING session-picker modal
   // (no new config-modal surface); the redirect is a plain hand-off, moved here
@@ -312,29 +229,3 @@ function unwiredSurface(name: string, title: string, reason: string): ConfigModa
   };
 }
 
-
-/** Production provider-console composition, shared with focused boundary tests. */
-export function createBuiltinProviderHealthModalSurface(deps: ResolvedBuiltinViewDeps): ConfigModalSurface {
-  const ui = deps.uiServices;
-  const providerRuntime = createProviderRuntimeInspectionQuery(createRuntimeProviderApi({
-    benchmarkStore: ui.providers.benchmarkStore,
-    favoritesStore: ui.providers.favoritesStore,
-    providerRegistry: ui.providers.providerRegistry,
-  }));
-  const m = ui.readModels;
-  const domainModels = [m.localAuth, m.settings, m.remote, m.security, m.intelligence, m.continuity, m.worktrees, m.session] as const;
-  return createProviderHealthModalSurface(providerRuntime, m.providers, () => ({
-    configManager: deps.configManager,
-    auth: m.localAuth.getSnapshot(),
-    settings: m.settings.getSnapshot(),
-    remote: m.remote.getSnapshot(),
-    security: m.security.getSnapshot(),
-    intelligence: m.intelligence.getSnapshot(),
-    continuity: m.continuity.getSnapshot(),
-    worktrees: m.worktrees.getSnapshot(),
-    session: m.session.getSnapshot(),
-  }), (listener) => {
-    const unsubs = domainModels.map((model) => model.subscribe(listener));
-    return () => { for (const unsub of unsubs) unsub(); };
-  });
-}

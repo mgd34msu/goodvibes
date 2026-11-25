@@ -30,6 +30,7 @@ import { HELD_OWNER_ONLY_METADATA } from './held-for-owner.js';
 import { PURCHASE_AMOUNT_METADATA, PURCHASE_DEADLINE_METADATA, PURCHASE_ITEM_METADATA, PURCHASE_SHOP_METADATA, PURCHASE_STANDING_METADATA } from '../payments/payment-ports.js';
 import { formatMinorUnits } from '../payments/message.js';
 import { minorUnitExponent } from '../payments/money-parsing.js';
+import { toolAskWords } from './tool-ask-words.js';
 
 export type AskKind =
   | 'run-command' | 'answer-command-prompt' | 'change-files' | 'fetch' | 'start-agent' | 'hand-off-work'
@@ -304,6 +305,9 @@ function nameWords(name: string): string {
 function toolQuestion(tool: string, args: Record<string, unknown>): string {
   const written = TOOL_QUESTIONS[tool];
   if (written) return written(args);
+  // A tool whose program words its calls itself (capability_run: the capability's own label).
+  const own = toolAskWords(tool, args);
+  if (own) return own.question;
   const words = toolCallActivity(toolActivityOf(tool), args);
   if (words?.object) return `${imperativeOf(words.doing)} ${words.object}?`;
   if (tool.includes('__')) {
@@ -609,6 +613,9 @@ function subjectOf(kind: AskKind, request: PermissionPromptRequest, values: read
       .map(([key, value]) => `${nameWords(key)}: ${typeof value === 'string' ? value : JSON.stringify(value)}`);
     return lines.length > 0 ? { kind: 'text', lines } : undefined;
   }
+  // A call its program words itself: its sentence and each input on a labelled line, never the arguments as JSON.
+  const own = toolAskWords(request.tool, request.args);
+  if (own) return own.lines.length > 0 ? { kind: 'text', lines: [...own.lines] } : undefined;
   if (values.length === 0) return undefined;
   if (kind === 'answer-command-prompt' && request.attribution?.kind === 'exec-prompt') {
     return { kind: 'command', lines: [request.attribution.command, request.attribution.prompt] };

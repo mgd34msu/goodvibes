@@ -1,6 +1,5 @@
 import { revealOrNull } from '@goodvibes/engine/platform/platform/security';
-import { createAuthCommand } from '@goodvibes/engine/terminal-shell/auth-review-command';
-import type { ServiceSignIn, ServiceSignOut } from '@goodvibes/engine/terminal-shell/provider-account-commands';
+import type { ServiceSessionRequest } from '@goodvibes/engine/platform/platform/capabilities';
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import { readRefusal } from '@goodvibes/engine/errors';
 import { buildUrl } from '@goodvibes/engine/transport-http';
@@ -14,31 +13,6 @@ import {
   requireSecretsManager,
   requireShellPaths,
 } from './runtime-services.ts';
-
-interface AuthReviewBundle {
-  readonly version: 1;
-  readonly exportedAt: number;
-  /** The sign-in address of the daemon this terminal dials, or null when no daemon address is set. */
-  readonly daemonLoginUrl: string | null;
-  readonly secretKeys: readonly string[];
-  readonly activeSubscriptions: readonly string[];
-  readonly pendingSubscriptions: readonly string[];
-}
-
-/** A summary as read back: one saved by 3.4.0 or earlier also holds a fixed listener address. */
-type SavedAuthReviewBundle = AuthReviewBundle & { readonly listenerLoginUrl?: unknown };
-
-function inspectAuthBundle(bundle: SavedAuthReviewBundle): string {
-  return [
-    'Auth Review Bundle',
-    `  exportedAt: ${new Date(bundle.exportedAt).toISOString()}`,
-    `  daemonLoginUrl: ${typeof bundle.daemonLoginUrl === 'string' && bundle.daemonLoginUrl ? bundle.daemonLoginUrl : 'no daemon address set'}`,
-    ...(typeof bundle.listenerLoginUrl === 'string' ? [`  listenerLoginUrl: ${bundle.listenerLoginUrl} (a fixed address an older release wrote)`] : []),
-    `  stored secrets: ${bundle.secretKeys.length}`,
-    `  active subscriptions: ${bundle.activeSubscriptions.length}`,
-    `  pending subscriptions: ${bundle.pendingSubscriptions.length}`,
-  ].join('\n');
-}
 
 const AUTH_LOGIN_TIMEOUT_MS = 15_000;
 
@@ -96,7 +70,7 @@ function serviceBaseUrl(raw: string, action: string): URL {
 async function exchangeServiceLogin(
   ctx: CommandContext,
   input: { target: ServiceTarget; baseUrl: URL; username: string; password: string; secretKey: string },
-): Promise<void> {
+): Promise<string> {
   try {
     const url = buildUrl(input.baseUrl.href, '/login');
     const response = await fetch(url, {
@@ -132,23 +106,22 @@ async function exchangeServiceLogin(
       const notInUse = daemonTokenOverride()
         ? 'GOODVIBES_DAEMON_TOKEN is set, and it is the bearer for every daemon call while it is'
         : dialledOrigin !== signedIn
-          ? `this terminal dials ${dialled ?? 'no daemon address'}, not ${signedIn}; the session is used once this terminal is pointed at that address (connect to it with /setup connect-daemon)`
+          ? `this terminal dials ${dialled ?? 'no daemon address'}, not ${signedIn}; the session is used once this terminal is pointed at that address (Settings, the daemon to connect to)`
           : null;
-      ctx.print([
+      return [
         notInUse
           ? `Signed in to the daemon at ${signedIn} as ${input.username}; the session is stored but not in use: ${notInUse}.`
           : `Signed in to the daemon at ${signedIn} as ${input.username}; this terminal now calls that daemon with the session.`,
-        `  It stays ${notInUse ? 'stored' : 'in use'} until it expires (calls are then refused until you sign in again or sign out) or you run /accounts sign-out daemon ${signedIn}.`,
+        `  It stays ${notInUse ? 'stored' : 'in use'} until it expires (calls are then refused until you sign in again or sign out) or you sign out of it in Models and providers.`,
         ...(input.secretKey === sessionTokenKey(input.target, undefined) ? [] : [`  A daemon session is kept per daemon address, so the key name ${input.secretKey} is not used.`]),
-      ].join('\n'));
-      return;
+      ].join('\n');
     }
     // Stored with the origin that issued it: sign-out sends it back only there.
     await requireSecretsManager(ctx).set(input.secretKey, encodeListenerSession(input.baseUrl.origin, body.token));
-    ctx.print([
+    return [
       `Signed in to the ${input.target} at ${input.baseUrl.origin} as ${input.username}; the session token is in secure storage as ${input.secretKey}.`,
-      `  The session stays valid on the ${input.target} until it expires or you run /accounts sign-out ${input.target} ${input.baseUrl.origin}${input.secretKey === sessionTokenKey(input.target, undefined) ? '' : ` --key ${input.secretKey}`}.`,
-    ].join('\n'));
+      `  The session stays valid on the ${input.target} until it expires or you sign out of it in Models and providers.`,
+    ].join('\n');
   } catch (error) {
     if (readRefusal(error)) throw error;
     const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
@@ -171,13 +144,13 @@ async function exchangeServiceLogin(
 async function endServiceSession(
   ctx: CommandContext,
   input: { target: ServiceTarget; baseUrl: URL; secretKey: string },
-): Promise<void> {
+): Promise<string> {
   const secrets = requireSecretsManager(ctx);
   const homeDirectory = requireShellPaths(ctx).homeDirectory;
   // A daemon session is held per address; a listener session names the origin that issued it.
   const stored = input.target === 'daemon' ? readDaemonSessionToken(homeDirectory, input.baseUrl.origin) : revealOrNull(await secrets.get(input.secretKey), 'dispatch');
   if (!stored) {
-    throw commandRefusal(`No ${input.target} session is held for ${input.baseUrl.origin}; nothing to sign out of.`, `/accounts sign-in ${input.target} ${input.baseUrl.origin} signs in.`);
+    throw commandRefusal(`No ${input.target} session is held for ${input.baseUrl.origin}; nothing to sign out of.`, `Sign in to the ${input.target} at ${input.baseUrl.origin} in Models and providers.`);
   }
   let token = stored;
   if (input.target === 'listener') {
@@ -185,11 +158,10 @@ async function endServiceSession(
     if (!session) {
       // It does not say which listener issued it, so it is sent nowhere.
       await secrets.delete(input.secretKey);
-      ctx.print(`Removed the stored listener token ${input.secretKey} from this terminal without contacting ${input.baseUrl.origin}: it does not name the listener that issued it, so it is never sent anywhere. That session lapses at its expiry.`);
-      return;
+      return `Removed the stored listener token ${input.secretKey} from this terminal without contacting ${input.baseUrl.origin}: it does not name the listener that issued it, so it is never sent anywhere. That session lapses at its expiry.`;
     }
     if (session.origin !== input.baseUrl.origin) {
-      throw commandRefusal(`The listener session stored as ${input.secretKey} was issued by ${session.origin}; it is never sent to ${input.baseUrl.origin}. Nothing was sent or removed.`, `/accounts sign-out listener ${session.origin}${input.secretKey === sessionTokenKey('listener', undefined) ? '' : ` --key ${input.secretKey}`} signs out there.`);
+      throw commandRefusal(`The listener session stored as ${input.secretKey} was issued by ${session.origin}; it is never sent to ${input.baseUrl.origin}. Nothing was sent or removed.`, `Sign out of the listener at ${session.origin} instead.`);
     }
     token = session.token;
   }
@@ -208,96 +180,39 @@ async function endServiceSession(
       : response.status === 401
         ? `The ${input.target} no longer knows the session (it expired or was revoked already).`
         : response.status === 404 || response.status === 405
-          ? `The ${input.target} is an older build without a sign-out route, so the session lapses at its expiry${input.target === 'daemon' ? ', or an administrator ends it with /local-auth sign-out' : ''}.`
-          : `The ${input.target} did not end the session (HTTP ${response.status}); it lapses at its expiry${input.target === 'daemon' ? ', or an administrator ends it with /local-auth sign-out' : ''}.`;
+          ? `The ${input.target} is an older build without a sign-out route, so the session lapses at its expiry${input.target === 'daemon' ? ', or an administrator ends it' : ''}.`
+          : `The ${input.target} did not end the session (HTTP ${response.status}); it lapses at its expiry${input.target === 'daemon' ? ', or an administrator ends it' : ''}.`;
   } catch (error) {
     revoked = `The ${input.target} could not be reached (${error instanceof Error ? error.message : String(error)}); the session lapses at its expiry.`;
   }
   if (input.target === 'daemon') {
     writeDaemonSessionToken(homeDirectory, input.baseUrl.origin, null);
-    ctx.print(`Signed out of the daemon at ${input.baseUrl.origin}: ${revoked} This terminal calls it with its own credential again.`);
-    return;
+    return `Signed out of the daemon at ${input.baseUrl.origin}: ${revoked} This terminal calls it with its own credential again.`;
   }
   await secrets.delete(input.secretKey);
-  ctx.print(`Signed out of the ${input.target} at ${input.baseUrl.origin}: ${revoked} The stored token ${input.secretKey} was removed.`);
+  return `Signed out of the ${input.target} at ${input.baseUrl.origin}: ${revoked} The stored token ${input.secretKey} was removed.`;
 }
 
-/** Sign in to a daemon or listener (`/accounts sign-in`): the password goes only to the address given. */
-export async function signInToService(ctx: CommandContext, input: ServiceSignIn): Promise<void> {
-  const baseUrl = serviceBaseUrl(input.address, 'Not signed in');
-  await exchangeServiceLogin(ctx, { target: input.service, baseUrl, username: input.user, password: input.password, secretKey: sessionTokenKey(input.service, input.key || undefined) });
+/**
+ * This terminal app's own sessions toward a daemon or listener, as the
+ * capabilities accounts.sign-in and accounts.sign-out take them
+ * (capabilities/builtin/service-sessions.ts): the password goes only to the
+ * address given.
+ */
+export function serviceSessionsOf(ctx: CommandContext) {
+  return {
+    async signIn(input: ServiceSessionRequest): Promise<string> {
+      const baseUrl = serviceBaseUrl(input.address, 'Not signed in');
+      if (!input.password) throw commandRefusal('Not signed in: no password was given.');
+      return exchangeServiceLogin(ctx, { target: input.service, baseUrl, username: input.user, password: input.password, secretKey: sessionTokenKey(input.service, input.key || undefined) });
+    },
+    async signOut(input: Omit<ServiceSessionRequest, 'user' | 'password'>): Promise<string> {
+      const baseUrl = serviceBaseUrl(input.address, 'Not signed out');
+      return endServiceSession(ctx, { target: input.service, baseUrl, secretKey: sessionTokenKey(input.service, input.key || undefined) });
+    },
+  };
 }
-
-/** Sign out of a daemon or listener (`/accounts sign-out`). */
-export async function signOutOfService(ctx: CommandContext, input: ServiceSignOut): Promise<void> {
-  const baseUrl = serviceBaseUrl(input.address, 'Not signed out');
-  await endServiceSession(ctx, { target: input.service, baseUrl, secretKey: sessionTokenKey(input.service, input.key || undefined) });
-}
-
-/** `/auth` is one description shared with the other terminal app (terminal-shell/auth-review-command.ts). */
-const authCommand = createAuthCommand<CommandContext, AuthReviewBundle>({
-  review: (snapshot, builtinProviders) => [
-    'Provider sign-ins',
-    '  a daemon or listener: /accounts sign-in',
-    `  stored secrets: ${snapshot.secretKeyCount}`,
-    `  built-in providers: ${builtinProviders.length}${builtinProviders.length > 0 ? ` (${builtinProviders.join(', ')})` : ''}`,
-    `  active subscriptions: ${snapshot.activeSubscriptions}${
-      snapshot.activeSubscriptions > 0
-        ? ` (${snapshot.providers
-            .filter((provider) => provider.activeSubscription)
-            .map((provider) => provider.provider)
-            .join(', ')})`
-        : ''
-    }`,
-    `  pending subscriptions: ${snapshot.pendingSubscriptions}${
-      snapshot.pendingSubscriptions > 0
-        ? ` (${snapshot.providers
-            .filter((provider) => provider.pendingLogin)
-            .map((provider) => provider.provider)
-            .join(', ')})`
-        : ''
-    }`,
-    ...snapshot.providers.map(
-      (provider) =>
-        `  ${provider.provider}  freshness=${provider.freshness}  mode=${provider.callbackMode}  configured=${provider.configured ? 'yes' : 'no'}`,
-    ),
-  ],
-  show: (provider, inspection) => [
-    `Auth Provider ${provider}`,
-    `  configured: ${inspection.configured ? 'yes' : 'no'}`,
-    ...(inspection.source ? [`  source: ${inspection.source}`] : []),
-    `  freshness: ${inspection.freshness}`,
-    `  callbackMode: ${inspection.callbackMode}`,
-    ...(inspection.redirectUri ? [`  redirectUri: ${inspection.redirectUri}`] : []),
-    ...(inspection.localCallback ? [`  localCallback: ${inspection.localCallback}`] : []),
-    `  activeSubscription: ${inspection.activeSubscription ? 'yes' : 'no'}`,
-    `  pendingLogin: ${inspection.pendingLogin ? 'yes' : 'no'}`,
-    `  overrideAmbientApiKeys: ${inspection.overrideAmbientApiKeys ? 'yes' : 'no'}`,
-    ...(inspection.tokenType ? [`  tokenType: ${inspection.tokenType}`] : []),
-    ...(inspection.expiresAt ? [`  expiresAt: ${new Date(inspection.expiresAt).toISOString()}`] : []),
-    ...inspection.issues.map((issue) => `  issue: ${issue}`),
-    ...inspection.nextActions.map((action) => `  next: ${action}`),
-  ],
-  repair: (provider, inspection) => [
-    `Auth Repair ${provider}`,
-    `  configured: ${inspection.configured ? 'yes' : 'no'}`,
-    `  freshness: ${inspection.freshness}`,
-    `  callbackMode: ${inspection.callbackMode}`,
-    ...inspection.issues.map((issue) => `  issue: ${issue}`),
-    ...(inspection.nextActions.length > 0
-      ? ['  next:', ...inspection.nextActions.map((action) => `    ${action}`)]
-      : ['  No active repair actions suggested.']),
-  ],
-  build: (base, ctx) => {
-    // The daemon this terminal dials; a listener session carries its own issuing origin, so no listener address is recorded.
-    const daemon = resolveControlPlaneBaseUrl(ctx.platform.configManager);
-    return { ...base, daemonLoginUrl: daemon ? buildUrl(daemon, '/login') : null };
-  },
-  inspect: (value) => inspectAuthBundle(value as SavedAuthReviewBundle),
-});
 
 export function registerPlatformAccessRuntimeCommands(registry: CommandRegistry): void {
   registerUpdateCommand(registry);
-
-  registry.register(authCommand);
 }

@@ -95,7 +95,7 @@ export interface ConfigKeyFacts {
 export function reasoningEffortSetting(): Pick<ConfigSettingFields, 'validate' | 'validationHint'> {
   return {
     validate: isAcceptableReasoningEffortSetting,
-    validationHint: 'a known reasoning effort level, run /effort for the current model choices',
+    validationHint: 'a known reasoning effort level; "See how hard the model thinks" in This conversation lists the current model\'s choices',
   };
 }
 

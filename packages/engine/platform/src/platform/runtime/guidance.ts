@@ -202,7 +202,7 @@ export function evaluateContextualGuidance(
       category: 'recovery',
       title: 'A permission decision is waiting',
       summary: 'Operator approval is currently blocking the active workflow.',
-      commands: ['/approval', '/security'],
+      commands: ['Waiting for you (in the menu)', '/security'],
     });
   }
 
@@ -213,7 +213,7 @@ export function evaluateContextualGuidance(
       category: 'operational',
       title: 'Repeated denials suggest a policy mismatch',
       summary: 'Several actions were denied in this session. Review whether a scoped durable rule should be added.',
-      commands: ['/security', '/approval'],
+      commands: ['/security', 'Waiting for you (in the menu)'],
     });
   }
 
@@ -224,7 +224,8 @@ export function evaluateContextualGuidance(
       category: 'recovery',
       title: 'One or more MCP servers require authentication',
       summary: `${snapshot.authRequiredMcpCount} MCP server${snapshot.authRequiredMcpCount === 1 ? '' : 's'} cannot operate until auth is completed.`,
-      commands: ['/mcp', '/services check'],
+      // The services' own check is a control in Models and providers (Services, check every service).
+      commands: ['/mcp'],
     });
   }
 
@@ -246,7 +247,7 @@ export function evaluateContextualGuidance(
       category: 'onboarding',
       title: 'Workspace intelligence is not ready',
       summary: 'Diagnostics and symbol search are unavailable for this workspace. Enable or configure intelligence to improve code-aware workflows.',
-      commands: ['/intelligence review', '/health check intelligence'],
+      commands: ['Code and changes, Code intelligence (in the menu)', '/health check intelligence'],
     });
   }
 
@@ -275,6 +276,6 @@ export function formatGuidanceItems(items: readonly GuidanceItem[]): string[] {
     `[${item.category}] ${item.title}`,
     `  ${item.summary}`,
     ...(item.commands.length > 0 ? [`  next: ${item.commands.join('  ')}`] : []),
-    `  dismiss: /guidance dismiss ${item.id}`,
+    `  dismiss: "Dismiss a piece of guidance" in This conversation, then ${item.id}`,
   ]);
 }

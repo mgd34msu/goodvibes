@@ -26,6 +26,8 @@ export async function createDaemonNativeWorkExecutionServices(options: Omit<Daem
   readonly joinForeground?: (contractId: string) => Promise<void>;
   readonly releaseForeground?: (contractId: string) => void;
   readonly readAccessFilter: NonNullable<DaemonContractCompositionOptions['readAccessFilter']>;
+  /** A piece of work's plan before it runs ("Show me the plan before it runs"). */
+  readonly workPlans?: Pick<import('@goodvibes/engine/platform/platform/workflow/work-ledger').WorkPlans, 'gate' | 'started'> | undefined;
 }) {
   const continuationOwner = options.continuationScopeOwner;
   const continuationPolicy = continuationOwner ? createDaemonContinuationPolicy(options.configManager, continuationOwner) : undefined;
@@ -38,7 +40,8 @@ export async function createDaemonNativeWorkExecutionServices(options: Omit<Daem
     verification: { settings: () => checkSettings(readContractConfig(options.configManager)), readAccessFilter: options.readAccessFilter },
     ...(options.cancelForeground ? { cancelForeground: options.cancelForeground } : {}),
     ...(options.joinForeground ? { joinForeground: options.joinForeground } : {}),
-    ...(options.releaseForeground ? { releaseForeground: options.releaseForeground } : {}) });
+    ...(options.releaseForeground ? { releaseForeground: options.releaseForeground } : {}),
+    ...(options.workPlans ? { plans: options.workPlans } : {}) });
   try {
     const contracts = createDaemonContractServices({ ...options, nativeDataWriter: options.nativeDataWriter ?? options.configManager.getNativeDataWriter(), projectRoot: realpathSync(options.projectRoot), nativeOwner: execution.nativeOwner });
     execution.attachRunner(contracts.runner);

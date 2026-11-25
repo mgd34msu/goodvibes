@@ -67,7 +67,12 @@ export function capabilityRunDefinition(entries: readonly CapabilityEntry[], met
     ...(methods.recipients ? { recipients: methods.recipients } : {}),
   };
   // Only the owner does it himself: its own flag, or an effect a model never causes that the owner cannot decide for it.
-  const ownerActs: ToolOwnerActs = { field: 'id', values: [...entries.filter((entry) => entry.ownerOnly || modelNeverRuns(entry)).map((entry) => entry.id), ...(methods.ownerActs ?? [])] };
+  const ownerOwn = entries.filter((entry) => entry.ownerOnly || modelNeverRuns(entry));
+  const ownerActs: ToolOwnerActs = {
+    field: 'id', values: [...ownerOwn.map((entry) => entry.id), ...(methods.ownerActs ?? [])],
+    // The refusal names the act in the capability's own words (gate/classify.ts).
+    words: Object.fromEntries(ownerOwn.map((entry) => [entry.id, entry.label])),
+  };
   return {
     name: CAPABILITY_RUN_TOOL,
     activity: { doing: 'Running', did: 'ran', object: 'a capability' },

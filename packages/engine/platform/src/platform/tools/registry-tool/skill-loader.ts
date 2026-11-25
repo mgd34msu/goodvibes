@@ -15,6 +15,7 @@ import {
 import { logger } from '../../utils/logger.js';
 import { listSkillIndex, readLocatedSkill } from '../../skills/discovery.js';
 import { resolveSkillRoots } from '../../skills/roots.js';
+import { skillMayLoad } from '../../skills/library.js';
 import type { SkillFrontmatterValue } from '../../skills/model.js';
 import { isInsideLiveRegistryScope, liveRegistryScope } from './source.js';
 
@@ -83,7 +84,8 @@ export async function loadSkillByTrigger(input: string, roots: SkillLoaderRoots)
     triggersOf(entry.metadata.triggers).some((trigger) => trigger.toLowerCase().trim() === normalizedInput)
     || `/${entry.name}`.toLowerCase() === normalizedInput;
   for (const entry of entries) {
-    if (!matches(entry) || !isInsideLiveRegistryScope(scope, entry.path)) continue;
+    // A skill switched off, or not reviewed yet, in the skill store is not loaded (skills/library.ts).
+    if (!matches(entry) || !skillMayLoad(entry.metadata) || !isInsideLiveRegistryScope(scope, entry.path)) continue;
     const skill = await readLocatedSkill(entry);
     if (skill) return materializeScoped(scope, entry.path, skill.body);
   }

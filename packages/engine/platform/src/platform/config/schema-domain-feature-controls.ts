@@ -63,12 +63,12 @@ export const featureControlSettings: ConfigSettingRow[] = [
       'Uses the context size a local model\'s server reports, so the conversation is shortened at the right point for that model. Turn off to use only explicitly configured or static limits.',
   },
   {
-    key: 'planner.adaptive',
-    label: 'Choose how each turn is carried out (not used yet)',
+    key: 'planner.showPlanFirst',
+    label: 'Show me the plan before it runs',
     appliesWhen: 'now',
     type: 'boolean',
     description:
-      'Reserved for choosing an execution strategy (single/cohort/background/remote) on every conversation turn. No turn reads a strategy yet, so this setting changes nothing today. The planner that /work planner, planner-mode, planner-override and planner-explain work with is consulted when /workstream drafts a plan, whatever this setting says.',
+      'Off: a piece of work you ask for has its plan written and run, and you can open the plan in Work at any time. On: its plan waits in Work, where you can change, reorder or take out steps or have it written again, then approve it (that starts the work) or throw it away.',
   },
   {
     key: 'tools.outputSchemaFingerprints',

@@ -38,7 +38,7 @@ export const SETTING_DOMAIN_VOCABULARY: Readonly<Record<string, SettingDomainVoc
     ],
     relatedCommand: {
       command: '/payments add-card',
-      why: 'The card number, expiry and verification code are never settings, they are typed at a local terminal through a masked prompt. /payments address enters the two addresses; /payments cards shows what is set.',
+      why: 'The card number, expiry and verification code are never settings, they are typed at a local terminal through a masked prompt ("Add a card" in the Money place). The Money place also sets the two addresses and shows what is set.',
     },
   },
   occasions: {

@@ -147,14 +147,29 @@ export function paintKeycapHints(line: Line, x: number, endX: number, hints: rea
 export function tabs(canvas: SurfaceCanvas, x: number, y: number, labels: readonly string[], active: number, maxX: number, onSelect?: ((index: number) => void) | undefined): number {
   const t = activeTokens();
   let cx = x;
-  // When the row is too narrow for every tab, the first tabs give way so the active one is always drawn.
-  const span = (from: number): number => labels.slice(from, active + 1).reduce((sum, label) => sum + getDisplayWidth(label) + 4, -4);
+  const widthOf = (from: number, to: number): number => labels.slice(from, to + 1).reduce((sum, label) => sum + getDisplayWidth(label) + 4, -4);
+  const allFit = labels.length === 0 || x + widthOf(0, labels.length - 1) <= maxX;
+  // When the row is too narrow for every tab, the first tabs give way so the active one is always drawn, and each
+  // cut side says how many tabs are hidden there ("‹ 2", "3 ›"), so no tab is out of sight unsaid.
+  const MARK = 6;
   let first = 0;
-  while (first < active && x + span(first) > maxX) first++;
+  while (!allFit && first < active && x + (first > 0 ? MARK : 0) + widthOf(first, active) > maxX - MARK) first++;
+  if (!allFit && first > 0) {
+    const mark = `‹ ${first}`;
+    if (onSelect) canvas.hitTargets.push({ id: 'tab:before', x: cx, y, width: getDisplayWidth(mark), height: 1, onClick: () => onSelect(first - 1) });
+    canvas.put(cx, y, mark, { fg: t.textFaint });
+    cx += MARK;
+  }
+  const limit = allFit ? maxX : maxX - MARK;
+  // Tabs keep their order: once one does not fit, none after it is drawn (a shorter later tab never jumps the queue).
+  let full = false;
+  let last = first - 1;
   labels.forEach((label, k) => {
-    if (k < first) return;
+    if (k < first || full) return;
     const w = getDisplayWidth(label);
-    if (cx + w > maxX) return;
+    // The open tab is always drawn, even past the room kept for the mark.
+    if (cx + w > (k === active ? maxX : limit)) { full = true; return; }
+    last = k;
     if (onSelect) canvas.hitTargets.push({ id: `tab:${k}:${label}`, x: cx - 1, y, width: w + 2, height: 1, onClick: () => onSelect(k) });
     if (k === active) {
       canvas.grad(cx - 1, y, w + 2, t.brand, t.brandEnd);
@@ -164,6 +179,14 @@ export function tabs(canvas: SurfaceCanvas, x: number, y: number, labels: readon
     }
     cx += w + 4;
   });
+  const after = labels.length - 1 - last;
+  if (after > 0) {
+    const mark = `${after} ›`;
+    const mx = Math.min(cx, maxX - getDisplayWidth(mark) + 1);
+    if (onSelect) canvas.hitTargets.push({ id: 'tab:after', x: mx, y, width: getDisplayWidth(mark), height: 1, onClick: () => onSelect(last + 1) });
+    canvas.put(mx, y, mark, { fg: t.textFaint });
+    cx = mx + getDisplayWidth(mark);
+  }
   return cx;
 }
 

@@ -154,6 +154,8 @@ export interface CallFacts {
   readonly recoverable: boolean;
   /** Recognised from the tool, its mode and its arguments (recognizeOwnerOnly). */
   readonly ownerOnly?: OwnerOnlyKind | undefined;
+  /** For an owner act, the act in its own words when the tool's declaration gives them (ownerActWordsOf). */
+  readonly ownerActWords?: string | undefined;
   /** The turn read text anyone can write (the untrusted-content ledger holds an entry for it). */
   readonly untrustedRead: boolean;
   /**
@@ -222,8 +224,10 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
   if (facts.ownerOnly === 'owner-act') {
     return { kind: 'fact', allow: false, basis: 'owner-act', decision: {
       state: 'refused', decidedBy: 'code',
-      reason: `${facts.tool} would do something only the owner does himself (answer what was put to him, or grant or withdraw access)`,
-      next: ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, /approval, the web UI)'],
+      reason: facts.ownerActWords
+        ? `${facts.ownerActWords} is something only the owner does from their own screen`
+        : `${facts.tool} would do something only the owner does himself (answer what was put to him, or grant or withdraw access)`,
+      next: ['do not call it again', 'tell the owner what is waiting; he answers it in his own app (the approval prompt, Waiting for you, the web UI)'],
     } };
   }
   // A guest's turn (someone a channel admits who is not its owner) may read and
@@ -447,6 +451,24 @@ export function callRecipients(args: Record<string, unknown>, definition?: Pick<
   if (paths.length === 0) return [];
   const values = declaredValues(args, paths);
   return values?.map((value) => value.trim()).filter((value) => value.length > 0);
+}
+
+/** A verb phrase as an act: "Start a remote runner" becomes "Starting a remote runner". */
+function asAct(label: string): string {
+  const [verb = '', ...rest] = label.trim().split(/\s+/);
+  const lower = verb.toLowerCase();
+  const ing = /[^e]e$/.test(lower) ? `${lower.slice(0, -1)}ing`
+    : /^[^aeiou]*[aeiou][bdgmnprt]$/.test(lower) ? `${lower}${lower.at(-1)}ing` : `${lower}ing`;
+  return [ing.charAt(0).toUpperCase() + ing.slice(1), ...rest].join(' ');
+}
+
+/** The act an owner-act call names, in its declaration's own words; undefined when it gives none. */
+export function ownerActWordsOf(args: Record<string, unknown>, definition: OwnerOnlyDefinition | undefined): string | undefined {
+  const acts = definition?.ownerActs;
+  if (!acts?.words) return undefined;
+  const value = acts.field.split('.').reduce<unknown>((node, key) => (node !== null && typeof node === 'object' ? (node as Record<string, unknown>)[key] : undefined), args);
+  const words = typeof value === 'string' ? acts.words[value] : undefined;
+  return words ? asAct(words) : undefined;
 }
 
 /**

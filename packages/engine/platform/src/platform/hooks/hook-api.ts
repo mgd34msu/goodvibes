@@ -8,6 +8,7 @@ import type {
   HookConfigInspection,
   HookSimulationResult,
 } from './workbench.js';
+import { HooksFileAwaitingTrustError } from './workbench.js';
 
 export interface HookContractRecord extends HookPointContract {
   /** Set when code chose the entry from the filter's words, without a decision model. */
@@ -264,7 +265,13 @@ export function createHookApi(options: CreateHookApiOptions): HookApi {
           // Read before the reload below, which starts from a cleared workbench.
           const rejected = [...options.workbench.getLastImportRejections()];
           await options.workbench.saveManagedConfig();
-          await options.workbench.loadAndApplyManagedHooks();
+          try {
+            await options.workbench.loadAndApplyManagedHooks();
+          } catch (error) {
+            // A folder not trusted yet holds the written file back from running; what the bundle left out is still said.
+            if (error instanceof HooksFileAwaitingTrustError) throw Object.assign(error, { rejected });
+            throw error;
+          }
           return rejected;
         });
       },

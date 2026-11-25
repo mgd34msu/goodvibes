@@ -116,8 +116,8 @@ function buildTeamworkReviewSnapshot(ctx: CommandContext, archetypes: readonly R
 
 type AgentManagerLike = ReturnType<typeof requireAgentManager>;
 
-/** What `/remote dispatch` is for: a remote engineer runs on a remote runner, which only a typed command starts. */
-const REMOTE_STEP_REFUSAL = 'A remote engineer runs on a remote runner, started with /remote dispatch engineer <description> typed in the terminal.';
+/** A remote engineer runs on a remote runner, which only the owner starts (the Work place, Runners, start a runner). */
+const REMOTE_STEP_REFUSAL = 'A remote engineer runs on a remote runner, which you start from the Work place: Runners, start a runner, kind of agent Engineer.';
 
 /** Start the agent a mode describes; null for a mode that runs remotely. */
 function startModeAgent(mode: TeamworkMode, title: string, manager: AgentManagerLike, extra: { readonly sessionId: string; readonly context?: string; readonly cohort?: string }): { readonly id: string; readonly template: string } | null {

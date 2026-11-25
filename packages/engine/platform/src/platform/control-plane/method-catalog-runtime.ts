@@ -574,11 +574,15 @@ export const builtinGatewayRuntimeMethodDescriptors: readonly GatewayMethodDescr
         note: STRING_SCHEMA,
       }, ['runId', 'ranAt', 'trigger', 'idle', 'scanned', 'merged', 'archived', 'decayed', 'proposed', 'usageSignalAvailable', 'note'])),
       pendingProposals: arraySchema(objectSchema({
+        // `<kind>:<sorted ids>`, what memory.consolidation.decide takes; the store sets it on every listed proposal.
+        id: STRING_SCHEMA,
         kind: enumSchema(['contradiction', 'cross-scope-duplicate', 'stale-delete']),
         ids: STRING_LIST_SCHEMA,
         route: STRING_SCHEMA,
         reason: STRING_SCHEMA,
       }, ['kind', 'ids', 'route', 'reason'])),
+      // The proposals the retained receipts raised that were decided since (the route counts them).
+      decidedProposalCount: NUMBER_SCHEMA,
     }, ['receipts', 'pendingProposals']),
   }),
   methodDescriptor({

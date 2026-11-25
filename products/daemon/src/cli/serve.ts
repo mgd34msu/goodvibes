@@ -27,6 +27,7 @@ import type { DaemonCliFlags } from './types.js';
 import { clearDerivedPublicBaseUrl, pruneDaemonStartupTokens, sweepDaemonWorktrees } from './startup-maintenance.js';
 import { renderDaemonStartupPairing } from './startup-pairing.js';
 import { readEnvDaemonToken, readEnvHttpListenerToken } from './daemon-tokens.js';
+import { registerDaemonAcpAgentCommand } from './self-acp-command.js';
 
 /** How long a working-directory move waits for the answer to the request that asked for it to reach the caller. */
 const MOVE_ANSWER_GRACE_MS = 100;
@@ -89,6 +90,8 @@ export function runConfiguredDaemonCli(
    */
   configureAt?: ((workingDirectory: string) => DaemonCliConfiguration) | undefined,
 ) {
+  // The remote runners this daemon starts are the terminal app run as an ACP agent.
+  registerDaemonAcpAgentCommand();
   // runDaemonProcess constructs its owner even when shutdown won admission.
   // Keep token and graph acquisition inside start, after that admission fence.
   const restarted = Symbol('native suite replacement completed');

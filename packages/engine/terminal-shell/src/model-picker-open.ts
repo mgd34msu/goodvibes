@@ -14,6 +14,8 @@ export interface ModelPickerOpenDeps<Info> {
     isCatalogLoadCurrent(ticket: number): boolean;
     fillCatalog(ticket: number, fill: ModelPickerCatalogFill<Info>, done?: boolean | undefined): boolean;
     onSessionEnded(listener: (chosen: boolean) => void): void;
+    /** When the providers' lists were last read for this picker (the empty list says it). */
+    listsReadAt?: number | null | undefined;
   };
   readonly render: () => void;
   /** The selectable models from the cached catalog (synchronous). */
@@ -36,8 +38,11 @@ export interface ModelPickerOpenDeps<Info> {
   readonly resolveSecretProviderIds: () => Promise<ReadonlySet<string>>;
   /** Slow: the embedding registry's status probe. */
   readonly resolveEmbeddingProviders?: (() => Promise<EmbeddingProviderPickerEntry[]>) | undefined;
-  /** Optional live re-check of each provider's served models; resolves true when a list changed. */
-  readonly refreshLiveModels?: (() => Promise<boolean>) | undefined;
+  /**
+   * Optional live re-check of each provider's served models; resolves true when a list changed. `force` reads past
+   * each provider's stored list (the picker opened with no model at all).
+   */
+  readonly refreshLiveModels?: ((force?: boolean) => Promise<boolean>) | undefined;
   /**
    * Hear when the providers' model lists change (PROVIDERS_CHANGED, which the
    * daemon sends after it reads every provider's list on start): an open
@@ -102,8 +107,10 @@ export function openModelPickerNow<Info>(
   })();
   const live = (async () => {
     if (!deps.refreshLiveModels) return;
-    const changed = await deps.refreshLiveModels().catch(() => false);
-    if (!changed) return;
+    // A picker that opens with no model reads every list again at once, past each stored one, and then says when.
+    const changed = await deps.refreshLiveModels(models.length === 0).catch(() => false);
+    picker.listsReadAt = Date.now();
+    if (!changed) { if (models.length === 0 && ownsCatalog()) deps.render(); return; }
     const fresh = mode === 'providers' ? { providers: deps.listProviders() } : { models: deps.listModels() };
     if (picker.fillCatalog(ticket, fresh, false)) deps.render();
   })();

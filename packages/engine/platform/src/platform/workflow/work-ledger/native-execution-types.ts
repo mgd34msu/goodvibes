@@ -39,7 +39,7 @@ export interface NativeWorkExecutionIntent {
   readonly generation: number;
   readonly state: 'admitting' | 'associated' | 'cancelled' | 'refused';
 }
-type NativeWorkExecutionErrorCode = 'unavailable' | 'unsupported-authority' | 'stale' | 'conflict' | 'recovery-required' | 'closed' | 'invalid' | 'refused' | 'not-found' | 'pending-intent' | 'prevented-before-admission' | 'decision-model-failed';
+type NativeWorkExecutionErrorCode = 'unavailable' | 'unsupported-authority' | 'stale' | 'conflict' | 'recovery-required' | 'closed' | 'invalid' | 'refused' | 'not-found' | 'pending-intent' | 'prevented-before-admission' | 'decision-model-failed' | 'plan-waiting';
 /** The allowed next step per code. Every text is fixed, so none can carry an owner's raw failure message across the public boundary. */
 const NEXT_STEP: Record<NativeWorkExecutionErrorCode, string> = {
   unavailable: 'The execution could not be reached or confirmed; read the execution status to see where it stands, then retry, or cancel it.',
@@ -54,6 +54,7 @@ const NEXT_STEP: Record<NativeWorkExecutionErrorCode, string> = {
   'pending-intent': 'An admission is still in flight for this work; read its status and wait for it to finish, or cancel it.',
   'prevented-before-admission': 'This work was cancelled before it was admitted and cannot start; submit new work to run it.',
   'decision-model-failed': 'The decision model failed before it decided whether to start this work, so nothing was started; check the decision model, then start the work again.',
+  'plan-waiting': 'Its plan waits for you (Show me the plan before it runs is on): open it in Work, change it if you like, and approve it to start the work.',
 };
 export class NativeWorkExecutionError extends Error {
   /** `detail` is fixed text naming the current state and the moves that remain; never an owner's raw failure message. */

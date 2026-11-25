@@ -1,14 +1,13 @@
 import { join } from 'path';
-import { createUndoCommands, refuseWhileTurnRuns } from '@goodvibes/engine/terminal-shell/everyday-commands';
+import { createRetryCommand, createUndoCommands } from '@goodvibes/engine/terminal-shell/everyday-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 
 import { extractText } from '@goodvibes/engine/platform/platform/export';
 import { requireShellPaths } from './runtime-services.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
 import { readConversationMessageSnapshots } from '../../core/conversation-message-snapshot.ts';
-import { dropFileChange, redoLastFileChange } from '@goodvibes/engine/terminal-shell/recovery-commands';
 import { sessionCapabilityServices } from './session-capabilities.ts';
-import { createCheckpointCommand } from '@goodvibes/engine/terminal-shell/checkpoint-command';
+import { createCheckpointCommand, type CheckpointCommandPolicy } from '@goodvibes/engine/terminal-shell/checkpoint-command';
 
 function formatSessionFailure(action: string, error: unknown): string {
   return [`Failed to ${action}`, `  error ${summarizeError(error)}`].join('\n');
@@ -36,27 +35,25 @@ function getCurrentConversationMessages(ctx: CommandContext): ReturnType<typeof 
   throw new Error('Conversation manager cannot export message snapshots.');
 }
 
+/** The Agent's checkpoints: taken by itself in a registered workspace; it makes none on request and goes back to no turn. */
+export const checkpointPolicy: CheckpointCommandPolicy<CommandContext> = {
+  emptyHint: 'The Agent takes checkpoints only in a registered workspace (goodvibes-agent workspaces register --yes).',
+  make: { refused: 'The Agent takes checkpoints by itself, at the end of each turn, and only in a registered workspace (goodvibes-agent workspaces register --yes); it makes none on request.' },
+  rewind: { refused: 'The Agent does not go back to an earlier turn; /undo takes back the last turn.' },
+};
+
 export function registerSessionContentCommands(registry: CommandRegistry): void {
-  registry.register(contentCommands.titleCommand);
   registry.register(undoCommands.undo);
   registry.register(undoCommands.redo);
 
-
-
   // `/checkpoint` is one description shared with the terminal app (terminal-shell/checkpoint-command.ts).
-  registry.register(createCheckpointCommand<CommandContext>({
-    record: (ctx, text) => ctx.print(text),
-    emptyHint: 'The Agent takes checkpoints only in a registered workspace (goodvibes-agent workspaces register --yes).',
-    make: { refused: 'The Agent takes checkpoints by itself, at the end of each turn, and only in a registered workspace (goodvibes-agent workspaces register --yes); it makes none on request.' },
-    rewind: { refused: 'The Agent does not go back to an earlier turn; /undo takes back the last turn.' },
-  }));
+  registry.register(createCheckpointCommand<CommandContext>(checkpointPolicy));
 
-  registry.register(contentCommands.retryCommand);
-
+  // `/retry` is the capability conversation.retry, run on the Agent's conversation (session-capabilities.ts).
+  registry.register(createRetryCommand<CommandContext>(sessionCapabilityServices));
 }
 
 import { createSessionContentCommands } from '@goodvibes/engine/terminal-shell/session-content-commands';
-import { commandRefusal } from './confirmation.ts';
 export const contentCommands = createSessionContentCommands<CommandContext, ReturnType<typeof getCurrentConversationMessages>[number]>({
   paths: requireShellPaths,
   capture: getCurrentConversationMessages,
@@ -68,23 +65,11 @@ export const contentCommands = createSessionContentCommands<CommandContext, Retu
   invalidPath: 'Error\n  message Export path must be within the current directory.',
   exported: (count, path) => `Exported conversation\n  messages ${count}\n  path ${path}`,
   failed: formatSessionFailure,
-  title: (title) => `Conversation title\n  title ${title}`,
-  titleSet: (title) => `Title set\n  title ${title}`,
-  retryRemovesLastTurn: true,
 });
 
 /** `/undo` and `/redo` are single-action commands shared with the other terminal app (terminal-shell/everyday-commands.ts). */
 const undoCommands = createUndoCommands<CommandContext>({
-  // The capability conversation.undo, run on the Agent's conversation (session-capabilities.ts).
+  // The capabilities conversation.undo and conversation.redo, run on the Agent's conversation (session-capabilities.ts).
   undo: sessionCapabilityServices,
-  async redo(values, ctx) {
-    const print = (text: string) => ctx.print(text);
-    if (values.what === 'file') { redoLastFileChange(ctx.workspace.fileUndoManager, print); return; }
-    if (values.what === 'set-aside') { dropFileChange(ctx.workspace.fileUndoManager, 'redo', print); return; }
-    if (values.what === 'rewind') throw commandRefusal('The Agent has no rewind to redo: /checkpoint rewind goes back to a turn only in the terminal app.');
-    refuseWhileTurnRuns(ctx, '/redo');
-    if (!ctx.session.conversationManager.redo()) throw commandRefusal('There is nothing to redo.', 'To write a reverted file change again: /redo file');
-    ctx.renderRequest();
-    return 'Turn restored.';
-  },
+  redo: sessionCapabilityServices,
 });

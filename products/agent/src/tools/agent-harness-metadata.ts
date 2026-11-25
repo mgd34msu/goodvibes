@@ -31,9 +31,9 @@ function commandModelNotes(commandName: string): Omit<CommandExecutionPolicy, 'e
   if (root === 'work') {
     return {
       requiresConfirmation: false,
-      confirmation: 'Reads use the selected host\'s existing read permissions. Submissions, intake steps and imports use current authority and, for an import, a fresh host-owned Jev decision; caller confirmation flags grant no authority.',
-      preferredModelTool: `${agentHarnessModes('run_command')} commandName:"work"`,
-      boundary: '/work open [project] opens the native read-only work ledger in the visible Agent workspace; start|status|cancel|resume <work> act on one attempt; submit-file and the submission actions submit owner source; the intake actions recover captured input; import-preview|import-status|import <project> and import-reconsider|import-recover|import-cancel|import-restart <project> [request] import old planning records (submission captures complete persisted sources and saves the exact command before dispatch; recovery keeps the original request; imports grant no execution or verification). Host, principal, workspace and live capability checks remain mandatory.',
+      confirmation: 'Reads use the daemon\'s existing read permissions. Every act on a piece of work runs under current authority; caller confirmation flags grant no authority.',
+      preferredModelTool: 'capability_find, then capability_run with a work.* capability',
+      boundary: '/work opens the Work place for the person. Every act on work (see it, start, check, stop, go on, answer it, run a failed step again, its spending limit, a plan before it runs, propose a piece of work with its plan) is a work.* capability: find it with capability_find and run it with capability_run. Host, principal, workspace and live capability checks remain mandatory.',
     };
   }
   if (root === 'agent' || root === 'agent-workspace' || root === 'workspace') {

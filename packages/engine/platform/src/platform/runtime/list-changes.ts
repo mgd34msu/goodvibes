@@ -52,7 +52,9 @@ export type ChangedList = 'memory' | 'checkpoints' | 'ci-watches' | 'check-ins' 
   | 'settings-sync'
   // This conversation: a model's context window size set or cleared through the daemon (capabilities/builtin/context-windows.ts);
   // each running program reads the daemon's file again on it (terminal-shell context-windows-follow.ts).
-  | 'context-windows';
+  | 'context-windows'
+  // Mail, calendar and channels: the daemon's webhook addresses changed, or a notification failed (capabilities/builtin/notify.ts).
+  | 'notifications';
 
 export interface ListChange {
   readonly list: ChangedList;

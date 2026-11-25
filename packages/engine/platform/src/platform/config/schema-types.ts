@@ -108,6 +108,7 @@ export interface GoodVibesConfig {
     toolResultReconciliation: 'reconcile' | 'warn-only'; // default: 'reconcile'. Inject synthetic results for dangling tool calls at turn end
     returnContextMode: 'off' | 'local' | 'assisted'; // default: 'off'
     guidanceMode: 'off' | 'minimal' | 'guided'; // default: 'minimal'
+    budgetAlertUsd: number;     // default: 0 (no alert). The daemon's one spending alert; each program checks it at a turn's end
   };
   storage: {
     secretPolicy: 'plaintext_allowed' | 'preferred_secure' | 'require_secure'; // default: 'preferred_secure'

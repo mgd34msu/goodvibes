@@ -221,6 +221,9 @@ export const DAEMON_OWNED_CONFIG_KEYS: readonly string[] = [
   'provider.optimizerMode',
   'provider.optimizerPinnedModel',
   'permissions.mode',
+  // The spending alert: one amount for every program on this machine, set in Money (any program, the web UI, a
+  // script) and checked by each program at the end of a turn from its copy of the daemon's settings.
+  'behavior.budgetAlertUsd',
 ];
 
 

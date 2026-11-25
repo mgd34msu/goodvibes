@@ -13,11 +13,9 @@ import type { CommandContext, CommandRegistry } from '../input/command-registry.
 import { workRequestsHost } from '../input/commands/planning-runtime.ts';
 import { capabilityBinding } from '../input/commands/capability-binding.ts';
 
-/** What the /work modal reads: the shared view and one change listener at a time. */
-export interface NativeWorkLedgerModalSource {
+/** The terminal app's view of its link to the host: the submission journal and the input waiting to be admitted. */
+export interface NativeWorkLedgerHost {
   readonly view: NativeWorkLedgerView;
-  /** Route view changes to `listener` until the returned function is called. */
-  watch(listener: () => void): () => void;
 }
 
 /**
@@ -34,7 +32,7 @@ export function createNativeWorkLedgerHost(
     readonly workspace: () => string;
   },
   bind?: NativeLedgerBindingFactory,
-): NativeWorkLedgerModalSource {
+): NativeWorkLedgerHost {
   const observation = new OwnedSelectionObservation();
   const homeDirectory = () => (typeof deps.homeDirectory === 'function' ? deps.homeDirectory() : deps.homeDirectory);
   const resolve = (): NativeLedgerHost => {
@@ -49,25 +47,17 @@ export function createNativeWorkLedgerHost(
       journalPath: deps.journalPath,
     };
   };
-  let listener: () => void = () => {};
   const view = createBoundNativeWorkLedgerView(
     resolve,
-    () => listener(),
+    // Nothing in this program draws the view: the Work place reads work from the daemon.
+    () => {},
     {
       identityFormat: 'credential',
       intake: TUI_NATIVE_INTAKE_POLICY,
     },
     bind,
   );
-  return {
-    view,
-    watch(next) {
-      listener = next;
-      return () => {
-        if (listener === next) listener = () => {};
-      };
-    },
-  };
+  return { view };
 }
 
 /** `/work` (terminal-shell/native/work-command.ts) in the terminal app: its submission journal, requests in your own words, and the daemon it runs work on. */

@@ -1,4 +1,3 @@
-import type { NativeWorkLedgerModalSource } from '../runtime/native-work-ledger-host.ts';
 /**
  * view-deps.ts, what the built-in modals and views are built from.
  *
@@ -21,8 +20,6 @@ import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { PluginManager } from '@goodvibes/engine/platform/platform/plugins';
 
 export interface BuiltinViewDeps {
-  /** The /work modal's view of the shared native host selection. */
-  readonly nativeWorkLedgerSelection?: NativeWorkLedgerModalSource;
   readonly providerRegistry: ProviderRegistry;
   readonly uiServices: UiRuntimeServices;
   readonly toolRegistry?: ToolRegistry;

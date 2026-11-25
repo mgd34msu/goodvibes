@@ -2682,7 +2682,7 @@ export class ConfigManager {
     }
     logger.info('Settings an earlier version left were carried forward', { file, keptAs, removed });
     this.migrationReceipt(`carried-forward:${file}:${removed.join(',')}`,
-      describeSettingsCarryForward(file, null, { moved: [], superseded: [], removed }, keptAs));
+      describeSettingsCarryForward(file, null, { moved: [], copied: [], superseded: [], removed }, keptAs));
   }
 
   /**

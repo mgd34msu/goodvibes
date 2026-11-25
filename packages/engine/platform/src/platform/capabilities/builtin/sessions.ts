@@ -31,8 +31,8 @@ export interface LiveSessions {
   resume(target: string, force: boolean): Promise<string>;
   /** Save a copy under a name and go on in the copy. */
   fork(name: string): Promise<string>;
-  /** Give this session a new name. */
-  rename(name: string): Promise<string>;
+  /** Give a saved session a new name (this one when `target` is empty). */
+  rename(target: string, name: string): Promise<string>;
   /** Write a saved session's redacted transcript to a file, or show it. */
   exportSaved(input: { readonly target: string; readonly format: 'markdown' | 'text'; readonly path: string; readonly print: boolean }): Promise<string>;
   /** Upload this conversation as a secret gist and say its link. */
@@ -51,8 +51,20 @@ export interface LiveSessions {
   composer(): Promise<string>;
   /** What the last resume brought back. */
   restored(): Promise<string>;
-  /** The bookmarked blocks, to jump to one. */
-  bookmarks(): Promise<string>;
+  /** The bookmarked blocks; with a block's key, the conversation is moved to that block. */
+  bookmarks(block: string): Promise<string>;
+  /**
+   * The cross-session task graph: the project's one file for both terminal programs (`.goodvibes/shared/task-graph.json`),
+   * the same one a turn's task tool reads. False in a program that only reads it (the Agent): its changes are no controls.
+   */
+  readonly changesTaskGraph: boolean;
+  /** The graph as text or JSON, every session's tasks or one's. */
+  graph(input: { readonly session: string; readonly format: string }): Promise<string>;
+  linkTask(input: { readonly task: string; readonly from: string; readonly after: string; readonly label: string }): Promise<string>;
+  handOff(input: { readonly task: string; readonly to: string; readonly from: string; readonly reason: string }): Promise<string>;
+  accept(handoff: string): Promise<string>;
+  withdraw(handoff: string): Promise<string>;
+  cancelTasks(input: { readonly scope: string; readonly task: string; readonly root: string; readonly from: string; readonly reason: string }): Promise<string>;
 }
 
 export interface SessionsCapabilityServices {
@@ -82,6 +94,8 @@ export const HOSTED_SESSIONS_LIST = 'hosted.sessions' as ListName;
 export const SAVED_SESSIONS_LIST = 'sessions.saved' as ListName;
 /** This conversation's branches. */
 export const SESSION_BRANCHES_LIST = 'sessions.branches' as ListName;
+/** The handoffs in the cross-session task graph still waiting to be accepted. */
+export const WAITING_HANDOFFS_LIST = 'sessions.handoffs.waiting' as ListName;
 
 const SAVED: InputDescription = {
   id: 'session', label: 'Session', help: 'Your saved sessions, newest first', kind: 'choice',

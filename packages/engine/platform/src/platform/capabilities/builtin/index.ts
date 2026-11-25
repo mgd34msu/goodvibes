@@ -103,6 +103,8 @@ export * from './conversation.js';
 export * from './conversation-controls.js';
 export * from './code.js';
 export * from './messages.js';
+export * from './notify.js';
+import { NOTIFY_CAPABILITIES, NOTIFY_FAILED, type NotifyCapabilityServices } from './notify.js';
 export * from './method-capability.js';
 export * from './automation.js';
 export * from './sessions.js';
@@ -165,6 +167,8 @@ export type DaemonCapabilityServices = HooksCapabilityServices & SecretsCapabili
   & KnowledgeCapabilityServices & TemplateCapabilityServices
   & AgentStoresCapabilityServices
   & MessagesCapabilityServices
+  // Mail, calendar and channels (builtin/notify.ts): the daemon's webhook addresses, its secret store and notifier.
+  & NotifyCapabilityServices
   & RemoteCapabilityServices
   & ClusterCapabilityServices
   // Devices and network (builtin/network-scan.ts): the one network-scan decision and the daemon's scan.
@@ -222,6 +226,8 @@ export const DAEMON_CAPABILITIES: readonly Moved<DaemonCapabilityServices>[] = [
   ...MAIL_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'mail', title: 'Mail' } })),
   ...CALENDAR_HANDLER_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'calendar', title: 'Calendar' } })),
   ...CHANNELS_HANDLER_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'channels', title: 'Channels' } })),
+  // Webhook notifications (builtin/notify.ts): the daemon's one list of addresses, a test, a send, a resend.
+  ...NOTIFY_CAPABILITIES.map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'notify', title: 'Webhook notifications' } })),
   // System (builtin/system.ts): sleep, the daemon's updates, the voice runtime, the first-run sign-in file; each a daemon method run as the caller.
   ...[POWER_STATUS, POWER_ON, POWER_OFF].map((definition) => ({ definition: definition as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'power', title: 'Sleep' } })),
   { definition: UPDATE_DAEMON as CapabilityDefinition<DaemonCapabilityServices>, command: { name: 'update', title: 'Updates' } },
@@ -306,6 +312,8 @@ export const METHOD_CAPABILITIES: readonly { readonly definition: MethodCapabili
   ...AUTOMATION_METHOD_CAPABILITIES,
   // Models and providers (builtin/models.ts): the model lists, the shared default model, starting and finishing a sign-in, the accounts.
   ...MODELS_METHOD_CAPABILITIES,
+  // Mail, calendar and channels (builtin/notify.ts): the daemon's failed notifications.
+  { definition: NOTIFY_FAILED, command: { name: 'notify', title: 'Webhook notifications' } },
 ];
 
 /** A capability that runs through its own daemon method, by id. */

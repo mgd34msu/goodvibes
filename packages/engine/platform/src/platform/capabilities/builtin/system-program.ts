@@ -142,9 +142,9 @@ export const HEALTH_SAVE_FAILURE: Def = {
 };
 
 export const HEALTH_KEEP_FAILURE: Def = {
-  capability: session('health.keep-failure'), actionId: 'keep-failure', label: 'Keep a failure report in memory', word: 'keep-failure',
+  capability: session('health.keep-failure'), actionId: 'keep-failure', label: 'Keep a failure of this session as an incident', word: 'keep-failure',
   inputs: [REPORT_INPUT],
-  sentence: 'The failure report is kept in durable memory as an incident record, once, until you change it.', done: '',
+  sentence: 'A failure report of this session (what failed, why, the evidence) is kept as an incident record that later sessions remember, once, until you change it.', done: '',
   touches: 'this-machine', lasts: 'kept', risk: 'none', example: { report: 'latest' },
   async run(values, services) { return { text: await failuresOf(services).keep(values.report || 'latest') }; },
 };

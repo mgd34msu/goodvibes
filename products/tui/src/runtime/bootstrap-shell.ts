@@ -175,7 +175,6 @@ export function createBootstrapShell(options: BootstrapShellOptions): BootstrapS
     workspace: () => services.workingDirectory,
   });
   const views = createShellViews({
-    nativeWorkLedgerSelection: nativeWorkLedgerHost,
     providerRegistry: services.providerRegistry,
     uiServices,
     toolRegistry,

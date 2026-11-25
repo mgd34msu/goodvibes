@@ -42,6 +42,7 @@ export const coreConfigDefaults = {
     toolResultReconciliation: 'reconcile',
     returnContextMode: 'off',
     guidanceMode: 'minimal',
+    budgetAlertUsd: 0,
   },
   storage: {
     secretPolicy: 'preferred_secure',
@@ -390,6 +391,15 @@ export const coreHeadConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     type: 'enum',
     description: 'Operational guidance mode: off, minimal, or guided',
     enumValues: ['off', 'minimal', 'guided'],
+  },
+  {
+    key: 'behavior.budgetAlertUsd',
+    label: 'Warn when a conversation costs more than (USD, 0 for off)',
+    appliesWhen: 'next-answer',
+    type: 'number',
+    description: 'The spending alert, one for every program on this machine (kept in the daemon\'s settings): when a conversation\'s cost passes this many US dollars, the program holding it warns you at the end of that answer (0 turns the alert off). Also set from Money, Spending.',
+    validate: (value) => typeof value === 'number' && Number.isFinite(value) && value >= 0,
+    validationHint: 'an amount in US dollars, 0 or more; 0 turns the alert off',
   },
   {
     key: 'storage.secretPolicy',

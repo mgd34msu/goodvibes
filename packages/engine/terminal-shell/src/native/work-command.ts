@@ -38,7 +38,6 @@ import { defineCommand } from '../command-actions/define.js';
 import { defineList, type ListRow } from '../command-actions/lists.js';
 import { daemonCapabilityAction, runDaemonCapability, sessionCapabilityAction, type DaemonCapabilityBinding } from '../command-actions/capability-actions.js';
 import type { ActionDescription, CommandActionContext, CommandDescription } from '../command-actions/types.js';
-import { doAction } from '../described-command-kit.js';
 
 /** What one app does for `/work`. */
 export interface WorkHost<Ctx> {
@@ -54,7 +53,6 @@ interface IntakeContext {
   readonly nativeConversationIntake?: NativeConversationIntakeActions | undefined;
   readonly dispatchNativeIntakeTurn?: ((state: NativeConversationIntakeState) => void | Promise<void>) | undefined;
 }
-interface PlaceContext { readonly openPlace?: ((placeId: string) => void) | undefined }
 interface ChecklistContext { readonly workspace?: { readonly workPlan?: ChecklistCapabilityServices['checklist'] } | undefined }
 
 let installed: WorkHost<CommandActionContext> | undefined;
@@ -225,12 +223,12 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
   // --yes confirms only right after the action word: the same word in the text is text.
   leadingFlagsOnly: true,
   title: 'Work',
-  // Bare `/work` opens the Work place; every other action is a control there.
-  bareOpens: 'open',
+  // Bare `/work` opens the Work place; every action is a control there.
+  opens: 'work',
   summary: 'Your work: ask for it, start, check, stop or resume it, answer what it asks, run a failed step again, its spending limit, and the project\'s checklist',
   group: 'Agents and work',
   firstScreenRows: [
-    'open', 'list', 'new', 'request',
+    'list', 'new', 'request',
     { label: 'Start, check, stop or resume work…', actions: ['start', 'status', 'cancel', 'resume'] },
     { label: 'Answer it, run a step again, its spending limit…', actions: ['answer', 'retry', 'budget'] },
     { label: 'A plan waiting for you…', actions: ['approve', 'step-edit', 'step-drop', 'step-move', 'plan-redo', 'plan-discard'] },
@@ -240,16 +238,6 @@ export const WORK_COMMAND: CommandDescription<CommandActionContext> = {
     { label: 'The checklist…', actions: CHECKLIST_CAPABILITIES.map((definition) => definition.actionId) },
   ],
   actions: [
-    doAction<CommandActionContext>({
-      id: 'open', label: 'Open Work', word: 'open', touches: 'reads',
-      sentence: 'Opens the Work place: your work, its plans and results, and the checklist.',
-      operator: { terminalOnly: 'It is a terminal screen.' },
-      async run(_values, ctx) {
-        const open = (ctx as CommandActionContext & PlaceContext).openPlace;
-        if (!open) throw commandRefusal('This program has no screens to open.');
-        open('work');
-      },
-    }),
     ...WORK_METHOD_CAPABILITIES.map(onDaemon),
     ...WORK_INTAKE_CAPABILITIES.map(onIntake),
     ...CHECKLIST_CAPABILITIES.map(onChecklist),

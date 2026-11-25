@@ -43,7 +43,9 @@ export type WorkspaceEvent =
         // Devices and network: a settings sync bundle pulled, or a setting that disagreed settled.
         | 'settings-sync'
         // This conversation: a model's context window size set or cleared through the daemon; every running program reads it again.
-        | 'context-windows';
+        | 'context-windows'
+        // Mail, calendar and channels: the daemon's webhook addresses changed, or a notification failed.
+        | 'notifications';
       change: 'created' | 'changed' | 'deleted';
       id?: string | undefined;
     }

@@ -897,7 +897,7 @@ Looking through the conversation is under `/session` (its group "Look through th
 `/session bookmarks` lists the blocks bookmarked with `Ctrl+B` and jumps to one.
 `/session next [<kind>]` and `/session prev [<kind>]` scroll to the next or previous entry of a kind; `error` is the kind for error lines (`/session next error`).
 
-`/verbosity` sets how much the app prints, the same in both apps: `/verbosity set quiet|balanced|operator` writes `behavior.hitlMode` (default `balanced`) and clears the per-domain levels set this session, naming them (`Cleared the per-domain levels for: <domains> (set them again with /verbosity set-domain).`); `/verbosity show` (what `/verbosity` alone gives a model or script) prints the current level and the per-domain verbosity; `/verbosity set-domain <domain> <minimal|normal|verbose>` sets one domain's verbosity for this session.
+How much the app prints is a row of the System place's This session tab, the same in both apps: `v` changes the level (Quiet, Balanced or Operator; it writes `behavior.hitlMode`, default `balanced`, and clears the per-domain levels set this session, naming them), and `n` sets one kind of notification's verbosity (minimal, normal or verbose) for this session. A model or a script runs the same as `verbosity.show`, `verbosity.set` and `verbosity.set-domain` (`goodvibes do verbosity.set --input level=quiet`).
 
 `/notifications` (or `Ctrl+N`) opens the notification history, newest first. A notice is never drawn as a box over the conversation, a dialog or the first-run screens: it is counted on the status bar (`3 notices`) until read.
 

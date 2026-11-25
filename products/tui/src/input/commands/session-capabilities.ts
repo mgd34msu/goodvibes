@@ -49,6 +49,7 @@ import { templateSessionServices } from '@goodvibes/engine/terminal-shell/templa
 import { deepLinksOf } from './platform-services-runtime.ts';
 import { teamHost } from './teamwork-runtime.ts';
 import { contractsHost } from './control-room-runtime.ts';
+import { evalSuitesOf } from './eval.ts';
 import { healthServicesOf } from '@goodvibes/engine/terminal-shell/health-command';
 import { healthPolicy } from './health-runtime.ts';
 import { releaseOf } from './product-runtime.ts';
@@ -153,6 +154,8 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
     // Work and agents: this app's own agents, started from team modes, recipes and archetypes, and their contracts (builtin/agents.ts).
     agentTeam: agentTeamOf(ctx),
     agentContracts: agentContractsOf(ctx),
+    // Work and agents: task suites run in this app's project, and their results this session (builtin/eval.ts).
+    evalSuites: evalSuitesOf(ctx),
     // System (builtin/system-session.ts): this session at a glance, closing this app, how much it prints.
     systemSession: systemSessionOf(ctx),
     // Code and changes (builtin/code.ts): git, worktrees, the code index, code lookups and tests on this app's project folder.

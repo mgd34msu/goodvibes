@@ -72,7 +72,7 @@ export function connectedHostCapabilityMap(toolRegistry: ToolRegistry, registere
       id: 'operator-briefing',
       effect: 'read-only-network',
       modelTools: ['agent_operator_briefing'],
-      workspaceCategories: ['home', 'work', 'host', 'automation'],
+      workspaceCategories: ['home', 'host', 'automation'],
       slashCommandFamilies: ['approval', 'automation', 'schedule'],
       purpose: 'Read pending work, approvals, automation, schedules, and scheduler capacity from public operator routes.',
     }),

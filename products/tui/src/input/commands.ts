@@ -1,7 +1,6 @@
 import { COMMAND_TASK_GROUPS } from '@goodvibes/engine/terminal-shell/command-palette';
 import { CommandRegistry, type CommandContext } from './command-registry.ts';
 import type { SlashCommand } from './command-registry.ts';
-import { evalCommand } from './commands/eval.ts';
 import { sessionCommand, resumeCommand } from './commands/session.ts';
 import { memoryCommand } from './commands/memory.ts';
 import { registerShellCoreCommands } from './commands/shell-core.ts';
@@ -111,7 +110,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: TASK.settings, register: () => registerWaitingLists<CommandContext>(capabilityBinding) },
   { category: TASK.channels, register: registerCalendarRuntimeCommands },
   { category: TASK.settings, register: registerPrincipalsRuntimeCommands },
-  { category: TASK.check, register: (registry) => registry.register(evalCommand) },
+  // `/eval` is gone: task suites are capabilities (builtin/eval.ts) with their controls on the Work place's Evaluations tab.
   { category: TASK.sessions, register: registerHostedRuntimeCommands },
   { category: TASK.sessions, register: (registry) => registry.register(sessionCommand) },
   { category: TASK.sessions, register: (registry) => registry.register(resumeCommand) },

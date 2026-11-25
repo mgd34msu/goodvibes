@@ -104,7 +104,102 @@ export interface CodingAgentItem extends PlaceItem {
   readonly binaryPath: string;
 }
 
-export type WorkAgentItem = RunnerItem | PoolItem | HandedBackItem | RecordedRunItem | YourAgentItem | ContractItem | ArchetypeItem | CodingAgentItem;
+/** A research run the daemon keeps for this project: what it asks and where it stands. */
+export interface ResearchRunItem extends PlaceItem {
+  readonly kind: 'research-run';
+  /** The run's own status: planned, running, paused, blocked, completed, failed or cancelled. */
+  readonly state: string;
+  readonly title: string;
+  readonly question: string;
+  readonly phase: string;
+  readonly progress: number;
+  readonly sources: number;
+  readonly nextSteps: readonly string[];
+  readonly note?: string | undefined;
+  readonly error?: string | undefined;
+  readonly report?: string | undefined;
+}
+
+/** A source in this project's research queue. */
+export interface ResearchSourceItem extends PlaceItem {
+  readonly kind: 'research-source';
+  /** Its review status: unreviewed, reviewed, used, rejected. */
+  readonly state: string;
+  readonly title: string;
+  readonly question: string;
+  readonly summary: string;
+  readonly credibility: string;
+  readonly score: number;
+  readonly url?: string | undefined;
+  readonly publisher?: string | undefined;
+}
+
+/** Coding work handed to the terminal app: its shared session, and its answer once there is one. */
+export interface HandedOffItem extends PlaceItem {
+  readonly kind: 'handed-off';
+  /** answered; the input's state (queued, delivered, failed ...); gone when the session no longer exists; unreadable. */
+  readonly state: string;
+  readonly task: string;
+  readonly createdAt: string;
+  readonly reviewRequested: boolean;
+  readonly session?: string | undefined;
+  readonly answer?: string | undefined;
+  readonly answeredAt?: string | undefined;
+  readonly error?: string | undefined;
+}
+
+/** A task suite run in this session (builtin/eval.ts): its last result, and the gate's verdict when it was gated. */
+export interface EvaluationItem extends PlaceItem {
+  readonly kind: 'evaluation';
+  readonly state: 'passed' | 'failed';
+  readonly passed: number;
+  readonly total: number;
+  readonly at: number;
+  readonly gate?: 'passed' | 'failed' | undefined;
+  readonly failed: readonly string[];
+}
+
+export type WorkAgentItem = RunnerItem | PoolItem | HandedBackItem | RecordedRunItem | YourAgentItem | ContractItem | ArchetypeItem | CodingAgentItem
+  | ResearchRunItem | ResearchSourceItem | HandedOffItem | EvaluationItem;
+
+/** The session source a program that runs task suites supplies (work-agents-lists.ts `evaluationsPlaceSource`). */
+export const EVALUATIONS_SOURCE = 'eval-results';
+
+export function researchRunItems(output: unknown): readonly ResearchRunItem[] {
+  return (Array.isArray(listed(output)['runs']) ? listed(output)['runs'] as unknown[] : []).map(record).filter((run) => text(run['id'])).map((run): ResearchRunItem => ({
+    kind: 'research-run', id: text(run['id']), state: text(run['status']) || 'planned', title: plain(run['title']) || text(run['id']), question: plain(run['question']),
+    phase: text(run['phase']), progress: count(run['progress']), sources: count(run['sources']), nextSteps: strings(run['nextSteps']).map((step) => plain(step)),
+    ...(plain(run['note']) ? { note: plain(run['note']) } : {}), ...(plain(run['error']) ? { error: plain(run['error']) } : {}), ...(text(run['report']) ? { report: text(run['report']) } : {}),
+  }));
+}
+
+export function researchSourceItems(output: unknown): readonly ResearchSourceItem[] {
+  return (Array.isArray(listed(output)['sources']) ? listed(output)['sources'] as unknown[] : []).map(record).filter((source) => text(source['id'])).map((source): ResearchSourceItem => ({
+    kind: 'research-source', id: text(source['id']), state: text(source['status']) || 'unreviewed', title: plain(source['title']) || text(source['id']),
+    question: plain(source['question']), summary: plain(source['summary']), credibility: text(source['credibility']) || 'unreviewed', score: count(source['score']),
+    ...(plain(source['url']) ? { url: plain(source['url']) } : {}), ...(plain(source['publisher']) ? { publisher: plain(source['publisher']) } : {}),
+  }));
+}
+
+export function handedOffItems(output: unknown): readonly HandedOffItem[] {
+  return (Array.isArray(listed(output)['handedOff']) ? listed(output)['handedOff'] as unknown[] : []).map(record).filter((entry) => text(entry['sessionId'])).map((entry): HandedOffItem => ({
+    kind: 'handed-off', id: text(entry['sessionId']), state: text(entry['state']) || 'unknown', task: plain(entry['task']), createdAt: text(entry['createdAt']),
+    reviewRequested: entry['reviewRequested'] === true, ...(text(entry['session']) ? { session: text(entry['session']) } : {}),
+    ...(plain(entry['answer']) ? { answer: plain(entry['answer']), answeredAt: text(entry['answeredAt']) } : {}),
+    ...(plain(entry['error'] ?? entry['inputError']) ? { error: plain(entry['error'] ?? entry['inputError']) } : {}),
+  }));
+}
+
+export function evaluationItems(raw: unknown): readonly EvaluationItem[] {
+  return (Array.isArray(raw) ? raw : []).map(record).filter((row) => text(row['suite'])).map((row): EvaluationItem => {
+    const passed = count(row['passed']); const total = count(row['total']);
+    const gate = row['gate'] === 'passed' || row['gate'] === 'failed' ? row['gate'] : undefined;
+    return {
+      kind: 'evaluation', id: text(row['suite']), state: (gate ?? (passed === total ? 'passed' : 'failed')) as EvaluationItem['state'], passed, total, at: count(row['at']),
+      ...(gate ? { gate } : {}), failed: strings(row['failed']),
+    };
+  });
+}
 
 /** The session sources a program that runs its own agents supplies (work-agents-lists.ts `agentsPlaceSources`). */
 export const YOUR_AGENTS_SOURCE = 'agents-running';
@@ -430,7 +525,131 @@ const codingAgentsList: PlaceList<WorkAgentItem> = {
   detail: (item) => [{ label: 'Coding agent', text: (item as CodingAgentItem).title }, { label: 'Program', text: (item as CodingAgentItem).binaryPath || 'not said' }],
 };
 
-export const WORK_AGENT_LISTS: readonly PlaceList<WorkAgentItem>[] = [yourAgentsList, contractsList, archetypesList, codingAgentsList, runnersList, poolsList, handedBackList, recordedRunsList];
+/** One read of the daemon's research runs and research queue for both lists, read again on every change (LIST_CHANGED `research`). */
+const RESEARCH_SOURCE = { kind: 'daemon', method: 'capabilities.run', input: { id: 'research.runs' } } as const;
+const RESEARCH_EVENTS: PlaceFollow = { domains: ['workspace'], events: [], lists: ['research'] };
+
+const RESEARCH_STATE_WORDS: Readonly<Record<string, string>> = {
+  planned: 'not started', running: 'collecting sources', paused: 'paused', blocked: 'stopped on a problem', completed: 'done', failed: 'failed', cancelled: 'stopped',
+};
+const CREDIBILITY_WORDS: Readonly<Record<string, string>> = { unreviewed: 'not judged yet', high: 'high', medium: 'medium', low: 'low', mixed: 'mixed' };
+const SOURCE_STATE_WORDS: Readonly<Record<string, string>> = { unreviewed: 'not reviewed', reviewed: 'reviewed', used: 'used in a report', rejected: 'set aside' };
+
+const researchList: PlaceList<WorkAgentItem> = {
+  id: 'research',
+  label: 'Research',
+  noun: 'your research runs',
+  source: { ...RESEARCH_SOURCE, items: researchRunItems },
+  follows: RESEARCH_EVENTS,
+  empty: 'No research runs yet: start one, and the daemon collects public web sources for it.',
+  row: (item) => {
+    const run = item as ResearchRunItem;
+    return {
+      title: run.title,
+      right: `${RESEARCH_STATE_WORDS[run.state] ?? run.state}, ${run.sources} source${run.sources === 1 ? '' : 's'}`,
+      mark: run.state === 'running' ? 'running' : run.state === 'blocked' || run.state === 'failed' ? 'attention' : run.state === 'completed' ? 'ok' : 'paused',
+    };
+  },
+  detail: (item) => {
+    const run = item as ResearchRunItem;
+    return [
+      { label: 'Question', text: run.question || 'not said' },
+      { label: 'Where it stands', text: `${RESEARCH_STATE_WORDS[run.state] ?? run.state}, ${run.progress}% done` },
+      { label: 'Sources', text: `${run.sources} collected` },
+      ...(run.note ? [{ label: 'Last note', text: run.note }] : []),
+      ...(run.error ? [{ label: 'What went wrong', text: run.error, tone: 'warning' as const }] : []),
+      ...run.nextSteps.map((step, index) => ({ label: index === 0 ? 'Next' : '', text: step })),
+      ...(run.report ? [{ label: 'Report', text: `saved as artifact ${run.report}` }] : []),
+    ];
+  },
+};
+
+const sourcesList: PlaceList<WorkAgentItem> = {
+  id: 'sources',
+  label: 'Sources',
+  noun: 'your research queue',
+  source: { ...RESEARCH_SOURCE, items: researchSourceItems },
+  follows: RESEARCH_EVENTS,
+  empty: 'The research queue is empty: a research run fills it, and you can add a source of your own.',
+  row: (item) => {
+    const source = item as ResearchSourceItem;
+    return { title: source.title, right: CREDIBILITY_WORDS[source.credibility] ?? source.credibility, mark: source.state === 'rejected' ? 'paused' : source.state === 'used' ? 'ok' : 'waiting' };
+  },
+  detail: (item) => {
+    const source = item as ResearchSourceItem;
+    return [
+      { label: 'For the question', text: source.question || 'not said' },
+      ...(source.url ? [{ label: 'Address', text: source.url }] : []),
+      ...(source.publisher ? [{ label: 'Publisher', text: source.publisher }] : []),
+      { label: 'Trust', text: `${CREDIBILITY_WORDS[source.credibility] ?? source.credibility}${source.score > 0 ? `, score ${source.score}` : ''}` },
+      { label: 'State', text: SOURCE_STATE_WORDS[source.state] ?? source.state },
+      { text: '' },
+      { label: 'Summary', text: source.summary || 'none' },
+    ];
+  },
+};
+
+const HANDED_OFF_WORDS: Readonly<Record<string, string>> = {
+  answered: 'answered', queued: 'waiting to be taken', delivered: 'taken', running: 'being worked on', failed: 'failed', cancelled: 'stopped',
+  gone: 'session gone', unreadable: 'could not be read', unknown: 'state not known', active: 'open', closed: 'closed',
+};
+
+const handedOffList: PlaceList<WorkAgentItem> = {
+  id: 'handed-off',
+  label: 'Handed off',
+  noun: 'the work you handed off',
+  source: { kind: 'daemon', method: 'capabilities.run', input: { id: 'agents.handed-off' }, items: handedOffItems },
+  // A hand-off made anywhere, and its session answering.
+  follows: { domains: ['session', 'workspace'], events: ['session'], lists: ['handed-off'] },
+  empty: 'No work handed off yet: hand coding work to the terminal app and follow it here.',
+  row: (item) => {
+    const entry = item as HandedOffItem;
+    return {
+      title: entry.task || entry.id, right: HANDED_OFF_WORDS[entry.state] ?? entry.state,
+      mark: entry.state === 'answered' ? 'ok' : entry.state === 'failed' || entry.state === 'gone' || entry.state === 'unreadable' ? 'attention' : 'running',
+    };
+  },
+  detail: (item) => {
+    const entry = item as HandedOffItem;
+    return [
+      { label: 'The work', text: entry.task || 'not said' },
+      { label: 'Handed off', text: entry.createdAt ? new Date(entry.createdAt).toLocaleString() : 'not known' },
+      { label: 'Where it stands', text: HANDED_OFF_WORDS[entry.state] ?? entry.state },
+      ...(entry.reviewRequested ? [{ label: 'Review', text: 'asked for' }] : []),
+      ...(entry.error ? [{ label: 'What went wrong', text: entry.error, tone: 'warning' as const }] : []),
+      ...(entry.answer ? [{ text: '' }, { label: 'Latest answer', text: entry.answer }] : []),
+    ];
+  },
+};
+
+const evaluationsList: PlaceList<WorkAgentItem> = {
+  id: 'evaluations',
+  label: 'Evaluations',
+  noun: 'the task suites run here',
+  source: { kind: 'session', name: EVALUATIONS_SOURCE, items: evaluationItems },
+  // Task suites run in the terminal app's project; the Agent runs none.
+  programs: ['tui'],
+  empty: 'No task suite run in this session: run one to test the product on real tasks.',
+  row: (item) => {
+    const run = item as EvaluationItem;
+    return { title: run.id, right: run.gate ? `gate ${run.gate}` : `${run.passed} of ${run.total} passed`, mark: run.state === 'passed' ? 'ok' : 'attention' };
+  },
+  detail: (item) => {
+    const run = item as EvaluationItem;
+    return [
+      { label: 'Suite', text: run.id },
+      { label: 'Passed', text: `${run.passed} of ${run.total}` },
+      ...(run.gate ? [{ label: 'Gate', text: run.gate }] : []),
+      ...(run.failed.length > 0 ? [{ label: 'Failed', text: run.failed.join(', '), tone: 'warning' as const }] : []),
+      { label: 'Run', text: run.at ? new Date(run.at).toLocaleString() : 'not known' },
+    ];
+  },
+};
+
+export const WORK_AGENT_LISTS: readonly PlaceList<WorkAgentItem>[] = [
+  yourAgentsList, contractsList, archetypesList, codingAgentsList, handedOffList, researchList, sourcesList, evaluationsList,
+  runnersList, poolsList, handedBackList, recordedRunsList,
+];
 
 const LIVE_RUNNER = ['running', 'degraded'];
 

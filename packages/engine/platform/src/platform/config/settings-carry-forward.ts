@@ -95,10 +95,21 @@ export const DECISION_MODEL_NONE_KEY = 'judgment.noDecisionModel';
  */
 export const PROGRAM_SETTINGS_ROOTS: readonly string[] = ['tui', 'agent'];
 
+/**
+ * Daemon keys a program's own settings file held in 3.5.0, which that program's 3.5.0 binary still reads: copied
+ * into the daemon's settings file once (when it does not set them yet) and left in the program's file as they were,
+ * so a 3.5.0 binary after a rollback keeps its value. This release never reads them from the program's file (the
+ * daemon's is the one copy) and says nothing about them there. `behavior.budgetAlertUsd`: the terminal app's own
+ * spending alert until 3.5.0, the daemon's from this release.
+ */
+export const DAEMON_KEYS_KEPT_FOR_ROLLBACK: readonly string[] = ['behavior.budgetAlertUsd'];
+
 /** What carrying one file forward did, for the one line the owner reads. */
 export interface SettingsCarryForward {
   /** Daemon keys written to the daemon's settings file. */
   readonly moved: readonly string[];
+  /** Daemon keys written to the daemon's settings file and left in this file for an earlier version (DAEMON_KEYS_KEPT_FOR_ROLLBACK). */
+  readonly copied: readonly string[];
   /** Daemon keys the daemon's file already set: its value stays, the copy went. */
   readonly superseded: readonly string[];
   /** Keys this release no longer has, removed. */
@@ -117,22 +128,25 @@ export function carrySettingsForward(document: Record<string, unknown>, daemonTi
   const daemonEntries = daemonTierPath === null ? [] : collectDaemonOwnedEntries(document);
   const retired = RETIRED_SETTING_KEYS.filter((key) => readDotPath(document, key).present);
   const moved: string[] = [];
+  const copied: string[] = [];
   const superseded: string[] = [];
+  const kept = new Set(DAEMON_KEYS_KEPT_FOR_ROLLBACK);
   if (daemonTierPath !== null && daemonEntries.length > 0) {
     const tier = readDaemonTierFile(daemonTierPath);
     for (const { key, value } of daemonEntries) {
-      if (readDotPath(tier, key).present) superseded.push(key);
-      else { persistDaemonKey(daemonTierPath, key, value); moved.push(key); }
+      // A key kept for a rollback is copied once and then left alone: the daemon's value is the one in force.
+      if (readDotPath(tier, key).present) { if (!kept.has(key)) superseded.push(key); }
+      else { persistDaemonKey(daemonTierPath, key, value); (kept.has(key) ? copied : moved).push(key); }
     }
   }
-  for (const { key } of daemonEntries) deleteRawDotPath(document, key);
+  for (const { key } of daemonEntries) if (!kept.has(key)) deleteRawDotPath(document, key);
   for (const key of retired) deleteRawDotPath(document, key);
-  return { moved, superseded, removed: retired };
+  return { moved, copied, superseded, removed: retired };
 }
 
 /** Whether carrying forward changed anything. */
 export function carriedAnything(result: SettingsCarryForward): boolean {
-  return result.moved.length + result.superseded.length + result.removed.length > 0;
+  return result.moved.length + result.copied.length + result.superseded.length + result.removed.length > 0;
 }
 
 /** A path under the home directory written from `~`, as a person reads it. */
@@ -145,6 +159,7 @@ function shortPath(file: string): string {
 export function describeSettingsCarryForward(file: string, daemonFile: string | null, result: SettingsCarryForward, keptAs?: string): string {
   const parts: string[] = [];
   if (result.moved.length > 0) parts.push(`moved to the daemon's settings (${daemonFile === null ? 'its own file' : shortPath(daemonFile)}): ${result.moved.join(', ')}`);
+  if (result.copied.length > 0) parts.push(`copied to the daemon's settings (${daemonFile === null ? 'its own file' : shortPath(daemonFile)}), which every program now uses, and left here as they were for an earlier version: ${result.copied.join(', ')}`);
   if (result.superseded.length > 0) parts.push(`removed because the daemon's settings already set them: ${result.superseded.join(', ')}`);
   if (result.removed.length > 0) parts.push(`removed because this version no longer has them: ${result.removed.join(', ')}`);
   const kept = keptAs === undefined ? '' : ` The file as it was is kept as ${shortPath(keptAs)}.`;

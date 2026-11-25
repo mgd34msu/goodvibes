@@ -1,26 +1,21 @@
 /**
- * `/eval`, described once (command-actions/): evaluate the product on real work.
- *
- *   /eval list [suite-dir]                         List the tasks in a task suite
- *   /eval run [suite-dir]                          Run every task, then its verification script
- *   /eval compare [baseline-file]                  Compare the last run against a baseline file
- *   /eval gate [suite-dir] [--baseline <file>] [--save-baseline]
- *                                                  Run the suite and fail on a failed or regressed task
+ * Evaluating the product on real work: the terminal app's services for the
+ * eval capabilities (platform builtin/eval.ts), whose controls are on the Work
+ * place's Evaluations tab.
  *
  * A task suite is one directory per task, each with a `task.json`
  * (`instruction`, optional `timeoutMs`) and a `verify.sh` that exits 0 when
  * the work is right. The suite is copied to a scratch directory, every
  * instruction runs as one headless `goodvibes run --output json` in its task's
  * copy, and the task's script decides pass or fail. The checked-in tasks are
- * never changed.
+ * never changed. The results of this session are kept in the app's eval
+ * registry, which the Evaluations tab lists.
  */
 
 import { cpSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { isAbsolute, join, relative, resolve } from 'node:path';
 import type { CommandContext } from '../command-registry.ts';
-import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
-import { choiceInput, doAction, readAction, textInput } from '@goodvibes/engine/terminal-shell/described-command-kit';
 import { EvalRunner, createHeadlessRunExecutor, discoverTasks, formatTaskSuiteResult, runTaskSuite, taskSuiteAsEvalSuite } from '@/runtime/index.ts';
 import type { EvalSuiteResult } from '@/runtime/index.ts';
 import { loadBaseline, captureBaseline, formatBaselineComparison, writeBaseline } from '@/runtime/index.ts';
@@ -28,14 +23,9 @@ import type { EvalRegistry } from '@goodvibes/engine/platform/platform/observe';
 import { formatGateResult } from '@/runtime/index.ts';
 import { requireShellPaths } from '@goodvibes/engine/terminal-shell/command-service-access';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
+import { CapabilityRefusal, DEFAULT_EVAL_BASELINE, DEFAULT_TASK_SUITE_DIR, type EvalResultRow, type EvalSuiteServices } from '@goodvibes/engine/platform/platform/capabilities';
 
-// ── Subcommand helpers ────────────────────────────────────────────────────────
-
-/** Where /eval looks when no suite directory is named, relative to the project. */
-export const DEFAULT_TASK_SUITE_DIR = join('.goodvibes', 'eval', 'tasks');
-
-/** Where the baseline is kept when no file is named, relative to the project. */
-const DEFAULT_BASELINE = '.goodvibes/eval/baseline.json';
+export { DEFAULT_TASK_SUITE_DIR };
 
 /** A task suite on disk: its directory and the name its baseline entries use. */
 interface TaskSuiteLocation {
@@ -43,68 +33,50 @@ interface TaskSuiteLocation {
   readonly name: string;
 }
 
-/** The suite directory named (or the default), or null after saying why there is none. */
-function locateSuite(named: string | undefined, context: CommandContext): TaskSuiteLocation | null {
+/** The suite directory named (or the default); a refusal saying how to make one when there is none. */
+function locateSuite(named: string | undefined, context: CommandContext): TaskSuiteLocation {
   const projectRoot = requireShellPaths(context).workingDirectory;
   const dir = named ? (isAbsolute(named) ? named : resolve(projectRoot, named)) : join(projectRoot, DEFAULT_TASK_SUITE_DIR);
   if (!existsSync(dir) || !statSync(dir).isDirectory()) {
-    context.print([
-      `[eval] No task suite at ${dir}.`,
-      `[eval] Create one directory per task under ${named ? dir : DEFAULT_TASK_SUITE_DIR}, each with a task.json`
-        + ' ({"instruction": "..."}) and a verify.sh that exits 0 when the work is right, then run /eval run again.',
-    ].join('\n'));
-    return null;
+    throw new CapabilityRefusal(
+      `No task suite at ${dir}.`,
+      `Make one folder per task under ${named ? dir : DEFAULT_TASK_SUITE_DIR}, each with a task.json ({"instruction": "..."}) and a verify.sh that exits 0 when the work is right, then run the suite again.`,
+      'NOT_FOUND',
+    );
   }
   const inProject = relative(projectRoot, dir);
   return { dir, name: inProject && !inProject.startsWith('..') && !isAbsolute(inProject) ? inProject : dir };
 }
 
 /**
- * Runs the suite in a scratch copy and prints each task's outcome; null when it
- * could not run, 'stopped' when the owner stopped it. The run holds the
- * terminal's /eval slot: Esc and Ctrl-C stop it, closing the terminal stops it,
- * and a second /eval while one runs is refused.
+ * Runs the suite in a scratch copy; its words and result, or 'stopped' when the owner stopped it. The run holds the
+ * terminal's eval slot: Esc and Ctrl-C stop it, closing the terminal stops it, and a second run while one runs is refused.
  */
-async function runSuite(location: TaskSuiteLocation, context: CommandContext): Promise<EvalSuiteResult | null | 'stopped'> {
+async function runSuite(location: TaskSuiteLocation, context: CommandContext): Promise<{ readonly words: string; readonly result: EvalSuiteResult } | 'stopped'> {
   const slot = context.evalRuns;
   const signal = slot ? slot.begin() : undefined;
-  if (signal === null) {
-    context.print('[eval] An eval is already running in this terminal; press Esc to stop it, then run this again.');
-    return null;
-  }
+  if (signal === null) throw new CapabilityRefusal('Nothing was run: a task suite is already running in this terminal.', 'Press Esc to stop it, then run this again.', 'CONFLICT');
   const scratch = mkdtempSync(join(tmpdir(), 'goodvibes-eval-tasks-'));
   try {
     const copy = join(scratch, 'suite');
     cpSync(location.dir, copy, { recursive: true });
-    context.print(`[eval] Running the task suite ${location.dir}: one goodvibes run per task, then its verify.sh... (Esc stops it)`);
     const startedAt = Date.now();
     const result = await runTaskSuite(copy, { executor: createHeadlessRunExecutor(), sourceDir: location.dir, signal });
-    if (signal?.aborted) {
-      context.print('[eval] Stopped; no result.');
-      return 'stopped';
-    }
-    context.print([
+    if (signal?.aborted) return 'stopped';
+    const words = [
       formatTaskSuiteResult({ ...result, suiteDir: location.dir }),
       result.total === 0
-        ? '[eval] The suite has no tasks: add a directory with a task.json and a verify.sh.'
-        : result.passed ? '[eval] Every task passed.' : `[eval] ${result.total - result.passedCount} of ${result.total} task(s) failed.`,
-    ].join('\n'));
-    return taskSuiteAsEvalSuite(location.name, result, startedAt);
+        ? 'The suite has no tasks: add a folder with a task.json and a verify.sh.'
+        : result.passed ? 'Every task passed.' : `${result.total - result.passedCount} of ${result.total} task(s) failed.`,
+    ].join('\n');
+    return { words, result: taskSuiteAsEvalSuite(location.name, result, startedAt) };
   } catch (error) {
-    if (signal?.aborted) {
-      context.print('[eval] Stopped; no result.');
-      return 'stopped';
-    }
-    context.print(`[eval] The task suite did not run: ${summarizeError(error)}`);
-    return null;
+    if (signal?.aborted) return 'stopped';
+    throw new CapabilityRefusal(`The task suite did not run: ${summarizeError(error)}`);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
     if (signal) slot?.finish(signal);
   }
-}
-
-function getRegistry(context: CommandContext): EvalRegistry | undefined {
-  return context.extensions.evalRegistry;
 }
 
 /** Runs in flight per registry: the registry's running flag is one boolean, so it is cleared when the last one ends. */
@@ -124,151 +96,103 @@ async function withEvalRunning<T>(registry: EvalRegistry | undefined, work: () =
   }
 }
 
-// ── /eval list ────────────────────────────────────────────────────────────────
+const STOPPED = 'Stopped before it finished; no result was kept.';
 
-function handleList(suite: string, context: CommandContext): void {
+function list(suite: string, context: CommandContext): string {
   const location = locateSuite(suite || undefined, context);
-  if (!location) return;
   let tasks: ReturnType<typeof discoverTasks>;
   try {
     tasks = discoverTasks(location.dir);
   } catch (error) {
-    context.print(`[eval] The task suite at ${location.dir} could not be read: ${summarizeError(error)}`);
-    return;
+    throw new CapabilityRefusal(`The task suite at ${location.dir} could not be read: ${summarizeError(error)}`);
   }
-  const lines = [`[eval] Task suite ${location.dir} (${tasks.length} task${tasks.length === 1 ? '' : 's'}):`];
-  for (const { definition } of tasks) {
-    const instruction = definition.instruction.replace(/\s+/g, ' ').trim();
-    lines.push(`  - ${definition.id}: ${instruction.length > 80 ? `${instruction.slice(0, 79)}…` : instruction}`);
-  }
-  lines.push('[eval] Run them: /eval run [suite-dir]');
-  context.print(lines.join('\n'));
+  return [
+    `Task suite ${location.dir} (${tasks.length} task${tasks.length === 1 ? '' : 's'}):`,
+    ...tasks.map(({ definition }) => {
+      const instruction = definition.instruction.replace(/\s+/g, ' ').trim();
+      return `  - ${definition.id}: ${instruction.length > 80 ? `${instruction.slice(0, 79)}…` : instruction}`;
+    }),
+  ].join('\n');
 }
 
-// ── /eval run ────────────────────────────────────────────────────────────────
-
-async function handleRun(suite: string, context: CommandContext): Promise<void> {
+async function run(suite: string, context: CommandContext): Promise<string> {
   const location = locateSuite(suite || undefined, context);
-  if (!location) return;
-  const registry = getRegistry(context);
-  await withEvalRunning(registry, async () => {
+  const registry = context.extensions.evalRegistry;
+  return withEvalRunning(registry, async () => {
     const fresh = await runSuite(location, context);
-    if (fresh && fresh !== 'stopped') registry?.push(fresh);
+    if (fresh === 'stopped') return STOPPED;
+    registry?.push(fresh.result);
+    return fresh.words;
   });
 }
 
-// ── /eval compare ─────────────────────────────────────────────────────────────
-
-async function handleCompare(baselinePath: string, context: CommandContext): Promise<void> {
-  const baselineFile = baselinePath || DEFAULT_BASELINE;
-  const registry = getRegistry(context);
+async function compare(baselinePath: string, context: CommandContext): Promise<string> {
+  const baselineFile = baselinePath || DEFAULT_EVAL_BASELINE;
   const projectRoot = requireShellPaths(context).workingDirectory;
-  const suiteResults = registry?.getSuiteResults() ?? [];
-
-  if (suiteResults.length === 0) {
-    context.print('[eval] No suite results to compare. Run /eval run [suite-dir] first.');
-    return;
-  }
-
+  const suiteResults = context.extensions.evalRegistry?.getSuiteResults() ?? [];
+  if (suiteResults.length === 0) throw new CapabilityRefusal('There is no suite run of this session to compare.', 'Run a task suite first, from the Evaluations tab.');
   const baseline = await loadBaseline(baselineFile, projectRoot);
-  if (!baseline) {
-    context.print(`[eval] Baseline file not found: ${baselineFile}\n[eval] /eval gate [suite-dir] makes one.`);
-    return;
-  }
-
-  context.print(suiteResults.map((result) => formatBaselineComparison(baseline, result)).join('\n'));
+  if (!baseline) throw new CapabilityRefusal(`There is no baseline at ${baselineFile}.`, 'Gating a suite makes one.', 'NOT_FOUND');
+  return suiteResults.map((result) => formatBaselineComparison(baseline, result)).join('\n');
 }
 
-// ── /eval gate ────────────────────────────────────────────────────────────────
-
-async function handleGate(suite: string, baselinePath: string, saveFlag: boolean, context: CommandContext): Promise<void> {
-  const baselineFile = baselinePath || DEFAULT_BASELINE;
+async function gate(suite: string, baselinePath: string, saveFlag: boolean, context: CommandContext): Promise<string> {
+  const baselineFile = baselinePath || DEFAULT_EVAL_BASELINE;
   const projectRoot = requireShellPaths(context).workingDirectory;
-
   const location = locateSuite(suite || undefined, context);
-  if (!location) return;
-
-  const registry = getRegistry(context);
-  const runner = new EvalRunner();
-
-  context.print(`[eval] Gate: running the task suite ${location.name}...`);
+  const registry = context.extensions.evalRegistry;
   const fresh = await withEvalRunning(registry, async () => {
     const result = await runSuite(location, context);
-    if (result && result !== 'stopped') registry?.push(result);
+    if (result !== 'stopped') registry?.push(result.result);
     return result;
   });
-  if (fresh === 'stopped') return;
-  if (!fresh) {
-    context.print('[eval] Gate FAILED: the task suite did not run.');
-    return;
-  }
-
+  if (fresh === 'stopped') return STOPPED;
   const baseline = await loadBaseline(baselineFile, projectRoot);
-  const gate = runner.evaluateGate(fresh, baseline);
-  registry?.pushGate(gate);
-
-  const report = [formatGateResult(gate)];
-
+  const verdict = new EvalRunner().evaluateGate(fresh.result, baseline);
+  registry?.pushGate(verdict);
+  const report = [fresh.words, formatGateResult(verdict)];
   if (saveFlag || !baseline) {
-    const newBaseline = captureBaseline(location.name, [fresh]);
     try {
-      await writeBaseline(baselineFile, newBaseline, projectRoot);
-      report.push(`[eval] Baseline saved to ${baselineFile}`);
+      await writeBaseline(baselineFile, captureBaseline(location.name, [fresh.result]), projectRoot);
+      report.push(`This run is now the baseline, in ${baselineFile}.`);
     } catch (err) {
-      report.push(`[eval] Warning: could not save baseline: ${summarizeError(err)}`);
+      report.push(`The baseline could not be saved: ${summarizeError(err)}`);
     }
   }
-
-  const gateFailures = [
-    `${gate.floorFailures.length} failed task(s)`,
-    `${gate.regressions.length} regression(s) against the baseline`,
-    ...(gate.missingFromRun.length > 0 ? [`${gate.missingFromRun.length} baseline task(s) missing from the run: ${gate.missingFromRun.join(', ')}`] : []),
-    ...(fresh.results.length === 0 ? ['the run has no tasks'] : []),
+  const failures = [
+    `${verdict.floorFailures.length} failed task(s)`,
+    `${verdict.regressions.length} regression(s) against the baseline`,
+    ...(verdict.missingFromRun.length > 0 ? [`${verdict.missingFromRun.length} baseline task(s) missing from the run: ${verdict.missingFromRun.join(', ')}`] : []),
+    ...(fresh.result.results.length === 0 ? ['the run has no tasks'] : []),
   ];
-  report.push(gate.passed
-    ? '[eval] Gate PASSED.'
-    : `[eval] Gate FAILED: ${gateFailures.join(', ')}.`);
-  context.print(report.join('\n'));
+  report.push(verdict.passed ? 'The gate passed.' : `The gate failed: ${failures.join(', ')}.`);
+  return report.join('\n');
 }
 
-// ── The command ──────────────────────────────────────────────────────────────
+/** The suites run in this session, newest result each, with the gate's verdict where there was one. */
+function results(registry: EvalRegistry | undefined): readonly EvalResultRow[] {
+  if (!registry) return [];
+  const gates = new Map(registry.getGateResults().map((entry) => [entry.suite, entry.passed]));
+  return registry.getSuiteResults().map((suite): EvalResultRow => {
+    const passed = suite.results.filter((entry) => entry.scorecard.passed).length;
+    const verdict = gates.get(suite.suite);
+    return {
+      suite: suite.suite, passed, total: suite.results.length, at: suite.finishedAt,
+      ...(verdict === undefined ? {} : { gate: verdict ? 'passed' as const : 'failed' as const }),
+      failed: suite.results.filter((entry) => !entry.scorecard.passed).map((entry) => entry.scenario.id),
+    };
+  });
+}
 
-const SUITE = textInput({ id: 'suite', label: 'Task suite', help: `A folder with one folder per task (default ${DEFAULT_TASK_SUITE_DIR})`, why: 'a folder in this project', kind: 'path', typed: { position: 1 }, optional: { default: '', means: DEFAULT_TASK_SUITE_DIR } });
-const TERMINAL_ONLY = { terminalOnly: 'It runs the product in this terminal app\'s project.' } as const;
-
-export const evalCommand = defineCommand<CommandContext>({
-  name: 'eval',
-  title: 'Evaluate on real tasks',
-  summary: 'Run a task suite through goodvibes run, compare it with a baseline, and stop on a regression',
-  group: 'Changes',
-  report: 'list',
-  actions: [
-    readAction<CommandContext>({
-      id: 'list', label: 'See the tasks in a suite', word: 'list', inputs: [SUITE],
-      sentence: 'Lists the tasks in the task suite named, each with its instruction.', example: { suite: 'evals/tasks' }, operator: TERMINAL_ONLY,
-      async run(values, ctx) { handleList(values.suite ?? '', ctx); },
-    }),
-    doAction<CommandContext>({
-      id: 'run', label: 'Run a task suite', word: 'run', inputs: [SUITE],
-      sentence: 'Each task of the suite runs as one goodvibes run in a scratch copy, then its verify.sh says pass or fail; the suite itself is never changed.', example: { suite: 'evals/tasks' }, operator: TERMINAL_ONLY,
-      async run(values, ctx) { await handleRun(values.suite ?? '', ctx); },
-    }),
-    readAction<CommandContext>({
-      id: 'compare', label: 'Compare the last run with a baseline', word: 'compare',
-      inputs: [textInput({ id: 'baseline', label: 'Baseline', help: `A baseline file (default ${DEFAULT_BASELINE})`, why: 'a file in this project', kind: 'path', typed: { position: 1 }, optional: { default: '', means: DEFAULT_BASELINE } })],
-      sentence: 'Compares the last suite run of this session with the baseline file, task by task.', example: { baseline: 'evals/baseline.json' }, operator: TERMINAL_ONLY,
-      async run(values, ctx) { await handleCompare(values.baseline ?? '', ctx); },
-    }),
-    {
-      id: 'gate', label: 'Run a suite and stop on a regression', word: 'gate',
-      inputs: [
-        SUITE,
-        textInput({ id: 'baseline', label: 'Baseline', help: `A baseline file (default ${DEFAULT_BASELINE})`, why: 'a file in this project', kind: 'path', typed: { flag: '--baseline' }, optional: { default: '', means: DEFAULT_BASELINE } }),
-        choiceInput({ id: 'save', label: 'Then', help: 'Whether this run becomes the baseline', choices: [{ value: 'no', label: 'Keep the baseline' }, { value: 'yes', label: 'Save this run as the baseline', help: 'The baseline file is written over.' }], typed: { flag: '--save-baseline', switchOn: 'yes' }, optional: { default: 'no', means: 'keep the baseline (one is made when there is none)' } }),
-      ],
-      sentence: 'The suite runs, and the gate fails on a failed task or one worse than the baseline; a missing baseline is made from this run, until you change it.', done: '',
-      touches: 'this-machine', lasts: 'kept', risk: 'none', operator: TERMINAL_ONLY, example: { suite: 'evals/tasks', save: 'yes' },
-      async run(values, ctx) { await handleGate(values.suite ?? '', values.baseline ?? '', values.save === 'yes', ctx); },
-    },
-  ],
-});
+/** This app's task suites (builtin/eval.ts services), run in its project folder. */
+export function evalSuitesOf(ctx: CommandContext): EvalSuiteServices {
+  const registry = ctx.extensions.evalRegistry;
+  return {
+    list: async (suite) => list(suite, ctx),
+    run: (suite) => run(suite, ctx),
+    compare: (baseline) => compare(baseline, ctx),
+    gate: (suite, baseline, save) => gate(suite, baseline, save, ctx),
+    results: () => results(registry),
+    subscribe: (listener) => registry?.subscribe(listener) ?? (() => {}),
+  };
+}

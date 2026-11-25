@@ -210,6 +210,12 @@ export interface SecretStoreSlice {
   get(key: string): Promise<string | null>;
   set(key: string, value: string): Promise<void>;
   delete(key: string): Promise<void>;
+  /**
+   * After `key` read as absent: the words for a secret store this computer
+   * could not read (config/secret-store-unreadable.ts), or null when the stores
+   * were read. A slice without it is taken as read.
+   */
+  unreadable?(key: string): Promise<string | null>;
 }
 
 // ---------------------------------------------------------------------------
@@ -245,7 +251,9 @@ export type ConnectionState =
   /** Refresh was attempted and failed; the user must reconnect. */
   | 'reconnect-needed'
   /** No token stored for this account. */
-  | 'disconnected';
+  | 'disconnected'
+  /** The secret store on this computer could not be read: whether a token is stored is not known, and none is asked for. */
+  | 'unreadable';
 
 // ---------------------------------------------------------------------------
 // Flow states

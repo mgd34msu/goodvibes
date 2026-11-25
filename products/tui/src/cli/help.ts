@@ -3,6 +3,7 @@ import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal
 import { renderDetailedCommandHelp, renderMostUsedHelp, renderUsageLine, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
 import { join } from 'node:path';
 import { GOODVIBES_CLI_CATALOG } from '@goodvibes/engine/terminal-shell/cli-command-catalog';
+import { CAPABILITY_CLI_HELP } from '@goodvibes/engine/terminal-shell/capability-cli-help';
 import { VERSION } from '../version.ts';
 
 export const getPackageVersion = (): string => productVersionFromModule(import.meta.url, '@goodvibes/tui', VERSION);
@@ -125,6 +126,7 @@ export function renderGoodVibesHelp(binary = 'goodvibes'): string {
 type CommandHelp = TerminalCommandHelp;
 
 const COMMAND_HELP: Record<string, CommandHelp> = {
+  ...CAPABILITY_CLI_HELP,
   tui: {
     usage: ['tui [path]', '[prompt]'],
     summary: 'Start the interactive terminal UI. A prompt starts the TUI with that prompt seeded.',

@@ -81,6 +81,9 @@ import type { RuntimeServices } from './runtime-services-types.js';
 import { daemonWorkspaceCheckpoints } from './workspace-checkpointing.js';
 import { hostedRewindStorage, hostedSessionConversations } from './conversation-rewind-port.js';
 import { createAgentHostedTurn } from '@goodvibes/engine/terminal-shell/agent-turn/hosted-turn';
+import {
+  createDaemonCapabilityServices, daemonCapabilityCatalog, loadedDaemonCapabilityCatalog, preloadDaemonCapabilityCatalog,
+} from '@goodvibes/engine/platform/platform/capabilities';
 
 /** The operator policy a session hosted by THIS daemon runs under. */
 function hostedSystemPrompt(input: { readonly workspaceRoot: string }): string {
@@ -148,6 +151,8 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
 
   // One checkpoint manager per hosted workspace, open until the daemon stops; the daemon's own workspace keeps the daemon's.
   const workspaceCheckpoints = daemonWorkspaceCheckpoints(services.runtimeBus);
+  // The daemon's own stores, which a hosted session's capabilities act on (a project's hooks file and secrets by its folder).
+  const capabilityServices = createDaemonCapabilityServices(services);
 
   return {
     nativeConversation: nativeHostedConversationOwner(services.gatewayMethods),
@@ -212,8 +217,17 @@ export function createHostedSessionOptions(services: RuntimeServices): DaemonHos
         // checkpoints.restore and sessions.changes.get work for a hosted session.
         // It outlives the floor: a finished session's changes stay reviewable.
         workspaceCheckpoints.acquire(workspaceRoot);
+        // The daemon's whole capability catalog, read before the first session's tools are built from it.
+        await preloadDaemonCapabilityCatalog();
         return {
           services: floor,
+          capabilityTools: {
+            catalog: daemonCapabilityCatalog,
+            loaded: loadedDaemonCapabilityCatalog,
+            services: capabilityServices,
+            methods: services.gatewayMethods,
+            workingDirectory: () => workspaceRoot,
+          },
           devicePosture: services.devicePosture,
           // Each workspace floor owns its own contract store and runner.
           contractRunner: floor.contractRunner,

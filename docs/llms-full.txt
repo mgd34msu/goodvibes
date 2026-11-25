@@ -1286,7 +1286,7 @@ These settings control the service (type, default and description for each):
 | Key | Type | Default | Allowed | Stored in | What it does |
 | --- | --- | --- | --- | --- | --- |
 | `service.autostart` | boolean | `false` |  | daemon file | Whether the daemon's service starts on its own at login. The daemon applies every change, however it is set (a settings screen, /settings set in either terminal program, goodvibes-daemon config set, the API, or an edit of the daemon's settings file): on installs the service when it is not installed and enables it at login (systemd enable; a LaunchAgent with RunAtLoad); off disables it at login and leaves it installed and running. A value set while no daemon runs is applied when the daemon next starts. goodvibes-daemon install-service turns it on and uninstall-service off. A Windows logon task starts at login while installed whatever its value. A daemon setting, in the daemon's settings file. |
-| `service.enabled` | boolean | `true` |  | daemon file | Whether this machine runs the daemon as a service. On, a daemon started by hand installs the service at its first idle moment and doctor reports a missing or stopped service; off (the installers' --no-service, or goodvibes-daemon uninstall-service), nothing installs one and doctor does not ask for one. goodvibes-daemon install-service turns it on. A daemon setting: one value every program and installer reads, in the daemon's settings file. |
+| `service.enabled` | boolean | `true` |  | daemon file | On: GoodVibes runs its daemon as a service of this computer. It is set up the first time a daemon you started is idle, and from then on it keeps running after you close the window you started it from, so your sessions and whatever it serves stay available. Turn on Start the daemon at login as well and it also starts by itself when you sign in. Off: nothing sets up a service, and the daemon runs only while you keep it running. |
 | `service.logPath` | string | `""` |  | daemon file | File path for daemon/service logs (empty = platform default under the configured service directory). Saving it rewrites the service definition, as service.restartOnFailure does; it takes effect at the next daemon start. |
 | `service.platform` | enum | `"auto"` | `auto`, `systemd`, `launchd`, `windows`, `manual` | daemon file | Target service manager platform. |
 | `service.restartOnFailure` | boolean | `true` |  | daemon file | Restart the service automatically after failure. Saving it rewrites the service definition (what goodvibes-daemon refresh-service does): the running daemon service does it at once, or at its next start when no daemon ran; it takes effect at the next daemon start, and nothing is restarted. |
@@ -2450,7 +2450,7 @@ Seven screens list optional features, each as a checkbox that starts at its curr
 
 ### The Agent's first run
 
-The Agent's first start runs the same three-step first run as the terminal app (above). `goodvibes-agent setup` (or `goodvibes-agent onboarding`) starts the Agent on `/setup`, whose topics are listed in the Agent part; a topic opens the workspace with only that topic's rows. The setup pages below are the workspace's Onboarding areas, opened with `/agent` or `Ctrl+G`.
+The Agent's first start runs the same three-step first run as the terminal app (above). `goodvibes-agent setup` (or `goodvibes-agent onboarding`) starts the Agent on `/setup`, whose topics are listed in the Agent part; a topic opens the workspace with only that topic's rows. The setup pages below are the workspace's Onboarding areas, opened with `/agent` or `Ctrl+G` `w`.
 
 Keys: Up and Down move, Left and Right switch between the page list and the page, Enter opens a row, `/` searches, Ctrl+] goes to the next area, Ctrl+R checks the daemon again, Esc closes, and typing a letter closes the workspace with that letter in the message box.
 
@@ -2677,6 +2677,17 @@ A prompt is required.
 ```
 
 The exit code is `2`.
+
+### `goodvibes find` and `goodvibes do`
+
+`find "<what you need>" [--output json]` names the three to five GoodVibes capabilities that do it, from the function group that serves the need, each with its id, its inputs and its risk; nothing runs. `do <capability id> [--input key=value ...] [--output json]` runs one by id through the daemon: a command you typed is the request, so it runs at once and prints what it did. A capability that acts on a conversation (clear, compact, undo) is refused in one line; it runs in the terminal app or the Agent. Exit `0` done (or found), `1` refused or failed, `2` bad usage; with `--output json` the answer, or the `{ok:false, code, error, fix}` refusal, is one document on stdout.
+
+```sh
+goodvibes find "switch off the lint hook"
+goodvibes do hooks.disable --input hook=lint-before-commit
+```
+
+The model has the same two as tools (`capability_find`, `capability_run`), and `goodvibes-daemon mcp serve` offers them to another program's model. A value of an input that is a secret (a password, a key) is never shown: an ask, an approval record, the conversation and every log show it as `(hidden, <n> characters)`.
 
 ### `goodvibes status`
 
@@ -3176,7 +3187,7 @@ The screen has four regions, top to bottom.
 3. The composer is the text box where the owner types. Its label shows what Enter will do (prompt, command, shell, note, memory pin).
 4. The status bar, the row under the composer. Left: first one word for what main is doing, never dropped: `working` while a turn runs, `waiting for you` (warning colour) while a question waits for your answer, nothing at rest. Then `Permissions:` and the mode in force. When it is the mode chosen, its name (`Permissions: Jev decides`, `Permissions: Ask me`, `Permissions: YOLO`); when it is not, what is in force first and the choice second, with when it takes effect: `Permissions: asking you, for now · Jev decides once a decision model is set` (no decision model set), `· Jev decides once decision models are on` (decision models switched off), `· Jev decides once you pick it yourself (not measured on this decision model)` (Jev decides is only the shipped default and was not measured on this decision model), `· Jev decides once the decision model answers again · decision model unreachable` (or `· decision model failing`), and `Permissions: YOLO, for now · <mode> once the old auto-approve setting is off`; then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero; while the row has room, the newest unread notice's subject beside the count, `2 notices: Setting nosuch ignored (…)`, or the first words of its text when it has no title, which gives way after the branch), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. The right side is drawn faint, as background facts. A click on a segment opens its view: the mode opens `/permissions`, whose first row reads the mode in force and, chosen, says what it does, why it differs from your choice and the one setting that fixes that (`Choose a decision model`, `Turn decision models on`, or `Change when GoodVibes asks`), the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; the choice shortens and keeps its cause (`Jev decides once a decision model is set` to `Jev decides: no decision model set`, `Jev decides: not measured yet` while Jev decides is only the shipped default, `Jev decides: waits for the decision model` while it fails, followed by the failure; a click on the mode shows the rest); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure goes last. `Permissions:` with the mode in force (`asking you, for now`) and the choice always stay. At 120 columns with no decision model set, `Permissions: asking you, for now · Jev decides: no decision model set` shows with context, branch and model (with `1 notice` in place of the context when there is one); with Jev decides only the shipped default and not measured, `Permissions: asking you, for now · Jev decides: not measured yet` shows the same way; with the decision model unreachable, `Permissions: asking you, for now · Jev decides: waits for the decision model · decision model unreachable` shows with the model (`· unreachable` when there is a notice). At 80 columns: `Permissions: asking you, for now · Jev decides: no decision model set` and its key, or `Permissions: asking you, for now · Jev decides: waits for the decision model · unreachable`.
 
-While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Alt+N` and `Alt+P` (the rebindable `next-session` and `previous-session`) show the next and previous session, and the row ends with those keys. `Tab` and `Shift+Tab` never switch sessions.
+While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Ctrl+G` `n` and `Ctrl+G` `p` (the rebindable `next-session` and `previous-session`, also `Ctrl+Q` and `Ctrl+_`) show the next and previous session, and the row ends with those keys. `Tab` and `Shift+Tab` never switch sessions.
 
 ### What the composer does with typed text
 
@@ -3204,19 +3215,25 @@ Images in the terminal app:
 - Deleting a marker with `Backspace` removes that image.
 - `@photo.png` typed in the composer is plain text (the model can read the file with its tools); `!@photo.png` attaches the image, at most 20 MB, as a pasted path does.
 
+### The leader and the menu
+
+The leader (`Ctrl+G` by default, the rebindable `leader`) starts a two-key shortcut, over every screen: press it, and a strip at the bottom of the screen lists every key that can follow and what it does; the next key completes the shortcut or, if no shortcut uses it, cancels it (`Esc` cancels too). On a settings screen the key after the leader is that screen's action letter when it has one, and the strip lists those letters first, then the shortcuts of the key table. There is no time limit between the two keys. `Ctrl+G` then `m` opens the menu of every place: the fourteen function groups (This conversation, Sessions, Code and changes, Work and agents, Waiting for you, Models and providers, Permissions and safety, Tools and extensions, Memory and knowledge, Mail, calendar and channels, Automation, Devices and network, Money, System), each with one line on what is there and a count where something waits or failed; typing filters, `Enter` opens the place. The status bar's `ctrl+g m menu` keycap opens it with a click. In this release Waiting for you, Automation and System (Keys) have their place; the others say so.
+
+A place lists the real things (your schedules, what waits on you) read by themselves when it opens and again whenever they change elsewhere (a schedule paused, removed or run from the web UI, a question answered or expired elsewhere, shows with no key pressed). The hint row shows only the actions that apply to the selected item now, with the keys bound now; pressing one does it, says what happened and how to undo it, and asks first only when it cannot be undone or weakens a protection. Answering something that waits for you never asks again: the item is the question, so an answer's key answers it on the press, and `Enter` lists its answers, starting on No for an ask that loosens a protection. A list that could not be read says why; it is read again by itself when the daemon answers again (also when the place was opened while the daemon was down), and `r` reads it at once. Rows, tabs and menu rows can be clicked.
+
+Waiting for you holds the questions, the approvals and the held calls (the calls `just-vibes` held instead of asking) of every program in one inbox: the daemon's held calls and the ones each terminal program's own gate held, so a held call can be answered here, in the web UI or on a phone. An answer runs on its key, and the line after it names the choice as you pressed it (`Answered "Run bun test?": No.`).
+
+Each place's letters are keys of the table too, one group per place, named `place.<place>.<action>` in `keybindings.json` (`place.automation.pause`, `place.waiting.read-again`); a place's two keys that can apply at once, or one of its keys the program reads before the place, are reported as a conflict. An item's answers keep the item's own keys (`y`, `n`, `1`...), the same on every surface.
+
+The Keys place (System) lists every key the program acts on as bound now, and each place's keys under the place's name; `Enter` on one and then the new key changes it (the leader and then a key makes a two-key shortcut), `d` puts back its default, `Shift+D` puts every key back (it asks first). The model can do the same three (`keys.bind`, `keys.reset`, `keys.reset-all`, found and run like any capability; a key is written `ctrl+k`, `f5`, `shift+tab` or `leader m`). Two actions on one key are reported in plain words naming both, there, in a notice at start, and for a hand edit of `keybindings.json`.
+
 ### Fixed keys
 
 These keys are not in the rebindable table.
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Send the composer, or run the selected row in a list. |
 | `Shift+Enter` | Insert a newline. |
-| `Tab` | Complete a path or command; otherwise toggle the nearest block's collapse. |
-| `Esc` | One step per press, the first that applies: close the top view (one level), clear the composer, leave an agent or process view, return a scrolled-back transcript to the bottom, interrupt the running turn. The status bar names what the next `Esc` does (`esc clear input`, `esc back`, `esc interrupt`). Each step also has a key of its own: `Ctrl+C` interrupts, `Alt+U` (terminal app) or `Ctrl+U` (Agent) clears the composer. Inside Agents it backs out one level and never stops work. |
-| `PageUp`, `PageDown` | Scroll the transcript by a page. |
-| `Up`, `Down` | Scroll the transcript, or recall input history when the composer is focused. |
-| `F2` | Open or close Your agents. |
 | `?` on an empty composer | Open the help list of every command. |
 | `@` at the start or after a space | Open the file picker; the chosen path is inserted. `!@` opens it to insert a file whose text will be embedded. |
 | `r` or `m` after a turn error | Retry the turn, or open the model picker. Any other key dismisses the choice. |
@@ -3229,11 +3246,18 @@ The default table of the terminal app:
 
 | Action | Default key | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C`, `F5` | Copy selected text to the clipboard. |
+| `leader` | `Ctrl+G` | Start a two-key shortcut (above). |
+| `open-menu` | `Ctrl+G` `m` | Open the menu of every place. |
+| `next-field` | `Tab` | Complete a path or command; otherwise toggle the nearest block's collapse; in a form, the next field; in a place, the next list. |
+| `choose` | `Enter` | Send the composer, or run the selected row in a list. |
+| `back` | `Esc` | One step per press, the first that applies: close the top view (one level), clear the composer, leave an agent or process view, return a scrolled-back transcript to the bottom, interrupt the running turn. The status bar names what the next `Esc` does (`esc clear input`, `esc back`, `esc interrupt`). Inside Agents it backs out one level and never stops work. |
+| `move-up`, `move-down`, `move-left`, `move-right` | `Up`, `Down`, `Left`, `Right` | Move; `Up`/`Down` scroll the transcript or recall input history when the composer is focused. |
+| `copy-selection` | `Ctrl+G` `c`, `F5`, `Ctrl+Shift+C` | Copy selected text to the clipboard (`Ctrl+Shift+C` where the terminal passes it on). |
 | `clear-cancel` | `Ctrl+C` | Clear the composer; on an empty composer cancel generation; pressed twice within one second, exit. The footer shows `Press Ctrl+C again to exit`. |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P`, `Ctrl+K` | Open the command palette: every command, view and setting. |
-| `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled (the same as `F2`). |
+| `open-agents` | `F2`, `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled. |
+| `scroll-page-up`, `scroll-page-down` | `PageUp`, `PageDown` | Scroll the transcript by a page. |
 | `history-search` | `Ctrl+R` | Reverse search of input history. |
 | `search` | `Ctrl+F` | Search this conversation's transcript. |
 | `block-copy` | `Ctrl+Y` | Copy the nearest block. |
@@ -3242,33 +3266,37 @@ The default table of the terminal app:
 | `delete-word` | `Ctrl+W` | Delete the word before the cursor (whitespace-delimited) into the kill ring. |
 | `line-start` | `Ctrl+A` | Move to the start of the line. |
 | `next-error-line-end` | `Ctrl+E` | Move to the end of the line; on an empty composer, jump to the next error in the transcript. |
-| `kill-line` | `Alt+K`, `Ctrl+X` | Kill from the cursor to the end of the line into the kill ring. |
-| `clear-prompt` | `Alt+U`, `Ctrl+G` | Clear the whole composer without using the kill ring. |
+| `kill-line` | `Ctrl+G` `k`, `Ctrl+X` | Kill from the cursor to the end of the line into the kill ring. |
+| `clear-prompt` | `Ctrl+G` `u` | Clear the whole composer without using the kill ring. |
 | `undo` | `Ctrl+Z` | Undo the last composer edit. |
-| `redo` | `Ctrl+Shift+Z`, `Ctrl+^` | Redo the last undone composer edit. |
+| `redo` | `Ctrl+G` `z`, `Ctrl+^` | Redo the last undone composer edit. |
 | `paste` | `Ctrl+V` | Paste from the clipboard; an image takes priority over text. |
-| `word-back` | `Alt+B`, `Ctrl+Left` | Move to the start of the previous word. |
-| `word-forward` | `Alt+F`, `Ctrl+Right` | Move to the end of the next word. |
+| `word-back` | `Ctrl+G` `b`, `Ctrl+Left` | Move to the start of the previous word. |
+| `word-forward` | `Ctrl+G` `f`, `Ctrl+Right` | Move to the end of the next word. |
 | `kill-to-start` | `Ctrl+U` | Kill from the cursor to the start of the line into the kill ring. |
-| `kill-word-forward` | `Alt+D`, `Ctrl+Delete` | Kill the next word into the kill ring. |
-| `yank` | `Ctrl+Shift+Y`, `Ctrl+\` | Paste the newest kill-ring entry. |
-| `yank-pop` | `Alt+Y`, `Ctrl+]` | Right after a yank, replace it with the previous kill-ring entry. |
-| `cancel-tool-call` | `Alt+C`, `Ctrl+T` | Cancel the running tool call; the turn continues. |
-| `toggle-keep-awake` | `Alt+A`, `F6` | Turn the machine's keep-awake on or off (the "sleep disabled" chip). |
-| `toggle-memory-provenance` | `Alt+M`, `F7` | List or hide the memories the last turn used. |
-| `voice-input` | `Alt+V`, `F8` | First press starts recording; the second press stops it and adds the transcription to the composer, after any text already there. |
-| `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move the keyboard onto the transcript's work tree: arrows move and fold, `Enter` opens, `y` copies, `Esc` returns. |
+| `kill-word-forward` | `Ctrl+G` `d`, `Ctrl+Delete` | Kill the next word into the kill ring. |
+| `yank` | `Ctrl+G` `y`, `Ctrl+\` | Paste the newest kill-ring entry. |
+| `yank-pop` | `Ctrl+G` `Y`, `Ctrl+]` | Right after a yank, replace it with the previous kill-ring entry. |
+| `cancel-tool-call` | `Ctrl+G` `t`, `Ctrl+T` | Cancel the running tool call; the turn continues. |
+| `toggle-keep-awake` | `Ctrl+G` `a`, `F6` | Turn the machine's keep-awake on or off (the "sleep disabled" chip). |
+| `toggle-memory-provenance` | `Ctrl+G` `e`, `F7` | List or hide the memories the last turn used. |
+| `voice-input` | `Ctrl+G` `v`, `F8` | First press starts recording; the second press stops it and adds the transcription to the composer, after any text already there. |
+| `focus-work-tree` | `Ctrl+G` `Up`, `Ctrl+Up` | Move the keyboard onto the transcript's work tree: arrows move and fold, `Enter` opens, `y` copies, `Esc` returns. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode (see below). |
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
-| `failure-other-model` | `Alt+O`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I`, `F3` | On the newest failed turn: show what the provider said. |
-| `failure-sign-in` | `Alt+S`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
-| `next-session` | `Alt+N`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
-| `previous-session` | `Alt+P`, `Ctrl+_` | While the session chips show: the previous session. |
+| `failure-other-model` | `Ctrl+G` `o`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Ctrl+G` `i`, `F3` | On the newest failed turn: show what the provider said. |
+| `failure-sign-in` | `Ctrl+G` `s`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
+| `failure-retry` | `Ctrl+G` `r`, `F12` | On the newest failed turn: send the prompt again. |
+| `open-fix-session` | `Ctrl+G` `j`, `F10` | Open the fix session just started (a CI fix, a conflict resolution). |
+| `next-session` | `Ctrl+G` `n`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
+| `previous-session` | `Ctrl+G` `p`, `Ctrl+_` | While the session chips show: the previous session. |
+| `contract-question-ordinary` | `Ctrl+G` `q` | While a contract's question is on offer above the composer: send the next message as an ordinary one, not as its answer. |
+| `model-picker-group` | `Ctrl+G` `g` | In the model list: group it another way (provider, price, none). |
 
-Every Alt and Ctrl+Shift chord has a second default: macOS Terminal sends no Alt unless "Use Option as Meta key" is on, and a terminal without the extended keyboard protocol sends `Ctrl+Shift+<letter>` as `Ctrl+<letter>`, so the second chord is one every terminal sends and tmux leaves alone (a function key, a free `Ctrl` chord, or `Ctrl` with an arrow or Delete). `F12` is the second chord of `Alt+R` (try again) and `F10` of `Alt+J` (open the fix session just started).
+The actions that sat on an `Alt` or `Ctrl+Shift` chord, which tmux, screen and macOS Terminal swallow, are a leader shortcut by default, each beside a second key every terminal sends (a function key, a free `Ctrl` chord, or `Ctrl` with an arrow or Delete). A person can bind a chord back: `{ "kill-line": { "key": "k", "alt": true } }` in `keybindings.json`; a binding there written before this release keeps working. A two-key shortcut is written `{ "key": "m", "leader": true }`. A key bound to `next-field`, `choose`, `back` or a `move-*` action is that key to every screen, and `Tab`, `Enter`, `Esc` or an arrow bound to another action does that action instead.
 
-`Alt+R` on the newest failed turn sends the failed prompt again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and `Alt+R` tries again. When the failed turn had already run tools, the tool results are kept and the turn continues from them, so their effects are not repeated. The keys are named on the failed turn's row (see "Turn errors"), not in the footer.
+`Ctrl+G` `r` on the newest failed turn sends the failed prompt again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and the same key tries again. When the failed turn had already run tools, the tool results are kept and the turn continues from them, so their effects are not repeated. The keys are named on the failed turn's row (see "Turn errors"), not in the footer.
 
 `Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
@@ -3332,7 +3360,7 @@ Pickers (session picker, profile picker, selection lists, the recovery offer) sh
 | `Esc` | Close the list in one press. |
 
 Configuration workspaces (`/memory open`, `/todo open`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and others) keep a search row that always takes typed characters.
-An action there fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key for keys a terminal cannot send with `Ctrl` (`c`, `h`, `i`, `j`, `m`, digits and capitals; the hint bar shows `^G c`).
+An action there fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from the leader (`Ctrl+G` unless rebound) followed by its key for keys a terminal cannot send with `Ctrl` (`c`, `h`, `i`, `j`, `m`, digits and capitals; the hint bar shows `^G c`, and the leader as bound).
 An action that deletes, uninstalls or clears asks for the same key a second time; `Esc` cancels.
 
 ### Turn errors
@@ -3343,13 +3371,13 @@ A failed turn is a row in the transcript under its prompt, which stays as you ty
 ✕ The model didn't answer.
   OpenAI returned an error (500) six times. Nothing was changed.
 
-  alt+r try again   alt+o use another model   alt+i details
+  ctrl+g r try again   ctrl+g o use another model   ctrl+g i details
 
   Tip: name a backup model once and GoodVibes switches by itself:
   /model backup
 ```
 
-The second line is worded from the failure's facts: the provider's status (`refused the API key (401)`, `turned the request away for too many requests (429)`, `returned an error (500)`), a connection error (`GoodVibes couldn't reach <provider> (ECONNREFUSED)`), how many requests were made, and what the turn's tools changed before it stopped, from the turn's own record (`2 files were changed before it stopped. /changes`; `1 command ran before it stopped.`; `Nothing was changed.` only when the record shows nothing was written, run or sent). `alt+r` sends the prompt again, `alt+o` opens the model picker and sends the prompt to the model chosen there, `alt+i` shows the details under the second line (provider, model, status, code, attempts and their times, why the fallback order did not move the turn, the provider's own message) and hides them again. A provider that refused its key offers `alt+s sign in again` (the provider sign-ins, `/auth`) in place of `alt+r`. The tip is shown only while `provider.fallbackModels` is empty. A turn sent with no usable model (no model selected, or its provider not signed in) is refused before any request: `No model is set up yet. Nothing was changed.` with `alt+o choose a model` and `or run /setup`. A newer prompt removes the keys and the tip from the older row; its first two lines stay. While a failing request is retried, the row says so (`Retrying up to 5 times…`) and becomes the failure row when the retries are spent.
+The second line is worded from the failure's facts: the provider's status (`refused the API key (401)`, `turned the request away for too many requests (429)`, `returned an error (500)`), a connection error (`GoodVibes couldn't reach <provider> (ECONNREFUSED)`), how many requests were made, and what the turn's tools changed before it stopped, from the turn's own record (`2 files were changed before it stopped. /changes`; `1 command ran before it stopped.`; `Nothing was changed.` only when the record shows nothing was written, run or sent). `ctrl+g r` sends the prompt again, `ctrl+g o` opens the model picker and sends the prompt to the model chosen there, `ctrl+g i` shows the details under the second line (provider, model, status, code, attempts and their times, why the fallback order did not move the turn, the provider's own message) and hides them again. A provider that refused its key offers `ctrl+g s sign in again` (the provider sign-ins, `/auth`) in place of `ctrl+g r`. The row names each key as bound (`failure-retry`, `failure-other-model`, `failure-details`, `failure-sign-in`). The tip is shown only while `provider.fallbackModels` is empty. A turn sent with no usable model (no model selected, or its provider not signed in) is refused before any request: `No model is set up yet. Nothing was changed.` with `ctrl+g o choose a model` and `or run /setup`. A newer prompt removes the keys and the tip from the older row; its first two lines stay. While a failing request is retried, the row says so (`Retrying up to 5 times…`) and becomes the failure row when the retries are spent.
 A provider failure may move to another sign-in, another backend of a `synthetic` model, or the next model of your fallback order, as described under "Failover".
 `/retry [modified text]` sends the last prompt again, optionally changed.
 
@@ -3579,7 +3607,7 @@ When a file was changed after that call (by you, another tool or another program
 When the provider is not signed in, the terminal app asks for its API key on a hidden line before the switch lands.
 An unknown id is refused with the provider registry's reason. `/model use` alone opens the full model picker, as bare `/model` does.
 `/model refresh` asks every provider you have set up for its models again (past any list kept on disk), then refreshes the catalog, the benchmarks and the token limits, asks the daemon to read its own lists again (`models.refresh`; the lists the web app and every other program show), and prints one line per provider: how many models it has, or why its list could not be read (`could not be read, its server is not running`, `could not be read (<error>); 12 models from its last list`, `0 models: it answered with an empty list`); a provider that does not list its own models says it uses the built-in catalog. With a daemon running, a note follows: `The daemon read its lists again too (what the web UI and the other programs show): <n> providers answered` (and `; could not read <provider> (<error>)`). In the model picker, `Ctrl+R` runs `/model refresh`. A part that failed makes the refresh a refusal naming it, after the rest was printed.
-The model picker (its key, or a failed turn's `alt+o`) opens on Main chat, with the other things a model is chosen for behind one tab, `Other jobs (optional) ▸`: Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). `Tab` (or a click on that tab) moves to them; then each is listed, marked `(off)` when it is off, and a line under the tabs says what the chosen one does and, when none is chosen for it, that it uses the Main chat model. In the Agent the search index is not a tab, and that line says where it is set (`/settings open provider.embeddingProvider`). Under the search field a row names each filter key with what it is set to: `ctrl+t price: any  ctrl+k needs: any  ctrl+a all models  ctrl+b sort: off  ctrl+g by: provider` (`ctrl+a usable only` while it hides models you cannot use; on a narrow screen it takes two rows). Each model row shows its price tier beside its context (`free` in green, `paid`, `subscription`) when it is known, and the detail names it (`Price`) and how long ago the provider's model list was read (`List  list read 3 h ago`). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `not in the catalog`; its detail reads `Not described by the model catalog; usable as a text model, listed after the described ones.` An open picker shows a fresh list as soon as the providers' lists change (the daemon reads every provider's list when it starts); `ctrl+r` reads them again now; pinned and recent models still come first. After them, a `Recommended` group lists at most five models from connected providers, each with why, in catalog facts only: `newest <family>` (the latest release date in a family the catalog names), `largest context: <n> tokens`, `lowest price: $<in> in, $<out> out per 1M tokens`, compared among one provider's models; a provider the catalog gives none of these facts for has none, and a benchmark sort lists no group. The Agent's picker shows the same group.
+The model picker (its key, or a failed turn's `alt+o`) opens on Main chat, with the other things a model is chosen for behind one tab, `Other jobs (optional) ▸`: Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). `Tab` (or a click on that tab) moves to them; then each is listed, marked `(off)` when it is off, and a line under the tabs says what the chosen one does and, when none is chosen for it, that it uses the Main chat model. In the Agent the search index is not a tab, and that line says where it is set (`/settings open provider.embeddingProvider`). Under the search field a row names each filter key with what it is set to: `ctrl+t price: any  ctrl+k needs: any  ctrl+a all models  ctrl+b sort: off  ctrl+g g by: provider` (`ctrl+a usable only` while it hides models you cannot use; on a narrow screen it takes two rows; the grouping key is the rebindable `model-picker-group`, the leader then `g`, and the row names it as bound). Each model row shows its price tier beside its context (`free` in green, `paid`, `subscription`) when it is known, and the detail names it (`Price`) and how long ago the provider's model list was read (`List  list read 3 h ago`). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `not in the catalog`; its detail reads `Not described by the model catalog; usable as a text model, listed after the described ones.` An open picker shows a fresh list as soon as the providers' lists change (the daemon reads every provider's list when it starts); `ctrl+r` reads them again now; pinned and recent models still come first. After them, a `Recommended` group lists at most five models from connected providers, each with why, in catalog facts only: `newest <family>` (the latest release date in a family the catalog names), `largest context: <n> tokens`, `lowest price: $<in> in, $<out> out per 1M tokens`, compared among one provider's models; a provider the catalog gives none of these facts for has none, and a benchmark sort lists no group. The Agent's picker shows the same group.
 
 `/effort` is described once for both programs: `show` ("See how hard the model thinks", the report) and `set <level>` ("Choose how hard the model thinks"; bare `/effort set` lists the levels the current model offers).
 `/effort set high` saves `provider.reasoningEffort` and prints the level in effect.
@@ -3653,7 +3681,7 @@ A confirmation applies exactly what it showed. When `/startup transfer-import` o
 A confirmation whose text does not fit the screen scrolls (up, down, page up, page down) and says `↓ N more lines`; its confirming button stays disabled until the end has been shown. In a settings list, Enter and a two-press action act on the row drawn under the highlight: while a search is shown that is the search result, and a second press after the list refreshed onto another row asks again.
 An existing target is not overwritten without `--overwrite`.
 `/update` (actions `check`, `apply`, `rollback`, `daemon [--check]`, `review`, `save-review <file> [--replace]`, `read-review <file>`) checks for a newer release and, for binary installs, downloads, verifies and applies it or rolls back. Updates are described under "Updating" in the install part.
-`/power status` shows who holds this computer awake; `/power on` and `/power off` set the daemon-held keep-awake (the same as `Alt+A`). The setting, `power.keepAwake`, is the daemon's: a change goes to the daemon, or with none running into the daemon's settings file it reads at start, so every app and the daemon read the one value and a change made while the daemon was down is kept. A value an earlier version kept in an app's own settings file is moved to the daemon's settings file the first time the app starts (or dropped there when the daemon's file already sets it), and the app says so once.
+`/power status` shows who holds this computer awake; `/power on` and `/power off` set the daemon-held keep-awake (the same as `Ctrl+G` `a` or `F6`). The setting, `power.keepAwake`, is the daemon's: a change goes to the daemon, or with none running into the daemon's settings file it reads at start, so every app and the daemon read the one value and a change made while the daemon was down is kept. A value an earlier version kept in an app's own settings file is moved to the daemon's settings file the first time the app starts (or dropped there when the daemon's file already sets it), and the app says so once.
 
 `/security` gathers what protects this machine. Bare in the terminal, it opens its list; from a model or a script it prints the short status (`✓ Nothing needs attention.`, or each thing that does with `Fix: <line>`): blocked or overdue paired-device tokens, policy lint findings and a failed preflight, MCP servers with held-back tools or allowed to run anything, risky MCP routes, held-back plugins, and an undecided folder. Its actions, by group:
 
@@ -4055,7 +4083,7 @@ A failed request never moves to a model the owner did not choose. The same rule 
 2. **Synthetic backends.** A `synthetic` model moves between the providers that serve it (see "Synthetic failover").
 3. **Retries.** A failure that a wait can clear (a rate limit with a short `Retry-After`, a network error, a 5xx) is retried on the same model, and the stream shows `STREAM_RETRY`. With nowhere else to go the waits are 5, 10, 20, 40 and 60 seconds. When `provider.fallbackModels` has an entry not yet tried whose provider is signed in, the model gets one retry after 2 seconds and then the turn moves on; a server asking to wait longer than that (`Retry-After`) is not waited for, the turn moves at once.
 4. **The fallback order.** When the model still fails (every sign-in, every synthetic backend and every retry), the turn moves to the first entry of `provider.fallbackModels` not yet tried this turn whose provider is signed in, and sends the failed request again to it; the rest of the turn, tool calls already made included, continues on that model. Entries are registry keys such as `["anthropic:claude-sonnet-5"]`; the provider half is matched by id or display name without regard to case. A worker agent given its own `fallbackModels` uses that order instead, and one whose routing says `providerFailurePolicy: "fail"` uses none.
-5. **Stop.** With no order set, or every entry tried, the turn ends with the error (`provider_error`, or `provider_exhausted` for a spent `synthetic` model). The failed turn's row says so (see "Turn errors"), with the reason nothing else was tried in its details (`alt+i`, the `Fallback` row); a headless run's `TURN_ERROR` carries the same reason as `fallbackNote`.
+5. **Stop.** With no order set, or every entry tried, the turn ends with the error (`provider_error`, or `provider_exhausted` for a spent `synthetic` model). The failed turn's row says so (see "Turn errors"), with the reason nothing else was tried in its details (`ctrl+g i`, the `Fallback` row); a headless run's `TURN_ERROR` carries the same reason as `fallbackNote`.
 
 Each move prints a line naming both models, the position in the fallback order, the error and the price difference when both prices are known, and says which model answers:
 
@@ -4450,7 +4478,7 @@ Each record has a class, a scope, a summary, optional detail and tags, a confide
 | scope | `session`, `project`, `team` |
 | review state | `fresh`, `reviewed`, `stale`, `contradicted` |
 
-Records that match a turn can be added to the model's context; `/memory explain <task>` shows which would be, and `Alt+M` lists the memories the last turn used.
+Records that match a turn can be added to the model's context; `/memory explain <task>` shows which would be, and `Ctrl+G` `e` (or `F7`) lists the memories the last turn used.
 
 `/memory` is described once for both programs (the Agent has the same command). Bare, it opens its list of actions with "See your memory" first and the rest grouped ("Correct or review a record", "See what a task is given", "Keep memory as files, or move it", "Copies of memory and the search index"); a model or a script running it bare gets the list of records. Each action asks for what it needs, from the live list of records or copies where there is one, says what it will do in one sentence, and ends with the line that does the same. The typed lines:
 
@@ -4508,7 +4536,7 @@ Files, artifacts, browser history, connectors and the map are Agent Knowledge's;
 | `memory.budgetMb` | number | `0` | integer in [0, 1048576] | each program | How much memory the daemon plans to use, in MB. The governor sheds caches and pauses background jobs as RSS approaches this budget. 0 means auto: min(25% of system RAM, 4096 MB), resolved at daemon start. Applies after the daemon restarts. |
 | `memory.hardLimitPct` | number | `90` | integer in [1, 100] | each program | The daemon restarts before its memory reaches this share of the most it may use: its own memory limit where it has one, else the computer's memory. If RSS holds at/above this percent of that ceiling for memory.tripwire.sustainSec, the governor writes a hard-limit receipt and exits so a supervisor restarts clean, catching a leak too slow for memory.tripwire.rateMbPerSec just before the kernel/cgroup OOM killer would strike. Default 90: fire at 90% of the real kill line, leaving a safety margin for the exit itself. Deliberately anchored to the kill ceiling and NOT to memory.budgetMb: the budget caps small by design (25% of RAM, max 4096 MB), and a large-but-stable working set above the budget on a big-RAM host is handled by the critical tier (refuse new expensive work, stay alive), anchoring the exit to the budget would put such a healthy daemon in a permanent restart loop. Applies after the daemon restarts. |
 | `memory.projection.dir` | string | `".goodvibes/memory/projection"` | a folder path, relative to the project or absolute | each program | /memory sync-files writes one markdown file per standing (project/team-scope) memory record here, and commits the folder when it sits inside a git repository. A relative path resolves against the project working directory. /memory review-files reads your edits back from this folder as proposals; editing or deleting a file never changes the memory store directly. |
-| `memory.showProvenance` | boolean | `false` |  | terminal app only | Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in listing them (Alt+M to expand). Off by default; when off, nothing is rendered and no metadata is read. |
+| `memory.showProvenance` | boolean | `false` |  | terminal app only | Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in listing them (Ctrl+G then e to expand, unless rebound). Off by default; when off, nothing is rendered and no metadata is read. |
 | `memory.tier.criticalPct` | number | `95` | integer in [1, 100] | each program | At this share of the memory budget, the daemon refuses new heavy work and says why. Applies after the daemon restarts. |
 | `memory.tier.elevatedPct` | number | `60` | integer in [1, 100] | each program | At this share of the memory budget, the daemon trims what it keeps in memory. Applies after the daemon restarts. |
 | `memory.tier.highPct` | number | `80` | integer in [1, 100] | each program | At this share of the memory budget, the daemon empties what it keeps in memory and pauses background work that can wait. Applies after the daemon restarts. |
@@ -5678,7 +5706,7 @@ Other notices are never drawn over the conversation: the status bar counts the u
 - Why a message was not sent and what to do, for example when the connected host refuses it because the workspace is not registered. The text stays in the composer.
 - The output of a `!` command: the command, its output and its exit status.
 
-The status bar is the terminal app's (see "Screen layout"): `Permissions:` and the mode in force in words with the `shift+tab` key, the unread notices with `ctrl+n`, `context 34%`, `branch main, changed` (only in a folder registered as a project with `goodvibes-agent workspaces register`; read at start and after each turn), `model <name>` and, in place of the terminal app's `ctrl+p menu`, the `ctrl+g workspace` keycap; a click on a segment opens its view, except the branch (the Agent has no changes view). A provider warning (a model you use stopped being free, a custom provider file that did not load) is said in the conversation, as in the terminal app. The header names the program, its version and the session. A hosted session's mode is its host's: the segment shows it, and `Shift+Tab` sends the change to the host. The status bar keeps one short chip for the power state (`sleep disabled`, `sleep held` or `keep-awake refused`); the full note, and a warning such as the sleep-edge hooks being off, is a notice in `/notifications`, posted when it changes.
+The status bar is the terminal app's (see "Screen layout"): `Permissions:` and the mode in force in words with the `shift+tab` key, the unread notices with `ctrl+n`, `context 34%`, `branch main, changed` (only in a folder registered as a project with `goodvibes-agent workspaces register`; read at start and after each turn), `model <name>` and, as in the terminal app, the `ctrl+g m menu` keycap (the menu of every place); a click on a segment opens its view, except the branch (the Agent has no changes view). A provider warning (a model you use stopped being free, a custom provider file that did not load) is said in the conversation, as in the terminal app. The header names the program, its version and the session. A hosted session's mode is its host's: the segment shows it, and `Shift+Tab` sends the change to the host. The status bar keeps one short chip for the power state (`sleep disabled`, `sleep held` or `keep-awake refused`); the full note, and a warning such as the sleep-edge hooks being off, is a notice in `/notifications`, posted when it changes.
 
 ### Keys
 
@@ -5686,16 +5714,21 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 
 | Action | Default key | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C`, `F5` | Copy selected text. |
+| `leader` | `Ctrl+G` | Start a two-key shortcut, as in the terminal app ("The leader and the menu"). |
+| `open-menu` | `Ctrl+G` `m` | Open the menu of every place. |
+| `next-field`, `choose`, `back` | `Tab`, `Enter`, `Esc` | As in the terminal app. |
+| `move-up`, `move-down`, `move-left`, `move-right` | the arrows | Move. |
+| `copy-selection` | `Ctrl+G` `c`, `F5`, `Ctrl+Shift+C` | Copy selected text. |
 | `clear-cancel` | `Ctrl+C` | Clear the composer, cancel generation, twice to exit. |
 | `screen-clear` | `Ctrl+L` | Repaint. |
 | `command-palette` | `Ctrl+P` | Open help: every command and keyboard shortcut in one searchable list (the same as `?` and `/help`). |
-| `workspace-picker` | `Ctrl+G` | Open the Agent workspace. |
+| `workspace-picker` | `Ctrl+G` `w` | Open the Agent workspace. |
 | `workspace-close` | `Ctrl+X` | Close the Agent workspace. |
-| `workspace-close-all` | `Ctrl+Shift+X`, `Ctrl+\` | Close the Agent workspace. |
+| `workspace-close-all` | `Ctrl+G` `x`, `Ctrl+\` | Close the Agent workspace. |
 | `workspace-tab-next` | `Ctrl+]` | Next workspace category. |
 | `workspace-tab-prev` | `Ctrl+[` | Previous workspace category. |
-| `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for the owner, what is scheduled, the background services. |
+| `open-agents` | `F2`, `Ctrl+O` | Open Your agents: what is running, what waits for the owner, what is scheduled, the background services. |
+| `scroll-page-up`, `scroll-page-down` | `PageUp`, `Ctrl+PageUp`; `PageDown`, `Ctrl+PageDown` | Scroll the transcript by a page. |
 | `history-search` | `Ctrl+R` | Reverse search of input history. |
 | `search` | `Ctrl+F` | Search the transcript. |
 | `block-copy` | `Ctrl+Y` | Copy the nearest block. |
@@ -5706,23 +5739,24 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 | `next-error-line-end` | `Ctrl+E` | End of line, or the next error on an empty composer. |
 | `kill-line` | `Ctrl+K` | Kill to the end of the line. |
 | `clear-prompt` | `Ctrl+U` | Clear the composer. |
-| `undo`, `redo` | `Ctrl+Z`; `Ctrl+Shift+Z`, `Ctrl+^` | Undo or redo a composer edit. |
+| `undo`, `redo` | `Ctrl+Z`; `Ctrl+G` `z`, `Ctrl+^` | Undo or redo a composer edit. |
 | `paste` | `Ctrl+V` | Paste. |
-| `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move onto the work tree. |
+| `focus-work-tree` | `Ctrl+G` `Up`, `Ctrl+Up` | Move onto the work tree. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode, as in the terminal app. |
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
-| `failure-other-model` | `Alt+O`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I`, `F3` | On the newest failed turn: show what the provider said. |
-| `failure-retry` | `Alt+R`, `F12` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
-| `failure-sign-in` | `Alt+S`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
-| `next-session` | `Alt+N`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
-| `previous-session` | `Alt+P`, `Ctrl+_` | While the session chips show: the previous session. |
+| `failure-other-model` | `Ctrl+G` `o`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Ctrl+G` `i`, `F3` | On the newest failed turn: show what the provider said. |
+| `failure-retry` | `Ctrl+G` `r`, `F12` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
+| `failure-sign-in` | `Ctrl+G` `s`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
+| `next-session` | `Ctrl+G` `n`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
+| `previous-session` | `Ctrl+G` `p`, `Ctrl+_` | While the session chips show: the previous session. |
+| `contract-question-ordinary` | `Ctrl+G` `q` | While a contract's question is on offer: send the next message as an ordinary one. |
+| `model-picker-group` | `Ctrl+G` `g` | In the model list: group it another way. |
 
-As in the terminal app, every Alt and Ctrl+Shift chord has a second default that macOS Terminal (no Alt by default) and terminals without the extended keyboard protocol still send.
+As in the terminal app, the actions that sat on an `Alt` or `Ctrl+Shift` chord are a leader shortcut by default, beside a second key every terminal sends; a chord can be bound back in `keybindings.json`. The leader is read over every screen, the places' keys are groups of the table (`place.<place>.<action>`), the model changes keys as the Keys place does (`keys.bind`, `keys.reset`, `keys.reset-all`), and rows, tabs and menu rows of a place can be clicked, as in the terminal app.
 
-The Agent has no command palette key, no `Alt` word-movement or kill-ring keys, and no `Alt+C`, `Alt+A`, `Alt+M` or `Alt+V`.
+The Agent has no word-movement or kill-ring keys, and no cancel-tool, keep-awake, memories-used or voice key.
 The old action names `panel-picker`, `panel-close`, `panel-close-all`, `panel-tab-next`, `panel-tab-prev` and `sidebar-toggle` are read as `workspace-picker`, `workspace-close`, `workspace-close-all`, `workspace-tab-next`, `workspace-tab-prev` and `open-agents`.
-`Ctrl+PageUp` and `Ctrl+PageDown` scroll by a page like `PageUp` and `PageDown`.
 
 ### Checkpoints need a registered workspace
 
@@ -5966,7 +6000,9 @@ To correct a fact, edit the record in place:
 To keep the old fact on record instead, mark it wrong and add the new one: `memory contradict <old-id> "Office moved to Denver"` (or `memory stale <old-id> <reason>` for a fact that is merely out of date), then `memory add fact "Office is in Denver" --scope project` and `memory review <new-id> reviewed --confidence 90` so it is applied. Inside the Agent these are `/memory review <id> contradicted --reason <reason>`, `/memory add fact <summary>`, `/memory review <id> reviewed --confidence 90`, `/memory remove <id>`.
 The model can also change a record's text in place: ask it (for example "correct the memory about my office: it is in Denver now"); its `memory` tool has an `update` action, which needs your request and the permission gate's admission like any change.
 
-#### `goodvibes-agent knowledge` (aliases `know`, `kb`), `ask`, `search` (alias `find`)
+#### `goodvibes-agent knowledge` (aliases `know`, `kb`), `ask`, `search`
+
+(`goodvibes-agent find <need>` is not a knowledge search: it finds the GoodVibes capability that does what you need, see `do` and `find` below.)
 
 Agent Knowledge is the Agent's own knowledge store on the connected host, under `/api/goodvibes-agent/knowledge/*`. It never reads the terminal app's knowledge or any other space.
 
@@ -5987,6 +6023,10 @@ Agent Knowledge is the Agent's own knowledge store on the connected host, under 
 Options that would target another space (`--space`, `--knowledge-space`, `--knowledge-space-id`, `--include-all-spaces`) are refused.
 Without a token: `Agent Knowledge error auth_required (authorization required)`, the route tried and the repair step; exit `1`.
 Inside the Agent, `/knowledge` is the terminal app's command on Agent Knowledge (a question naming another knowledge space is refused), plus `ingest-file <file>`, `ingest-artifact <artifact>`, `import-browser-history [--browsers <list>] [--sources history|bookmark] [--limit <n>] [--since-days <n>]` (the owner's only), `ingest-connector <connector> [--input ...|--path ...|--content ...]`, `map [words]`, `connectors`, `connector <connector>` and `connector-doctor <connector>`; bare, it opens the workspace's Knowledge section from `open`.
+
+#### `goodvibes-agent find`, `goodvibes-agent do`
+
+`find "<what you need>" [--output json]` names the three to five GoodVibes capabilities that do it (from the function group that serves the need), each with its id, inputs and risk; nothing runs. `do <capability id> [--input key=value ...] [--output json]` runs one by id through the connected daemon. A command you typed is the request, so it runs at once and prints what it did; a capability that acts on a conversation (clear, compact, undo) is refused in one line, since it runs inside the Agent's open chat. Exit `0` done (or found), `1` refused or failed, `2` bad usage. The same two verbs exist in `goodvibes` and `goodvibes-daemon`. `find` is not a knowledge search; that is `search`.
 
 #### `goodvibes-agent delegate` (alias `build`)
 
@@ -6102,7 +6142,7 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 
 The Agent workspace is a full-screen view of categories, each a list of rows grouped by what a person does. It has no forms of its own: a row that does something names a slash command's action (shown in its Command column, such as `/memory add`), and `Enter` closes the workspace and opens that action's guided form, the same one the slash command opens (a row may fill some blanks in, such as the account of `/calendar use-app google`); a row's name is the action's own label. The rows come first; the pane under them says what the selected row will do (the action's sentence, or a setting's own description with its value and default as `/settings get` shows them) and, where the row's command has a report, that report's first lines, read by running it exactly as the command does, then in one sentence what the area is for. Every report is read by itself, in the background: those of Home and Work & Approvals at each start of the Agent (after the first frame), and those of any area as soon as it is shown. The screen is drawn at once, a report not in yet says `<command>: reading…`, and it fills in when it arrives. A reading is shared for 5 minutes, so moving between areas or opening the workspace again does not read it again; an older one is read again on the next opening; nothing runs on a timer. `Ctrl+R` reads every report, the host check and the work list again now. Coming back from a row's guided form that changed something reads that command's report again. An action's result names the time it arrived (`Action Result: Opened Research · 14:05`). A report that reaches past this computer (questions waiting on you, host tasks and processes, a mailbox, a provider) changes on its own, so once its reading is more than 5 minutes old its heading says so in the warning colour: `As /questions list showed it, read at 22:03, may be out of date: ctrl+r to read again:`. It is decided each time the screen is drawn (any key redraws it); nothing ticks. A report that reads only this computer (notes, skills, routines, personas, Agent homes, secrets, settings) lists stored things that change only when you change them, and a change made from the workspace reads it again, so it is never marked. The connected host's setup check runs on each opening (once its last reading is more than 5 minutes old), for a host on this computer or another, and the work list in Work & Approvals is kept live by its subscription from the moment the workspace opens, so it is never marked. The status line under the rows shows only once something has happened in the area. The heading of the rows (`Action  Command`) is in the accent colour while the arrow keys move in them, muted while they move in the area column. The report is in one of three states, each said in its own words: `<command>: reading…`, `As <command> showed it, read at 14:05:` with its lines (or "Nothing to show."), and `<command>: could not read it (tried at 14:05)` in the warning colour. When the connected daemon did not answer, it says `The daemon at <url> did not answer.` (a list that fell back says `Showing only what is held on this computer. Approvals and questions held by that daemon are not included.` and then `On this computer:` or `Nothing is waiting on this computer.`) and `GoodVibes reads this again when that daemon answers.`: the Agent's existing daemon check (every `watchers.heartbeatIntervalMs`, 30 s by default) sees it answer and every failed report is read again. Any other failure gives its reason and `GoodVibes reads this again the next time you open this area; ctrl+r to try now.`: a failed reading is never held as fresh, so it is read again when its area is shown again, when the workspace is opened and at the next start. Work & Approvals also shows the work view `/work open` shows. Nothing else is shown there. A setting row cycles a yes/no or a choice in place and opens the settings screen at that setting for a typed value or a `permissions.*` change; an area whose rows are all settings shows Setting, Default and Current columns, and a setting among action rows shows `now <value>`. A row that opens another area shows `/agent <area>` in its Command column, the command that opens that area; the other rows open a picker or say what to ask in the conversation.
 The title row names the Agent home the session runs in, the model it answers with and its provider, and the daemon it works with (`Agent home default · model rt-1 (rtfake) · daemon on this computer`; `, signed in with a subscription` after the provider for a stored sign-in; `daemon at <host:port>` when `daemon.connectedHost.url` is set). In a home other than the default one, the status bar shows `home <name>` too.
-It opens with `/agent [section]` or `Ctrl+G`; the Agent's status bar ends with the `ctrl+g workspace` keycap (a click opens the workspace), which gives way only after the model when the row is short. `/setup` opens one topic's rows of it at a time (below).
+It opens with `/agent [section]` or `Ctrl+G` `w` (the leader, then `w`); the Agent's status bar ends with the `ctrl+g m menu` keycap, the menu of every place, which the places replace this workspace's rows with as they are built. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it. The footer reads `a-z ask the assistant (Esc comes back)`, then move, pane, open, search and refresh.
 Typing a letter closes the workspace and puts the letter in the composer; while it is there, a row above the composer reads `Typing to the assistant · Esc: back to <area> (drops this letter)` (`keeps what you typed` once there is more than one letter).
 
@@ -6911,6 +6951,7 @@ How to reverse a decision:
 - An approval is the owner's "allow for this session" answer for that exact call. The call does not run by itself: ask the agent to carry on, and the call runs when it is made again.
 - The same exact call held again keeps its first id. At most 64 held calls are kept.
 - Only the owner can approve or dismiss. When the model runs the command it is told to have the owner type it.
+- Every held call is also in the owner inbox, as a queued action (`Let it run: ...?`, `y` lets it run, `n` sets it aside): the daemon posts the calls its own gate holds, and each terminal program posts the calls its gate holds while it is connected to the daemon (one held while the daemon is down is posted when it is back). So Waiting for you, `/questions`, the web UI and a phone list them with everything else and answer them; an answer there approves or sets aside the call here, and an answer with `/held` withdraws the inbox item. A held call that loosens a protection opens on No.
 
 ## The owner inbox: `/questions`
 
@@ -6965,7 +7006,7 @@ The decision model answers judgment calls at the gate and many other decisions (
 
 When the set decision model gives no usable answer, for any reason (unreachable, too slow, a request too large for it, an HTTP error of any status, a refused or missing key, a malformed answer, a closed connection), each decision takes its stated fallback and the work goes on; you are told once per outage, naming the model, what failed and the next step, and the notice is withdrawn when it answers again. Nothing the decision model fails ends a turn, a tool call batch or a contract; a contract's checks are recorded as not judged and its work is kept. An answer (a refusal by the model included) or a cancellation is not a failure. The reason is kept in the decision log. With no decision model set, nothing is asked, nothing waits, and no error is shown.
 
-In `jev-decides` and `just-vibes`, the setting "If Jev can't answer" (`judgment.policy`, in the decision model settings) says what happens to a tool call Jev would decide while the decision model fails: `Hybrid`, shown as Ask me (the default), brings it to you (held to the end of the run in `just-vibes`); `Decision Model Only`, shown as Refuse the action, refuses it with the model's error and the turn goes on. It is kept in the daemon's settings file (`~/.goodvibes/daemon/settings.json`), one value for the terminal app, the Agent and the daemon. Releases up to 3.5.0 had a third value, No Decision Model; a home that holds it is carried once to the mode Ask me with its decision model settings kept, and the owner is told once.
+In `jev-decides` and `just-vibes`, the setting "If Jev can't answer" (`judgment.policy`, in the decision model settings) says what happens to a tool call Jev would decide while the decision model fails: `Hybrid`, shown as Ask me (the default), brings it to you (held to the end of the run in `just-vibes`); `Decision Model Only`, shown as Refuse the action, refuses it with the model's error and the turn goes on. It is kept in the daemon's settings file (`~/.goodvibes/daemon/settings.json`), one value for the terminal app, the Agent and the daemon. Releases up to 3.5.0 had a third value, No Decision Model; a home that holds it is carried once to the mode Ask me with no decision model set, so nothing is sent to a decision model: the decision model's own settings (`judgment.endpoint`, `judgment.model`, `judgment.keySource`, `judgment.keyName`, `judgment.backend`, `judgment.fallbacks`) are moved, as they were, to `judgment.setAside`, and the owner is told once. Choosing a decision model in Settings then offers them back first ("Use the decision model you had before"), which sets them again and empties `judgment.setAside`. The carry also stores the choice itself, "No decision model" (`judgment.noDecisionModel` on): while it is on, no decision model is asked whatever the environment holds (`TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`, `TYPESAFE_DEFAULT_MODEL`, or a key source), and nothing is sent to one. Choosing "No decision model" in the decision model picker (both terminal programs) or switching "No decision model" on in the web settings stores the same choice and leaves the decision model settings as they are; choosing a decision model, or "Use the decision model you had before", turns it off. On a fresh home it is off, so a key found in the environment is used as before. A 3.5.0 program reading the home after a rollback starts and leaves the two keys it does not know (`judgment.setAside`, `judgment.noDecisionModel`) in the file; it does not honour the choice, so with a key or server address in its environment it asks the decision model there (3.5.0 has no setting that wins over the environment).
 
 ### Setting up the hosted decision model (Jev)
 
@@ -7170,7 +7211,7 @@ Every workspace (working directory) has a trust level: `trusted`, `restricted`, 
 | --- | --- |
 | `trusted` | All tools may run, subject to the permission mode and rules. |
 | `restricted` | Only reads run. Every write, command and delegation is refused, in every mode including `yolo`. The model is told so as that call's result (`This folder is restricted: no file can be changed and no command run until it is trusted.`) and the turn goes on; you read one row beside the call, `Not run: this folder is restricted (/security trust-folder trusts it).` |
-| undecided | Reads run, and calls are decided as in a trusted folder (an undoable edit inside the folder runs without asking); a call that would ask you raises the trust question instead. In the terminal app a folder is never left undecided once it is open. When it has no hooks file and no MCP servers of its own, trusting it would let nothing run that the permission mode does not already govern, so nothing is asked: it is recorded as trusted for having nothing of its own to run, in `~/.goodvibes/shared/workspace-trust-nothing-to-run.json` beside the workspace register (never as a row of the register, so an earlier release reads the folder as undecided), and you are told nothing. When it has them, the trust question is asked as the program opens, before any prompt is acted on (first run, when it is needed, follows it), titled with the folder (`Trust ~/projects/garden-planner?`), with the cursor on "Keep restricted (read-only)", so Enter pressed at once trusts nothing (the folder is restricted: a write or command the model asks for is refused, the refusal goes back to the model and the turn carries on). The two choices are "Trust this workspace", which says what trusting lets run (`Trusting it lets the hooks in hooks.json run and the tool servers (MCP) in .goodvibes/mcp.json start, and lets GoodVibes change files and run commands here. It approves nothing: each action still follows your setting for when GoodVibes asks.`), and "Keep restricted (read-only)" ("GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it."); both end "Change it later with /security trust-folder or /security restrict-folder." Dismissing it (Esc) records nothing: the folder stays undecided, and the first call that would ask you raises the question again; choosing trust there forwards that ask to you. A folder trusted for having nothing of its own that later gains a hooks file or an MCP file is asked about then, naming the files, before any of them runs: when its hooks are about to fire or its servers to start, or as the program opens. Until you answer they stay off; "Trust this workspace" turns them on. A trust question that opens by itself while you type is kept apart from your typing as the approval card is: keys typed as it appears, or in the same burst, go to the composer, and while the composer holds a draft every key stays there until Tab moves to the question (its key row then reads `tab answer this question (your draft stays)`); the draft is left as it was. The Agent and the daemon read the same record and keep such files off until the folder is trusted (`/security trust-folder`). |
+| undecided | Reads run, and calls are decided as in a trusted folder (an undoable edit inside the folder runs without asking); a call that would ask you raises the trust question instead. In the terminal app a folder is never left undecided once it is open. When it has no hooks file and no MCP servers of its own, trusting it would let nothing run that the permission mode does not already govern, so nothing is asked: it is recorded as trusted for having nothing of its own to run, in `~/.goodvibes/shared/workspace-trust-nothing-to-run.json` beside the workspace register (never as a row of the register, so an earlier release reads the folder as undecided), and you are told nothing. `goodvibes run` and `goodvibes-agent run` apply the same rule before the turn and record it the same way; a folder with no decision that brings a hooks file or MCP servers of its own is not trusted in a headless run: every write, command or delegation is refused at once, whoever would have decided it, with a sentence naming the folder, what it brings and how to trust it (`<folder> brings a hooks file (hooks.json) of its own and has no trust decision, so this run does not trust it: no file is changed and no command runs there; reads still work. To trust it, open it in goodvibes and choose "Trust this workspace", or run /security trust-folder there, then run again.`); the refusal goes back to the model as the call's result and the turn goes on, so the run ends as the turn does (`completed`, exit `0`, when the model then answers). Nothing is saved: the folder stays undecided. When it has them, the trust question is asked as the program opens, before any prompt is acted on (first run, when it is needed, follows it), titled with the folder (`Trust ~/projects/garden-planner?`), with the cursor on "Keep restricted (read-only)", so Enter pressed at once trusts nothing (the folder is restricted: a write or command the model asks for is refused, the refusal goes back to the model and the turn carries on). The two choices are "Trust this workspace", which says what trusting lets run (`Trusting it lets the hooks in hooks.json run and the tool servers (MCP) in .goodvibes/mcp.json start, and lets GoodVibes change files and run commands here. It approves nothing: each action still follows your setting for when GoodVibes asks.`), and "Keep restricted (read-only)" ("GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it."); both end "Change it later with /security trust-folder or /security restrict-folder." Dismissing it (Esc) records nothing: the folder stays undecided, and the first call that would ask you raises the question again; choosing trust there forwards that ask to you. A folder trusted for having nothing of its own that later gains a hooks file or an MCP file is asked about then, naming the files, before any of them runs: when its hooks are about to fire or its servers to start, or as the program opens. Until you answer they stay off; "Trust this workspace" turns them on. A trust question that opens by itself while you type is kept apart from your typing as the approval card is: keys typed as it appears, or in the same burst, go to the composer, and while the composer holds a draft every key stays there until Tab moves to the question (its key row then reads `tab answer this question (your draft stays)`); the draft is left as it was. The Agent and the daemon read the same record and keep such files off until the folder is trusted (`/security trust-folder`). |
 | undecided, a headless run | `goodvibes run` and the daemon's runs (the web UI, channels, schedules) ask nothing on opening and behave as 3.4.8 did. Reads run; an undoable edit inside the folder runs without asking, as in a trusted folder; a command, delegation or other write is decided as the mode in force decides it (`jev-decides`: the decision model; `yolo`: it runs), and one that would ask you raises the trust question, refused when nobody can answer it (below). Only a folder you restricted refuses writes. |
 
 ```text
@@ -7206,7 +7247,9 @@ On Linux with bubblewrap (`bwrap`) installed, each shell command the `exec` tool
 - credential-bearing environment variables are removed;
 - the network is off. It is opened only when both hold: the decision model reads the command as needing the network, and every command in the line is listed in `sandbox.egressAllowlist`. The allowlist alone never opens it: a listed command the model reads as not needing the network gets none, and with no decision model in use no command gets the network, listed or not (the command is put to you instead: `Without a decision model, this did not assess command host-access needs; owner approval is required inside the sandbox`, and approving runs it inside the boundary, still offline). A command read as needing the network and fully listed is put to you as `wants network (on egress allowlist, granted inside the boundary once approved)`; approving grants it for that run. Who answers that ask follows the mode: in `ask-me`, and in `jev-decides` without a working decision model, it is put to you on the approval card (annotated per `sandbox.judgment`); otherwise the call's own recorded admission (Jev's decision) answers it. One read as needing the network but not fully listed is told `denied inside the boundary and approval does not change that; add it to sandbox.egressAllowlist`.
 
-Where bubblewrap is missing, on macOS, and on native Windows, the exec path runs on the host and the sandbox reports itself unavailable. On Windows, run GoodVibes in WSL 2 with bubblewrap installed to get the boundary.
+Where bubblewrap is missing, on macOS, and on native Windows, the exec path runs on the host and the sandbox reports itself unavailable. The same holds inside a container or a pid namespace whose `/proc` shows another namespace's processes (for example `unshare --pid` without a `/proc` of its own): bubblewrap reaches the processes it starts through `/proc`, so it fails there, sometimes half-way with a process left holding the command's output, and the sandbox reports itself unavailable with that reason instead of letting a command wait forever. On Windows, run GoodVibes in WSL 2 with bubblewrap installed to get the boundary.
+
+An `exec` command is finished when its own process exits. Its result holds everything it wrote up to then (all of a large output too: its overflow file has every line) and is returned at once, even when a process it started keeps running with its output (`server &`). Then the result carries `left_running`, one sentence naming that process ("A process this command started is still running and still holds its output (pid 4711); it was left running, and what it writes from now on is not read."); the process is not stopped. Inside the sandbox a process the command started ends with the boundary, as every process in it does. The same holds for a command run under a terminal (`interactive`) and one run `until` a pattern, and for the jobs an `until` run hands to the background.
 
 | Setting | Default | Applies |
 | --- | --- | --- |
@@ -7407,10 +7450,12 @@ Full entries (files, project rule, environment variable): "Settings" in the part
 | `judgment.backend` | object | `{}` | data object with optional adapter, positive maxInputBytes/maxQuestions and explicit responseModels | daemon file | Optional adapter (system-one, cloudflare-workers-ai or laya), maxInputBytes, maxQuestions and responseModels for the primary deployment. Limits apply to the complete request; evidence is never silently shortened. Cloudflare run URLs select their adapter automatically. |
 | `judgment.endpoint` | string | `""` | empty, or an http(s) URL without embedded credentials, query or fragment | daemon file | Address of the decision model server the engine asks for judgments (a server that answers the decision API, POST /v1/systemone, as the hosted Jev does); empty uses TYPESAFE_BASE_URL, then the hosted endpoint. A loopback address selects a local model. While judgment.keySource is not none, change or reset it only together with judgment.keySource or judgment.keyName in one update (keep or clear the credential), or it is refused; embedded credentials, query strings and fragments are refused. |
 | `judgment.fallbacks` | array | `[]` | array of { endpoint, model, keySource: "env" \| "secret" \| "none", keyName } (keyName empty for "none"); no credentials in URLs or inline keys | daemon file | Ordered decision targets with endpoint, model, keySource, keyName and optional backend capabilities. Each target may use a different decision model or adapter. keySource is env, secret or none; none requires an empty keyName. Credentials are privately resolved from references, never inline values. An empty array disables inherited fallbacks. Each target is attempted with a finite timeout; when the chain is exhausted, a decision that has a fallback takes it and any other decision stops. |
-| `judgment.keyName` | string | `"TYPESAFE_API_KEY"` | a credential reference name | daemon file | Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none. |
-| `judgment.keySource` | enum | `"env"` | `env`, `secret`, `none` | daemon file | Where the decision model's key comes from: env reads an environment variable, secret reads the secret store, and none sends no key. This setting stores only one of those three words, never a credential or a credential reference. |
+| `judgment.keyName` | string | `"TYPESAFE_API_KEY"` | a credential reference name | daemon file | Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Not used when the key source is No key is sent. |
+| `judgment.keySource` | enum | `"env"` | `env`, `secret`, `none` | daemon file | Where the decision model's key comes from. Environment variable: the variable named in Decision model key name. Secret store: the secret of that name in GoodVibes' secret store. No key is sent: for a decision model server that needs none. Only this choice is stored here, never a key. |
 | `judgment.model` | string | `""` |  | daemon file | Judgment model or alias; empty uses TYPESAFE_DEFAULT_MODEL, then jev-latest. |
+| `judgment.noDecisionModel` | boolean | `false` |  | daemon file | On: no decision model is asked, whatever this computer's environment holds (a decision model key or server address there is not used), so nothing is sent to one; Jev decides then asks you, as Ask me does. Choosing No decision model in Settings turns it on, as does carrying forward an earlier version's No Decision Model; choosing a decision model in Settings turns it off. Off (the default): a decision model set here or found in the environment is used. |
 | `judgment.policy` | enum | `"Hybrid"` | `Hybrid`, `Decision Model Only` | daemon file | Only for Jev decides and Just vibes: what happens to a call Jev would decide when the decision model fails. Ask me (default): it comes to you (in Just vibes it is held to the end of the run), and the failure is shown once with the model, what failed and the next step. Refuse the action: it is refused with the reason, and the turn goes on. |
+| `judgment.setAside` | object | `{}` | object with any of endpoint, model, keySource, keyName, backend and fallbacks, each valid as its judgment.* setting | daemon file | The decision model settings an earlier version held while decision models were switched off (No Decision Model): moved here, as they were, when that choice was carried to the mode Ask me with no decision model set, so nothing is sent to a decision model until you choose one. Choosing a decision model in Settings offers them back ("Use the decision model you had before"), which sets them again and empties this. Empty when nothing is set aside. Holds the names of credentials, never a credential. |
 | `judgment.timeoutMs` | number | `30000` | integer in [0, 2147483647] | daemon file | How long one attempt at one decision target may go without its answer before that target is treated as not answering, so the next target or the decision's own fallback is used; 0 uses 30000 ms. It exists for a server that took the request and never answered, or a connection lost without a reset: the decision API sends its whole answer at once, so nothing else can tell such an attempt from a slow one. Decisions are sized to what the model accepts and answer in seconds; raise it for a slow local model. Cancellation stops the operation sooner. |
 | `judgment.volumeMonitor` | object | `{"budgets":[],"intervalMs":60000,"windowMs":3600000,"limit":10000,"enabled":false}` | object with enabled and up to 100 budgets; enabled monitoring needs at least one budget | daemon file | Local decision call-volume alerts. Set enabled:true and budgets:[{name:"All decisions",maxLogicalDecisions:1000,maxWireAttempts:2000}]. Optional battery/site restrict each budget; windowMs defaults to one hour, intervalMs to one minute, limit to 10000 log entries. Alerts report usage without calling models or stopping work. Disabled settings retain the optional GOODVIBES_JUDGMENT_MONITOR file override. |
 
@@ -7878,6 +7923,7 @@ Status failures and fixes:
 | --- | --- | --- |
 | `EMAIL_NOT_CONFIGURED` | Host or user missing. | Steps 1 and 2 above. |
 | `EMAIL_CREDENTIALS_MISSING` | Password secret missing. | `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>` |
+| `EMAIL_CREDENTIALS_UNREADABLE` (HTTP 412) | The secret store on the daemon's computer could not be read, so the mailbox password, which may well be stored, could not be read; the answer gives the cause. `/mail status` reads "Mail: the secret store could not be read" and the web mail view "The secret store could not be read"; neither asks for the password. | Make the store readable on that computer (its key file, `~/.goodvibes/secrets.key`, must be the one the store was written with); nothing needs to be given again. |
 | `EMAIL_NOT_ENABLED` | The mailbox is not set up: an IMAP host, SMTP host or account is missing. | Steps 1 and 2 above. |
 | `EMAIL_CREDENTIALS_REJECTED` (HTTP 424) | The IMAP or SMTP server refused the stored password (an app password revoked or changed). Not a sign-in failure: the daemon answers 424, never 401. | Store a current password with `/secrets set GOODVIBES_SURFACES_EMAIL_PASSWORD <password>`. |
 | unreachable | The daemon cannot be reached. | Check the daemon with `/health` and `goodvibes status`. |
@@ -7984,7 +8030,7 @@ Prerequisites: a CalDAV server URL, user and password (or an app password).
 /calendar status
 ```
 
-A blank left out keeps its value in `change`. `change` and `delete` reach the guests and ask once; the daemon's calendar needs an end time for `add`, and an identical `add` from the same session is refused unless `--again` ("Add it again"). A time without a zone is read in this machine's zone. A daemon answer of `CALENDAR_NOT_CONFIGURED` means the URL or user is missing. The Agent's own actions (`all`, `import`, `export`, `accounts`, `connect`, `disconnect`, `subscriptions`, `subscribe`, `refresh`, `unsubscribe`) are refused here saying so.
+A blank left out keeps its value in `change`. `change` and `delete` reach the guests and ask once; the daemon's calendar needs an end time for `add`, and an identical `add` from the same session is refused unless `--again` ("Add it again"). A time without a zone is read in this machine's zone. A daemon answer of `CALENDAR_NOT_CONFIGURED` means the URL or user is missing, and `CALENDAR_CREDENTIALS_MISSING` that no CalDAV password is stored. `CALENDAR_CREDENTIALS_UNREADABLE` (HTTP 412) means a password may well be stored but the secret store on the daemon's computer could not be read; the answer gives the cause, and no screen asks for the password again: make the store readable on that computer (its key file, `~/.goodvibes/secrets.key`, must be the one the store was written with) and the calendar reads again. The Agent's own actions (`all`, `import`, `export`, `accounts`, `connect`, `disconnect`, `subscriptions`, `subscribe`, `refresh`, `unsubscribe`) are refused here saying so.
 
 Google Calendar cannot be reached over CalDAV with a password: Google refuses Basic authentication on its CalDAV endpoint. Use the Google route below.
 
@@ -8022,7 +8068,7 @@ Connecting a calendar account over OAuth needs your own OAuth client id: no clie
 3. Run `/calendar connect google` (or `outlook`). A browser opens; approve. On a machine with no browser, add `--with device`: Outlook shows a device code to enter on another device; Google prints a link to open anywhere, and after approving you run `/calendar connect google --with code` within ten minutes and give the 127.0.0.1 address the browser landed on (asked for masked).
 4. The answer lists the account, the transport and the scopes. `/calendar upcoming` then merges that account's events.
 
-A Google account has one connection on a machine. `/calendar connect google`, `/google connect` and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and the Agent's `/calendar` all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (a `/calendar connect google` from 3.4.4 or before has no Gmail scope; one from `/google` has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account connected with `/calendar connect outlook` is one connection too (`GOODVIBES_CALENDAR_MICROSOFT_TOKENS`, with the client id in `calendar.microsoft.clientId`): the Agent's `/calendar` and the daemon's calendar (the web Calendar) both read it. The daemon serves it beside the CalDAV server or the Google connection: a read of the default calendars returns the events of both, Outlook's events and calendars carry ids that start with `outlook:` (its calendars are listed as "<name> (Outlook)"), and a read, change or removal of an `outlook:` event goes to Outlook. With Outlook the only account, it is the daemon's calendar and a new event goes there. An `.ics` import into an Outlook calendar is refused (`CALENDAR_NOT_SUPPORTED`): import it in Outlook. With no usable account at all, the answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read.
+A Google account has one connection on a machine. `/calendar connect google`, `/google connect` and the model's `google` tool all store the same one (the refresh token `GOODVIBES_GOOGLE_OAUTH_REFRESH_TOKEN`, and beside it `GOODVIBES_GOOGLE_OAUTH_ACCOUNT`: the account's label, the scopes granted at connect and a digest of the token, never the token), and the daemon's calendar (the web Calendar), its Gmail access and the Agent's `/calendar` all read it. Every Google sign-in asks for the same scopes: `gmail.readonly`, `gmail.send`, `calendar.readonly`, `calendar.events`. A connection made earlier with fewer (a `/calendar connect google` from 3.4.4 or before has no Gmail scope; one from `/google` has no `calendar.readonly`, which listing calendars needs) works for what it was granted and names the missing scope when a feature needs it; connecting once more grants them all. A Microsoft account connected with `/calendar connect outlook` is one connection too (`GOODVIBES_CALENDAR_MICROSOFT_TOKENS`, with the client id in `calendar.microsoft.clientId`): the Agent's `/calendar` and the daemon's calendar (the web Calendar) both read it. The daemon serves it beside the CalDAV server or the Google connection: a read of the default calendars returns the events of both, Outlook's events and calendars carry ids that start with `outlook:` (its calendars are listed as "<name> (Outlook)"), and a read, change or removal of an `outlook:` event goes to Outlook. With Outlook the only account, it is the daemon's calendar and a new event goes there. An `.ics` import into an Outlook calendar is refused (`CALENDAR_NOT_SUPPORTED`): import it in Outlook. With no usable account at all, the answer (`CALENDAR_NOT_CONFIGURED`) names the accounts that exist and why none can be read; when the reason is a secret store this computer cannot read, the answer is `CALENDAR_CREDENTIALS_UNREADABLE` ("No calendar this daemon can read: …" with the cause), and the Agent's `/calendar accounts` says the store could not be read instead of "not connected".
 
 Up to 3.4.4, `/calendar connect google` kept a second Google connection (`GOODVIBES_CALENDAR_GOOGLE_TOKENS`) that the daemon never read. The daemon's first start of 3.4.5 moves it into the one connection, once, and says "Carried forward from the earlier version: 1 Google connection." When a different Google connection was already there, that one stays (the daemon's mail and calendar were using it), the earlier one is kept unused, and the notice names both accounts and how to choose the other: `/calendar connect google` signed in as it. Going back to 3.4.4 after the move: the daemon, the web Calendar and mail keep the connection, and the Agent's `/calendar accounts` lists no Google account until `/calendar connect google` is run there.
 
@@ -8454,7 +8500,7 @@ When a request names no provider, a configured `local` provider is used first, t
 /voice import <file>
 ```
 
-`ui.voiceEnabled` turns the voice control surface on. The `voice-input` key action (Alt+V by default) starts and stops recording in the terminal app.
+`ui.voiceEnabled` turns the voice control surface on. The `voice-input` key action (Ctrl+G then v, or F8, by default) starts and stops recording in the terminal app.
 
 ### Local offline voice
 
@@ -8502,7 +8548,7 @@ The `voice.wake.*` settings, by group:
 | On/off and where | `enabled`; `surfaces.tui` (default on), `surfaces.agent`, `surfaces.webui`, `surfaces.app` | Turn detection on, and choose which apps listen. Turn `surfaces.tui` off when you talk to the Agent instead, so two apps do not both act on one phrase. The web UI and desktop app ask the browser for microphone permission only when their row is on; a plain-http origin cannot capture. |
 | What it listens for | `models` (default `hey_goodvibes`), `customModelDir` | Comma-separated model ids; extra ids are loaded from `customModelDir` without checksum pinning. An empty list stops detection without stopping the service. |
 | How sure it must be | `threshold` (0.9), `patienceFrames` (2), `cooldownMs` (2000), `vadThreshold` (0, off; 0.3 recommended) | Lower `threshold` toward 0.5 if it misses you; raise it if it fires when you did not speak to it. `vadThreshold` above 0 screens out non-speech frames first. |
-| Audio input | `inputDevice` (empty: system default), `captureCommand`, `noiseSuppression` (`none` or `speex`) | List devices with `pactl list short sources` or `arecord -L`. `pw-record` takes a PipeWire node name or serial; `sox` cannot pick a device. Use `speex` in a noisy room. These rows also apply to push-to-talk (Alt+V). |
+| Audio input | `inputDevice` (empty: system default), `captureCommand`, `noiseSuppression` (`none` or `speex`) | List devices with `pactl list short sources` or `arecord -L`. `pw-record` takes a PipeWire node name or serial; `sox` cannot pick a device. Use `speex` in a noisy room. These rows also apply to push-to-talk (the `voice-input` key). |
 | Feedback | `activationSound` (`chime`, `none`, `custom`), `activationSoundPath`, `indicator` (`statusline`, `banner`, `off`) | |
 | Recording after the wake | `preRollMs` (500), `captureMaxSeconds` (10; 0 removes the ceiling), `silenceStopMs` (1200), `silenceFloorRms` (0: measured per utterance), `speechRetriggerMs` (150) | Raise `silenceStopMs` if it cuts you off mid-sentence; set `silenceFloorRms` if capture keeps running after you stop. |
 | What happens to the transcript | `autoSubmit` (off) | On sends the transcript as a turn without review. Read when the transcript is ready, so a change made while one is being transcribed applies to it. |
@@ -10295,14 +10341,16 @@ A phone on the same network can open the web UI over plain http, but a browser g
 | Way | You give | The phone | Sent |
 | --- | --- | --- | --- |
 | A certificate for a domain you own (Let's Encrypt) | a name under your domain (`gv.example.com`) and, once, a Cloudflare API token with Zone, DNS, Edit on its zone | trusts it with nothing installed | to Let's Encrypt the name and public keys (the name appears in public Certificate Transparency logs); to Cloudflare the name, a proof digest and this computer's local address |
-| A certificate you made | the certificate (with its chain) and key files on this computer | trusts it when it trusts the signer | nothing |
+| A certificate you made | the certificate (with its chain) and key files on this computer | trusts it when it trusts the signer | nothing; on a machine that leads a group, the certificate and its key, sealed, to each machine in the group it covers |
 | Tailscale | Tailscale signed in here and on the phone, HTTPS on for the tailnet | trusts it, from anywhere on the tailnet | per Tailscale |
-| GoodVibes' own certificate | nothing here; on each phone, install the certificate once from `/lan-https` | trusts it once installed; not yet tried on a real iPhone or Android phone | nothing |
+| GoodVibes' own certificate | nothing here; on each phone, install the certificate once from `/lan-https` | trusts it once installed; not yet tried on a real iPhone or Android phone | nothing; on a machine that leads a group (where it covers the group's machines' names and addresses), the certificate and its key, sealed, to each machine in the group |
+
+The screen says the same: on a machine that leads a group, "What is sent where" for a certificate you made and for GoodVibes' own certificate says the certificate and its key are sent, sealed, to each machine in the group, and GoodVibes' own certificate says it covers the group's machines' names and addresses; on any other machine they say "Nothing leaves this computer". A certificate's end date is written the same way everywhere (the local date, month in words: `February 22, 2027`), in the daemon's own lines as on each screen. When no Cloudflare token was read because the secret store on this computer could not be read, the screen says so with the cause ("The secret store on this computer could not be read (...)") and does not ask for the token again. A notice no owner channel carried (a node's own certificate authority set aside while it follows its lead) is shown at the top of the Secure address screen in all three programs until it has been shown there once; it is marked given only when an owner channel carried it or the screen showed it.
 
 - `controlPlane.lanHttps.enabled` switches the https listener on or off (port `controlPlane.lanHttps.port`, 3443); `secureAddress.certificate` (`local-authority`, the default, `own-files` or `lets-encrypt`) is the one setting that says which certificate it serves. The other settings: `secureAddress.domain`, `secureAddress.certFile`, `secureAddress.keyFile`, `secureAddress.dnsProvider` (`cloudflare`), `secureAddress.acmeDirectory` (Let's Encrypt's address; another ACME authority with DNS proofs works the same way).
 - Let's Encrypt: the daemon speaks ACME itself. Its account key (`secureAddress.acmeAccount`) and the certificate's key (`secureAddress.certificate`) are kept in the daemon's secret store and never shown, logged or answered. The certificate covers the name and every name directly under it (`*.gv.example.com`), proved by DNS records it writes through Cloudflare (`_acme-challenge.<name>`, removed afterwards). It writes the name's address record pointing at this computer's local address (192.168, then 10, then 172.16-31), and corrects it at the next start or listener bind when the address changed. It then looks the name up from this computer: a router that refuses answers pointing at local addresses (DNS rebinding protection) is named on the screen with what to allow on it. It renews by itself when under 30 days remain, checked at each start and listener bind, at each request the https listener serves, and at each daemon heartbeat (`watchers.heartbeatIntervalMs`); a refusal by the authority waits an hour before the daemon tries again by itself (a change on the screen tries at once). A renewal that fails within a week of the end is put in front of you. A record under the name that GoodVibes did not write is never changed.
 - A certificate you made: checked when given (the key must belong to the certificate; the names it covers; when it ends; a pair that is not in force is refused and nothing is written). The files are read again at each start and listener bind when they changed, and once the certificate in use has ended. You are told once, a fortnight before it ends.
-- `goodvibes-daemon webui enable --lan --https --certificate local-authority|own-files|lets-encrypt [--domain <name>] [--cert-file <path> --key-file <path>]` does the same from a script (a token is never taken on the command line: the daemon uses `cloudflare.apiTokenRef`, `CLOUDFLARE_API_TOKEN` or the stored secret). Over the API: `secureAddress.get`, `secureAddress.set` (admin) and `secureAddress.reissue` (admin).
+- `goodvibes-daemon webui enable --lan --https --certificate local-authority|own-files|lets-encrypt [--domain <name>] [--cert-file <path> --key-file <path>]` does the same from a script (a token is never taken on the command line: the daemon uses `cloudflare.apiTokenRef`, `CLOUDFLARE_API_TOKEN` or the stored secret). Over the API: `secureAddress.get` (scope `read:remote`, owner-private: a user without the admin role is not granted it), `secureAddress.set` (admin) and `secureAddress.reissue` (admin).
 - "Issue a new certificate now" (on a machine of its own or a group's lead, while https is on with Let's Encrypt or GoodVibes' own certificate): a new certificate with a new key at once, served and sent to the machines that follow. Let's Encrypt allows only five for the same name a week, so it is meant for a key that may have been seen by someone else; renewal needs nothing. It is the screen's button in all three programs (in the terminal programs, its row in "Secure address now"), the method `secureAddress.reissue` for a client or script, and for the model inside GoodVibes the same method through `agent_operator_method`, admitted by the permission gate under the mode in force. A certificate you made is renewed by you.
 - Pairing carries the https address the listener serves (at the certificate's own name for Let's Encrypt and a certificate you made), and the pairing posture reports the microphone, push and install as available there; the certificate-page step appears only for GoodVibes' own certificate.
 
@@ -13484,12 +13532,12 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it; a change that would change which decision model decides for you counts as loosening security.
 
-- `judgment.keyName`: Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none.
+- `judgment.keyName`: Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Not used when the key source is No key is sent.
   - type `string`; default `"TYPESAFE_API_KEY"`; allowed: a credential reference name.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it; a change that would change which decision model decides for you counts as loosening security.
 
-- `judgment.keySource`: Where the decision model's key comes from: env reads an environment variable, secret reads the secret store, and none sends no key. This setting stores only one of those three words, never a credential or a credential reference.
+- `judgment.keySource`: Where the decision model's key comes from. Environment variable: the variable named in Decision model key name. Secret store: the secret of that name in GoodVibes' secret store. No key is sent: for a decision model server that needs none. Only this choice is stored here, never a key.
   - type `enum`; default `"env"`; allowed: `env`, `secret`, `none`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it; a change that would change which decision model decides for you counts as loosening security.
@@ -13500,8 +13548,18 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - A project file may not set it; a change that would change which decision model decides for you counts as loosening security.
   - Environment: `TYPESAFE_DEFAULT_MODEL` (used when the setting is empty).
 
+- `judgment.noDecisionModel`: On: no decision model is asked, whatever this computer's environment holds (a decision model key or server address there is not used), so nothing is sent to one; Jev decides then asks you, as Ask me does. Choosing No decision model in Settings turns it on, as does carrying forward an earlier version's No Decision Model; choosing a decision model in Settings turns it off. Off (the default): a decision model set here or found in the environment is used.
+  - type `boolean`; default `false`.
+  - Stored in the daemon file (one value, which all three programs read).
+  - A project file may not set it; a change that would let a decision model decide for you again counts as loosening security.
+
 - `judgment.policy`: Only for Jev decides and Just vibes: what happens to a call Jev would decide when the decision model fails. Ask me (default): it comes to you (in Just vibes it is held to the end of the run), and the failure is shown once with the model, what failed and the next step. Refuse the action: it is refused with the reason, and the turn goes on.
   - type `enum`; default `"Hybrid"`; allowed: `Hybrid`, `Decision Model Only`.
+  - Stored in the daemon file (one value, which all three programs read).
+  - A project file may not set it.
+
+- `judgment.setAside`: The decision model settings an earlier version held while decision models were switched off (No Decision Model): moved here, as they were, when that choice was carried to the mode Ask me with no decision model set, so nothing is sent to a decision model until you choose one. Choosing a decision model in Settings offers them back ("Use the decision model you had before"), which sets them again and empties this. Empty when nothing is set aside. Holds the names of credentials, never a credential.
+  - type `object`; default `{}`; allowed: object with any of endpoint, model, keySource, keyName, backend and fallbacks, each valid as its judgment.* setting.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
@@ -13580,7 +13638,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in each program's own file (the terminal app, Agent and the daemon each keep their own value).
   - A project file may not set it.
 
-- `memory.showProvenance`: Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in listing them (Alt+M to expand). Off by default; when off, nothing is rendered and no metadata is read.
+- `memory.showProvenance`: Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in listing them (Ctrl+G then e to expand, unless rebound). Off by default; when off, nothing is rendered and no metadata is read.
   - type `boolean`; default `false`.
   - Stored in the terminal app's own file only (`~/.goodvibes/tui/settings.json`); the other programs do not have this setting.
   - A project file may not set it.
@@ -14368,7 +14426,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `secureAddress.certificate`: A phone that opens GoodVibes over plain http on your network gets the chat and little else: browsers keep the microphone, push notifications, installing the app, the camera and passkeys for https addresses. Pick one way to give GoodVibes an https address. The plain http address keeps working exactly as it does now, whichever you pick. The https address is switched on by controlPlane.lanHttps.enabled ("Serve the web UI over https on your network"); this setting says which certificate it serves. lets-encrypt: A certificate for a domain you own (Let's Encrypt): GoodVibes gets a free certificate from Let's Encrypt for a name under a domain you own (for example gv.example.com, and every name under it for the machines of your group) and renews it by itself about a month before it ends. It writes two kinds of DNS record through your DNS provider's API: a short-lived proof record (_acme-challenge.<name>, removed once Let's Encrypt has checked it) and an address record pointing the name at this computer's address on your network, corrected when that address changes. Phones then open https://<name>:<port>. Needs: The name, and an API token from your DNS provider (Cloudflare: a token with the permission Zone, DNS, Edit on the zone that holds the name), unless one is already stored. Nothing else: no account to make, no email, nothing to install on any phone. Choosing it agrees to Let's Encrypt's subscriber agreement. The phone gains: Every phone, tablet and computer trusts the address at once: microphone, push notifications, installing the app, camera and passkeys all work, with nothing installed on the phone. Sent: To Let's Encrypt: the name and the public half of keys made on this computer (the private keys never leave it). To your DNS provider: the name, the proof value (a digest, no secret) and this computer's local network address, which becomes readable by anyone who looks the name up. Nothing goes to GoodVibes. Before you choose: Let's Encrypt publishes the name of every certificate it issues in public logs (Certificate Transparency) that anyone can search, so pick a name that says nothing about you or your home. Some home routers refuse DNS answers that point at a local address (DNS rebinding protection); GoodVibes looks the name up from this computer after writing it and tells you if that happens, and what to change on the router. own-files: A certificate you made: GoodVibes serves https with a certificate and key you already have (from your own certificate authority, a company one, or another ACME client). It checks them when you give them (the key must belong to the certificate; which names it covers; when it ends), reads the files again when they change, and tells you once, a fortnight before the certificate ends. It never renews it: that stays yours. Needs: The paths of two files on this computer: the certificate (with its chain) and its private key, unencrypted. The names it covers must be the names phones open. The phone gains: The same as any https address, on every device that trusts whoever signed your certificate. A device that does not trust the signer shows a certificate warning. Sent: Nothing leaves this computer: the files are read here and used here. local-authority (the default, as in 3.5.0): GoodVibes' own certificate (no domain needed): GoodVibes makes a certificate authority on this computer that can only vouch for this computer's own names and private network addresses, and serves https with a certificate it signs. It is made again at each start for the addresses the computer has then. Needs: On each phone, once: open the page /lan-https on this computer's plain address and install the GoodVibes certificate (the page says how on iPhone and Android, and how to remove it). The phone gains: Everything an https address gives, on each phone that installed the certificate; a phone that did not shows a certificate warning. Sent: Nothing leaves this computer. Before you choose: Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone. The fourth way, Tailscale, is not a certificate this daemon serves: Tailscale: Tailscale serves this computer at its https name on your tailnet (https://<machine>.<tailnet>.ts.net) with a certificate Tailscale obtains, and forwards to GoodVibes. It is set up per machine and is not shared with the machines of a group. Needs: Tailscale installed and signed in on this computer and on each phone, and HTTPS turned on for your tailnet in the Tailscale admin page. The phone gains: Everything an https address gives, on every phone signed in to your tailnet, from anywhere, not only at home. Sent: Tailscale's coordination servers learn this machine's tailnet name (the certificate for it is issued by Let's Encrypt and appears in its public logs under your tailnet's name); your traffic goes between your devices, encrypted by Tailscale. (Settings, Network, Tailscale). In a machine group, the machine that set this up provides it to every machine that joined; a machine that joined shows what it received and has nothing to set.
+- `secureAddress.certificate`: A phone that opens GoodVibes over plain http on your network gets the chat and little else: browsers keep the microphone, push notifications, installing the app, the camera and passkeys for https addresses. Pick one way to give GoodVibes an https address. The plain http address keeps working exactly as it does now, whichever you pick. The https address is switched on by controlPlane.lanHttps.enabled ("Serve the web UI over https on your network"); this setting says which certificate it serves. lets-encrypt: A certificate for a domain you own (Let's Encrypt): GoodVibes gets a free certificate from Let's Encrypt for a name under a domain you own (for example gv.example.com, and every name under it for the machines of your group) and renews it by itself about a month before it ends. It writes two kinds of DNS record through your DNS provider's API: a short-lived proof record (_acme-challenge.<name>, removed once Let's Encrypt has checked it) and an address record pointing the name at this computer's address on your network, corrected when that address changes. Phones then open https://<name>:<port>. Needs: The name, and an API token from your DNS provider (Cloudflare: a token with the permission Zone, DNS, Edit on the zone that holds the name), unless one is already stored. Nothing else: no account to make, no email, nothing to install on any phone. Choosing it agrees to Let's Encrypt's subscriber agreement. The phone gains: Every phone, tablet and computer trusts the address at once: microphone, push notifications, installing the app, camera and passkeys all work, with nothing installed on the phone. Sent: To Let's Encrypt: the name and the public half of keys made on this computer (the private keys never leave it). To your DNS provider: the name, the proof value (a digest, no secret) and this computer's local network address, which becomes readable by anyone who looks the name up. Nothing goes to GoodVibes. Before you choose: Let's Encrypt publishes the name of every certificate it issues in public logs (Certificate Transparency) that anyone can search, so pick a name that says nothing about you or your home. Some home routers refuse DNS answers that point at a local address (DNS rebinding protection); GoodVibes looks the name up from this computer after writing it and tells you if that happens, and what to change on the router. On a machine that leads a group: Sent: To Let's Encrypt: the name and the public half of keys made on this computer. To your DNS provider: the name, the proof value (a digest, no secret) and the local network address of this computer and of each machine in the group, which become readable by anyone who looks the names up. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; they go nowhere else. Nothing goes to GoodVibes. own-files: A certificate you made: GoodVibes serves https with a certificate and key you already have (from your own certificate authority, a company one, or another ACME client). It checks them when you give them (the key must belong to the certificate; which names it covers; when it ends), reads the files again when they change, and tells you once, a fortnight before the certificate ends. It never renews it: that stays yours. Needs: The paths of two files on this computer: the certificate (with its chain) and its private key, unencrypted. The names it covers must be the names phones open. The phone gains: The same as any https address, on every device that trusts whoever signed your certificate. A device that does not trust the signer shows a certificate warning. Sent: Nothing leaves this computer: the files are read here and used here. On a machine that leads a group: Sent: The files are read here. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group that the certificate covers, so that machine serves the same certificate; they go nowhere else. local-authority (the default, as in 3.5.0): GoodVibes' own certificate (no domain needed): GoodVibes makes a certificate authority on this computer that can only vouch for this computer's own names and private network addresses, and serves https with a certificate it signs. It is made again at each start for the addresses the computer has then. Needs: On each phone, once: open the page /lan-https on this computer's plain address and install the GoodVibes certificate (the page says how on iPhone and Android, and how to remove it). The phone gains: Everything an https address gives, on each phone that installed the certificate; a phone that did not shows a certificate warning. Sent: Nothing leaves this computer. Before you choose: Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone. On a machine that leads a group: GoodVibes makes a certificate authority on this computer and serves https with a certificate it signs. Because this computer leads a group, that certificate covers the names and private network addresses of every machine in the group as well as this computer's own, so a phone that installed the authority once trusts them all. It is made again at each start for the addresses the machines have then. Sent: Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; the certificate authority's own key never leaves this computer. The fourth way, Tailscale, is not a certificate this daemon serves: Tailscale: Tailscale serves this computer at its https name on your tailnet (https://<machine>.<tailnet>.ts.net) with a certificate Tailscale obtains, and forwards to GoodVibes. It is set up per machine and is not shared with the machines of a group. Needs: Tailscale installed and signed in on this computer and on each phone, and HTTPS turned on for your tailnet in the Tailscale admin page. The phone gains: Everything an https address gives, on every phone signed in to your tailnet, from anywhere, not only at home. Sent: Tailscale's coordination servers learn this machine's tailnet name (the certificate for it is issued by Let's Encrypt and appears in its public logs under your tailnet's name); your traffic goes between your devices, encrypted by Tailscale. (Settings, Network, Tailscale). In a machine group, the machine that set this up provides it to every machine that joined; a machine that joined shows what it received and has nothing to set.
   - type `enum`; default `"local-authority"`; allowed: `local-authority`, `own-files`, `lets-encrypt`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
@@ -14417,7 +14475,7 @@ A value in backticks is written exactly as shown in JSON (`true`, `30`, `"ask-me
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
 
-- `service.enabled`: Whether this machine runs the daemon as a service. On, a daemon started by hand installs the service at its first idle moment and doctor reports a missing or stopped service; off (the installers' --no-service, or goodvibes-daemon uninstall-service), nothing installs one and doctor does not ask for one. goodvibes-daemon install-service turns it on. A daemon setting: one value every program and installer reads, in the daemon's settings file.
+- `service.enabled`: On: GoodVibes runs its daemon as a service of this computer. It is set up the first time a daemon you started is idle, and from then on it keeps running after you close the window you started it from, so your sessions and whatever it serves stay available. Turn on Start the daemon at login as well and it also starts by itself when you sign in. Off: nothing sets up a service, and the daemon runs only while you keep it running.
   - type `boolean`; default `true`.
   - Stored in the daemon file (one value, which all three programs read).
   - A project file may not set it.
@@ -15888,6 +15946,8 @@ Commands:
   tui                        Start the interactive TUI (default)
   open                       Start the app on the view a goodvibes://open link names
   run                        Run non-interactively with text/json/stream-json output
+  do                         Run a capability by id (from find) with --input key=value
+  find                       Find the capabilities that do what you need
   web                        Show browser surface bind URL and enablement
   service                    Inspect/manage daemon service lifecycle
   status                     Print config, provider, service, and onboarding posture
@@ -16061,6 +16121,22 @@ Examples:
   goodvibes control-plane status --json
 ```
 
+### `goodvibes do`
+
+```
+GoodVibes do
+
+Run one GoodVibes capability by its id (from find) with its inputs, through the daemon. A command you typed is the request, so it runs at once and prints what it did; a capability that acts on a conversation is refused here (it runs in the terminal app or the Agent). Exit 0 done, 1 refused or failed, 2 bad usage.
+
+Usage:
+  goodvibes do <capability id> [--input key=value ...] [--output json]
+
+Examples:
+  goodvibes do hooks.disable --input hook=lint-before-commit
+  goodvibes do secrets.set --input key=STRIPE_KEY --input value=... --input scope=user
+  goodvibes do memory.explain --input task="add a login page" --output json
+```
+
 ### `goodvibes doctor`
 
 ```
@@ -16083,6 +16159,21 @@ Examples:
   goodvibes doctor explain write ./src/app.ts
   goodvibes doctor routing
   goodvibes doctor hooks --json
+```
+
+### `goodvibes find`
+
+```
+GoodVibes find
+
+Say what you need in words: three to five capabilities come back with their ids, inputs and risk, from the function group that serves the need. Nothing runs.
+
+Usage:
+  goodvibes find "<what you need>" [--output json]
+
+Examples:
+  goodvibes find "switch off the lint hook"
+  goodvibes find "store my stripe key" --output json
 ```
 
 ### `goodvibes hooks`
@@ -16782,6 +16873,22 @@ Examples:
   goodvibes-agent delegate --review "implement the settings screen and review it"
 ```
 
+### `goodvibes-agent do`
+
+```
+GoodVibes Agent do
+
+Run one GoodVibes capability by its id (from find) with its inputs, through the daemon. A command you typed is the request, so it runs at once and prints what it did; a capability that acts on a conversation is refused here (it runs in the terminal app or the Agent). Exit 0 done, 1 refused or failed, 2 bad usage.
+
+Usage:
+  goodvibes-agent do <capability id> [--input key=value ...] [--output json]
+
+Examples:
+  goodvibes-agent do hooks.disable --input hook=lint-before-commit
+  goodvibes-agent do secrets.set --input key=STRIPE_KEY --input value=... --input scope=user
+  goodvibes-agent do memory.explain --input task="add a login page" --output json
+```
+
 ### `goodvibes-agent doctor`
 
 ```
@@ -16799,6 +16906,21 @@ Examples:
   goodvibes-agent doctor
   goodvibes-agent doctor --json
   goodvibes-agent --runtime-url http://127.0.0.1:3421 doctor
+```
+
+### `goodvibes-agent find`
+
+```
+GoodVibes Agent search
+
+Shortcut for isolated Agent Knowledge search. This never queries default knowledge or non-Agent knowledge.
+
+Usage:
+  goodvibes-agent search <query> [--limit <n>]
+
+Examples:
+  goodvibes-agent search "release checklist"
+  goodvibes-agent search "operator workspace" --limit 5
 ```
 
 ### `goodvibes-agent fleet`
@@ -17404,6 +17526,8 @@ Commands:
   stop-service                  Stop the daemon service without removing it.
   restart-service               Restart the daemon service.
   status                        Ask a running daemon what it is doing.
+  do                            Run a capability by id (from find) with --input key=value
+  find                          Find the capabilities that do what you need
   pair                          Print the pairing link and QR code again, or mint one on a remote daemon.
   sessions                      List or end the sessions a running daemon is hosting.
   mcp                           Serve the operator surface of a running daemon to an MCP client over stdio.
@@ -17592,6 +17716,54 @@ Global options:
   -v, --version                 Print the version and exit 0.
 ```
 
+### `goodvibes-daemon do`
+
+```
+Usage: goodvibes-daemon do <capability id> [--input key=value ...] [--json] [--host <http(s)://name>] [--port <n>] [--token <t>]
+
+Run one capability (an id from goodvibes-daemon find) with its inputs, as the
+running daemon's capabilities.run. A command you typed is the request, so it
+runs at once and prints what it did; a secret value is never printed. A
+capability that acts on a conversation (clear, compact, undo) is refused here:
+it runs in the terminal app or the Agent. With --json the answer is one document.
+
+Exit 0 when it was done, 1 when it was refused or failed, 2 for bad usage.
+
+Options:
+      --json                    Print one JSON document instead of prose, for scripting.
+      --host <name>             The machine to ask, as a name or a URL (https://name, https://name:3421). Defaults to this one. A URL without a port means 443 for https and 80 for http.
+      --port <n>                That daemon's control-plane port. Defaults to the port in a --host URL, else its scheme's (443, 80), else the configured one.
+      --token <t>               Operator token for that daemon. Defaults to this machine's own.
+
+Global options:
+      --daemon-home <dir>       Run this daemon entirely out of <dir>: its identity (operator tokens, daemon settings, secrets) in <dir>, and everything else it keeps (users, device tokens, memory, sessions) under <dir>/.goodvibes/, unless GOODVIBES_HOME names that tree. Shares nothing with another daemon.
+  -C, --working-dir, --cd <dir> The directory the daemon treats as its workspace.
+  -h, --help                    Print help and exit 0.
+  -v, --version                 Print the version and exit 0.
+```
+
+### `goodvibes-daemon find`
+
+```
+Usage: goodvibes-daemon find "<what you need>" [--json] [--host <http(s)://name>] [--port <n>] [--token <t>]
+
+Say what you need in words: the running daemon's capabilities.find picks the
+function group and returns three to five capabilities with their ids, inputs
+and risk. Nothing runs. With --json the answer is one document.
+
+Options:
+      --json                    Print one JSON document instead of prose, for scripting.
+      --host <name>             The machine to ask, as a name or a URL (https://name, https://name:3421). Defaults to this one. A URL without a port means 443 for https and 80 for http.
+      --port <n>                That daemon's control-plane port. Defaults to the port in a --host URL, else its scheme's (443, 80), else the configured one.
+      --token <t>               Operator token for that daemon. Defaults to this machine's own.
+
+Global options:
+      --daemon-home <dir>       Run this daemon entirely out of <dir>: its identity (operator tokens, daemon settings, secrets) in <dir>, and everything else it keeps (users, device tokens, memory, sessions) under <dir>/.goodvibes/, unless GOODVIBES_HOME names that tree. Shares nothing with another daemon.
+  -C, --working-dir, --cd <dir> The directory the daemon treats as its workspace.
+  -h, --help                    Print help and exit 0.
+  -v, --version                 Print the version and exit 0.
+```
+
 ### `goodvibes-daemon install-service`
 
 ```
@@ -17653,15 +17825,19 @@ Global options:
 ```
 Usage: goodvibes-daemon mcp serve [--categories <list|all>] [--allow-write] [--allow-destructive] [--host <http(s)://name>] [--port <n>] [--token <t>]
 
-mcp serve              speak the Model Context Protocol on stdin/stdout, with one tool
-                       per operator method of the daemon it connects to (session
-                       lifecycle first), so an MCP client can drive GoodVibes.
+mcp serve              speak the Model Context Protocol on stdin/stdout, so an MCP
+                       client can drive GoodVibes through the daemon it connects to.
 
-By default it serves the agent slice: the sessions, tasks, contracts and approvals
-methods that read, plus creating a session, sending it a message and steering it
-(the exact number is printed at start). --categories picks other operator families (comma separated or
-repeated; `all` for every family), --allow-write adds the methods that change
-state, and --allow-destructive adds the methods the contract marks dangerous.
+By default it serves two tools: capability_find (say what you need; a few
+capabilities come back with their inputs and risk) and capability_run (run one
+by id), which reach every capability of GoodVibes. A run is decided under your
+permission mode by the daemon; an act that loosens a protection or cannot be
+undone is put to you. With --categories, --allow-write or --allow-destructive it
+serves one tool per operator method instead (session lifecycle first): the agent
+slice of sessions, tasks, contracts and approvals reads by default, --categories
+picks other operator families (comma separated or repeated; `all` for every
+family), --allow-write adds the methods that change state, and
+--allow-destructive adds the methods the contract marks dangerous.
 The number of tools served is printed on stderr at start.
 
 A client that cancels a tool call (notifications/cancelled) stops the request to
@@ -19021,10 +19197,10 @@ Every slash command typed in the terminal app's prompt, in alphabetical order. E
   - `/update review` `See this install`
   - `/update rollback` `Go back to the previous version`
   - `/update save-review` `<file> [--replace]   Save this install's update state to a file`
-- `/usage` `/usage open [<show>] | alert <dollars> | by-source [<over>] [--as <as>]`: Tokens, cost and context pressure, the spending alert, and cost by who spent it.
+- `/usage` `/usage open [<show>] | alert <dollars> | by-source [<over>] [--as <as>] [--by <split by>]`: Tokens, cost and context pressure, the spending alert, and cost by who spent it.
   - Category Models and providers; depends on the subcommand (`open`, `by-source` only read)
   - `/usage alert` `<dollars>   Set a spending alert`
-  - `/usage by-source` `[<over>] [--as <as>]   See cost by who spent it`
+  - `/usage by-source` `[<over>] [--as <as>] [--by <split by>]   See cost by who spent it`
   - `/usage open` `[<show>]   See usage and cost`
 - `/verbosity` `/verbosity show | set <print level> | set-domain <kind of notification> <how much of it>`: Set how much the app prints: quiet, balanced or operator.
   - Category Agents and work; depends on the subcommand (`show` only read)
@@ -20672,7 +20848,7 @@ Inputs:
 
 ### Tools only Agent has
 
-Agent has the platform tools above (except those listed as not in Agent) and these 56 more.
+Agent has the platform tools above (except those listed as not in Agent) and these 58 more.
 
 ### `accounts`
 
@@ -21392,6 +21568,30 @@ Inputs:
 - `repair` (boolean, optional): For provision: reinstall even if a browser is cached.
 - `button` (one of `"left"`, `"right"`, `"middle"`, optional): Mouse button for action:"click".
 
+### `capability_find`
+
+Find the GoodVibes capability that does what you need (settings, secrets, hooks, memory, schedules, mail, devices, and everything else a person can do in its screens): say the need in words; three to five come back with id, what each does, its inputs and its risk. Then call capability_run.
+
+Permission category `read`.
+
+Inputs:
+
+- `need` (string, required): What you need done, in plain words: "store my Stripe key", "switch off the lint hook".
+
+### `capability_run`
+
+Run a GoodVibes capability by id (from capability_find, or a daemon method id) with its inputs; it goes through the same permission gate as every other call. A capability found once stays callable for this session.
+
+Permission category `delegate`; side effects: `network`, `state`.
+
+Inputs:
+
+- `id` (string, required): The capability id capability_find gave (hooks.disable), or a daemon method id (services.status).
+- `inputs` (object, optional): The inputs by name, as capability_find listed them (for a method id, the method's input).
+- `confirm` (boolean, optional): For a daemon method id only: the method runs only with confirm.
+- `explicitUserRequest` (boolean, optional): For a daemon method id only: the owner asked for exactly this in this conversation.
+- `dryRun` (boolean, optional): For a daemon method id only: show the request without sending it.
+
 ### `capability_status`
 
 What this build can do, read from its live runtime state.
@@ -22066,6 +22266,11 @@ The same number, different meaning:
   with problems" for `install.sh`.
 - `1` always means the command ran and did not succeed. For `run` it also
   covers a refusal, which is not an error to retry.
+
+`do` and `find` (`goodvibes`, `goodvibes-agent`, `goodvibes-daemon`) run and find a GoodVibes capability through the
+daemon: `0` it was done (or found), `1` it was refused or failed (a capability that acts on a conversation is refused
+in one line, since it needs the terminal app or the Agent), `2` the command line was wrong. With `--output json`
+(`--json` for the daemon) the answer, or the `{ok:false, code, error, fix}` refusal, is one document on stdout.
 
 Branching rules that hold for every program:
 
@@ -23243,7 +23448,7 @@ Each row is one settings domain: how its keys are classed, and every key that is
 | `hostedSessions.*` | 7 | replicated | the group should agree on this | `hostedSessions.maxSessions` node-local (this switch is a property of this installation) |
 | `httpListener.*` | 8 | node-local | the schema marks this a listening port, and a port this machine binds belongs to the machine; this domain describes one machine, not the group | none |
 | `integrations.*` | 7 | replicated | the group should agree on this | none |
-| `judgment.*` | 9 | node-local | this domain describes one machine, not the group | none |
+| `judgment.*` | 11 | node-local | this domain describes one machine, not the group | none |
 | `network.*` | 1 | node-local | no ruling has been made about this domain, so it stays local | none |
 | `occasions.*` | 11 | replicated | the group should agree on this | none |
 | `payments.*` | 33 | replicated | the group should agree on this | none |
@@ -23269,11 +23474,20 @@ These actions can be rebound in `~/.goodvibes/tui/keybindings.json`: a JSON obje
 
 | Action | Default keys | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C`, `f5` | Copy selected text to clipboard. |
+| `leader` | `Ctrl+G` | Start a two-key shortcut: the next key says which. |
+| `open-menu` | `Ctrl+G M` | Open the menu of every place. |
+| `next-field` | `tab` | Tab: complete, or go to the next field, list or pane. |
+| `choose` | `enter` | Enter: send, choose, open. |
+| `back` | `escape` | Esc: go back one level, close, interrupt. |
+| `move-up` | `up` | Up: move up. |
+| `move-down` | `down` | Down: move down. |
+| `move-left` | `left` | Left: move left, the previous tab. |
+| `move-right` | `right` | Right: move right, the next tab. |
+| `copy-selection` | `Ctrl+G C`, `F5`, `Ctrl+Shift+C` | Copy selected text to clipboard. |
 | `clear-cancel` | `Ctrl+C` | Clear input / cancel generation / exit (double) |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P`, `Ctrl+K` | Open the command palette (search & run any command) |
-| `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled. |
+| `open-agents` | `F2`, `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled. |
 | `history-search` | `Ctrl+R` | Reverse input history search. |
 | `search` | `Ctrl+F` | Toggle conversation search. |
 | `block-copy` | `Ctrl+Y` | Copy nearest block to clipboard. |
@@ -23282,29 +23496,35 @@ These actions can be rebound in `~/.goodvibes/tui/keybindings.json`: a JSON obje
 | `delete-word` | `Ctrl+W` | Delete word backward. |
 | `line-start` | `Ctrl+A` | Move to start of line. |
 | `next-error-line-end` | `Ctrl+E` | Navigate to next error / move to line end. |
-| `kill-line` | `Alt+K`, `Ctrl+X` | Kill to end of line. |
-| `clear-prompt` | `Alt+U`, `Ctrl+G` | Clear the entire prompt. |
+| `kill-line` | `Ctrl+G K`, `Ctrl+X` | Kill to end of line. |
+| `clear-prompt` | `Ctrl+G U` | Clear the entire prompt. |
 | `undo` | `Ctrl+Z` | Undo last prompt edit. |
-| `redo` | `Ctrl+Shift+Z`, `Ctrl+^` | Redo last undone edit. |
+| `redo` | `Ctrl+G Z`, `Ctrl+^` | Redo last undone edit. |
 | `paste` | `Ctrl+V` | Paste from clipboard (image priority) |
-| `word-back` | `Alt+B`, `Ctrl+left` | Move cursor to start of previous word. |
-| `word-forward` | `Alt+F`, `Ctrl+right` | Move cursor to end of next word. |
+| `word-back` | `Ctrl+G B`, `Ctrl+left` | Move cursor to start of previous word. |
+| `word-forward` | `Ctrl+G F`, `Ctrl+right` | Move cursor to end of next word. |
 | `kill-to-start` | `Ctrl+U` | Kill from cursor to start of line into kill ring. |
-| `kill-word-forward` | `Alt+D`, `Ctrl+delete` | Kill word forward into kill ring. |
-| `yank` | `Ctrl+Shift+Y`, `Ctrl+\` | Yank (paste) from kill ring. |
-| `yank-pop` | `Alt+Y`, `Ctrl+]` | Rotate kill ring and yank next entry. |
-| `cancel-tool-call` | `Alt+C`, `Ctrl+T` | Cancel the running tool call (the turn continues) |
-| `toggle-keep-awake` | `Alt+A`, `f6` | Toggle keep-awake (the "sleep disabled" chip) |
-| `toggle-memory-provenance` | `Alt+M`, `f7` | List/hide the memories a turn used (provenance chip drill-in) |
-| `voice-input` | `Alt+V`, `f8` | Voice input: press to start recording, press again to stop and transcribe into the composer. |
-| `focus-work-tree` | `Alt+up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
+| `kill-word-forward` | `Ctrl+G D`, `Ctrl+delete` | Kill word forward into kill ring. |
+| `yank` | `Ctrl+G Y`, `Ctrl+\` | Yank (paste) from kill ring. |
+| `yank-pop` | `Ctrl+G Shift+Y`, `Ctrl+]` | Rotate kill ring and yank next entry. |
+| `cancel-tool-call` | `Ctrl+G T`, `Ctrl+T` | Cancel the running tool call (the turn continues) |
+| `toggle-keep-awake` | `Ctrl+G A`, `F6` | Toggle keep-awake (the "sleep disabled" chip) |
+| `toggle-memory-provenance` | `Ctrl+G E`, `F7` | List/hide the memories a turn used (provenance chip drill-in) |
+| `voice-input` | `Ctrl+G V`, `F8` | Voice input: press to start recording, press again to stop and transcribe into the composer. |
+| `focus-work-tree` | `Ctrl+G up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
 | `cycle-permission-mode` | `Shift+tab` | Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings) |
 | `open-notifications` | `Ctrl+N` | Open the notices (the status bar counts the unread ones) |
-| `failure-other-model` | `Alt+O`, `f9` | After a failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I`, `f3` | After a failed turn: show what the provider said. |
-| `failure-sign-in` | `Alt+S`, `f4` | After a provider refused its key: open the provider sign-ins. |
-| `next-session` | `Alt+N`, `Ctrl+Q` | Show the next session (agent or process) in the session row above the conversation. |
-| `previous-session` | `Alt+P`, `Ctrl+_` | Show the previous session (agent or process) in the session row above the conversation. |
+| `failure-other-model` | `Ctrl+G O`, `F9` | After a failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Ctrl+G I`, `F3` | After a failed turn: show what the provider said. |
+| `failure-sign-in` | `Ctrl+G S`, `F4` | After a provider refused its key: open the provider sign-ins. |
+| `failure-retry` | `Ctrl+G R`, `F12` | After a failed turn: send the prompt again. |
+| `open-fix-session` | `Ctrl+G J`, `F10` | Open the fix session that was just started (a CI fix, a conflict resolution) |
+| `next-session` | `Ctrl+G N`, `Ctrl+Q` | Show the next session (agent or process) in the session row above the conversation. |
+| `previous-session` | `Ctrl+G P`, `Ctrl+_` | Show the previous session (agent or process) in the session row above the conversation. |
+| `scroll-page-up` | `PageUp` | Scroll the conversation up a page. |
+| `scroll-page-down` | `PageDn` | Scroll the conversation down a page. |
+| `contract-question-ordinary` | `Ctrl+G Q` | Send the next message as an ordinary one, not as the answer to a contract's question. |
+| `model-picker-group` | `Ctrl+G G` | In the model list: group it another way (provider, price, none) |
 
 ## Key bindings: Agent
 
@@ -23314,16 +23534,25 @@ These actions can be rebound in `~/.goodvibes/agent/keybindings.json`: a JSON ob
 
 | Action | Default keys | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C`, `f5` | Copy selected text to clipboard. |
+| `leader` | `Ctrl+G` | Start a two-key shortcut: the next key says which. |
+| `open-menu` | `Ctrl+G M` | Open the menu of every place. |
+| `next-field` | `tab` | Tab: complete, or go to the next field, list or pane. |
+| `choose` | `enter` | Enter: send, choose, open. |
+| `back` | `escape` | Esc: go back one level, close, interrupt. |
+| `move-up` | `up` | Up: move up. |
+| `move-down` | `down` | Down: move down. |
+| `move-left` | `left` | Left: move left, the previous tab. |
+| `move-right` | `right` | Right: move right, the next tab. |
+| `copy-selection` | `Ctrl+G C`, `F5`, `Ctrl+Shift+C` | Copy selected text to clipboard. |
 | `clear-cancel` | `Ctrl+C` | Clear input / cancel generation / exit (double) |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P` | Open help: every command and keyboard shortcut in one searchable list. |
-| `workspace-picker` | `Ctrl+G` | Open the Agent operator workspace. |
+| `workspace-picker` | `Ctrl+G W` | Open the Agent operator workspace. |
 | `workspace-close` | `Ctrl+X` | Close the Agent workspace. |
-| `workspace-close-all` | `Ctrl+Shift+X`, `Ctrl+\` | Close the Agent workspace. |
+| `workspace-close-all` | `Ctrl+G X`, `Ctrl+\` | Close the Agent workspace. |
 | `workspace-tab-next` | `Ctrl+]` | Cycle Agent workspace category forward. |
 | `workspace-tab-prev` | `Ctrl+[` | Cycle Agent workspace category backward. |
-| `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled. |
+| `open-agents` | `F2`, `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled. |
 | `history-search` | `Ctrl+R` | Reverse input history search. |
 | `search` | `Ctrl+F` | Toggle conversation search. |
 | `block-copy` | `Ctrl+Y` | Copy nearest block to clipboard. |
@@ -23335,17 +23564,21 @@ These actions can be rebound in `~/.goodvibes/agent/keybindings.json`: a JSON ob
 | `kill-line` | `Ctrl+K` | Kill to end of line. |
 | `clear-prompt` | `Ctrl+U` | Clear the prompt. |
 | `undo` | `Ctrl+Z` | Undo last prompt edit. |
-| `redo` | `Ctrl+Shift+Z`, `Ctrl+^` | Redo last undone edit. |
+| `redo` | `Ctrl+G Z`, `Ctrl+^` | Redo last undone edit. |
 | `paste` | `Ctrl+V` | Paste from clipboard (image priority) |
-| `focus-work-tree` | `Alt+up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
+| `focus-work-tree` | `Ctrl+G up`, `Ctrl+up` | Move the keyboard onto the conversation work tree (arrows move and fold, Enter opens, y copies, Esc returns) |
 | `cycle-permission-mode` | `Shift+tab` | Change when GoodVibes asks, for this session (asks before YOLO; the saved default is set in /settings) |
 | `open-notifications` | `Ctrl+N` | Open the notices (the status bar counts the unread ones) |
-| `failure-other-model` | `Alt+O`, `f9` | After a failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I`, `f3` | After a failed turn: show what the provider said. |
-| `failure-retry` | `Alt+R`, `f12` | After a failed turn: send the prompt again. |
-| `failure-sign-in` | `Alt+S`, `f4` | After a provider refused its key: open the provider sign-ins. |
-| `next-session` | `Alt+N`, `Ctrl+Q` | Show the next session (agent or process) in the session row above the conversation. |
-| `previous-session` | `Alt+P`, `Ctrl+_` | Show the previous session (agent or process) in the session row above the conversation. |
+| `failure-other-model` | `Ctrl+G O`, `F9` | After a failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Ctrl+G I`, `F3` | After a failed turn: show what the provider said. |
+| `failure-retry` | `Ctrl+G R`, `F12` | After a failed turn: send the prompt again. |
+| `failure-sign-in` | `Ctrl+G S`, `F4` | After a provider refused its key: open the provider sign-ins. |
+| `next-session` | `Ctrl+G N`, `Ctrl+Q` | Show the next session (agent or process) in the session row above the conversation. |
+| `previous-session` | `Ctrl+G P`, `Ctrl+_` | Show the previous session (agent or process) in the session row above the conversation. |
+| `scroll-page-up` | `pageup`, `Ctrl+pageup` | Scroll the conversation up a page. |
+| `scroll-page-down` | `pagedown`, `Ctrl+pagedown` | Scroll the conversation down a page. |
+| `contract-question-ordinary` | `Ctrl+G Q` | Send the next message as an ordinary one, not as the answer to a contract's question. |
+| `model-picker-group` | `Ctrl+G G` | In the model list: group it another way (provider, price, none) |
 
 ## Hooks
 
@@ -23580,6 +23813,13 @@ A method with no HTTP route is called with `POST /api/control-plane/methods/{met
 | `calendar.ics.export` | `GET /api/calendar/ics/export` | authenticated | `read:calendar` | read | safe to repeat | Export events from the configured calendar as raw .ics content within an optional time window. With no limit every event in the window is exported; with a limit the export stops there and more: true says the window holds further events. |
 | `calendar.ics.import` | `POST /api/calendar/ics/import` | admin | `write:calendar` | outward (dangerous) | safe with the header `Idempotency-Key` | Import raw .ics content into the configured calendar. Requires explicit confirmation (confirm: true). A series and its overrides are stored together as written; an event already on the calendar is kept unless replace: true. Guests an imported event names are not invited; they are listed in attendeesLeftOff. |
 
+### capabilities
+
+| Method | HTTP route | Access | Scopes | Effect | Retry | What it does |
+| --- | --- | --- | --- | --- | --- | --- |
+| `capabilities.find` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | What the caller needs, in words, in; three to five capabilities out, never the whole list. Step one picks the function group (the decision model when one is usable, keyword ranking otherwise); step two ranks the capabilities of that group, and of the nearest group when the best match is weak. Each comes with its id, one line on what it does, where it runs (daemon: here; session: in the program holding a conversation; terminal: only inside a terminal program for now), what a repeat does, its inputs (name, kind, required, choices, default) and its risk. Nothing runs. |
+| `capabilities.run` | invoke only | authenticated | `write:control-plane` | write | not safe | Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own gate admitted it runs, and any other caller's call is decided under the owner's permission mode (an act that loosens a protection or cannot be undone is put to the owner and opens on No). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent). The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does. |
+
 ### channels
 
 | Method | HTTP route | Access | Scopes | Effect | Retry | What it does |
@@ -23667,7 +23907,7 @@ A method with no HTTP route is called with `POST /api/control-plane/methods/{met
 
 | Method | HTTP route | Access | Scopes | Effect | Retry | What it does |
 | --- | --- | --- | --- | --- | --- | --- |
-| `cloudflare.credentials.verify` | `POST /api/cloudflare/validate` | admin | `read:cloudflare` | read | safe to repeat | Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400) and a token Cloudflare rejects fails the call with Cloudflare's error. Changes nothing. |
+| `cloudflare.credentials.verify` | `POST /api/cloudflare/validate` | admin | `read:cloudflare` | read | safe to repeat | Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400), a stored one this computer's secret store could not read with CLOUDFLARE_CREDENTIALS_UNREADABLE (412, the cause named, nothing asked for again), and a token Cloudflare rejects fails the call with Cloudflare's error. Changes nothing. |
 | `cloudflare.disable` | `POST /api/cloudflare/disable` | admin | `write:cloudflare` | write (dangerous) | safe to repeat | Switch the Cloudflare integration off. Always disables it locally (`cloudflare.enabled` false and the batch queue back to `local`; `persistConfig` defaults to true) and stops this daemon's tunnel connector, so the daemon stops using the worker. When an API token and account are available it also removes the worker's daemon credential (the script secret and its Secrets Store copy), its cron trigger (`disableCron`, default true) and its workers.dev route (`disableWorkerSubdomain`, default true; pass false to keep the route). `remote` is `disabled` only when every Cloudflare step succeeded; otherwise it is `not-disabled`, the deployed worker may keep calling the daemon until it is disabled in the Cloudflare dashboard, and `steps` says which. The worker and the account's other resources stay in place; each one still deployed is listed as a `still-deployed` step. With `bootstrapToken` (a token allowed to edit API tokens) it also revokes the operational token this daemon created; without it a `revoke-operational-token` step says that token is still live. |
 | `cloudflare.provision` | `POST /api/cloudflare/provision` | admin | `write:cloudflare` | write (dangerous) | safe to repeat | Create or update the selected Cloudflare resources (worker, queues and dead-letter queue, tunnel and its connector on this daemon, Access application and service token, DNS records, KV for queued-job state, Durable Objects for the daily queue budget, R2 for job bodies, Secrets Store for the worker's credentials), answered 202 with one step per resource: `ok`, `skipped` or `warning`; `warnings` repeats the message of every warning step. Generated secrets are stored as `goodvibes://` secrets when asked and returned only when `returnGeneratedSecrets` is true. With Workers selected and a worker URL known it then runs the `cloudflare.worker.verify` check unless `verify` is false. `ok` is true, and `cloudflare.enabled` and the Cloudflare batch queue are switched on, only when that check passed (or was turned off) and Access, when asked for, protects the daemon hostname; otherwise a `switch-on` warning step says why nothing was switched. Creates and changes billable resources in the Cloudflare account. |
 | `cloudflare.resources.list` | `POST /api/cloudflare/discover` | admin | `read:cloudflare` | read | safe to repeat | List what the account already has for the selected components: accounts, zones, the workers.dev subdomain and, with `includeResources`, existing queues, KV namespaces, Durable Object namespaces, R2 buckets, Secrets Stores, tunnels and Access applications. Read-only against Cloudflare; sent as a POST so credentials and the component selection travel in the body. |
@@ -24186,7 +24426,7 @@ A method with no HTTP route is called with `POST /api/control-plane/methods/{met
 
 | Method | HTTP route | Access | Scopes | Effect | Retry | What it does |
 | --- | --- | --- | --- | --- | --- | --- |
-| `secureAddress.get` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | What the Secure address screen shows: the four ways to give the daemon an https address for phones (Let's Encrypt for a domain you own, a certificate you made, Tailscale, GoodVibes' own certificate), each with what it does, what it needs from the person, what the phone gains and what is sent where; which one is in force and what the https listener serves now (address, names, end date, or why it does not serve); Let's Encrypt's last attempt, the address records written and this machine's own lookup of the name (a router that refuses local answers is named, with what to change); the own files' check; the local authority's fingerprint and the page a phone installs it from; the Tailscale address while one is served; and the group: on a lead, the machines that follow it and the line that every machine serves with the same certificate; on a node, the line that its secure address comes from the lead and what it received. No key or token is ever returned. |
+| `secureAddress.get` | invoke only | authenticated | `read:remote` | read | safe to repeat | What the Secure address screen shows: the four ways to give the daemon an https address for phones (Let's Encrypt for a domain you own, a certificate you made, Tailscale, GoodVibes' own certificate), each with what it does, what it needs from the person, what the phone gains and what is sent where; which one is in force and what the https listener serves now (address, names, end date, or why it does not serve); Let's Encrypt's last attempt, the address records written and this machine's own lookup of the name (a router that refuses local answers is named, with what to change); the own files' check; the local authority's fingerprint and the page a phone installs it from; the Tailscale address while one is served; and the group: on a lead, the machines that follow it and the line that every machine serves with the same certificate; on a node, the line that its secure address comes from the lead and what it received. On a lead the ways say what differs there (GoodVibes' own certificate covers the group's machines; a certificate you made and GoodVibes' own are sent, sealed, with their key to the group's machines). `letsEncrypt.tokenUnreadable` says, with the cause, that the secret store on this computer could not be read when no token was read (the token is then not asked for again). `notice` is a notice no owner channel carried (a node's own certificate authority set aside while it follows its lead), shown at the top of the screen; returning it here marks it given. No key or token is ever returned. Needs read:remote, an owner-private read scope: a user without the admin role is not granted it. |
 | `secureAddress.reissue` | invoke only | admin | `write:control-plane` | write | not safe | The Secure address screen's "Issue a new certificate now", on the machine that set the secure address up (a group's lead, or a machine of its own): a new certificate with a new key at once, served by the https listener and sent, sealed, to the machines that follow it. With Let's Encrypt a new order is placed (an order already running finishes first); Let's Encrypt allows only five certificates for the same names a week, so a repeat spends one more of them. With GoodVibes' own certificate a new server certificate is made under the same authority, so phones that installed it need nothing. No input. The answer is ok, one line of words (issued with its end date, or the authority's refusal in plain words) and the screen as secureAddress.get returns it; never a key or a token. Refused 409 SECURE_ADDRESS_NODE on a node (its certificate comes from the lead), and 409 SECURE_ADDRESS_UNAVAILABLE with words when https is off or the certificate is one the person made (they renew it themselves); nothing changes then. A certificate is also issued again by itself when it is due and when a machine that held it leaves or is removed from the group. |
 | `secureAddress.set` | invoke only | admin | `write:control-plane`, `write:config` | write (dangerous) | safe to repeat | The Secure address screen's change. certificate lets-encrypt (domain, and cloudflareToken when none is stored: a token with Zone, DNS, Edit on the zone that holds the name, stored in the secret store only once Cloudflare accepted it; never returned), own-files (certFile and keyFile, paths on the daemon's machine, checked first: the key must belong to the certificate and it must be in force), local-authority (GoodVibes' own certificate), or off (the https listener stops; plain http is unchanged). Refused 400 SECURE_ADDRESS_INVALID with words and nothing written when the input cannot work; refused 409 SECURE_ADDRESS_NODE on a node of a group, whose secure address comes from its lead. Otherwise the web UI is served to the network when it is not yet (what goodvibes-daemon webui enable --lan writes), secureAddress.* and controlPlane.lanHttps.enabled are written, and the answer (the same as secureAddress.get) comes once the https listener has synced and, for Let's Encrypt, once the order has an outcome: issued, or the authority's refusal in plain words. |
 | `tailscale.get` | invoke only | authenticated | `read:control-plane` | read | safe to repeat | READ-ONLY detection of a usable tailscale environment: binary present, logged-in status, MagicDNS name, and the https URL `tailscale serve` would yield. Never invokes a state-changing tailscale command. Where tailscale is absent the result says so once, surfaces offer the auto-wire affordance only when this reports a usable environment; nothing nags. Includes the most recent serve or stop receipt (lastServe), and activeServe: the serve this daemon started and has not stopped, which tailscale keeps on until tailscale.serve.stop runs. |
@@ -24459,8 +24699,8 @@ A token or user carries scopes; a method or event stream needs every scope it li
 | config | `read:config` | yes | 5 | 0 | authority, config, flags |
 | config | `write:config` | no | 13 | 0 | config, health, providers, remote-access, runtime |
 | continuity | `read:continuity` | yes | 1 | 0 | continuity |
-| control-plane | `read:control-plane` | yes | 14 | 0 | control-plane, pairing, remote, remote-access |
-| control-plane | `write:control-plane` | no | 15 | 0 | control-plane, pairing, remote-access |
+| control-plane | `read:control-plane` | yes | 14 | 0 | capabilities, control-plane, pairing, remote, remote-access |
+| control-plane | `write:control-plane` | no | 16 | 0 | capabilities, control-plane, pairing, remote-access |
 | deliveries | `read:deliveries` | yes | 1 | 0 | deliveries |
 | deliveries | `write:deliveries` | no | 1 | 0 | deliveries |
 | email | `read:email` | no | 7 | 0 | email |
@@ -24500,7 +24740,7 @@ A token or user carries scopes; a method or event stream needs every scope it li
 | push | `write:push` | no | 4 | 0 | push |
 | relay | `read:relay` | yes | 2 | 0 | relay |
 | relay | `write:relay` | no | 3 | 0 | pairing, relay |
-| remote | `read:remote` | no | 8 | 1 | remote, runtime |
+| remote | `read:remote` | no | 9 | 1 | remote, remote-access, runtime |
 | remote | `write:remote` | no | 13 | 0 | remote, runtime |
 | routes | `read:routes` | yes | 2 | 0 | routes |
 | routes | `write:routes` | no | 3 | 0 | routes |
@@ -24603,6 +24843,7 @@ Domain `automation` (access: authenticated):
 - `AUTOMATION_JOB_CREATED` { jobId: string, name: string, scheduleKind: "at"|"cron"|"every", enabled: boolean }: A scheduled job was created. `name` is its display name, `scheduleKind` how it repeats (`at` once, `every` an interval, `cron` an expression), and `enabled` whether it will run.
 - `AUTOMATION_JOB_DISABLED` { jobId: string, reason: string }: A scheduled job was turned off; `reason` is why it was paused (`disabled` when none was given).
 - `AUTOMATION_JOB_ENABLED` { jobId: string }: A scheduled job was turned on and will run at its next due time.
+- `AUTOMATION_JOB_REMOVED` { jobId: string, reason: string }: A scheduled job was removed, by its owner, an agent, a script, or a one-shot job finishing; `reason` says which (`job-removed` for a removal asked for). It no longer runs or lists anywhere.
 - `AUTOMATION_JOB_UPDATED` { jobId: string, changedFields: string[] }: A scheduled job's definition changed; `changedFields` names the fields that differ. A change of `enabled` is also announced by AUTOMATION_JOB_ENABLED or AUTOMATION_JOB_DISABLED.
 - `AUTOMATION_RUN_COMPLETED` { jobId: string, runId: string, startedAt: number, completedAt: number, durationMs: number, outcome: "cancelled"|"failed"|"partial"|"success", error?: string, retryable?: boolean }: The one terminal event: every run that ends announces it once, whatever the outcome. A subscriber that needs "the run is over" listens for this type only.
 - `AUTOMATION_RUN_FAILED` { jobId: string, runId: string, startedAt: number, failedAt: number, error: string, retryable: boolean }: Detail of a failed run (its retry reading); the run's end is announced by AUTOMATION_RUN_COMPLETED.
@@ -24974,6 +25215,7 @@ Codes the shared request layer and the daemon's routes put in `code` beyond thos
 | `BROWSER_REQUEST_REFUSED` | 400, 403 | `authorization`, `bad_request` | The browser request no longer owns its authorization. | no: change the request |
 | `CALENDAR_AUTH_FAILED` | 424 | none | Microsoft Outlook: <message> <RECONNECT>. | no: change the request |
 | `CALENDAR_BAD_RANGE` | 400 | `bad_request` | Invalid date range value: <iso>. | no: change the request |
+| `CALENDAR_CREDENTIALS_UNREADABLE` | 412 | `bad_request` | <unreadable> Nothing is read from CalDAV until the store can be read. | after the state changes |
 | `CALENDAR_EMPTY_ICS` | 400 | `bad_request` | No VEVENT components found in .ics content. | no: change the request |
 | `CALENDAR_EVENT_CHANGED` | 409 | `bad_request` | Event <eventId> changed on the calendar after it was read, so nothing was written. Read it again and repeat the change. | after the state changes |
 | `CALENDAR_EVENT_UNREADABLE` | 422 | `bad_request` | Event <eventId> could not be read: <message>. | no: change the request |
@@ -25013,6 +25255,7 @@ Codes the shared request layer and the daemon's routes put in `code` beyond thos
 | `DRAFT_STALE` | 409 | `bad_request` | Draft was changed on another surface at <updatedAt>; this save is from <updatedAt> and was not applied. Reload the draft and apply the edit again. | after the state changes |
 | `DRAFT_SURFACE_CLOSED` | 409 | `bad_request` | The draft service is shutting down; nothing was changed. Retry once the daemon is back. | after the state changes |
 | `EMAIL_CREDENTIALS_REJECTED` | 424 | none | <message> The mail server refused the stored password, so nothing was sent. Store a current one and send again. | no: change the request |
+| `EMAIL_CREDENTIALS_UNREADABLE` | 412 | `bad_request` | The secret store on this computer could not be read, so the mail password could not be read; nothing is read from or sent through the mailbox until it can be, and nothing already given is asked for again. | after the state changes |
 | `EMAIL_DELIVERY_UNCONFIRMED` | 409 | `bad_request` | The mail server did not confirm it took the message, so it may have been sent; the same clientSendId answers this again instead of mailing twice. | after the state changes |
 | `EMAIL_MAILBOX_UNAVAILABLE` | 409 | `bad_request` | The mail server reported the mailbox unavailable; nothing was sent. | after the state changes |
 | `EMAIL_NOT_CONFIGURED` | 400 | `bad_request` | Email is not configured: set surfaces.email.host (surfaces.email.imap.host for the inbox), surfaces.email.user and the email password secret. | no: change the request |
@@ -25166,6 +25409,11 @@ Codes the shared request layer and the daemon's routes put in `code` beyond thos
 | `APPROVAL_NOT_FOUND` | 404 | `not_found` | No approval has that id; nothing was answered. | no: change the request | `approvals.approve`, `approvals.cancel`, `approvals.claim`, `approvals.deny` |
 | `AUTHORITY_RECORD_UNAVAILABLE` | 503 | `service` | The authority record could not be read, so no relay code was issued and nothing was paired; check the record file, then pair again. | yes, after a wait | `relay.pairing.mint` |
 | `CANCEL_NOT_ALLOWED` | 409 | `bad_request` | Only a queued input can be cancelled; the body says whether it is running or ended. | after the state changes | `sessions.inputs.cancel` |
+| `CAPABILITY_ELSEWHERE` | 409 | `bad_request` | The capability acts on a conversation (it runs in the program holding it), or it has not moved to the daemon yet and runs only in a terminal program; the message says where, and nothing ran. | after the state changes | `capabilities.run` |
+| `CAPABILITY_INPUT_INVALID` | 400 | `bad_request` | An input is unknown, missing or not one of its choices; the message names it and nothing ran. | no: change the request | `capabilities.run` |
+| `CAPABILITY_NOT_APPROVED` | 403 | `authorization` | Asked of the owner under his mode and not approved (or nobody could be asked); nothing ran. | no: change the request | `capabilities.run` |
+| `CAPABILITY_NOT_FOUND` | 404 | `not_found` | No capability has this id; capabilities.find names the ones that do what is needed. | no: change the request | `capabilities.run` |
+| `CAPABILITY_REFUSED` | 422 | `bad_request` | The capability ran and did not do what was asked (no hook by that name, nothing to store); the message says what is true and what to do. | no: change the request | `capabilities.run` |
 | `CAPACITY_EXCEEDED` | 429 | `rate_limit` | The fleet is at fleet.maxSize; nothing was started. Retry after Retry-After seconds. | yes, after a wait | `tasks.create`, `tasks.retry` |
 | `CONTRACT_ENDED` | 409 | `bad_request` | The contract has ended; its budget can no longer change. | after the state changes | `contracts.budget`, `contracts.reply`, `contracts.retryUnit` |
 | `CONTRACT_HELD` | 409 | `bad_request` | The contract is held because no run claim could be taken; another process may run it, so it is not cancelled here. Fix the contract directory and restart, then cancel. | after the state changes | `contracts.cancel` |

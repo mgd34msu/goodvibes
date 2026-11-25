@@ -317,17 +317,25 @@ export class CalendarTokenStore {
     return out;
   }
 
+  /**
+   * The words for a secret store this computer could not read, when that is why
+   * a connection reads as absent (it is then unknown, never "not connected"), or null.
+   */
+  async storeUnreadable(): Promise<string | null> {
+    return (await this.secrets.unreadable?.(tokenKey('microsoft'))) ?? null;
+  }
+
   /** The honest connection state, from the marker + stored set + clock. */
   async connectionState(provider: CalendarProviderId): Promise<ConnectionState> {
     if (provider === 'google') {
       // The refresh token is the connection; the access token is this process's copy.
       const refreshToken = await readGoogleGrant((key) => this.secrets.get(key));
-      if (refreshToken === null) return 'disconnected';
+      if (refreshToken === null) return (await this.storeUnreadable()) ? 'unreadable' : 'disconnected';
       return refusedGoogleGrants.has(refreshToken) ? 'reconnect-needed' : 'connected';
     }
     if (await this.secrets.get(statusKey(provider))) return 'reconnect-needed';
     const tokens = await this.load(provider);
-    if (!tokens) return 'disconnected';
+    if (!tokens) return (await this.storeUnreadable()) ? 'unreadable' : 'disconnected';
     if (typeof tokens.expiresAt !== 'number') return 'connected';
     if (this.clock() < tokens.expiresAt - this.leewayMs) return 'connected';
     return tokens.refreshToken ? 'refresh-due' : 'reconnect-needed';
@@ -344,6 +352,9 @@ export class CalendarTokenStore {
     fetchImpl: HttpFetch,
   ): Promise<string> {
     const tokens = await this.load(provider);
+    // A store this computer could not read is said as such, never as "not connected".
+    const unreadable = tokens ? null : await this.storeUnreadable();
+    if (unreadable) throw new TokenRefreshError(provider, unreadable);
     if (!tokens) throw new TokenRefreshError(provider, `No ${provider} account is connected.`);
     if (provider === 'google' && tokens.refreshToken && refusedGoogleGrants.has(tokens.refreshToken)) {
       throw new TokenRefreshError(provider, 'Google refused this connection earlier. Connect Google again with /calendar connect google.');

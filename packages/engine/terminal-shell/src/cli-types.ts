@@ -9,6 +9,8 @@ export type GoodVibesCliCommand =
   | 'tui'
   | 'open'
   | 'run'
+  | 'do'
+  | 'find'
   | 'serve'
   | 'web'
   | 'service'

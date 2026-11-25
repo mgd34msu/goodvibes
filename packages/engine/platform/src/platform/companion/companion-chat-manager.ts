@@ -89,6 +89,7 @@ import type { CompanionChatRateLimiterOptions } from './companion-chat-rate-limi
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import { toolCallActivity } from '@goodvibes/engine/contracts';
+import { projectToolInputBatch } from '../core/tool-input-ingress.js';
 import { runTurn, type TurnModelResponse, type TurnRequest } from '../core/turn-loop.js';
 import { readTurnFailure, turnFailureText, type TurnChanges } from '../core/turn-failure.js';
 import { TurnAttemptRecord, TurnChangeRecord } from '../core/turn-changes.js';
@@ -1608,9 +1609,10 @@ export class CompanionChatManager {
               const toolCallId = chunk.toolCallId ?? '';
               const toolName = chunk.toolName ?? '';
               const toolInput = (chunk.toolInput ?? {}) as Record<string, unknown>;
-              const activity = toolCallActivity(toolRegistry?.definitionOf(toolName)?.activity, toolInput);
-              publish({ type: 'turn.tool_call', sessionId, turnId, toolCallId, toolName, toolInput, ...(activity ? { activity } : {}) });
+              // Shown (turn.tool_call) once the round's calls are projected below: a projected call is what every
+              // client, the history and the gate see (a secret input hidden), never the model's raw arguments.
               if (toolCallId && toolName) toolCalls.push({ id: toolCallId, name: toolName, arguments: toolInput });
+              else publish({ type: 'turn.tool_call', sessionId, turnId, toolCallId, toolName, toolInput });
               break;
             }
             case 'tool_result': {
@@ -1640,10 +1642,20 @@ export class CompanionChatManager {
               break;
           }
         }
-        return { content, toolCalls };
+        if (toolCalls.length === 0 || !toolRegistry) return { content, toolCalls };
+        // The registry projects each call before anything keeps or shows it, as a terminal turn does
+        // (core/tool-input-ingress.ts); execution reuses these projections, and they are released after it.
+        const batch = await projectToolInputBatch(toolRegistry, toolCalls, { signal });
+        projectedBatches.push(batch);
+        for (const call of batch.calls) {
+          const activity = toolCallActivity(toolRegistry.definitionOf(call.name)?.activity, call.arguments);
+          publish({ type: 'turn.tool_call', sessionId, turnId, toolCallId: call.id, toolName: call.name, toolInput: call.arguments, ...(activity ? { activity } : {}) });
+        }
+        return { content, toolCalls: [...batch.calls] };
       };
+      const projectedBatches: Array<{ release(): Promise<void> }> = [];
 
-      await runTurn({
+      try { await runTurn({
         signal: abortSignal,
         request: async (turnRequest) => {
           turnAttempts.sent(`${route.provider ?? ''}:${route.model ?? ''}`, Date.now());
@@ -1703,7 +1715,10 @@ export class CompanionChatManager {
             }
           },
         },
-      });
+      }); } finally {
+        // Every projection this turn made, run or not, is released once the turn is over.
+        await Promise.allSettled(projectedBatches.splice(0).map((batch) => batch.release()));
+      }
 
       // A detected abort (user cancel, session close, or shutdown) where the
       // provider ended its stream gracefully instead of throwing: finalize as

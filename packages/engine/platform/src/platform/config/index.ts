@@ -144,6 +144,10 @@ export {
   resolveGoodVibesTreeDirectory,
 } from './goodvibes-home.js';
 export type { GoodVibesHomeOwnership } from './goodvibes-home.js';
+export {
+  carryProgramSecretsToDaemon, describeSecretsCarryForward, secretsCarryForwardRecordPath, SECRET_CARRY_PROGRAMS,
+  type SecretsCarryForward, type SecretsCarryForwardOptions,
+} from './secrets-carry-forward.js';
 
 import { readFileSync } from 'fs';
 import { ConfigManager } from './manager.js';
@@ -370,6 +374,8 @@ export type {
   SecretsManagerOptions,
   WriteScopeEntries,
 } from './secrets.js';
+// A secret that reads as absent from a store this process cannot read is said as such, never as "not stored".
+export { SECRET_STORE_UNREADABLE, secretStoreUnreadableSentence, unreadableSecretStore, type StoredSecretReader } from './secret-store-unreadable.js';
 // The one way a product builds its credential store (the daemon home is required).
 export { createRuntimeSecretsManager } from '../runtime/secrets-composition.js';
 export type { DaemonSecretsCompositionInput } from '../runtime/secrets-composition.js';

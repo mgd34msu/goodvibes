@@ -24,6 +24,7 @@ import {
 } from './live-model-discovery.js';
 import type { ProviderCapability } from './capabilities.js';
 import { ProviderError } from '../types/errors.js';
+import { processSecretStoreUnreadable } from '../config/secret-store-unreadable.js';
 import { withRetry } from '../utils/retry.js';
 import { trackDeliveredOutput } from './stream-delivery.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
@@ -411,6 +412,11 @@ export class OpenAICompatProvider implements LLMProvider {
   async chat(params: ChatRequest): Promise<ChatResponse> {
     const { model, signal, onRetry } = params;
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
+    // A key that is absent because the secret store could not be read is said as such, never "no API key configured".
+    if (!this.isConfigured()) {
+      const unreadable = await processSecretStoreUnreadable(this.authEnvVars[0] ?? 'GOODVIBES_STORE_READABLE_CHECK', `the "${this.name}" API key`);
+      if (unreadable) throw new ProviderError(`${unreadable} The request for model "${model ?? this.defaultModel}" was not sent.`);
+    }
     this.assertConfiguredForChat(model);
 
     return (await instrumentedLlmCall(() => withRetry(async () => {

@@ -33,6 +33,7 @@ import { registerMarketplaceRuntimeCommands } from './commands/marketplace-runti
 import { registerGuidanceRuntimeCommands } from './commands/guidance-runtime.ts';
 import { registerRemoteRuntimeCommands } from './commands/remote-runtime.ts';
 import { registerHooksCommand } from '@goodvibes/engine/terminal-shell/hooks-command';
+import { capabilityBinding } from './commands/capability-binding.ts';
 import { registerEditorRuntimeCommands } from './commands/editor-runtime.ts';
 import { registerControlRoomRuntimeCommands } from './commands/control-room-runtime.ts';
 import { registerMcpRuntimeCommands } from './commands/mcp-runtime.ts';
@@ -124,7 +125,7 @@ export const BUILTIN_COMMAND_GROUPS: readonly BuiltinCommandGroup[] = [
   { category: TASK.tools, register: registerMarketplaceRuntimeCommands },
   { category: TASK.help, register: registerGuidanceRuntimeCommands },
   { category: TASK.channels, register: registerRemoteRuntimeCommands },
-  { category: TASK.tools, register: (registry) => registerHooksCommand<CommandContext>(registry) },
+  { category: TASK.tools, register: (registry) => registerHooksCommand<CommandContext>(registry, capabilityBinding) },
   { category: TASK.code, register: registerEditorRuntimeCommands },
   { category: TASK.agents, register: registerControlRoomRuntimeCommands },
   { category: TASK.tools, register: registerMcpRuntimeCommands },

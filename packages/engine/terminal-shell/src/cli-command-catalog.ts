@@ -249,6 +249,7 @@ const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptio
     { tokens: ['--stdin'], takesValue: false },
   ],
   pair: [{ tokens: ['--name'], takesValue: true }],
+  do: [{ tokens: ['--input', '-i'], takesValue: true }],
   'support-bundle': [{ tokens: ['--include-security'], takesValue: false }],
   plugin: [
     { tokens: ['--ref'], takesValue: true },
@@ -264,6 +265,9 @@ const COMMANDS: readonly CommandSpec<GoodVibesCliCommand, GoodVibesCliFlagField>
   ['tui', ['app'], []],
   ['open', [], []],
   ['run', ['exec', 'e'], []],
+  // A capability by id, and the capabilities that serve a need (capability-cli.ts).
+  ['do', [], []],
+  ['find', [], []],
   ['serve', ['daemon', 'server'], []],
   ['web', [], []],
   ['service', ['services'], ['status', 'check', 'install', 'start', 'stop', 'restart', 'uninstall']],

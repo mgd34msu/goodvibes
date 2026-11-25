@@ -73,6 +73,12 @@ export type InboundCapabilityReason =
    * they never stored sends them looking for the wrong thing.
    */
   | 'credentials-missing'
+  /**
+   * insufficient: the secret store on this computer could not be read, so the
+   * credential, which may well be stored, could not be read. Never "missing":
+   * nothing is asked for again; the store is what needs repair.
+   */
+  | 'store-unreadable'
   /** insufficient: the credential was refused. */
   | 'credentials-rejected'
   /** insufficient: signed in, and the mailbox would not open for reading. */

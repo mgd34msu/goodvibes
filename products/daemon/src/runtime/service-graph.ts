@@ -12,6 +12,8 @@ import { ApprovalRelay, GatewayMethodCatalog, createOwnerInbox, ownerInboxStoreP
 import { resolvePairingWebOrigin } from '@goodvibes/engine/platform/platform/pairing';
 import { describeModeInForceWords, hostApprovalPresentation, hostItemPresenter } from '@goodvibes/engine/platform/platform/permissions';
 import { daemonReceiptStoreAt, daemonReceiptsPath } from '@goodvibes/engine/platform/platform/daemon/receipts';
+import { carryProgramSecretsToDaemon, describeSecretsCarryForward, resolveGoodVibesDaemonHome } from '@goodvibes/engine/platform/platform/config';
+import { logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
 import { MailboxReaders } from '@goodvibes/engine/platform/platform/email';
 import { attachWsOnlyGatewayVerbHandlers } from '@goodvibes/engine/terminal-shell';
 import { createRuntimeAcquisitionScope } from './acquisition.js';
@@ -19,6 +21,7 @@ import { composeMailDeps } from './mail-composition.js';
 import { composeBrowserJudgment } from './browser-judgment-composition.js';
 import { createNativeWorkLedgerOwner } from './work-ledger-composition.js';
 import { CONVERSATIONAL_CONTAINMENT } from '@goodvibes/engine/platform/platform/hosted-sessions';
+import { createDaemonCapabilityServices, daemonCapabilityCatalog, loadedDaemonCapabilityCatalog } from '@goodvibes/engine/platform/platform/capabilities';
 import { wireMemoryPressureChannelNotice } from './notification-dispatch.js';
 import { createWorkspaceCheckpointing, daemonWorkspaceCheckpoints, type WorkspaceCheckpointing } from './workspace-checkpointing.js';
 import { createSessionConversationRewindPort, hostedRewindStorage } from './conversation-rewind-port.js';
@@ -168,6 +171,14 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
     disposalScope.registry.add('gate events into the runtime store', registerGateRuntimeEvents(options.runtimeBus, graph.runtimeDispatch));
     // A decision log that had to start empty after damage reaches the next terminal or web UI that attaches.
     if (judgment.decisionLogNotice) daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(judgment.decisionLogNotice);
+    // Each terminal program's own secrets, copied once into this daemon's store, which every program reads first
+    // (secrets-carry-forward.ts); the programs' files are left as they are. Off the start path: two small reads.
+    void carryProgramSecretsToDaemon({ globalHome: homeDirectory, daemonHome: resolveGoodVibesDaemonHome(homeDirectory) }).then((carried) => {
+      const line = carried ? describeSecretsCarryForward(carried) : undefined;
+      if (line) daemonReceiptStoreAt(daemonReceiptsPath(configManager)).record(line, { audience: 'owner' });
+    }).catch((error: unknown) => {
+      logger.warn('[daemon] the programs\' secrets could not be carried into the daemon\'s store; they are read where they are', { error: summarizeError(error) });
+    });
     const browserJudgment = options.createBrowserJudgment ? options.createBrowserJudgment(judgment)
       : composeBrowserJudgment({ judgment, providers: () => providerRegistry, config: configManager, secrets: secretsManager, methods: gatewayMethods, env: process.env, disposal: disposalScope.registry });
     let browserClosing: Promise<void> | undefined;
@@ -381,6 +392,14 @@ export async function createRuntimeBaseServices(options: RuntimeServicesOptions)
       // unless a composed workstream is explicitly granted the host (see
       // native-work-execution-activation.ts).
       execContainment: CONVERSATIONAL_CONTAINMENT,
+      // GoodVibes' own capabilities for the daemon's own turns (web chat, scheduled runs, handed-off work), run here.
+      capabilityTools: {
+        catalog: daemonCapabilityCatalog,
+        loaded: loadedDaemonCapabilityCatalog,
+        services: createDaemonCapabilityServices({ configManager, hookDispatcher, hookWorkbench: graph.hookWorkbench, secretsManager, memoryRegistry: graph.memoryRegistry }),
+        methods: gatewayMethods,
+        workingDirectory: () => configManager.getWorkingDirectory() ?? workingDirectory,
+      },
       // The mail and calendar tool, offered only to a run that names it (a scheduled run or trigger turn).
       decorateRegistry: (registry: Parameters<typeof unattendedRunTools.decorateRegistry>[0]) => {
         graph.agentToolDependencies.decorateRegistry?.(registry);

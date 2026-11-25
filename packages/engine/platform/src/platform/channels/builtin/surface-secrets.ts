@@ -18,6 +18,7 @@ import type { ServiceSecretField } from '../../config/service-registry.js';
 import type { ChannelSecretSource, ChannelSecretTargetDescriptor, ChannelSurface } from '../types.js';
 import { getBuiltinSetupSchema } from './setup-schema.js';
 import { channelCredentials } from '../credential-holder.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../../config/secret-store-unreadable.js';
 
 export interface SurfaceSecretReadDeps {
   readonly configManager: { get(key: string): unknown };
@@ -27,7 +28,7 @@ export interface SurfaceSecretReadDeps {
     /** The registry entry, when the registry can show it: a held credential is keyed by it. */
     get?(serviceName: string): unknown;
   };
-  readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | undefined;
+  readonly secretsManager?: (Pick<SecretsManager, 'get' | 'getGlobalHome'> & StoredSecretReader) | undefined;
 }
 
 export interface SurfaceSecretWriteDeps {
@@ -112,13 +113,28 @@ export async function readSurfaceSecret(
       configKey: key,
     }, 'dispatch'), secrets);
     if (resolved && resolved.trim()) return { value: resolved.trim(), declared: true, source: 'config', configKey: key };
+    // A store this computer could not read: the credential is unknown, not missing.
+    if (await storeUnreadable(deps, target)) return { value: null, declared: true, source: 'unreadable', configKey: key };
     return { value: null, declared: true, source: 'unresolved', configKey: key };
   }
   for (const name of target.envKeys ?? []) {
     const value = process.env[name];
     if (value && value.trim()) return { value: value.trim(), declared: true, source: 'env', ...configKeyOf(target) };
   }
+  // Only a credential the service registry keeps in the store can hide there with no setting naming it.
+  if (registry && target.serviceName && await storeUnreadable(deps, target)) return { value: null, declared: true, source: 'unreadable', ...configKeyOf(target) };
   return { value: null, declared: false, source: 'missing', ...configKeyOf(target) };
+}
+
+/** The words for a secret store this computer could not read while reading `target`, or null. */
+export async function surfaceSecretStoreUnreadable(deps: SurfaceSecretReadDeps, label: string): Promise<string | null> {
+  return unreadableSecretStore(deps.secretsManager as StoredSecretReader | undefined, STORE_CHECK_KEY, label);
+}
+
+const STORE_CHECK_KEY = 'GOODVIBES_STORE_READABLE_CHECK';
+
+async function storeUnreadable(deps: SurfaceSecretReadDeps, target: ChannelSecretTargetDescriptor): Promise<boolean> {
+  return (await surfaceSecretStoreUnreadable(deps, target.label)) !== null;
 }
 
 function configKeyOf(target: ChannelSecretTargetDescriptor): { readonly configKey?: string } {

@@ -33,6 +33,7 @@ import {
   type OwnerItem,
 } from '@goodvibes/engine/platform/platform/control-plane';
 import { presentInboxAsk, type AskFacts, type AskPresentation } from '@goodvibes/engine/platform/platform/permissions';
+import { InputTokenizer, type InputToken } from '@goodvibes/engine/platform/platform/core';
 import { homeOwnerInbox } from '@goodvibes/engine/platform/platform/runtime/client';
 import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/terminal-width';
 import { createEmptyCell } from '@goodvibes/engine/platform/platform/types/grid';
@@ -56,6 +57,18 @@ export interface QuestionCardDeps {
   readonly render: () => void;
   /** An answer that was not taken (answered elsewhere first, or the store refused it). */
   readonly notify: (message: string) => void;
+  /**
+   * The key table: the card's arrows, Enter and Esc are its move-up, move-down,
+   * choose and back (a key bound to one of them is that key here; a navigation
+   * key given to another action is not the card's). Without it, the keys as pressed.
+   */
+  readonly keys?: { translateNavigation(token: InputToken & { type: 'key' }): { readonly kind: 'pass' } | { readonly kind: 'drop' } | { readonly kind: 'rewrite'; readonly token: InputToken & { type: 'key' } } } | undefined;
+}
+
+/** One chunk as the card reads it: a navigation key through the table, or typed text. */
+interface CardKey {
+  readonly key?: string | undefined;
+  readonly text?: string | undefined;
 }
 
 interface CardState {
@@ -71,8 +84,7 @@ interface CardState {
 /** How long the answered line stays: long enough to be read, then it goes. */
 const ANSWERED_MS = 1500;
 
-const KEY_UP = '\x1b[A';
-const KEY_DOWN = '\x1b[B';
+const ESCAPE_TOKEN: InputToken & { type: 'key' } = { type: 'key', name: 'escape', logicalName: 'escape', ctrl: false, shift: false, meta: false };
 
 /** Whether the item is a question this chat's agent or session asked. */
 function askedHere(item: OwnerItem, sessionId: string | undefined): boolean {
@@ -176,9 +188,24 @@ export class OwnerQuestionCard {
    * only its own keys: arrows, digits, Enter, Esc, and typing while the
    * one-line answer is open. Every other key goes to the composer.
    */
+  /** A chunk read through the key table: one navigation key (as the table makes it), or text. */
+  #read(data: string): CardKey {
+    // A lone Esc is the whole key (the tokenizer would wait for what follows it).
+    const tokens = data === '\x1b' ? [ESCAPE_TOKEN] : new InputTokenizer().feed(data);
+    if (tokens.length !== 1) return {};
+    const first = tokens[0]!;
+    if (first.type === 'text') return { text: first.value };
+    if (first.type !== 'key') return {};
+    const read = this.#deps.keys?.translateNavigation(first);
+    if (read?.kind === 'drop') return {};
+    const token = read?.kind === 'rewrite' ? read.token : first;
+    return token.ctrl || token.meta ? {} : { key: token.logicalName };
+  }
+
   handleInput(data: string): boolean {
     const shown = this.#state;
     if (!shown || !this.#drawn) return false;
+    const pressed = this.#read(data);
     // It opened by itself: a key typed as it appeared, or in the same burst, is the composer's (the caller
     // asks only while the composer is empty; with a draft every key is the composer's already).
     const routed = shown.typeahead.addressed ? undefined : routeCardInput(data, shown.typeahead, Date.now());
@@ -188,22 +215,22 @@ export class OwnerQuestionCard {
     const choices = state.presentation.choices;
     const set = (next: CardState): boolean => { this.#state = next; this.#deps.render(); return true; };
     if (state.typing !== undefined) {
-      if (data === '\r' || data === '\n') {
+      if (pressed.key === 'enter') {
         const text = state.typing.trim();
         if (text === '') return set({ ...state, typing: undefined });
         this.#send({ text }, text);
         this.#deps.render();
         return true;
       }
-      if (data === '\x1b') return set({ ...state, typing: undefined });
+      if (pressed.key === 'escape') return set({ ...state, typing: undefined });
       if (data === '\x7f' || data === '\b') return set({ ...state, typing: [...state.typing].slice(0, -1).join('') });
       if (!data.startsWith('\x1b') && /^[^\x00-\x1f\x7f]+$/.test(data)) return set({ ...state, typing: state.typing + data });
       return true;
     }
-    if (data === KEY_UP || data === KEY_DOWN) {
-      return set({ ...state, index: (state.index + (data === KEY_UP ? -1 : 1) + choices.length) % choices.length });
+    if (pressed.key === 'up' || pressed.key === 'down') {
+      return set({ ...state, index: (state.index + (pressed.key === 'up' ? -1 : 1) + choices.length) % choices.length });
     }
-    if (data === '\x1b') {
+    if (pressed.key === 'escape') {
       // Answer later: it stays in the inbox.
       this.#later.add(state.item.id);
       this.#state = null;
@@ -219,7 +246,7 @@ export class OwnerQuestionCard {
       this.#deps.render();
       return true;
     };
-    if (data === '\r' || data === '\n') return pick(state.index);
+    if (pressed.key === 'enter') return pick(state.index);
     if (/^[1-9]$/.test(data)) {
       const listed = choices.findIndex((choice) => choice.key === data);
       if (listed >= 0) return pick(listed);

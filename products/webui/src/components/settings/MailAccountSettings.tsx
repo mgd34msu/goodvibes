@@ -44,6 +44,7 @@ import {
   isCalendarUnconfiguredError,
   isMethodNotInvokableError,
   isMethodUnavailableError,
+  isSecretStoreUnreadableError,
 } from '../../lib/errors';
 import { mailRefusalNote } from '../../lib/mail-refusal';
 import { Chip } from '../ui/Chip';
@@ -55,10 +56,11 @@ const STATE_TONE: Record<SurfaceState, StatusTone> = {
   'needs-setup': 'warn',
   'not-available': 'idle',
   'auth-failed': 'bad',
+  'store-unreadable': 'bad',
   error: 'warn',
 };
 
-type SurfaceState = 'ready' | 'needs-setup' | 'not-available' | 'auth-failed' | 'error';
+type SurfaceState = 'ready' | 'needs-setup' | 'not-available' | 'auth-failed' | 'store-unreadable' | 'error';
 
 interface SurfaceStatus {
   readonly state: SurfaceState;
@@ -71,6 +73,7 @@ const STATE_LABEL: Record<SurfaceState, string> = {
   'needs-setup': 'Needs setup',
   'not-available': 'Not on this daemon',
   'auth-failed': 'Credentials rejected',
+  'store-unreadable': 'Secret store could not be read',
   error: 'Status unavailable',
 };
 
@@ -104,6 +107,10 @@ function calendarStatus(error: unknown, ok: boolean): SurfaceStatus {
       label: STATE_LABEL['not-available'],
       detail: 'This daemon has no calendar service yet, and updating the daemon turns it on.',
     };
+  }
+  // The password may well be stored: the daemon's secret store could not be read, so nothing is asked for again.
+  if (isSecretStoreUnreadableError(error)) {
+    return { state: 'store-unreadable', label: STATE_LABEL['store-unreadable'], detail: formatError(error) };
   }
   if (isCalendarUnconfiguredError(error)) {
     return {

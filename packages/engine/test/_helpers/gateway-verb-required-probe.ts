@@ -54,6 +54,7 @@ import { registerAuthorityStatusGatewayMethods } from '../../platform/src/platfo
 import { registerCredentialWriteGatewayMethods } from '../../platform/src/platform/control-plane/routes/credentials-write.js';
 import { registerBrowserGatewayMethods } from '../../platform/src/platform/control-plane/routes/browser.js';
 import { registerCalendarGatewayMethods } from '../../platform/src/platform/control-plane/routes/calendar.js';
+import { registerCapabilityGatewayMethods } from '../../platform/src/platform/control-plane/routes/capabilities.js';
 import { registerChannelProfilesGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-profiles.js';
 import { registerChannelTestGatewayMethods } from '../../platform/src/platform/control-plane/routes/channel-test.js';
 import { registerRelayGatewayMethods } from '../../platform/src/platform/control-plane/routes/relay.js';
@@ -156,6 +157,7 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['credentials-write', (catalog) => registerCredentialWriteGatewayMethods(catalog, stubDeps())],
   ['browser', (catalog) => registerBrowserGatewayMethods(catalog, stubDeps())],
   ['calendar', (catalog) => registerCalendarGatewayMethods(catalog, stubDeps())],
+  ['capabilities', (catalog) => registerCapabilityGatewayMethods(catalog, stubDeps())],
   ['channel-profiles', (catalog) => registerChannelProfilesGatewayMethods(catalog, stubDeps(), stubDeps())],
   ['channel-test', (catalog) => registerChannelTestGatewayMethods(catalog, stubDeps())],
   ['checkin', (catalog) => registerCheckinGatewayMethods(catalog, stubDeps())],
@@ -233,6 +235,7 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerAuthorityStatusGatewayMethods',
   'registerBrowserGatewayMethods',
   'registerCalendarGatewayMethods',
+  'registerCapabilityGatewayMethods',
   'registerChannelProfilesGatewayMethods',
   'registerChannelTestGatewayMethods',
   'registerCheckinGatewayMethods',

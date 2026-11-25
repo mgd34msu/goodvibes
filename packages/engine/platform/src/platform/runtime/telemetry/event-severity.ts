@@ -35,6 +35,7 @@ export const EVENT_SEVERITY: Readonly<Record<AnyRuntimeEvent['type'], TelemetryS
   AUTOMATION_JOB_CREATED: 'info',
   AUTOMATION_JOB_DISABLED: 'info',
   AUTOMATION_JOB_ENABLED: 'info',
+  AUTOMATION_JOB_REMOVED: 'info',
   AUTOMATION_JOB_UPDATED: 'info',
   AUTOMATION_RUN_COMPLETED: 'info',
   AUTOMATION_RUN_FAILED: 'error',

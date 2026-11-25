@@ -31,7 +31,7 @@ import { currentExternalOperationSource } from '../../permissions/external-opera
 import type { JudgmentReadingOptions } from '@goodvibes/engine/errors';
 import { type CommandNeeds } from '../../runtime/permissions/normalization/index.js';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readlinkSync, realpathSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { decideSandboxedExec, egressAllowed, readCommandNeeds } from '../../runtime/permissions/sandbox-policy.js';
@@ -612,6 +612,17 @@ export function hostSandboxAvailability(): SandboxAvailability {
  * without spawning. This is the wiring production uses; unit tests exercise
  * detection with fabricated probes instead of spawning.
  */
+/**
+ * Why /proc here does not show this process's own pid namespace (its /proc/self is not this process), or null when it
+ * does or that cannot be read.
+ */
+function procOfAnotherPidNamespace(): string | null {
+  let self: string;
+  try { self = readlinkSync('/proc/self'); } catch { return null; }
+  if (Number(self) === process.pid) return null;
+  return `/proc here shows another pid namespace's processes (this process is ${process.pid} but /proc/self is ${self}), so bubblewrap cannot reach the processes it starts`;
+}
+
 export function probeSandboxHost(env: NodeJS.ProcessEnv = process.env): SandboxHostProbe {
   const platform = process.platform;
   if (platform !== 'linux') {
@@ -622,6 +633,12 @@ export function probeSandboxHost(env: NodeJS.ProcessEnv = process.env): SandboxH
   if (!bwrapPath) {
     return { platform, bwrapPath: null, bwrapWorks: false, netUnshareWorks: false };
   }
+  // bubblewrap reaches the child it starts through /proc/<its pid>. Where /proc shows another pid namespace's processes
+  // (a container, or `unshare --pid` without a /proc of its own), that number names another process or none: bubblewrap
+  // then fails, or fails half-way leaving a process that holds the command's output open, so the command never ends.
+  // A trial run cannot rule that out (it depends on which numbers happen to be taken), so such a host has no sandbox.
+  const foreignProc = procOfAnotherPidNamespace();
+  if (foreignProc !== null) return { platform, bwrapPath, bwrapWorks: false, netUnshareWorks: false, bwrapError: foreignProc };
   // Probe with the argv a real run uses, so a host where its namespaces, tmpfs or
   // binds fail is reported unavailable instead of failing every command later.
   let workspace: string;

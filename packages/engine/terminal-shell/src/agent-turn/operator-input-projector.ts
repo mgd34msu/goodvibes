@@ -34,7 +34,60 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 const contexts = new WeakMap<object, { readonly connection: CapturedConnection | undefined; readonly assertCurrent: () => void;
   readonly automation: OperatorAutomationTarget; readonly requestPolicy: ReturnType<typeof captureOperatorRequestPolicy> | undefined;
-  readonly shellPaths: ShellPathService; readonly reader: AgentConnectedHostConfigReader; readonly kind: 'method' | 'action' }>();
+  readonly shellPaths: ShellPathService; readonly reader: AgentConnectedHostConfigReader; readonly kind: 'method' | 'action';
+  readonly secrets: readonly SecretInputLeaf[] }>();
+
+/** One secret value of a nested method call: where it goes in the method's input, what the call shows there instead, and the value. */
+export interface SecretInputLeaf {
+  readonly path: readonly string[];
+  readonly shown: string;
+  readonly value: string;
+}
+
+/**
+ * Secret values of nested calls capability_run is about to make, by the call id
+ * it gives the nested call (never one a model chooses). The call itself carries
+ * each value hidden, so its ask, its approval record and every frame show the
+ * hidden form; the value is put back only into the request this exact call sends.
+ */
+const heldSecretLeaves = new Map<string, readonly SecretInputLeaf[]>();
+
+/** Hold the secret values of the nested method call `callId` until its projection takes them (once). */
+export function holdNestedSecretInputs(callId: string, leaves: readonly SecretInputLeaf[]): void {
+  if (leaves.length > 0) heldSecretLeaves.set(callId, leaves);
+}
+
+/** Forget what a nested call that never ran was holding. */
+export function dropNestedSecretInputs(callId: string): void {
+  heldSecretLeaves.delete(callId);
+}
+
+function leafAt(value: unknown, path: readonly string[]): unknown {
+  let node = value;
+  for (const part of path) {
+    if (!isRecord(node)) return undefined;
+    node = node[part];
+  }
+  return node;
+}
+
+function withLeaves(payload: Record<string, unknown>, leaves: readonly SecretInputLeaf[]): Record<string, unknown> {
+  if (leaves.length === 0) return payload;
+  const copy = structuredClone(payload);
+  for (const leaf of leaves) {
+    let node: Record<string, unknown> = copy;
+    for (const part of leaf.path.slice(0, -1)) {
+      const next = node[part];
+      if (!isRecord(next)) throw new ToolInputProjectionError('binding-changed');
+      node = next;
+    }
+    const last = leaf.path.at(-1)!;
+    // The request carries the hidden form exactly where the value goes, or nothing is sent.
+    if (node[last] !== leaf.shown) throw new ToolInputProjectionError('binding-changed');
+    node[last] = leaf.value;
+  }
+  return copy;
+}
 
 /** Capture connection authority before any repair or admission reading. */
 export function createOperatorInputProjector(shellPaths: ShellPathService, reader: AgentConnectedHostConfigReader,
@@ -67,13 +120,16 @@ export function createOperatorInputProjector(shellPaths: ShellPathService, reade
       automation = await captureOperatorAutomationTarget(snapshot.id, targetInput, connection,
         { signal: request.signal, assertCurrent: () => { request.assertCurrent(); assertSource(); } });
     }
+    const secrets = kind === 'method' ? heldSecretLeaves.get(request.callId) ?? [] : [];
+    heldSecretLeaves.delete(request.callId);
+    for (const leaf of secrets) if (leafAt(args.input, leaf.path) !== leaf.shown) throw new ToolInputProjectionError('binding-changed');
     const context = Object.freeze({}); let released = false;
     const assertCurrent = () => {
       if (released) throw new ToolInputProjectionError('released');
       assertSource(); connection?.assertCurrent();
     };
     const assertPrepared = () => { request.assertCurrent(); assertCurrent(); request.assertCurrent(); };
-    contexts.set(context, { connection, assertCurrent, automation, requestPolicy, shellPaths, reader, kind }); assertPrepared();
+    contexts.set(context, { connection, assertCurrent, automation, requestPolicy, shellPaths, reader, kind, secrets }); assertPrepared();
     return { status: 'projected', args: request.args, executionContext: context, assertCurrent: assertPrepared,
       ...(preview || (operatorMethodIsReadOnly(snapshot, args.input) && !operatorMethodIsOutward(snapshot.id)) ? { resultPublication: 'read-only' } : {}),
       assertRepairedArgs(repaired) {
@@ -104,7 +160,7 @@ export function operatorExecutionWireInput(input: Record<string, unknown>, args:
   const binding = contexts.get(context);
   if (!binding || binding.shellPaths !== shellPaths || binding.reader !== reader || binding.kind !== kind) throw new ToolInputProjectionError('held');
   assertProjectionExecution(context, args); binding.assertCurrent();
-  return { ...input, ...binding.automation.wireFields };
+  return withLeaves({ ...input, ...binding.automation.wireFields }, binding.secrets);
 }
 
 export function operatorExecutionRequestPolicy(args: Record<string, unknown>, options: Parameters<Tool['execute']>[1],

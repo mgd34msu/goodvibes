@@ -26,6 +26,12 @@ export const ROUTE_BINDING_FEATURE_FLAG = 'route-binding';
 export const DELIVERY_ENGINE_FEATURE_FLAG = 'delivery-engine';
 export const SERVICE_MANAGEMENT_FEATURE_FLAG = 'service-management';
 
+/** What "Run the daemon as a service" does, for a person (also the description of the service.enabled setting). */
+const SERVICE_DESCRIPTION = 'On: GoodVibes runs its daemon as a service of this computer. It is set up the first time a daemon you started is idle, '
+  + 'and from then on it keeps running after you close the window you started it from, so your sessions and whatever it serves stay available. '
+  + 'Turn on Start the daemon at login as well and it also starts by itself when you sign in. '
+  + 'Off: nothing sets up a service, and the daemon runs only while you keep it running.';
+
 const PERMISSION_TOOL_KEYS: readonly ConfigKey[] = [
   'permissions.tools.read',
   'permissions.tools.write',
@@ -653,12 +659,10 @@ export const FEATURE_FLAGS: FeatureFlag[] = [
   },
   {
     id: SERVICE_MANAGEMENT_FEATURE_FLAG,
-    name: 'Service Management',
-    description:
-      'Enables install/start/stop/status/autostart management for running Goodvibes as a '
-      + 'durable host service. The management verbs are available, but '
-      + 'nothing is installed or started until explicitly requested (service.autostart '
-      + 'stays false).',
+    // The same words as the setting it shows beside (service.enabled), so both terminal programs label the row alike.
+    name: 'Run the daemon as a service',
+    // The same words as service.enabled's description: a person reads one or the other, never a setting key.
+    description: SERVICE_DESCRIPTION,
     tier: 10,
     runtimeToggleable: true,
     settings: { key: 'service.enabled', kind: 'boolean' },

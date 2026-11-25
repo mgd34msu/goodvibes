@@ -112,11 +112,20 @@ export function googleConfigPort(ctx: CommandContext): GoogleConfigPort {
 export function googleSecretPort(ctx: CommandContext): GoogleSecretPort {
   const manager = requireSecretsManager(ctx) as {
     get: (key: string) => Promise<string | null>;
+    /** Throws on a secret store this computer cannot read, where `get` answers null (config/secrets.ts). */
+    getStored?: (key: string) => Promise<string | null>;
     set: (key: string, value: string, ownership?: { readonly assertCurrent: () => void }) => Promise<void>;
     delete?: (key: string) => Promise<void>;
   };
   return {
-    get: (key) => manager.get(key),
+    // A store that cannot be read is not an empty one: the read that throws lets the Google steps say "could not be
+    // read" (setup-state.ts readGoogleSecretState, discovery.ts) instead of offering a new setup over a stored credential.
+    get: async (key) => {
+      const value = await manager.get(key);
+      // Absent from every source: the stored read throws when the store could not be read, and that is what is said.
+      if (value === null && manager.getStored) await manager.getStored(key);
+      return value;
+    },
     set: (key, value, ownership) => manager.set(key, value, ownership),
     // Carried so a confirmation-gated removal can actually remove. Nothing
     // reaches it except `forgetGoogleCredentials`, which refuses without an

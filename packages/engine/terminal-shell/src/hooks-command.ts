@@ -5,6 +5,8 @@ import { requireContextValue } from './command-service-access.js';
 import { defineCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
 import type { CommandActionContext } from './command-actions/types.js';
+import { daemonCapabilityAction, runDaemonCapability, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import { HOOKS_CONTRACTS, HOOKS_DISABLE, HOOKS_ENABLE, MANAGED_HOOKS_LIST } from '@goodvibes/engine/platform/platform/capabilities';
 import { doAction, listInput, readAction, textInput } from './described-command-kit.js';
 
 /**
@@ -27,13 +29,24 @@ const TERMINAL_ONLY = 'Managed hooks are kept in this machine\'s hooks file.';
 
 const managedHookRows = (ctx: HooksCommandContext): ListRow[] => requireHookApi(ctx).workbench.listManagedHooks()
   .flatMap(({ pattern, hook }): ListRow[] => hook.name ? [{ value: hook.name, label: hook.name, detail: `${pattern} (${hook.type})`, state: hook.enabled === false ? 'off' : 'on' }] : []);
-/** The managed hooks alone: the entries that can be switched on or off. */
-const MANAGED_HOOKS = defineList<HooksCommandContext>({
-  name: 'hooks.managed',
+
+/**
+ * How `/hooks` reaches the daemon, which manages the hooks file: listing and
+ * switching hooks on or off are capabilities (capabilities/builtin/hooks.ts)
+ * the daemon runs. Set when the product registers the command.
+ */
+let daemonBinding: DaemonCapabilityBinding<HooksCommandContext> | undefined;
+
+/** The managed hooks alone: the entries that can be switched on or off, as the daemon reads them from the hooks file. */
+defineList<HooksCommandContext>({
+  name: MANAGED_HOOKS_LIST,
   async read(ctx) {
-    return managedHookRows(ctx);
+    if (!daemonBinding) return managedHookRows(ctx);
+    const answer = await runDaemonCapability('hooks.contracts', {}, ctx, daemonBinding);
+    const managed = Array.isArray(answer.data?.['managed']) ? answer.data['managed'] as readonly { readonly name: string; readonly detail?: string; readonly state?: string }[] : [];
+    return managed.map((hook): ListRow => ({ value: hook.name, label: hook.name, ...(hook.detail ? { detail: hook.detail } : {}), ...(hook.state ? { state: hook.state } : {}) }));
   },
-  operator: { terminalOnly: TERMINAL_ONLY },
+  operator: { method: 'capabilities.run', input: { id: 'hooks.contracts' }, rows: { from: 'data.managed', value: 'name', label: 'name', detail: 'detail', state: 'state' } },
 });
 /** The managed hooks and chains: the entries that can be removed. */
 const MANAGED_ENTRIES = defineList<HooksCommandContext>({
@@ -46,16 +59,8 @@ const MANAGED_ENTRIES = defineList<HooksCommandContext>({
   },
   operator: { terminalOnly: TERMINAL_ONLY },
 });
-const HOOK = listInput({ id: 'hook', label: 'Hook', help: 'The managed hooks', list: MANAGED_HOOKS });
 const ENTRY = listInput({ id: 'hook', label: 'Hook', help: 'The managed hooks and chains', list: MANAGED_ENTRIES });
 
-/** The refusal for a name `/hooks enable` or `disable` did not find among the managed hooks. */
-function toggleRefusal(ctx: HooksCommandContext, name: string): ReturnType<typeof commandRefusal> {
-  if (requireHookApi(ctx).workbench.listManagedChains().some((chain) => chain.name === name)) {
-    return commandRefusal(`${name} is a chain; a chain cannot be switched on or off.`, `/hooks remove ${name} takes it out of the hooks file`);
-  }
-  return commandRefusal(`No managed hook named ${name}.`, '/hooks contracts lists the managed hooks file and its entries', 'NOT_FOUND');
-}
 const FILE = textInput({ id: 'path', label: 'File', help: 'A hooks bundle file', why: 'a file path on this machine', kind: 'path', typed: { position: 1 } });
 const HOOK_TYPES = [
   { value: 'command', label: 'Run a command' },
@@ -65,7 +70,13 @@ const HOOK_TYPES = [
   { value: 'ts', label: 'Run a TypeScript file' },
 ];
 
-export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>): void {
+/**
+ * `binding` is how this program reaches the daemon: listing the hooks and
+ * switching one on or off run there and nowhere else.
+ */
+export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: Pick<TerminalCommandRegistry<Ctx>, 'register'>, binding: DaemonCapabilityBinding<Ctx>): void {
+  // The list reader is shared by every registration; it is handed the same product context the actions are.
+  daemonBinding = binding as unknown as DaemonCapabilityBinding<HooksCommandContext>;
   registry.register(defineCommand<Ctx>({
     name: 'hooks',
     title: 'Hooks',
@@ -78,28 +89,8 @@ export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: 
       { label: 'Try and move hooks', actions: ['simulate', 'reload', 'export', 'inspect', 'import'] },
     ],
     actions: [
-      readAction<Ctx>({
-        id: 'contracts', label: 'See the hook points and your hooks', word: 'contracts',
-        inputs: [textInput({ id: 'filter', label: 'Only those about', help: 'Words to narrow the list', why: 'your own words', typed: { tail: true }, optional: { default: '', means: 'all of them' } })],
-        sentence: 'Shows each hook point {filter}, what a hook there may do, and the managed hooks file.', example: { filter: 'tool' },
-        async run(values, ctx) {
-          const hookApi = requireHookApi(ctx);
-          const workbench = hookApi.workbench;
-          const filter = (values.filter ?? '').trim().toLowerCase();
-          const contracts = await hookApi.contracts(filter);
-          if (contracts.length === 0) return filter.length === 0 ? 'No hook contracts registered.' : `No hook contracts matched "${filter}".`;
-          const lines: string[] = [`Hook Contracts (${contracts.length}):`];
-          for (const contract of contracts) {
-            // The decision model could not say whether this entry fits the filter; it is listed, marked, rather than dropped.
-            lines.push(`  ${contract.pattern}${contract.unsure ? ' (unsure match)' : ''}`);
-            lines.push(`    authority=${contract.authority} mode=${contract.executionMode} deny=${contract.canDeny ? 'yes' : 'no'} mutate=${contract.canMutateInput ? 'yes' : 'no'} inject=${contract.canInjectContext ? 'yes' : 'no'} policy=${contract.failurePolicy}`);
-            lines.push(`    ${contract.description}`);
-          }
-          lines.push('Each hook runs under its own "timeout" (default 30 s, 60 s for an agent hook).');
-          lines.push('', `Managed hooks file: ${workbench.getFilePath()}`, `Managed entries: hooks=${workbench.listManagedHooks().length} chains=${workbench.listManagedChains().length}`);
-          return lines.join('\n');
-        },
-      }),
+      // Moved to the daemon (capabilities/builtin/hooks.ts): the description and the handler are the capability's.
+      daemonCapabilityAction<Ctx>(HOOKS_CONTRACTS, binding),
       doAction<Ctx>({
         id: 'open', label: 'Open the hooks screen', word: 'open', touches: 'reads',
         sentence: 'Opens the full-screen view of hook points and managed hooks.', operator: { terminalOnly: 'It is a terminal screen.' },
@@ -140,26 +131,8 @@ export function registerHooksCommand<Ctx extends HooksCommandContext>(registry: 
           return `Made managed hook chain ${chain.name} with ${chain.steps.length} step(s).`;
         },
       },
-      {
-        id: 'enable', label: 'Switch a hook on', word: 'enable', inputs: [HOOK],
-        sentence: '{hook} runs at its hook point again, until you change it.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'disable',
-        operator: { terminalOnly: TERMINAL_ONLY }, example: { hook: 'lint-before-commit' },
-        async run(values, ctx) {
-          if (!(await requireHookApi(ctx).workbench.toggle(values.hook!, true))) throw toggleRefusal(ctx, values.hook!);
-          return `Switched on managed hook ${values.hook}.`;
-        },
-      },
-      {
-        id: 'disable', label: 'Switch a hook off', word: 'disable', inputs: [HOOK],
-        sentence: '{hook} stops running at its hook point, until you change it.', done: '',
-        touches: 'this-machine', lasts: 'kept', risk: 'none', undoneBy: 'enable',
-        operator: { terminalOnly: TERMINAL_ONLY }, example: { hook: 'lint-before-commit' },
-        async run(values, ctx) {
-          if (!(await requireHookApi(ctx).workbench.toggle(values.hook!, false))) throw toggleRefusal(ctx, values.hook!);
-          return `Switched off managed hook ${values.hook}.`;
-        },
-      },
+      daemonCapabilityAction<Ctx>(HOOKS_ENABLE, binding),
+      daemonCapabilityAction<Ctx>(HOOKS_DISABLE, binding),
       {
         id: 'remove', label: 'Remove a hook or chain', word: 'remove', inputs: [ENTRY],
         sentence: 'The managed hook or chain {hook} is deleted from the hooks file; export first with /hooks export to keep a copy.', done: '',

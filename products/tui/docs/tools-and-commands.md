@@ -342,7 +342,9 @@ Run `/session` with no arguments to open its list of actions; a model or a scrip
 
 Most shortcuts are customizable via `~/.goodvibes/tui/keybindings.json`. Use `/help keys` to view current bindings.
 
-Only the actions `/help keys` lists can be reassigned: each key below that is the default of one of those actions (`Shift+Tab` is `cycle-permission-mode`, `Ctrl+O` is `open-agents`, and so on). These keys are fixed and are not in the rebindable table: `Enter` and `Shift+Enter` (send, new line), `Tab` (path completion), `Esc` (exit the current mode), `F2` (open or close Your agents), `?` (the list of every command and key, on an empty prompt), `@` (file picker), `Alt+R` or `F12` (try a failed turn again), `Alt+J` or `F10` (open the fix session), the arrow keys, `PageUp` / `PageDown`, the mouse, and the keys inside a view, search or picker (`n` / `N`, `Ctrl+X` to stop, and the selection-modal keys below).
+Every key the program acts on is in that table, `Tab`, `Enter`, `Esc` and the arrows included (`next-field`, `choose`, `back`, `move-up` and the others): a key bound to one of them is that key on every screen, and one of those keys bound to another action does that action instead. Change one in the Keys place (`Ctrl+G` `m`, then System: `Enter` on a key, then press the new one; `d` puts back its default, `Shift+D` every default) or in the file. `F2` (Your agents, `open-agents`), `PageUp` / `PageDown` (`scroll-page-up`, `scroll-page-down`), the question card's arrows, `Enter` and `Esc`, and a contract question's "send it as an ordinary message" (`contract-question-ordinary`, `Ctrl+G` `q`) are in the table too, and each place's letters are a group of it (`place.automation.pause`, listed in the Keys place under the place's name). These keys are fixed: `Shift+Enter` (new line), `?` (the list of every command and key, on an empty prompt), `@` (file picker), the mouse, and the letter keys inside an older view, search or picker (`n` / `N`, `Ctrl+X` to stop, and the selection-modal keys below), which move into the table as those views become places.
+
+The leader (`Ctrl+G`, the rebindable `leader`) starts a two-key shortcut over every screen: after it, a strip at the bottom of the screen lists every key that can follow and what it does, and the next key completes the shortcut or cancels it (on a settings screen, the key after it is that screen's action letter when it has one, and the strip lists those letters first). There is no time limit. `Ctrl+G` `m` opens the menu of every place; `Ctrl+G` `g` groups the model list another way.
 
 ### Input and editing
 
@@ -352,26 +354,26 @@ Only the actions `/help keys` lists can be reassigned: each key below that is th
 | `Shift+Enter` | Insert newline |
 | `Tab` | Path completion, else toggle block collapse |
 | `Ctrl+U` | Kill from cursor to start of line (push to kill ring) |
-| `Alt+U` or `Ctrl+G` | Clear entire prompt (no kill-ring push) |
+| `Ctrl+G` `u` | Clear entire prompt (no kill-ring push) |
 | `Ctrl+W` | Kill word backward (push to kill ring) |
-| `Alt+K` or `Ctrl+X` | Kill from cursor to end of line (push to kill ring) |
-| `Alt+D` or `Ctrl+Delete` | Kill word forward (push to kill ring) |
-| `Ctrl+Shift+Y` or `Ctrl+\` | Yank from kill ring |
-| `Alt+Y` or `Ctrl+]` | Yank-pop (rotate kill ring, replace last yank); only valid immediately after a yank |
-| `Alt+B` or `Ctrl+Left` | Move word backward |
-| `Alt+F` or `Ctrl+Right` | Move word forward |
+| `Ctrl+G` `k` or `Ctrl+X` | Kill from cursor to end of line (push to kill ring) |
+| `Ctrl+G` `d` or `Ctrl+Delete` | Kill word forward (push to kill ring) |
+| `Ctrl+G` `y` or `Ctrl+\` | Yank from kill ring |
+| `Ctrl+G` `Y` or `Ctrl+]` | Yank-pop (rotate kill ring, replace last yank); only valid immediately after a yank |
+| `Ctrl+G` `b` or `Ctrl+Left` | Move word backward |
+| `Ctrl+G` `f` or `Ctrl+Right` | Move word forward |
 | `Ctrl+Z` | Undo prompt edit |
-| `Ctrl+Shift+Z` or `Ctrl+^` | Redo prompt edit |
+| `Ctrl+G` `z` or `Ctrl+^` | Redo prompt edit |
 | `Ctrl+V` | Paste (image or text) |
 | `@` | Open file picker (insert file path) |
 | `?` | Open the list of every command and key (empty prompt) |
-| `Alt+R` / `Alt+O` / `Alt+I` / `Alt+S` (or `F12` / `F9` / `F3` / `F4`) | On the newest failed turn's row: try again / use another model / details / sign in again |
+| `Ctrl+G` `r` / `o` / `i` / `s` (or `F12` / `F9` / `F3` / `F4`) | On the newest failed turn's row: try again / use another model / details / sign in again |
 
-Every `Alt` and `Ctrl+Shift` key has a second default because macOS Terminal sends no `Alt` unless "Use Option as Meta key" is on, and a terminal without the extended keyboard protocol sends `Ctrl+Shift+<letter>` as `Ctrl+<letter>`: `Alt+C` cancel the running tool `Ctrl+T`, `Alt+A` keep-awake `F6`, `Alt+M` memories used `F7`, `Alt+V` voice `F8`, `Alt+N` / `Alt+P` next and previous session `Ctrl+Q` / `Ctrl+_`, `Ctrl+Shift+C` copy selection `F5`, `Alt+J` open the fix session `F10`.
+The actions that sat on an `Alt` or `Ctrl+Shift` chord (which tmux, screen and macOS Terminal swallow) are a leader shortcut by default, each beside a second key every terminal sends: `Ctrl+G` `t` cancel the running tool `Ctrl+T`, `Ctrl+G` `a` keep-awake `F6`, `Ctrl+G` `e` memories used `F7`, `Ctrl+G` `v` voice `F8`, `Ctrl+G` `n` / `p` next and previous session `Ctrl+Q` / `Ctrl+_`, `Ctrl+G` `c` copy selection `F5` (and `Ctrl+Shift+C`, where the terminal passes it on), `Ctrl+G` `j` open the fix session `F10`. A chord can be bound back in `keybindings.json` (`{ "kill-line": { "key": "k", "alt": true } }`), and one bound there before this release stays bound.
 
-`Ctrl+W` uses whitespace-delimited word boundaries (readline/unix-word-rubout semantics), while `Alt+D`, `Alt+B`, and `Alt+F` use Unicode word boundaries (letters, digits, underscore).
+`Ctrl+W` uses whitespace-delimited word boundaries (readline/unix-word-rubout semantics), while the word-forward, word-back and kill-word keys use Unicode word boundaries (letters, digits, underscore).
 
-`Ctrl+K` opens the list of every command and key (the same as `Ctrl+P`, `?` and `/help`), not kill-to-end-of-line. The readline kill that historically owned `Ctrl+K` is bound to `Alt+K` instead, so the capability is kept rather than lost. `Ctrl+U` and `Alt+U` are likewise split. `Ctrl+U` kills to the start of the line and pushes the text onto the kill ring (readline convention), while `Alt+U` clears the whole buffer regardless of cursor position and pushes nothing.
+`Ctrl+K` opens the list of every command and key (the same as `Ctrl+P`, `?` and `/help`), not kill-to-end-of-line; that kill is `Ctrl+G` `k` or `Ctrl+X`. `Ctrl+U` kills to the start of the line and pushes the text onto the kill ring (readline convention), while `Ctrl+G` `u` clears the whole buffer regardless of cursor position and pushes nothing.
 
 ### Navigation
 
@@ -397,7 +399,7 @@ Every `Alt` and `Ctrl+Shift` key has a second default because macOS Terminal sen
 | `Ctrl+B` | Bookmark nearest block |
 | `Ctrl+F` | Open conversation search overlay |
 | `Ctrl+L` | Clear screen |
-| `Ctrl+Shift+C` | Copy selection |
+| `Ctrl+G` `c` or `F5` | Copy selection |
 
 ### Views
 
@@ -413,7 +415,7 @@ Every view opens as a modal over the dimmed conversation, and `Esc` closes one l
 | `/notifications` | Notification history |
 | `/resume` | Session picker, with hosted sessions in a Hosted group |
 
-An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Your agents) opens the agent: its work is the spine, its own children branch off it, the header reads `main › engineer` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a process row) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because GoodVibes cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Alt+N` / `Alt+P` (the rebindable `next-session` and `previous-session`) switch between them; the row ends with those keys.
+An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Your agents) opens the agent: its work is the spine, its own children branch off it, the header reads `main › engineer` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a process row) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because GoodVibes cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Ctrl+G` `n` / `Ctrl+G` `p` (the rebindable `next-session` and `previous-session`) switch between them; the row ends with those keys.
 
 `Esc` in a view goes back up one level (a child agent returns to the agent that started it, then main) and never stops anything. Stopping is `Ctrl+X`: the first press asks, the second stops. The status line always says what the next `Esc` does.
 
@@ -432,7 +434,7 @@ The recovery offer, session picker, profile picker, and config rows are all pick
 
 In a searchable modal, `/` focuses the filter, and any keystroke that no row hotkey claims also arms the filter and starts the query with that character.
 
-The config modals (`/memory`, `/todo`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
+The config modals (`/memory`, `/todo`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and the others built on the config-modal host) have an always-live search row: every typed character goes into the search and never fires an action. An action fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from the leader (`Ctrl+G` unless rebound) followed by its key (the hint bar shows `^G c` for the keys a terminal cannot send as a Ctrl chord: `c`, `h`, `i`, `j`, `m`, digits and capitals). An action that deletes, uninstalls or clears asks for the same keys a second time; `Esc` cancels it.
 
 ### System
 
@@ -441,12 +443,13 @@ The config modals (`/memory`, `/todo`, `/marketplace`, `/plugin`, `/services ope
 | `Ctrl+C` | Clear input / cancel generation / exit (double-press to quit) |
 | `Ctrl+K` | Open the list of every command and key (search and run any command) |
 | `Shift+Tab` | Cycle this session's execution mode: ask-me → jev-decides → just-vibes → yolo, asking before yolo (declining moves on to ask-me); the saved default changes only in `/settings` (plan is outside the cycle; `/plan` toggles it). It does this in every state, also while the session chips show |
-| `Alt+N` / `Alt+P` | While the session chips show: the next / previous agent or process (`next-session`, `previous-session`) |
+| `Ctrl+G` `n` / `Ctrl+G` `p` | While the session chips show: the next / previous agent or process (`next-session`, `previous-session`) |
 | `Ctrl+X` | Inside an agent or process view: stop what it shows (the first press asks, the second stops) |
-| `Alt+C` | Cancel the running tool call (the turn continues) |
-| `Alt+A` | Toggle keep-awake (the "sleep disabled" chip) |
-| `Alt+M` | List or hide the memories a turn used (provenance chip drill-in) |
-| `Alt+V` | Voice input: press to start recording, press again to stop and transcribe into the composer |
+| `Ctrl+G` `t` or `Ctrl+T` | Cancel the running tool call (the turn continues) |
+| `Ctrl+G` `a` or `F6` | Toggle keep-awake (the "sleep disabled" chip) |
+| `Ctrl+G` `e` or `F7` | List or hide the memories a turn used (provenance chip drill-in) |
+| `Ctrl+G` `v` or `F8` | Voice input: press to start recording, press again to stop and transcribe into the composer |
+| `Ctrl+G` `m` | The menu of every place (also a click on `ctrl+g m menu` in the status bar) |
 
 A single `Ctrl+C` on an empty composer arms a roughly one-second "press again to exit" confirmation; the footer shows this as `Ctrl+C x2 quit`.
 

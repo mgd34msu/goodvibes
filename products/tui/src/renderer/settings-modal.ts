@@ -118,7 +118,14 @@ function settingsHints(modal: SettingsModal): KitHint[] {
     resetTo: selected ? (selected.flag ? (selected.flag.feature.defaultEnabled ? 'On' : 'Off') : formatDefault(selected)) : undefined,
     onList: modal.getSelectedListRow() !== null,
     adjustable: adjustable(selected),
+    // "Secure address now": Enter issues a new certificate on its action row and does nothing on the others.
+    ...(modal.currentCategory === 'secure-address-now' ? { listEnter: secureAddressEnter(modal) } : {}),
   });
+}
+
+function secureAddressEnter(modal: SettingsModal): string | null {
+  const row = modal.secureAddressRows[Math.max(0, Math.min(modal.secureAddressRows.length - 1, modal.selectedIndex))];
+  return row?.action === 'reissue' ? 'issue a new certificate' : null;
 }
 
 export const { renderSettingsModal } = createSettingsLayout<SettingsModal>({

@@ -13,6 +13,8 @@
  *   EMAIL_NOT_CONFIGURED       host/user are missing
  *   EMAIL_CREDENTIALS_MISSING  host/user are set, the password secret is not
  *   CALENDAR_NOT_CONFIGURED    CalDAV url/user are missing
+ *   EMAIL_CREDENTIALS_UNREADABLE, CALENDAR_CREDENTIALS_UNREADABLE
+ *                              the secret store could not be read: nothing is asked for
  *
  * Those codes are the daemon's, and the next step each one implies is the
  * daemon's requirement, not a guess here. If the daemon changes what it needs,
@@ -49,7 +51,7 @@ export type ConnectionSurface = 'mail' | 'calendar';
  * renders synchronously, a row has to say something true while the answer is
  * in flight, and "checking" is true where "not configured" would be invented.
  */
-export type ConnectionState = 'ready' | 'needs-setup' | 'unreachable' | 'checking';
+export type ConnectionState = 'ready' | 'needs-setup' | 'unreachable' | 'checking' | 'unreadable';
 
 export interface ConnectionStatus {
   readonly surface: ConnectionSurface;
@@ -164,6 +166,16 @@ export function describeConnectionProbe(
   }
 
   const code = daemonErrorCode(error);
+  // The secret store on the daemon's computer could not be read: whatever was given is not missing and is never asked
+  // for again; the daemon's words name the cause.
+  if (code !== null && code.endsWith('_CREDENTIALS_UNREADABLE')) {
+    return {
+      surface,
+      state: 'unreadable',
+      detail: errorText(error),
+      nextActions: ['Make the secret store readable on the daemon\'s computer (its key file must be the one the store was written with); nothing needs to be given again.'],
+    };
+  }
   const steps = code === null ? undefined : SETUP_STEPS[code];
   if (steps !== undefined) {
     return {
@@ -287,7 +299,7 @@ export async function probeConnection(
 /** Render one status as transcript lines. Used by `/mail` and `/calendar`. */
 export function renderConnectionStatus(status: ConnectionStatus): string {
   const lines = [
-    `${connectionSurfaceLabel(status.surface)}: ${status.state}`,
+    `${connectionSurfaceLabel(status.surface)}: ${status.state === 'unreadable' ? 'the secret store could not be read' : status.state}`,
     `  ${status.detail}`,
   ];
   if (status.nextActions.length > 0) {

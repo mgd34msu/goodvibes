@@ -5431,6 +5431,53 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       ]
     }
   },
+  "capabilities.find": {
+    "methodId": "capabilities.find",
+    "http": null,
+    "status": 200,
+    "body": {
+      "need": "sample",
+      "group": "conversation",
+      "groupChosenBy": "decision",
+      "capabilities": [
+        {
+          "id": "sample",
+          "does": "sample",
+          "group": "conversation",
+          "runsIn": "daemon",
+          "repeat": "safe",
+          "inputs": [
+            {
+              "name": "sample",
+              "kind": "sample",
+              "required": false,
+              "about": "sample",
+              "choices": [
+                "sample"
+              ],
+              "default": "sample"
+            }
+          ],
+          "risk": "sample"
+        }
+      ]
+    }
+  },
+  "capabilities.run": {
+    "methodId": "capabilities.run",
+    "http": null,
+    "status": 200,
+    "body": {
+      "id": "sample",
+      "ok": false,
+      "text": "sample",
+      "detail": "sample",
+      "data": {},
+      "risk": "sample",
+      "repeat": "safe",
+      "method": "sample"
+    }
+  },
   "channels.accounts.action.default": {
     "methodId": "channels.accounts.action.default",
     "http": {
@@ -5465,6 +5512,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -5533,6 +5581,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -5590,6 +5639,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "field": "sample",
           "label": "sample",
           "configured": false,
+          "resolved": false,
           "source": "sample"
         }
       ],
@@ -5629,6 +5679,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -5670,6 +5721,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -5919,6 +5971,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -6705,9 +6758,21 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "label": "sample",
           "state": "sample",
           "enabled": false,
+          "configured": false,
+          "credentialResolves": false,
+          "runtime": {
+            "observable": false,
+            "running": false,
+            "reason": "sample",
+            "lastError": "sample",
+            "observedAt": 0
+          },
           "accountId": "sample",
           "metadata": {}
         }
+      ],
+      "health": [
+        {}
       ]
     }
   },
@@ -26452,6 +26517,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "http": null,
     "status": 200,
     "body": {
+      "notice": "sample",
       "intro": "sample",
       "choices": [
         {
@@ -26486,6 +26552,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "letsEncrypt": {
         "domain": "sample",
         "tokenStored": false,
+        "tokenUnreadable": "sample",
         "issuing": false,
         "certificate": {
           "names": [
@@ -26565,6 +26632,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "ok": false,
       "words": "sample",
       "status": {
+        "notice": "sample",
         "intro": "sample",
         "choices": [
           {
@@ -26599,6 +26667,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
         "letsEncrypt": {
           "domain": "sample",
           "tokenStored": false,
+          "tokenUnreadable": "sample",
           "issuing": false,
           "certificate": {
             "names": [
@@ -26676,6 +26745,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
     "http": null,
     "status": 200,
     "body": {
+      "notice": "sample",
       "intro": "sample",
       "choices": [
         {
@@ -26710,6 +26780,7 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       "letsEncrypt": {
         "domain": "sample",
         "tokenStored": false,
+        "tokenUnreadable": "sample",
         "issuing": false,
         "certificate": {
           "names": [

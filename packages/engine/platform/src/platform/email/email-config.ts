@@ -8,6 +8,7 @@
  */
 
 import { revealOrNull, type Secret } from '../security/secret.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../config/secret-store-unreadable.js';
 import { ownerMessageForFailure } from './imap-open.js';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import type { EmailCapabilityFailureNotice } from './imap-open.js';
@@ -218,13 +219,16 @@ export function validateEmailInboxConfig(config: EmailConfig): string[] {
  */
 export class EmailCredentialUnavailableError extends Error {
   readonly notice: EmailCapabilityFailureNotice;
+  /** True when the secret store this computer holds could not be read: the password may be stored and is not asked for again. */
+  readonly storeUnreadable: boolean;
 
-  constructor(detail: string) {
-    const ownerMessage = ownerMessageForFailure('credential-unavailable', '');
+  /** `ownerMessage`: the owner's words when they are not "no mail password is stored" (a secret store that could not be read). */
+  constructor(detail: string, ownerMessage: string = ownerMessageForFailure('credential-unavailable', ''), storeUnreadable = false) {
     super(`${ownerMessage} ${detail}`);
+    this.storeUnreadable = storeUnreadable;
     this.name = 'EmailCredentialUnavailableError';
     this.notice = {
-      reason: 'credential-unavailable',
+      reason: storeUnreadable ? 'store-unreadable' : 'credential-unavailable',
       terminal: true,
       mailbox: '',
       ownerMessage,
@@ -247,7 +251,7 @@ export class EmailCredentialUnavailableError extends Error {
  */
 export async function resolveEmailPassword(
   passwordRef: string,
-  secretsManager: { readonly get: (key: string) => Promise<Secret | null> },
+  secretsManager: { readonly get: (key: string) => Promise<Secret | null> } & StoredSecretReader,
   setting = 'surfaces.email.password',
 ): Promise<string> {
   // The store is asked for a KEY; it never parses references, so a reference of
@@ -256,6 +260,11 @@ export async function resolveEmailPassword(
   if ('problem' in parsed) throw new EmailCredentialUnavailableError(`${parsed.problem}.`);
   const key = parsed.key;
   const value = revealOrNull(await secretsManager.get(key), 'dispatch');
+  // A secret store this computer could not read is not a missing password: the owner is not asked for it again.
+  const unreadable = value ? null : await unreadableSecretStore(secretsManager, key, 'the mailbox password');
+  if (unreadable) {
+    throw new EmailCredentialUnavailableError(`${setting} names '${key}'.`, `${unreadable} Nothing is read from the mailbox until the store can be read.`, true);
+  }
   if (!value) {
     throw new EmailCredentialUnavailableError(
       `${setting} names '${key}', and no secret by that name was found.`,

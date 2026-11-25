@@ -20,6 +20,7 @@
  */
 
 import { getOperatorContract } from '@goodvibes/engine/platform/contracts';
+import { builtinGatewayCapabilityMethodDescriptors } from '@goodvibes/engine/platform/platform/capabilities';
 
 export type JsonRecord = Record<string, unknown>;
 
@@ -81,6 +82,18 @@ function buildMethodIndex(): Map<string, OperatorContractMethodEntry> {
   const index = new Map<string, OperatorContractMethodEntry>();
   for (const method of methods) {
     if (typeof method?.id === 'string' && method.id) index.set(method.id, method);
+  }
+  // The two capability methods are declared by this program's own platform; a generated contract older than
+  // them still reaches them (capabilities.find, capabilities.run).
+  // Their schemas share the recursive JSON-value schema, so only the plain facts a caller reads are kept here.
+  for (const method of builtinGatewayCapabilityMethodDescriptors) {
+    if (index.has(method.id)) continue;
+    index.set(method.id, {
+      id: method.id, title: method.title, description: method.description, category: method.category, access: method.access,
+      scopes: [...method.scopes], invokable: method.invokable ?? true,
+      ...(method.ownerOnly ? { ownerOnly: true } : {}), ...(method.modelRefused ? { modelRefused: true } : {}),
+      ...(method.irreversible ? { irreversible: true } : {}), ...(method.changesContract ? { changesContract: true } : {}),
+    });
   }
   return index;
 }

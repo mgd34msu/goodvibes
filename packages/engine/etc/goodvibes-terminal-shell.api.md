@@ -707,7 +707,7 @@ export function getVisibleWindow(total: number, selectedIndex: number, visibleCo
 export const GOODVIBES_CLI_CATALOG: CliCatalog<GoodVibesCliCommand, GoodVibesCliFlagField, GoodVibesCliFlags>;
 
 // @public (undocumented)
-export type GoodVibesCliCommand = 'tui' | 'open' | 'run' | 'serve' | 'web' | 'service' | 'status' | 'doctor' | 'setup' | 'models' | 'providers' | 'auth' | 'subscription' | 'secrets' | 'sessions' | 'tasks' | 'pair' | 'surfaces' | 'listener' | 'control-plane' | 'support-bundle' | 'remote' | 'bridge' | 'hooks' | 'plugin' | 'completion' | 'help' | 'version' | 'unknown';
+export type GoodVibesCliCommand = 'tui' | 'open' | 'run' | 'do' | 'find' | 'serve' | 'web' | 'service' | 'status' | 'doctor' | 'setup' | 'models' | 'providers' | 'auth' | 'subscription' | 'secrets' | 'sessions' | 'tasks' | 'pair' | 'surfaces' | 'listener' | 'control-plane' | 'support-bundle' | 'remote' | 'bridge' | 'hooks' | 'plugin' | 'completion' | 'help' | 'version' | 'unknown';
 
 // @public
 export type GoodVibesCliFlagField = keyof GoodVibesCliFlags;

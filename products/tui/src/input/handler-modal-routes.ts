@@ -131,7 +131,10 @@ export function handleConfigModalToken(state: ConfigModalRouteState, token: Inpu
 
   let actionKey = '';
   if (token.type === 'key') {
-    if (token.logicalName === CONFIG_MODAL_ACTION_LEADER && token.ctrl && !token.shift && !token.meta) {
+    // The leader as bound in the key table (Ctrl+G by default); without a table, its default.
+    const keys = state.commandContext?.workspace?.keybindingsManager;
+    const leader = keys ? keys.matches('leader', token) : token.logicalName === CONFIG_MODAL_ACTION_LEADER && token.ctrl && !token.shift && !token.meta;
+    if (leader) {
       state.configModal.armLeader();
       state.requestRender();
       return true;

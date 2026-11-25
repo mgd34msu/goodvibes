@@ -34,6 +34,99 @@ export function listChangeOf(frame: unknown): string | undefined {
   return undefined;
 }
 
+/** What a screen follows on the daemon's event stream: whole domains, named wire events, LIST_CHANGED lists. */
+export interface DaemonFrameInterest {
+  /** Domains to open the stream on (`automation`, `gate`, `workspace` for LIST_CHANGED). */
+  readonly domains: readonly string[];
+  /** Wire event names that count as a change (a domain's frames carry its name; `approval-update`, `owner-inbox-update`). */
+  readonly events: readonly string[];
+  /** LIST_CHANGED lists that count as a change. */
+  readonly lists?: readonly string[] | undefined;
+}
+
+/** How a followed stream stands, for a screen that says why its list may be old. */
+export type DaemonFrameStreamState =
+  | { readonly kind: 'open' }
+  | { readonly kind: 'lost'; readonly reason: string };
+
+/**
+ * Follow the daemon's event stream for what `interest` names: `onChange` is
+ * called for each frame that counts, and once each time the stream opens
+ * again after it was lost (frames may have been missed in between, so the
+ * screen reads its list again). `onState` hears the stream open and get lost.
+ * A stream that cannot be opened at all reports that once and stops; the
+ * screen still reads its list when it opens. Nothing here waits on a clock:
+ * reconnecting is the transport's own.
+ */
+export function subscribeDaemonEventFrames(
+  options: ListChangeSubscriberOptions,
+  interest: DaemonFrameInterest,
+  onChange: () => void,
+  onState?: ((state: DaemonFrameStreamState) => void) | undefined,
+): () => void {
+  let closed = false;
+  let close: (() => void) | null = null;
+  let lost = false;
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  if (typeof fetchImpl !== 'function') return () => { closed = true; };
+  const events = new Set(interest.events);
+  const lists = new Set(interest.lists ?? []);
+  const changed = (): void => {
+    if (closed) return;
+    try { onChange(); } catch (error) { logger.debug('[daemon frames] a subscriber threw', { error: summarizeError(error) }); }
+  };
+  const state = (next: DaemonFrameStreamState): void => {
+    if (closed) return;
+    try { onState?.(next); } catch (error) { logger.debug('[daemon frames] a state listener threw', { error: summarizeError(error) }); }
+  };
+  void (async () => {
+    try {
+      const baseUrl = typeof options.baseUrl === 'function' ? options.baseUrl() : options.baseUrl;
+      const url = new URL(buildUrl(baseUrl, '/api/control-plane/events'));
+      url.searchParams.set('domains', [...new Set(interest.domains)].join(','));
+      const opened = await openRawServerSentEventStream(
+        fetchImpl,
+        url.toString(),
+        {
+          onEvent: ({ name: eventName, payload }) => {
+            if (closed) return;
+            if (eventName === LIST_CHANGE_WIRE_EVENT && lists.size > 0) {
+              const list = listChangeOf(payload);
+              if (list !== undefined && lists.has(list)) changed();
+              if (!events.has(eventName)) return;
+            }
+            if (events.has(eventName)) changed();
+          },
+          onReady: () => {
+            state({ kind: 'open' });
+            if (lost) { lost = false; changed(); }
+          },
+          onReconnect: ({ error }) => {
+            lost = true;
+            state({ kind: 'lost', reason: summarizeError(error) });
+          },
+          onGap: () => { lost = true; },
+          onEnd: (end) => {
+            state({ kind: 'lost', reason: end.kind === 'failed' ? end.refusal.reason : 'the daemon closed its event stream' });
+          },
+        },
+        // The transport's own reconnect (as the power chip's stream): a lost stream comes back by itself.
+        { reconnect: { enabled: true }, ...(options.getAuthToken ? { getAuthToken: options.getAuthToken } : {}) },
+      );
+      if (closed) { opened(); return; }
+      close = opened;
+    } catch (error) {
+      state({ kind: 'lost', reason: summarizeError(error) });
+      logger.debug('[daemon frames] the daemon event stream could not be opened; the screen reads its list when it opens', { error: summarizeError(error) });
+    }
+  })();
+  return () => {
+    closed = true;
+    close?.();
+    close = null;
+  };
+}
+
 /**
  * Follow the daemon's LIST_CHANGED notices for `lists`; `onChange` is called with the list's
  * name for each. Returns the unsubscribe (which also closes the stream).

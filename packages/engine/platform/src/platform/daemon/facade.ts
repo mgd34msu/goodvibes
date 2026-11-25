@@ -14,6 +14,7 @@ import { ModelReferenceError } from '../providers/model-id-resolution.js';
 import { AgentSpawnInputError } from '../tools/agent/model-routing.js';
 import { summarizeError } from '../utils/error-display.js';
 import { DaemonLifecycleRuntime, type NativeHandover, createDaemonOwnerAlerter, registerDaemonHeartbeatWatcher, runDaemonSessionStoreBoot } from './facade-lifecycle.js';
+import { deliverOwnerAlert } from './owner-alert.js';
 import { registerUpdateGatewayMethods } from '../control-plane/routes/update.js';
 import { registerRelayGatewayMethods } from '../control-plane/routes/relay.js';
 import { AgentManager } from '../tools/agent/index.js';
@@ -94,6 +95,7 @@ import { lanAuthorityCertificate } from './lan-https/authority.js';
 import { lanHttpsPageResponse } from './lan-https/page.js';
 import { SecureAddressGroupShare } from './lan-https/group-share.js';
 import { registerSecureAddressGatewayMethods } from '../control-plane/routes/secure-address.js';
+import { registerDaemonCapabilities } from './capability-wiring.js';
 import { activeTailscaleServeOrigin } from '../remote-access/tailscale.js';
 import { lanHttpsOriginOf } from '../pairing/web-origin.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
@@ -233,6 +235,13 @@ export class DaemonServer {
     secrets: () => this.runtimeServices?.secretsManager,
     // A certificate ending soon, a renewal that failed close to the end, a node's authority set aside: one line to the owner (owner-alert.ts).
     alertOwner: (text) => { try { createDaemonOwnerAlerter(this.routeBindings, this.surfaceDeliveryHelper)(text); } catch (error) { logger.warn('DaemonServer: a secure address notice could not be sent', { error: summarizeError(error) }); } },
+    // A notice that must be seen: true only when an owner channel carried it (otherwise the Secure address screen shows it).
+    noticeOwner: async (text) => {
+      try { return (await deliverOwnerAlert(this.routeBindings, this.surfaceDeliveryHelper, null, text)) !== null; } catch (error) {
+        logger.warn('DaemonServer: a secure address notice could not be sent', { error: summarizeError(error) });
+        return false;
+      }
+    },
   });
   private readonly pendingSurfaceReplies = new Map<string, PendingSurfaceReply>();
   private readonly controlPlaneHelper: DaemonControlPlaneHelper;
@@ -470,6 +479,8 @@ export class DaemonServer {
       tailscaleOrigin: () => activeTailscaleServeOrigin(),
       ...(config.serveToNetwork ? { serveToNetwork: config.serveToNetwork } : {}),
     });
+    // capabilities.find and capabilities.run: every capability by need and by id, through this daemon's own dispatch and gate.
+    registerDaemonCapabilities(this.runtimeServices, (input) => this.invokeGatewayMethodCall(input));
     // A group's machines share the secure address of the one that set it up (lan-https/group-share.ts).
     if (config.secureAddressGroup) {
       const share = new SecureAddressGroupShare(config.secureAddressGroup, this.lanHttps.secureAddress);

@@ -38,9 +38,9 @@ import {
 } from './settings-io.js';
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
-import { PROGRAM_SETTINGS_ROOTS, RETIRED_NO_DECISION_MODEL_POLICIES, RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, describeSettingsCarryForward, type SettingsCarryForward } from './settings-carry-forward.js';
+import { DECISION_MODEL_NONE_KEY, DECISION_MODEL_SETTINGS_SET_ASIDE, DECISION_MODEL_SET_ASIDE_KEY, PROGRAM_SETTINGS_ROOTS, RETIRED_NO_DECISION_MODEL_POLICIES, RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, describeSettingsCarryForward, type SettingsCarryForward } from './settings-carry-forward.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
-import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
+import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, persistDaemonKey, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
 import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
 import { describeKeySource, type ConfigKeyTier, type ConfigKeySource } from './manager-key-source.js';
 import { DEFAULT_CONFIG_SNAPSHOT, cloneDefaultConfig, ensureSharedConfig, requireAbsoluteOwnedPath, sanitizeConfigShape } from './manager-bootstrap.js';
@@ -2565,23 +2565,33 @@ export class ConfigManager {
   /**
    * 3.5.0 and earlier had a third value for `judgment.policy`, No Decision Model:
    * no decision model is asked, as with none set. It is carried once to the mode
-   * Ask me, the decision-model settings kept. This manager sets `permissions.mode`
-   * to `ask-me` in its own settings file while the daemon's file on this machine
-   * holds the value; the daemon (the one manager that owns that file) also sets
-   * it in the terminal app's and the Agent's settings files, then removes the
-   * value (Ask me is then the "If Jev can't answer" answer, the default), so the
-   * order the programs start in does not matter. Every file changed is kept
-   * beside itself as it was, and the owner is told once. A 3.5.0 program reading
-   * the files afterwards finds two values it knows. A failure leaves the files as
-   * they were and says so in the log.
+   * Ask me with no decision model set, so nothing is sent to one: the primary
+   * decision model's settings (DECISION_MODEL_SETTINGS_SET_ASIDE) are moved, as
+   * they were, to `judgment.setAside`, which Settings offers back when a decision
+   * model is chosen again. This manager sets `permissions.mode` to `ask-me` in its
+   * own settings file while the daemon's file on this machine holds the value
+   * (and leaves the decision-model settings out of what it reads, loadDaemonTier);
+   * the daemon (the one manager that owns that file) also sets it in the terminal
+   * app's and the Agent's settings files, moves the decision-model settings aside
+   * and removes the value (Ask me is then the "If Jev can't answer" answer, the
+   * default), so the order the programs start in does not matter. Every file
+   * changed is kept beside itself as it was, and the owner is told once. A 3.5.0
+   * program reading the files afterwards finds two values it knows, no decision
+   * model, and `judgment.setAside` and `judgment.noDecisionModel`, keys it does
+   * not know (left in the file and reported once). The carried home stays with
+   * no decision model whatever the environment holds (`judgment.noDecisionModel`). A failure leaves the files as they were and says so in the log.
    */
   #carryDecisionModelsOffForward(): void {
     const tierPath = this.daemonTierPath;
     if (this.readOnly || tierPath === null || tierPath === this.configPath || this.#daemonIsRemote() || !existsSync(tierPath)) return;
     let held: boolean;
+    // The decision model's own settings the daemon's file holds: moved aside by the daemon (said once, by whichever program starts first).
+    let modelHeld: string[];
     try {
-      const stored = readDotPath(readDaemonTierFile(tierPath), 'judgment.policy').value;
+      const tier = readDaemonTierFile(tierPath);
+      const stored = readDotPath(tier, 'judgment.policy').value;
       held = typeof stored === 'string' && RETIRED_NO_DECISION_MODEL_POLICIES.includes(stored);
+      modelHeld = DECISION_MODEL_SETTINGS_SET_ASIDE.filter((key) => readDotPath(tier, key).present);
     } catch {
       return; // An unreadable daemon file is refused, with its reason, by the tier load that follows.
     }
@@ -2592,6 +2602,7 @@ export class ConfigManager {
     }
     const changed: string[] = [];
     const kept: string[] = [];
+    let setAside: readonly string[] = [];
     try {
       for (const file of files) {
         const exists = existsSync(file);
@@ -2606,16 +2617,34 @@ export class ConfigManager {
       }
       if (this.daemonTierOwner) {
         kept.push(this.#keepFileBeforeCarryForward(tierPath));
+        // The decision model's own settings move aside as they were, in one write, then leave their keys:
+        // with none set nothing is sent to a decision model, and Settings offers them back.
+        const tier = readDaemonTierFile(tierPath);
+        const aside: Record<string, unknown> = {};
+        for (const key of DECISION_MODEL_SETTINGS_SET_ASIDE) {
+          const found = readDotPath(tier, key);
+          if (found.present) aside[key.slice('judgment.'.length)] = structuredClone(found.value);
+        }
+        setAside = Object.keys(aside);
+        if (setAside.length > 0) {
+          persistDaemonKey(tierPath, DECISION_MODEL_SET_ASIDE_KEY, aside);
+          for (const key of DECISION_MODEL_SETTINGS_SET_ASIDE) if (readDotPath(tier, key).present) removeDaemonKey(tierPath, key);
+        }
+        // The choice itself is kept: no decision model, which a key or server address in the environment does not undo.
+        persistDaemonKey(tierPath, DECISION_MODEL_NONE_KEY, true);
         removeDaemonKey(tierPath, 'judgment.policy');
       }
     } catch (error) {
       logger.warn('Decision models switched off in an earlier version could not be carried to the mode Ask me; the settings are left where they are', { file: tierPath, error: summarizeError(error) });
       return;
     }
-    logger.info('Decision models switched off in an earlier version were carried to the mode Ask me', { changed, keptAs: kept });
+    logger.info('Decision models switched off in an earlier version were carried to the mode Ask me', { changed, keptAs: kept, setAside });
     this.migrationReceipt(`carried-forward:decision-models-off:${tierPath}`,
-      'An earlier version had decision models switched off (No Decision Model). That choice is gone, so GoodVibes now uses the mode Ask me; '
-      + 'your decision model settings are kept, and another mode can be chosen with shift+tab or in Settings.'
+      'An earlier version had decision models switched off (No Decision Model). GoodVibes now uses the mode Ask me with No decision model chosen in Settings: nothing is sent to a decision model, even with a decision model key or server address in this computer\'s environment. '
+      + (setAside.length > 0 || modelHeld.length > 0
+        ? 'The decision model you had set up is kept, set aside; choosing a decision model in Settings offers it back. '
+        : '')
+      + 'Another mode can be chosen with shift+tab or in Settings.'
       + (kept.length > 0 ? ` The files as they were are kept beside them (${kept.join(', ')}).` : ''));
   }
 
@@ -2678,6 +2707,13 @@ export class ConfigManager {
       // another program reading the file before the daemon has done so leaves it out without a notice.
       const raw = readDaemonTierFile(this.daemonTierPath);
       for (const key of RETIRED_SETTING_KEYS) if (readDotPath(raw, key).present) deleteRawDotPath(raw, key);
+      // Decision models switched off (No Decision Model) not yet carried forward by the daemon: no decision model is set
+      // here either, so nothing is sent to one before the daemon has moved its settings aside (#carryDecisionModelsOffForward).
+      const policy = readDotPath(raw, 'judgment.policy').value;
+      if (typeof policy === 'string' && RETIRED_NO_DECISION_MODEL_POLICIES.includes(policy)) {
+        for (const key of DECISION_MODEL_SETTINGS_SET_ASIDE) if (readDotPath(raw, key).present) deleteRawDotPath(raw, key);
+        writeRawDotPath(raw, DECISION_MODEL_NONE_KEY, true);
+      }
       const stored = this.ingest(raw, this.daemonTierPath);
       const applied = overlayDaemonTierFrom(stored, (key, value) => {
         const { parent, field } = resolveOrCreateDaemonPath(staged.nonRuntime as unknown as Record<string, unknown>, key);

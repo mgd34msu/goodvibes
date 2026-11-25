@@ -65,6 +65,7 @@ const TERMINAL_REASONS: ReadonlySet<string> = new Set([
   'authentication-rejected',
   'mailbox-unavailable',
   'credential-unavailable',
+  'store-unreadable',
   'bodies-unfetchable',
 ]);
 
@@ -368,6 +369,8 @@ export async function resolveIdleSupport(
 export type EmailCapabilityFailureReason =
   | ImapOpenFailureReason
   | 'credential-unavailable'
+  /** The secret store this computer holds could not be read: the password may be stored; it is not asked for again. */
+  | 'store-unreadable'
   | 'bodies-unfetchable';
 
 /**
@@ -402,6 +405,10 @@ export function ownerMessageForFailure(
         + 'stored at daemon scope. A credential saved by another surface is not visible '
         + 'here and is deliberately not searched for, reading one would work on '
         + 'the machine that saved it and fail everywhere else.';
+    case 'store-unreadable':
+      // The cause is in the error's own words (secret-store-unreadable.ts); this is the sentence without it.
+      return 'The secret store on this computer could not be read, so the mailbox password could not be read; '
+        + 'nothing already given there is asked for again. Nothing is read from the mailbox until the store can be read.';
     case 'authentication-rejected':
       return 'The mail server rejected the sign-in. Nothing will be read until '
         + 'the stored password is replaced: store a working mailbox password '

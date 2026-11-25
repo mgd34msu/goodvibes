@@ -768,6 +768,16 @@
       "types": "./platform/dist/platform/hooks/index.d.ts",
       "import": "./platform/dist/platform/hooks/index.js"
     },
+    "./platform/platform/capabilities": {
+      "bun": "./platform/src/platform/capabilities/index.ts",
+      "types": "./platform/dist/platform/capabilities/index.d.ts",
+      "import": "./platform/dist/platform/capabilities/index.js"
+    },
+    "./platform/platform/capabilities/words": {
+      "bun": "./platform/src/platform/capabilities/words.ts",
+      "types": "./platform/dist/platform/capabilities/words.d.ts",
+      "import": "./platform/dist/platform/capabilities/words.js"
+    },
     "./platform/platform/integrations": {
       "bun": "./platform/src/platform/integrations/index.ts",
       "types": "./platform/dist/platform/integrations/index.d.ts",
@@ -3643,6 +3653,26 @@
       "types": "./terminal-shell/dist/global-shortcuts.d.ts",
       "import": "./terminal-shell/dist/global-shortcuts.js"
     },
+    "./terminal-shell/leader-key": {
+      "bun": "./terminal-shell/src/leader-key.ts",
+      "types": "./terminal-shell/dist/leader-key.d.ts",
+      "import": "./terminal-shell/dist/leader-key.js"
+    },
+    "./terminal-shell/places": {
+      "bun": "./terminal-shell/src/places/index.ts",
+      "types": "./terminal-shell/dist/places/index.d.ts",
+      "import": "./terminal-shell/dist/places/index.js"
+    },
+    "./terminal-shell/surface-pointer": {
+      "bun": "./terminal-shell/src/surface-pointer.ts",
+      "types": "./terminal-shell/dist/surface-pointer.d.ts",
+      "import": "./terminal-shell/dist/surface-pointer.js"
+    },
+    "./terminal-shell/keys-capabilities": {
+      "bun": "./terminal-shell/src/keys-capabilities.ts",
+      "types": "./terminal-shell/dist/keys-capabilities.d.ts",
+      "import": "./terminal-shell/dist/keys-capabilities.js"
+    },
     "./terminal-shell/kill-ring": {
       "bun": "./terminal-shell/src/kill-ring.ts",
       "types": "./terminal-shell/dist/kill-ring.d.ts",
@@ -4257,6 +4287,31 @@
       "bun": "./terminal-shell/src/agent-turn/operator-method-tool.ts",
       "types": "./terminal-shell/dist/agent-turn/operator-method-tool.d.ts",
       "import": "./terminal-shell/dist/agent-turn/operator-method-tool.js"
+    },
+    "./terminal-shell/agent-turn/capability-tools": {
+      "bun": "./terminal-shell/src/agent-turn/capability-tools.ts",
+      "types": "./terminal-shell/dist/agent-turn/capability-tools.d.ts",
+      "import": "./terminal-shell/dist/agent-turn/capability-tools.js"
+    },
+    "./terminal-shell/capability-host": {
+      "bun": "./terminal-shell/src/capability-host.ts",
+      "types": "./terminal-shell/dist/capability-host.d.ts",
+      "import": "./terminal-shell/dist/capability-host.js"
+    },
+    "./terminal-shell/capability-catalog": {
+      "bun": "./terminal-shell/src/capability-catalog.ts",
+      "types": "./terminal-shell/dist/capability-catalog.d.ts",
+      "import": "./terminal-shell/dist/capability-catalog.js"
+    },
+    "./terminal-shell/capability-cli-help": {
+      "bun": "./terminal-shell/src/capability-cli-help.ts",
+      "types": "./terminal-shell/dist/capability-cli-help.d.ts",
+      "import": "./terminal-shell/dist/capability-cli-help.js"
+    },
+    "./terminal-shell/capability-cli": {
+      "bun": "./terminal-shell/src/capability-cli.ts",
+      "types": "./terminal-shell/dist/capability-cli.d.ts",
+      "import": "./terminal-shell/dist/capability-cli.js"
     },
     "./terminal-shell/agent-turn/operator-policy": {
       "bun": "./terminal-shell/src/agent-turn/operator-policy.ts",

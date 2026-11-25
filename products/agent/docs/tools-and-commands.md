@@ -24,7 +24,7 @@ High-signal TUI routes:
 
 | Surface | Purpose |
 | --- | --- |
-| `/agent` | Open the Agent workspace (also `Ctrl+G`), at a page when one is named. |
+| `/agent` | Open the Agent workspace (also `Ctrl+G` `w`), at a page when one is named. |
 | `/work` | Work on the connected host: open it, ask for work in your own words (`request`), start, cancel or resume a piece of work, submit work from a file (`submit-file`), recover input waiting to be admitted, import old planning records (`import-preview`, `import`), and see how the planner spreads work. |
 | `/workstream` | Plan work as a draft (`plan`), review and change it (`plans`, `show`, `replan`, `edit`, `drop`, `move`), then `approve` and `launch` it, or `discard` it; `start` work on a request, `list`, `status`, `stop` or `answer` running workstreams, `retry` to run a step again, and `budget` to change a workstream's spending limit. |
 | `/help` | Every command and every key in one searchable list (also `?` and `Ctrl+P`). |
@@ -38,7 +38,7 @@ High-signal TUI routes:
 | `/mcp`, `/secrets`, `/settings` | Inspect or update Agent-local configuration. |
 | `/agents hand-off` | Hand explicit build/fix/review work to the terminal app with a handoff brief. Each hand-off is recorded in the Agent home; `/agents handed-off` lists them and `/agents handed-off <session>` shows the session's input state and latest answer. A hand-off whose task could not be delivered removes the empty session it created. |
 
-An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Your agents, `F2` or `Ctrl+O`) opens the agent: its work is the spine, its own children branch off it, the header reads `main › researcher` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a row in the process monitor) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because the Agent cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Alt+N` / `Alt+P` (the rebindable `next-session` and `previous-session`) switch between them; the row ends with those keys. `Shift+Tab` always changes when the Agent asks.
+An agent or a background process can take over the whole terminal. `Enter` on an agent's lane in the work tree (or on its row in Your agents, `F2` or `Ctrl+O`) opens the agent: its work is the spine, its own children branch off it, the header reads `main › researcher` in the agent's color, and the composer steers the agent while main keeps running. `Enter` on a `▶` bead (or a row in the process monitor) opens the process: live output with timestamps, errors in red, follow mode on. The process view takes no input, because the Agent cannot write to a background process's stdin; `/` searches its output and `y` copies it. While more than one session exists, a row of session chips under the header lists them, and `Ctrl+G` `n` / `Ctrl+G` `p` (the rebindable `next-session` and `previous-session`) switch between them; the row ends with those keys. `Shift+Tab` always changes when the Agent asks.
 
 Composer markers: a line that starts with `!` runs the rest as a shell command and shows its output, and that output goes in front of your next message as context; `!@<path>` in a message is replaced by the file's text, and `@<path>` or `@<url>` adds the file, a folder listing or a link note (each file is capped, and the cut is stated); an image cannot be sent with a message and is refused with your text back in the composer; `!# <text>` pins the text to session memory and sends it; a single line that starts with `# ` (a hash and a space) saves the rest as a session-memory note and sends nothing (`#482`, `## headings` and text of several lines that starts with `#` are sent as typed). The TUI reads these markers the same way.
 
@@ -389,7 +389,7 @@ Routine promotion is an explicit scheduling route. Local routines stay local unt
 | --- | --- |
 | `/accounts` | Review provider auth routes, subscription windows, and billing-path safety. |
 | `/agents open` | Your agents: what is waiting for you, running, scheduled and finished (also F2 and Ctrl+O). |
-| `/agent` | Open the Agent workspace (also Ctrl+G). |
+| `/agent` | Open the Agent workspace (also Ctrl+G then w). |
 | `/agents` | Your agents: open the live view, and hand build, fix or review work to the terminal app (`hand-off`, with reason, success criteria, workspace hint, priority and review intent) and follow it (`handed-off`). |
 | `/agent-home` | Separate Agent homes and the starters they are made from, including opt-in VIBE.md starter export/import with `--include-vibe`. |
 | `/approval` | What each kind of approval asks about, and the approvals waiting on you; answer one with `/questions answer`. |

@@ -14,6 +14,8 @@ export interface BuildCloudflareStatusInput {
   /** What provisioning created; resources count as configured only from here. */
   readonly provisioned: CloudflareProvisionedResources | null;
   readonly tunnelConnector?: CloudflareTunnelConnectorStatus | undefined;
+  /** The words for a secret store this computer could not read, when a token read as absent; never "not configured" then. */
+  readonly storeUnreadable?: string | null | undefined;
 }
 
 export function buildCloudflareControlPlaneStatus(input: BuildCloudflareStatusInput): CloudflareControlPlaneStatus {
@@ -39,9 +41,12 @@ export function buildCloudflareControlPlaneStatus(input: BuildCloudflareStatusIn
     secretsStore: Boolean(record?.secretsStore),
   };
   const warnings: string[] = [];
-  if (input.config.enabled && !configured.apiToken) warnings.push('Cloudflare is enabled but no API token is configured.');
+  // A token that read as absent because the secret store could not be read is not "not configured": said with its cause.
+  const unreadable = input.storeUnreadable ?? null;
+  if (input.config.enabled && (!configured.apiToken || !configured.workerToken) && unreadable) warnings.push(unreadable);
+  if (input.config.enabled && !configured.apiToken && !unreadable) warnings.push('Cloudflare is enabled but no API token is configured.');
   if (input.config.enabled && !configured.daemonBaseUrl) warnings.push('Cloudflare is enabled but no daemonBaseUrl is configured for Worker-to-daemon calls.');
-  if (input.config.enabled && !configured.workerToken) warnings.push('Cloudflare is enabled but no Worker-to-daemon operator token is configured.');
+  if (input.config.enabled && !configured.workerToken && !unreadable) warnings.push('Cloudflare is enabled but no Worker-to-daemon operator token is configured.');
   if (input.config.enabled && !configured.workerClientToken) warnings.push('Cloudflare Worker client auth is not configured; provisioning will generate one.');
   if (input.config.enabled && !configured.workerName) warnings.push('Cloudflare is enabled but no Worker has been provisioned from this daemon; run /cloudflare provision.');
   if (record?.worker?.daemonCredential === 'removed') warnings.push('The Worker no longer holds the daemon credential (it was disabled); provision again to restore it.');

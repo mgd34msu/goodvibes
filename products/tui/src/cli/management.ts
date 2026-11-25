@@ -9,6 +9,7 @@ import { createNetworkFetch } from '@goodvibes/engine/platform/platform/runtime/
 import { resolveRemoteDaemonTarget, type DaemonFailure, type RemoteDaemonTarget } from '@goodvibes/engine/terminal-shell/cluster-remote-daemon-target';
 import { callDaemonMethod, callDaemonRoute } from '@goodvibes/engine/terminal-shell/raw-reply-route';
 import { withProviderServices, type OneShotProviderServices } from './one-shot-services.ts';
+import { daemonTargetInvoke, runCapabilityCommand } from '@goodvibes/engine/terminal-shell/capability-cli';
 
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
 
@@ -270,6 +271,13 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
     switch (runtime.cli.command) {
       case 'run':
         return { handled: true, exitCode: await runNonInteractiveAgent(runtime) };
+      // A capability by id, and the capabilities that serve a need: the daemon's capabilities.run and capabilities.find.
+      case 'do':
+      case 'find':
+        return { handled: true, exitCode: await runCapabilityCommand({
+          program: 'goodvibes', verb: runtime.cli.command, args: runtime.cli.commandArgs, json: runtime.cli.flags.outputFormat === 'json', caller: 'tui',
+          invoke: daemonTargetInvoke(runtime), workingDirectory: runtime.workingDirectory,
+        }) };
       case 'web':
         console.log(renderWeb(runtime));
         return { handled: true, exitCode: 0 };

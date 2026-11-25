@@ -25,9 +25,11 @@ import {
   isEmailUnconfiguredError,
   isMethodNotInvokableError,
   isMethodUnavailableError,
+  isSecretStoreUnreadableError,
+  formatError,
 } from './errors';
 
-export type MailRefusalKind = 'not-available' | 'needs-setup' | 'auth-failed';
+export type MailRefusalKind = 'not-available' | 'needs-setup' | 'auth-failed' | 'store-unreadable';
 
 export interface MailRefusalNote {
   readonly kind: MailRefusalKind;
@@ -56,6 +58,14 @@ export function mailRefusalNote(error: unknown): MailRefusalNote | null {
       kind: 'not-available',
       title: 'Mail isn’t available on this daemon yet',
       description: 'This daemon has no mail service yet, and updating the daemon turns it on.',
+    };
+  }
+  // Before setup: the password may well be stored; the store could not be read, so nothing is asked for.
+  if (isSecretStoreUnreadableError(error)) {
+    return {
+      kind: 'store-unreadable',
+      title: 'The secret store could not be read',
+      description: formatError(error),
     };
   }
   if (isEmailUnconfiguredError(error)) {

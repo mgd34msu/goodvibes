@@ -57,8 +57,11 @@ import { bindWriteLastSessionPointerToSurface, ProcessTaskAdapter } from '@goodv
 import { deriveSpineFooterStatus, forwardCheckpointChangesToDaemon, type SessionSpineClient, type SessionSpineRestConnection } from '@goodvibes/engine/platform/platform/runtime/session-spine';
 import { transportRetryHooks } from '@goodvibes/engine/platform/platform/runtime/emitters';
 import { bindControlCommands } from './control-surfaces.ts';
+import { bindCapabilityHost, hiddenValuePrompt } from '@goodvibes/engine/terminal-shell/capability-host';
+import { sessionCapabilityServices } from '../input/commands/session-capabilities.ts';
 import { formatWorktreeStartupReport } from '@goodvibes/engine/platform/platform/runtime/shell';
 import { createSpineAdoptionSync } from './client/spine-adoption.ts';
+import { announceDaemonAttached } from './daemon-attach-signal.ts';
 import { pruneStaleOperatorTokens } from '@goodvibes/engine/platform/platform/pairing';
 import { workspaceOperatorTokenCandidates } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { UiRuntimeServices } from './ui-services.ts';
@@ -73,6 +76,7 @@ import { bindSessionContextAccounting } from '@goodvibes/engine/platform/platfor
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  daemonNotInstalledNotice,
   describeDaemonAutostart,
   waitForStartingDaemon,
   type DaemonServiceControl,
@@ -130,6 +134,13 @@ export type BootstrapContext = RuntimeContext & {
   trustPromptRef: { requestTrustDecision: () => Promise<WorkspaceTrustLevel>; awaitingOwner?: boolean };
   /** True once exit has durably saved the session, even while releases still run. */
   sessionSaved?: () => boolean;
+  /**
+   * Settles once the local daemon was found, or started when it was installed and stopped, or found missing
+   * (said in one line). The first turn waits for it, so the model's daemon capabilities have a daemon to run on.
+   */
+  daemonReady?: Promise<void>;
+  /** The one line that says no daemon is installed here (and how to install it), once the start found that; else undefined. */
+  daemonMissing?: () => string | undefined;
   /** Load the most recently saved conversation from disk. */
   loadLastConversation: () => { messages: Array<Record<string, unknown>> } | null;
   /** Write the last-session pointer file (used after session resume). */
@@ -396,6 +407,15 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   const commandRegistry = shell.commandRegistry;
   bindControlCommands(services, commandRegistry);
   const commandContext = shell.commandContext;
+  // The model's capability tools find every action of this app's commands and run the conversation's own on this conversation.
+  bootstrapUnsubs.push(bindCapabilityHost({
+    commands: () => commandRegistry.getAll(), session: () => sessionCapabilityServices(commandContext),
+    // The composer's hidden line, once the screen has set it up: a value a model's call needs is typed there.
+    hidden: () => {
+      const begin = commandContext.beginConcealedInput;
+      return begin ? (request) => { commandContext.print(hiddenValuePrompt(request.label)); begin(request); } : undefined;
+    },
+  }));
   // A failed or refused turn is a row in the transcript with its next steps on keys: alt+o picks
   // another model for the prompt, alt+i opens its details, alt+s the sign-ins (alt+r is the shell's retry chord).
   wireFailedTurnActions({
@@ -540,7 +560,10 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   // That no daemon is installed is said once on this machine, not at every start; once a
   // daemon is found the announce-once id is forgotten, so losing it again is said again.
   const announcements = new FeatureAnnouncementStore(featureAnnouncementsPath(configManager));
+  let missingDaemonLine: string | undefined;
   const announceAutostart = (outcome: Parameters<typeof describeDaemonAutostart>[0]): void => {
+    // A headless run says it on every run (ctx.daemonMissing); the interface once on this machine.
+    if (outcome.action === 'not-installed') missingDaemonLine = daemonNotInstalledNotice(outcome);
     if (outcome.action === 'not-installed' && !announcements.record(DAEMON_NOT_INSTALLED_ANNOUNCEMENT)) return;
     if (externalServices.daemonStatus.mode === 'external') announcements.forgetMatching((id) => id === DAEMON_NOT_INSTALLED_ANNOUNCEMENT);
     const notice = describeDaemonAutostart(
@@ -643,6 +666,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     adopt: (status, daemonToken) => {
       adoptedDaemonConnection = status.mode === 'external' && status.baseUrl !== '' ? { baseUrl: status.baseUrl, token: daemonToken } : null;
       syncSessionSpineToHostStatus(status, daemonToken);
+      // A daemon adopted (at start, or one that came up later): what could not be read reads again.
+      if (adoptedDaemonConnection) announceDaemonAttached();
     },
     notify: (text) => {
       systemMessageRouter.high(`[Daemon] ${text}`);
@@ -665,6 +690,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     requestRender();
     daemonHandshake.onLivenessTransition(online);
     if (online) retryRoutineMove();
+    // Readers that failed while the daemon was away (a place's lists) read again now.
+    if (online) announceDaemonAttached();
   });
   deferredStartup.schedule(
     createPluginStartupTask(
@@ -832,6 +859,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     systemMessageRouter,
     shutdown,
     sessionSaved: shutdown.sessionSaved,
+    daemonReady: externalServicesStarted,
+    daemonMissing: () => missingDaemonLine,
   };
 
   // ── Phase 12b: Operator Control Plane wiring (capability-gated); store and

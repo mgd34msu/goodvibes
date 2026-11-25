@@ -157,6 +157,17 @@ A prompt is required.
 
 The exit code is `2`.
 
+### `goodvibes find` and `goodvibes do`
+
+`find "<what you need>" [--output json]` names the three to five GoodVibes capabilities that do it, from the function group that serves the need, each with its id, its inputs and its risk; nothing runs. `do <capability id> [--input key=value ...] [--output json]` runs one by id through the daemon: a command you typed is the request, so it runs at once and prints what it did. A capability that acts on a conversation (clear, compact, undo) is refused in one line; it runs in the terminal app or the Agent. Exit `0` done (or found), `1` refused or failed, `2` bad usage; with `--output json` the answer, or the `{ok:false, code, error, fix}` refusal, is one document on stdout.
+
+```sh
+goodvibes find "switch off the lint hook"
+goodvibes do hooks.disable --input hook=lint-before-commit
+```
+
+The model has the same two as tools (`capability_find`, `capability_run`), and `goodvibes-daemon mcp serve` offers them to another program's model. A value of an input that is a secret (a password, a key) is never shown: an ask, an approval record, the conversation and every log show it as `(hidden, <n> characters)`.
+
 ### `goodvibes status`
 
 `status` prints the configuration posture: working directory, home directory, provider and model, reasoning effort, sign-in, decision model, permission mode, local auth files, daemon service, surfaces, onboarding, crashes, workspace trust and the exec sandbox.
@@ -655,7 +666,7 @@ The screen has four regions, top to bottom.
 3. The composer is the text box where the owner types. Its label shows what Enter will do (prompt, command, shell, note, memory pin).
 4. The status bar, the row under the composer. Left: first one word for what main is doing, never dropped: `working` while a turn runs, `waiting for you` (warning colour) while a question waits for your answer, nothing at rest. Then `Permissions:` and the mode in force. When it is the mode chosen, its name (`Permissions: Jev decides`, `Permissions: Ask me`, `Permissions: YOLO`); when it is not, what is in force first and the choice second, with when it takes effect: `Permissions: asking you, for now · Jev decides once a decision model is set` (no decision model set), `· Jev decides once decision models are on` (decision models switched off), `· Jev decides once you pick it yourself (not measured on this decision model)` (Jev decides is only the shipped default and was not measured on this decision model), `· Jev decides once the decision model answers again · decision model unreachable` (or `· decision model failing`), and `Permissions: YOLO, for now · <mode> once the old auto-approve setting is off`; then the `shift+tab` key that changes it. Then the chips that stay visible (`! YOLO` while an old auto-approve setting is on, the microphone, `sleep disabled`), the unread notices (`2 notices` with the `ctrl+n` key; absent at zero; while the row has room, the newest unread notice's subject beside the count, `2 notices: Setting nosuch ignored (…)`, or the first words of its text when it has no title, which gives way after the branch), what the next `Esc` does while a turn runs, and any background work. Right, two spaces apart: the cost when the model is priced, `context 34%` (amber from 65%, red at the compaction threshold; `context unknown` when the window is not known), `branch main, changed` (`, changed` while the working tree differs from the last commit; absent outside a repository), `model <name>`, and `ctrl+p menu`. The right side is drawn faint, as background facts. A click on a segment opens its view: the mode opens `/permissions`, whose first row reads the mode in force and, chosen, says what it does, why it differs from your choice and the one setting that fixes that (`Choose a decision model`, `Turn decision models on`, or `Change when GoodVibes asks`), the notices the notifications, context the context inspector, branch the changes, model the model picker, the cost Usage. When the row is short the pieces go in this order: `ctrl+p menu`, the cost; the choice shortens and keeps its cause (`Jev decides once a decision model is set` to `Jev decides: no decision model set`, `Jev decides: not measured yet` while Jev decides is only the shipped default, `Jev decides: waits for the decision model` while it fails, followed by the failure; a click on the mode shows the rest); the notices lose their `ctrl+n` key and keep the count (`3 notices`), the branch loses its state word (`branch main`), the context goes, the branch goes; a failure shortens (`decision model unreachable` to `unreachable`); then the model, the notices, the mode's key; a failure goes last. `Permissions:` with the mode in force (`asking you, for now`) and the choice always stay. At 120 columns with no decision model set, `Permissions: asking you, for now · Jev decides: no decision model set` shows with context, branch and model (with `1 notice` in place of the context when there is one); with Jev decides only the shipped default and not measured, `Permissions: asking you, for now · Jev decides: not measured yet` shows the same way; with the decision model unreachable, `Permissions: asking you, for now · Jev decides: waits for the decision model · decision model unreachable` shows with the model (`· unreachable` when there is a notice). At 80 columns: `Permissions: asking you, for now · Jev decides: no decision model set` and its key, or `Permissions: asking you, for now · Jev decides: waits for the decision model · unreachable`.
 
-While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Alt+N` and `Alt+P` (the rebindable `next-session` and `previous-session`) show the next and previous session, and the row ends with those keys. `Tab` and `Shift+Tab` never switch sessions.
+While more than one session exists (a helper agent or background process is running), a row of session chips appears under the header; `Ctrl+G` `n` and `Ctrl+G` `p` (the rebindable `next-session` and `previous-session`, also `Ctrl+Q` and `Ctrl+_`) show the next and previous session, and the row ends with those keys. `Tab` and `Shift+Tab` never switch sessions.
 
 ### What the composer does with typed text
 
@@ -683,19 +694,25 @@ Images in the terminal app:
 - Deleting a marker with `Backspace` removes that image.
 - `@photo.png` typed in the composer is plain text (the model can read the file with its tools); `!@photo.png` attaches the image, at most 20 MB, as a pasted path does.
 
+### The leader and the menu
+
+The leader (`Ctrl+G` by default, the rebindable `leader`) starts a two-key shortcut, over every screen: press it, and a strip at the bottom of the screen lists every key that can follow and what it does; the next key completes the shortcut or, if no shortcut uses it, cancels it (`Esc` cancels too). On a settings screen the key after the leader is that screen's action letter when it has one, and the strip lists those letters first, then the shortcuts of the key table. There is no time limit between the two keys. `Ctrl+G` then `m` opens the menu of every place: the fourteen function groups (This conversation, Sessions, Code and changes, Work and agents, Waiting for you, Models and providers, Permissions and safety, Tools and extensions, Memory and knowledge, Mail, calendar and channels, Automation, Devices and network, Money, System), each with one line on what is there and a count where something waits or failed; typing filters, `Enter` opens the place. The status bar's `ctrl+g m menu` keycap opens it with a click. In this release Waiting for you, Automation and System (Keys) have their place; the others say so.
+
+A place lists the real things (your schedules, what waits on you) read by themselves when it opens and again whenever they change elsewhere (a schedule paused, removed or run from the web UI, a question answered or expired elsewhere, shows with no key pressed). The hint row shows only the actions that apply to the selected item now, with the keys bound now; pressing one does it, says what happened and how to undo it, and asks first only when it cannot be undone or weakens a protection. Answering something that waits for you never asks again: the item is the question, so an answer's key answers it on the press, and `Enter` lists its answers, starting on No for an ask that loosens a protection. A list that could not be read says why; it is read again by itself when the daemon answers again (also when the place was opened while the daemon was down), and `r` reads it at once. Rows, tabs and menu rows can be clicked.
+
+Waiting for you holds the questions, the approvals and the held calls (the calls `just-vibes` held instead of asking) of every program in one inbox: the daemon's held calls and the ones each terminal program's own gate held, so a held call can be answered here, in the web UI or on a phone. An answer runs on its key, and the line after it names the choice as you pressed it (`Answered "Run bun test?": No.`).
+
+Each place's letters are keys of the table too, one group per place, named `place.<place>.<action>` in `keybindings.json` (`place.automation.pause`, `place.waiting.read-again`); a place's two keys that can apply at once, or one of its keys the program reads before the place, are reported as a conflict. An item's answers keep the item's own keys (`y`, `n`, `1`...), the same on every surface.
+
+The Keys place (System) lists every key the program acts on as bound now, and each place's keys under the place's name; `Enter` on one and then the new key changes it (the leader and then a key makes a two-key shortcut), `d` puts back its default, `Shift+D` puts every key back (it asks first). The model can do the same three (`keys.bind`, `keys.reset`, `keys.reset-all`, found and run like any capability; a key is written `ctrl+k`, `f5`, `shift+tab` or `leader m`). Two actions on one key are reported in plain words naming both, there, in a notice at start, and for a hand edit of `keybindings.json`.
+
 ### Fixed keys
 
 These keys are not in the rebindable table.
 
 | Key | Action |
 | --- | --- |
-| `Enter` | Send the composer, or run the selected row in a list. |
 | `Shift+Enter` | Insert a newline. |
-| `Tab` | Complete a path or command; otherwise toggle the nearest block's collapse. |
-| `Esc` | One step per press, the first that applies: close the top view (one level), clear the composer, leave an agent or process view, return a scrolled-back transcript to the bottom, interrupt the running turn. The status bar names what the next `Esc` does (`esc clear input`, `esc back`, `esc interrupt`). Each step also has a key of its own: `Ctrl+C` interrupts, `Alt+U` (terminal app) or `Ctrl+U` (Agent) clears the composer. Inside Agents it backs out one level and never stops work. |
-| `PageUp`, `PageDown` | Scroll the transcript by a page. |
-| `Up`, `Down` | Scroll the transcript, or recall input history when the composer is focused. |
-| `F2` | Open or close Your agents. |
 | `?` on an empty composer | Open the help list of every command. |
 | `@` at the start or after a space | Open the file picker; the chosen path is inserted. `!@` opens it to insert a file whose text will be embedded. |
 | `r` or `m` after a turn error | Retry the turn, or open the model picker. Any other key dismisses the choice. |
@@ -708,11 +725,18 @@ The default table of the terminal app:
 
 | Action | Default key | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C`, `F5` | Copy selected text to the clipboard. |
+| `leader` | `Ctrl+G` | Start a two-key shortcut (above). |
+| `open-menu` | `Ctrl+G` `m` | Open the menu of every place. |
+| `next-field` | `Tab` | Complete a path or command; otherwise toggle the nearest block's collapse; in a form, the next field; in a place, the next list. |
+| `choose` | `Enter` | Send the composer, or run the selected row in a list. |
+| `back` | `Esc` | One step per press, the first that applies: close the top view (one level), clear the composer, leave an agent or process view, return a scrolled-back transcript to the bottom, interrupt the running turn. The status bar names what the next `Esc` does (`esc clear input`, `esc back`, `esc interrupt`). Inside Agents it backs out one level and never stops work. |
+| `move-up`, `move-down`, `move-left`, `move-right` | `Up`, `Down`, `Left`, `Right` | Move; `Up`/`Down` scroll the transcript or recall input history when the composer is focused. |
+| `copy-selection` | `Ctrl+G` `c`, `F5`, `Ctrl+Shift+C` | Copy selected text to the clipboard (`Ctrl+Shift+C` where the terminal passes it on). |
 | `clear-cancel` | `Ctrl+C` | Clear the composer; on an empty composer cancel generation; pressed twice within one second, exit. The footer shows `Press Ctrl+C again to exit`. |
 | `screen-clear` | `Ctrl+L` | Repaint the screen. |
 | `command-palette` | `Ctrl+P`, `Ctrl+K` | Open the command palette: every command, view and setting. |
-| `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled (the same as `F2`). |
+| `open-agents` | `F2`, `Ctrl+O` | Open Your agents: what is running, what waits for you, what is scheduled. |
+| `scroll-page-up`, `scroll-page-down` | `PageUp`, `PageDown` | Scroll the transcript by a page. |
 | `history-search` | `Ctrl+R` | Reverse search of input history. |
 | `search` | `Ctrl+F` | Search this conversation's transcript. |
 | `block-copy` | `Ctrl+Y` | Copy the nearest block. |
@@ -721,33 +745,37 @@ The default table of the terminal app:
 | `delete-word` | `Ctrl+W` | Delete the word before the cursor (whitespace-delimited) into the kill ring. |
 | `line-start` | `Ctrl+A` | Move to the start of the line. |
 | `next-error-line-end` | `Ctrl+E` | Move to the end of the line; on an empty composer, jump to the next error in the transcript. |
-| `kill-line` | `Alt+K`, `Ctrl+X` | Kill from the cursor to the end of the line into the kill ring. |
-| `clear-prompt` | `Alt+U`, `Ctrl+G` | Clear the whole composer without using the kill ring. |
+| `kill-line` | `Ctrl+G` `k`, `Ctrl+X` | Kill from the cursor to the end of the line into the kill ring. |
+| `clear-prompt` | `Ctrl+G` `u` | Clear the whole composer without using the kill ring. |
 | `undo` | `Ctrl+Z` | Undo the last composer edit. |
-| `redo` | `Ctrl+Shift+Z`, `Ctrl+^` | Redo the last undone composer edit. |
+| `redo` | `Ctrl+G` `z`, `Ctrl+^` | Redo the last undone composer edit. |
 | `paste` | `Ctrl+V` | Paste from the clipboard; an image takes priority over text. |
-| `word-back` | `Alt+B`, `Ctrl+Left` | Move to the start of the previous word. |
-| `word-forward` | `Alt+F`, `Ctrl+Right` | Move to the end of the next word. |
+| `word-back` | `Ctrl+G` `b`, `Ctrl+Left` | Move to the start of the previous word. |
+| `word-forward` | `Ctrl+G` `f`, `Ctrl+Right` | Move to the end of the next word. |
 | `kill-to-start` | `Ctrl+U` | Kill from the cursor to the start of the line into the kill ring. |
-| `kill-word-forward` | `Alt+D`, `Ctrl+Delete` | Kill the next word into the kill ring. |
-| `yank` | `Ctrl+Shift+Y`, `Ctrl+\` | Paste the newest kill-ring entry. |
-| `yank-pop` | `Alt+Y`, `Ctrl+]` | Right after a yank, replace it with the previous kill-ring entry. |
-| `cancel-tool-call` | `Alt+C`, `Ctrl+T` | Cancel the running tool call; the turn continues. |
-| `toggle-keep-awake` | `Alt+A`, `F6` | Turn the machine's keep-awake on or off (the "sleep disabled" chip). |
-| `toggle-memory-provenance` | `Alt+M`, `F7` | List or hide the memories the last turn used. |
-| `voice-input` | `Alt+V`, `F8` | First press starts recording; the second press stops it and adds the transcription to the composer, after any text already there. |
-| `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move the keyboard onto the transcript's work tree: arrows move and fold, `Enter` opens, `y` copies, `Esc` returns. |
+| `kill-word-forward` | `Ctrl+G` `d`, `Ctrl+Delete` | Kill the next word into the kill ring. |
+| `yank` | `Ctrl+G` `y`, `Ctrl+\` | Paste the newest kill-ring entry. |
+| `yank-pop` | `Ctrl+G` `Y`, `Ctrl+]` | Right after a yank, replace it with the previous kill-ring entry. |
+| `cancel-tool-call` | `Ctrl+G` `t`, `Ctrl+T` | Cancel the running tool call; the turn continues. |
+| `toggle-keep-awake` | `Ctrl+G` `a`, `F6` | Turn the machine's keep-awake on or off (the "sleep disabled" chip). |
+| `toggle-memory-provenance` | `Ctrl+G` `e`, `F7` | List or hide the memories the last turn used. |
+| `voice-input` | `Ctrl+G` `v`, `F8` | First press starts recording; the second press stops it and adds the transcription to the composer, after any text already there. |
+| `focus-work-tree` | `Ctrl+G` `Up`, `Ctrl+Up` | Move the keyboard onto the transcript's work tree: arrows move and fold, `Enter` opens, `y` copies, `Esc` returns. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode (see below). |
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
-| `failure-other-model` | `Alt+O`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I`, `F3` | On the newest failed turn: show what the provider said. |
-| `failure-sign-in` | `Alt+S`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
-| `next-session` | `Alt+N`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
-| `previous-session` | `Alt+P`, `Ctrl+_` | While the session chips show: the previous session. |
+| `failure-other-model` | `Ctrl+G` `o`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Ctrl+G` `i`, `F3` | On the newest failed turn: show what the provider said. |
+| `failure-sign-in` | `Ctrl+G` `s`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
+| `failure-retry` | `Ctrl+G` `r`, `F12` | On the newest failed turn: send the prompt again. |
+| `open-fix-session` | `Ctrl+G` `j`, `F10` | Open the fix session just started (a CI fix, a conflict resolution). |
+| `next-session` | `Ctrl+G` `n`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
+| `previous-session` | `Ctrl+G` `p`, `Ctrl+_` | While the session chips show: the previous session. |
+| `contract-question-ordinary` | `Ctrl+G` `q` | While a contract's question is on offer above the composer: send the next message as an ordinary one, not as its answer. |
+| `model-picker-group` | `Ctrl+G` `g` | In the model list: group it another way (provider, price, none). |
 
-Every Alt and Ctrl+Shift chord has a second default: macOS Terminal sends no Alt unless "Use Option as Meta key" is on, and a terminal without the extended keyboard protocol sends `Ctrl+Shift+<letter>` as `Ctrl+<letter>`, so the second chord is one every terminal sends and tmux leaves alone (a function key, a free `Ctrl` chord, or `Ctrl` with an arrow or Delete). `F12` is the second chord of `Alt+R` (try again) and `F10` of `Alt+J` (open the fix session just started).
+The actions that sat on an `Alt` or `Ctrl+Shift` chord, which tmux, screen and macOS Terminal swallow, are a leader shortcut by default, each beside a second key every terminal sends (a function key, a free `Ctrl` chord, or `Ctrl` with an arrow or Delete). A person can bind a chord back: `{ "kill-line": { "key": "k", "alt": true } }` in `keybindings.json`; a binding there written before this release keeps working. A two-key shortcut is written `{ "key": "m", "leader": true }`. A key bound to `next-field`, `choose`, `back` or a `move-*` action is that key to every screen, and `Tab`, `Enter`, `Esc` or an arrow bound to another action does that action instead.
 
-`Alt+R` on the newest failed turn sends the failed prompt again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and `Alt+R` tries again. When the failed turn had already run tools, the tool results are kept and the turn continues from them, so their effects are not repeated. The keys are named on the failed turn's row (see "Turn errors"), not in the footer.
+`Ctrl+G` `r` on the newest failed turn sends the failed prompt again in place of the failed turn. The failed turn stays in the transcript, and the offer stays, until the replacement is submitted: when the memory refresh before it fails, or the session or the failed turn changes meanwhile, nothing is taken away and the same key tries again. When the failed turn had already run tools, the tool results are kept and the turn continues from them, so their effects are not repeated. The keys are named on the failed turn's row (see "Turn errors"), not in the footer.
 
 `Shift+Tab` cycles `ask-me` → `jev-decides` → `just-vibes` → `yolo` → `ask-me`.
 Before `yolo` it asks for confirmation (default No); declining skips to the mode after it.
@@ -811,7 +839,7 @@ Pickers (session picker, profile picker, selection lists, the recovery offer) sh
 | `Esc` | Close the list in one press. |
 
 Configuration workspaces (`/memory open`, `/todo open`, `/marketplace`, `/plugin`, `/services open`, `/provider open` and others) keep a search row that always takes typed characters.
-An action there fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from `Ctrl+G` followed by its key for keys a terminal cannot send with `Ctrl` (`c`, `h`, `i`, `j`, `m`, digits and capitals; the hint bar shows `^G c`).
+An action there fires from `Enter`, from `Ctrl` plus its letter (the hint bar shows `^d delete`), or from the leader (`Ctrl+G` unless rebound) followed by its key for keys a terminal cannot send with `Ctrl` (`c`, `h`, `i`, `j`, `m`, digits and capitals; the hint bar shows `^G c`, and the leader as bound).
 An action that deletes, uninstalls or clears asks for the same key a second time; `Esc` cancels.
 
 ### Turn errors
@@ -822,13 +850,13 @@ A failed turn is a row in the transcript under its prompt, which stays as you ty
 ✕ The model didn't answer.
   OpenAI returned an error (500) six times. Nothing was changed.
 
-  alt+r try again   alt+o use another model   alt+i details
+  ctrl+g r try again   ctrl+g o use another model   ctrl+g i details
 
   Tip: name a backup model once and GoodVibes switches by itself:
   /model backup
 ```
 
-The second line is worded from the failure's facts: the provider's status (`refused the API key (401)`, `turned the request away for too many requests (429)`, `returned an error (500)`), a connection error (`GoodVibes couldn't reach <provider> (ECONNREFUSED)`), how many requests were made, and what the turn's tools changed before it stopped, from the turn's own record (`2 files were changed before it stopped. /changes`; `1 command ran before it stopped.`; `Nothing was changed.` only when the record shows nothing was written, run or sent). `alt+r` sends the prompt again, `alt+o` opens the model picker and sends the prompt to the model chosen there, `alt+i` shows the details under the second line (provider, model, status, code, attempts and their times, why the fallback order did not move the turn, the provider's own message) and hides them again. A provider that refused its key offers `alt+s sign in again` (the provider sign-ins, `/auth`) in place of `alt+r`. The tip is shown only while `provider.fallbackModels` is empty. A turn sent with no usable model (no model selected, or its provider not signed in) is refused before any request: `No model is set up yet. Nothing was changed.` with `alt+o choose a model` and `or run /setup`. A newer prompt removes the keys and the tip from the older row; its first two lines stay. While a failing request is retried, the row says so (`Retrying up to 5 times…`) and becomes the failure row when the retries are spent.
+The second line is worded from the failure's facts: the provider's status (`refused the API key (401)`, `turned the request away for too many requests (429)`, `returned an error (500)`), a connection error (`GoodVibes couldn't reach <provider> (ECONNREFUSED)`), how many requests were made, and what the turn's tools changed before it stopped, from the turn's own record (`2 files were changed before it stopped. /changes`; `1 command ran before it stopped.`; `Nothing was changed.` only when the record shows nothing was written, run or sent). `ctrl+g r` sends the prompt again, `ctrl+g o` opens the model picker and sends the prompt to the model chosen there, `ctrl+g i` shows the details under the second line (provider, model, status, code, attempts and their times, why the fallback order did not move the turn, the provider's own message) and hides them again. A provider that refused its key offers `ctrl+g s sign in again` (the provider sign-ins, `/auth`) in place of `ctrl+g r`. The row names each key as bound (`failure-retry`, `failure-other-model`, `failure-details`, `failure-sign-in`). The tip is shown only while `provider.fallbackModels` is empty. A turn sent with no usable model (no model selected, or its provider not signed in) is refused before any request: `No model is set up yet. Nothing was changed.` with `ctrl+g o choose a model` and `or run /setup`. A newer prompt removes the keys and the tip from the older row; its first two lines stay. While a failing request is retried, the row says so (`Retrying up to 5 times…`) and becomes the failure row when the retries are spent.
 A provider failure may move to another sign-in, another backend of a `synthetic` model, or the next model of your fallback order, as described under "Failover".
 `/retry [modified text]` sends the last prompt again, optionally changed.
 
@@ -1058,7 +1086,7 @@ When a file was changed after that call (by you, another tool or another program
 When the provider is not signed in, the terminal app asks for its API key on a hidden line before the switch lands.
 An unknown id is refused with the provider registry's reason. `/model use` alone opens the full model picker, as bare `/model` does.
 `/model refresh` asks every provider you have set up for its models again (past any list kept on disk), then refreshes the catalog, the benchmarks and the token limits, asks the daemon to read its own lists again (`models.refresh`; the lists the web app and every other program show), and prints one line per provider: how many models it has, or why its list could not be read (`could not be read, its server is not running`, `could not be read (<error>); 12 models from its last list`, `0 models: it answered with an empty list`); a provider that does not list its own models says it uses the built-in catalog. With a daemon running, a note follows: `The daemon read its lists again too (what the web UI and the other programs show): <n> providers answered` (and `; could not read <provider> (<error>)`). In the model picker, `Ctrl+R` runs `/model refresh`. A part that failed makes the refresh a refusal naming it, after the rest was printed.
-The model picker (its key, or a failed turn's `alt+o`) opens on Main chat, with the other things a model is chosen for behind one tab, `Other jobs (optional) ▸`: Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). `Tab` (or a click on that tab) moves to them; then each is listed, marked `(off)` when it is off, and a line under the tabs says what the chosen one does and, when none is chosen for it, that it uses the Main chat model. In the Agent the search index is not a tab, and that line says where it is set (`/settings open provider.embeddingProvider`). Under the search field a row names each filter key with what it is set to: `ctrl+t price: any  ctrl+k needs: any  ctrl+a all models  ctrl+b sort: off  ctrl+g by: provider` (`ctrl+a usable only` while it hides models you cannot use; on a narrow screen it takes two rows). Each model row shows its price tier beside its context (`free` in green, `paid`, `subscription`) when it is known, and the detail names it (`Price`) and how long ago the provider's model list was read (`List  list read 3 h ago`). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `not in the catalog`; its detail reads `Not described by the model catalog; usable as a text model, listed after the described ones.` An open picker shows a fresh list as soon as the providers' lists change (the daemon reads every provider's list when it starts); `ctrl+r` reads them again now; pinned and recent models still come first. After them, a `Recommended` group lists at most five models from connected providers, each with why, in catalog facts only: `newest <family>` (the latest release date in a family the catalog names), `largest context: <n> tokens`, `lowest price: $<in> in, $<out> out per 1M tokens`, compared among one provider's models; a provider the catalog gives none of these facts for has none, and a benchmark sort lists no group. The Agent's picker shows the same group.
+The model picker (its key, or a failed turn's `alt+o`) opens on Main chat, with the other things a model is chosen for behind one tab, `Other jobs (optional) ▸`: Side work, Tool work, Spoken replies, Decision model and Search index (see "Routing roles" below). `Tab` (or a click on that tab) moves to them; then each is listed, marked `(off)` when it is off, and a line under the tabs says what the chosen one does and, when none is chosen for it, that it uses the Main chat model. In the Agent the search index is not a tab, and that line says where it is set (`/settings open provider.embeddingProvider`). Under the search field a row names each filter key with what it is set to: `ctrl+t price: any  ctrl+k needs: any  ctrl+a all models  ctrl+b sort: off  ctrl+g g by: provider` (`ctrl+a usable only` while it hides models you cannot use; on a narrow screen it takes two rows; the grouping key is the rebindable `model-picker-group`, the leader then `g`, and the row names it as bound). Each model row shows its price tier beside its context (`free` in green, `paid`, `subscription`) when it is known, and the detail names it (`Price`) and how long ago the provider's model list was read (`List  list read 3 h ago`). A model tab lists only models the model catalog says read and write text (its published type and input and output modalities); an image, video or speech model is not offered. A model the catalog does not describe (a local or custom model, say) is listed after the described ones in a group titled `Not described by the catalog`, each marked `not in the catalog`; its detail reads `Not described by the model catalog; usable as a text model, listed after the described ones.` An open picker shows a fresh list as soon as the providers' lists change (the daemon reads every provider's list when it starts); `ctrl+r` reads them again now; pinned and recent models still come first. After them, a `Recommended` group lists at most five models from connected providers, each with why, in catalog facts only: `newest <family>` (the latest release date in a family the catalog names), `largest context: <n> tokens`, `lowest price: $<in> in, $<out> out per 1M tokens`, compared among one provider's models; a provider the catalog gives none of these facts for has none, and a benchmark sort lists no group. The Agent's picker shows the same group.
 
 `/effort` is described once for both programs: `show` ("See how hard the model thinks", the report) and `set <level>` ("Choose how hard the model thinks"; bare `/effort set` lists the levels the current model offers).
 `/effort set high` saves `provider.reasoningEffort` and prints the level in effect.
@@ -1132,7 +1160,7 @@ A confirmation applies exactly what it showed. When `/startup transfer-import` o
 A confirmation whose text does not fit the screen scrolls (up, down, page up, page down) and says `↓ N more lines`; its confirming button stays disabled until the end has been shown. In a settings list, Enter and a two-press action act on the row drawn under the highlight: while a search is shown that is the search result, and a second press after the list refreshed onto another row asks again.
 An existing target is not overwritten without `--overwrite`.
 `/update` (actions `check`, `apply`, `rollback`, `daemon [--check]`, `review`, `save-review <file> [--replace]`, `read-review <file>`) checks for a newer release and, for binary installs, downloads, verifies and applies it or rolls back. Updates are described under "Updating" in the install part.
-`/power status` shows who holds this computer awake; `/power on` and `/power off` set the daemon-held keep-awake (the same as `Alt+A`). The setting, `power.keepAwake`, is the daemon's: a change goes to the daemon, or with none running into the daemon's settings file it reads at start, so every app and the daemon read the one value and a change made while the daemon was down is kept. A value an earlier version kept in an app's own settings file is moved to the daemon's settings file the first time the app starts (or dropped there when the daemon's file already sets it), and the app says so once.
+`/power status` shows who holds this computer awake; `/power on` and `/power off` set the daemon-held keep-awake (the same as `Ctrl+G` `a` or `F6`). The setting, `power.keepAwake`, is the daemon's: a change goes to the daemon, or with none running into the daemon's settings file it reads at start, so every app and the daemon read the one value and a change made while the daemon was down is kept. A value an earlier version kept in an app's own settings file is moved to the daemon's settings file the first time the app starts (or dropped there when the daemon's file already sets it), and the app says so once.
 
 `/security` gathers what protects this machine. Bare in the terminal, it opens its list; from a model or a script it prints the short status (`✓ Nothing needs attention.`, or each thing that does with `Fix: <line>`): blocked or overdue paired-device tokens, policy lint findings and a failed preflight, MCP servers with held-back tools or allowed to run anything, risky MCP routes, held-back plugins, and an undecided folder. Its actions, by group:
 
@@ -1534,7 +1562,7 @@ A failed request never moves to a model the owner did not choose. The same rule 
 2. **Synthetic backends.** A `synthetic` model moves between the providers that serve it (see "Synthetic failover").
 3. **Retries.** A failure that a wait can clear (a rate limit with a short `Retry-After`, a network error, a 5xx) is retried on the same model, and the stream shows `STREAM_RETRY`. With nowhere else to go the waits are 5, 10, 20, 40 and 60 seconds. When `provider.fallbackModels` has an entry not yet tried whose provider is signed in, the model gets one retry after 2 seconds and then the turn moves on; a server asking to wait longer than that (`Retry-After`) is not waited for, the turn moves at once.
 4. **The fallback order.** When the model still fails (every sign-in, every synthetic backend and every retry), the turn moves to the first entry of `provider.fallbackModels` not yet tried this turn whose provider is signed in, and sends the failed request again to it; the rest of the turn, tool calls already made included, continues on that model. Entries are registry keys such as `["anthropic:claude-sonnet-5"]`; the provider half is matched by id or display name without regard to case. A worker agent given its own `fallbackModels` uses that order instead, and one whose routing says `providerFailurePolicy: "fail"` uses none.
-5. **Stop.** With no order set, or every entry tried, the turn ends with the error (`provider_error`, or `provider_exhausted` for a spent `synthetic` model). The failed turn's row says so (see "Turn errors"), with the reason nothing else was tried in its details (`alt+i`, the `Fallback` row); a headless run's `TURN_ERROR` carries the same reason as `fallbackNote`.
+5. **Stop.** With no order set, or every entry tried, the turn ends with the error (`provider_error`, or `provider_exhausted` for a spent `synthetic` model). The failed turn's row says so (see "Turn errors"), with the reason nothing else was tried in its details (`ctrl+g i`, the `Fallback` row); a headless run's `TURN_ERROR` carries the same reason as `fallbackNote`.
 
 Each move prints a line naming both models, the position in the fallback order, the error and the price difference when both prices are known, and says which model answers:
 
@@ -1863,7 +1891,7 @@ Each record has a class, a scope, a summary, optional detail and tags, a confide
 | scope | `session`, `project`, `team` |
 | review state | `fresh`, `reviewed`, `stale`, `contradicted` |
 
-Records that match a turn can be added to the model's context; `/memory explain <task>` shows which would be, and `Alt+M` lists the memories the last turn used.
+Records that match a turn can be added to the model's context; `/memory explain <task>` shows which would be, and `Ctrl+G` `e` (or `F7`) lists the memories the last turn used.
 
 `/memory` is described once for both programs (the Agent has the same command). Bare, it opens its list of actions with "See your memory" first and the rest grouped ("Correct or review a record", "See what a task is given", "Keep memory as files, or move it", "Copies of memory and the search index"); a model or a script running it bare gets the list of records. Each action asks for what it needs, from the live list of records or copies where there is one, says what it will do in one sentence, and ends with the line that does the same. The typed lines:
 

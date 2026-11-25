@@ -10,6 +10,7 @@ import {
   resolveCredentialWriteScope,
 } from '../../config/credential-scope.ts';
 import { createMediaCommand } from '@goodvibes/engine/terminal-shell/media-command';
+import { capabilityBinding } from './capability-binding.ts';
 
 export const localActions = createLocalCommandActions<CommandContext>(requireProviderApi, {
   unpinByModelId: true,
@@ -36,7 +37,7 @@ const secretsCommand = createSecretsCommand<CommandContext>({
     credentialWriteScopeWasRelocated(key, requested)
       ? 'Filed in the daemon tier instead of ' + requested + ': the daemon is what reads this credential, and it reads only its own tier.'
       : '',
-});
+}, capabilityBinding);
 
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   // `/services` is one description shared with the other terminal app (terminal-shell/services-command.ts).

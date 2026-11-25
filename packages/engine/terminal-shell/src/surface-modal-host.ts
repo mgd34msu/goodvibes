@@ -33,6 +33,12 @@ export interface SurfaceModal {
   /** A short identifier (tests, diagnostics, the `ui` event stream). */
   readonly name: string;
   readonly waitingForOwner?: boolean;
+  /**
+   * True while the modal reads the next key as a key to keep (the Keys
+   * place choosing a new key): the leader is not read in front of it, so the
+   * leader itself and a sequence can be chosen.
+   */
+  readonly takesEveryKey?: boolean;
   /** Handle a key or text token while this modal is on top. */
   handleToken(token: InputToken, host: SurfaceModalHost): void;
   /** Esc: pop one of this modal's own sub-levels and return true, or return false to close the modal. */

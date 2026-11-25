@@ -72,6 +72,7 @@ import {
   type GoogleRequestRepair,
 } from '@goodvibes/engine/platform/platform/google';
 import type { ConfigManager, SecretsManager } from '@goodvibes/engine/platform/platform/config';
+import { unreadableSecretStore } from '@goodvibes/engine/platform/platform/config';
 import { createGoogleSettingsProjector, commitGoogleSettings, NO_GOOGLE_CLIENT_SECRET, retainGoogleConnectionOwners, retainGoogleCredentials, retainGooglePreparedEffectSource, type GooglePendingCredential } from './google-admission.js';
 import { nodeGoogleFilePort } from '@goodvibes/engine/platform/platform/google/node';
 import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '@goodvibes/engine/platform/platform/google';
@@ -584,7 +585,9 @@ export function createAgentGoogleTool(options: AgentGoogleToolOptions): Tool {
       // that needs it does not have one yet.
       if (action === 'connect.client' && options.secretsManager
         && options.secretsManager.resolveLocalCredentialSnapshot(GOOGLE_SECRET_KEYS.oauthClientSecret).state !== 'resolved') {
-        return failure(NO_GOOGLE_CLIENT_SECRET);
+        // A secret store this computer could not read is said as such: the owner is not asked for the secret again.
+        const unreadable = await unreadableSecretStore(options.secretsManager, GOOGLE_SECRET_KEYS.oauthClientSecret, 'the Google OAuth client secret');
+        return failure(unreadable ?? NO_GOOGLE_CLIENT_SECRET);
       }
       if (CONNECT_ACTIONS.has(action)) return await registerClient(rawArgs, executionOptions);
       if (action === 'connect.complete') {

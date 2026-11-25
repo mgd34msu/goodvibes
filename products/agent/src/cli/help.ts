@@ -2,6 +2,7 @@ import { productVersionFromModule } from '@goodvibes/engine/terminal-shell/cli-h
 import { normalizeHelpTopic as normalizeTopic } from '@goodvibes/engine/terminal-shell/cli-help';
 import { renderDetailedCommandHelp, renderMostUsedHelp, renderUsageLine, COMMON_COMMAND_HELP, type TerminalCommandHelp } from '@goodvibes/engine/terminal-shell/cli-help';
 import { join } from 'node:path';
+import { CAPABILITY_CLI_HELP } from '@goodvibes/engine/terminal-shell/capability-cli-help';
 import { VERSION } from '../version.ts';
 import { describeSelfUpdate, readLastSelfUpdate } from '../runtime/self-update-receipt.ts';
 // The install-kind module alone: `--version` must not load the runtime operations.
@@ -172,6 +173,7 @@ export interface GoodVibesCommandHelpDescriptor {
 }
 
 const COMMAND_HELP: Record<string, CommandHelp> = {
+  ...CAPABILITY_CLI_HELP,
   run: {
     usage: [
       'run [prompt] [--output text|json|stream-json]',

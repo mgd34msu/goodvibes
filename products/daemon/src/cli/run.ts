@@ -198,6 +198,23 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         return result(await runStatusCommand({ ...remote, flags: remoteFlags,
           crashLogPath: surfaceCrashLogPath(homeDirectory, GOODVIBES_DAEMON_SURFACE_ROOT) }));
       }
+      // A capability by id, and the capabilities that serve a need: the running daemon's capabilities.run and capabilities.find.
+      case 'do':
+      case 'find': {
+        const { daemonTargetInvoke, runCapabilityCli } = await import('@goodvibes/engine/terminal-shell/capability-cli');
+        const lines: string[] = [];
+        const errors: string[] = [];
+        const exitCode = await runCapabilityCli({
+          program: 'goodvibes-daemon', verb: cli.command, args: cli.commandArgs, json: cli.flags.json === true,
+          invoke: daemonTargetInvoke({ configManager: config, homeDirectory, daemonHomeDirectory },
+            { fetchImpl: remote.fetchImpl, readToken: remote.readToken, flags: { host: cli.flags.host, port: cli.flags.port, token: cli.flags.token } }),
+          workingDirectory,
+          stdout: (text) => { lines.push(text); },
+          stderr: (text) => { errors.push(text); },
+        });
+        for (const line of errors) stderr(line);
+        return result({ exitCode, lines });
+      }
       case 'update': {
         const { runUpdateCommand } = await import('../daemon/status-command.js');
         return result(await runUpdateCommand({ ...remote, flags: { ...remoteFlags, check: cli.flags.check } }));
@@ -237,6 +254,7 @@ export async function runDaemonCli(argv: readonly string[], options: DaemonCliOp
         const { runMcpCommand } = await import('../daemon/mcp-command.js');
         return await runMcpCommand({ configManager: config, daemonHomeDir: daemonHomeDirectory,
           flags: { ...remoteFlags, categories: cli.flags.categories, allowWrite: cli.flags.allowWrite, allowDestructive: cli.flags.allowDestructive }, args: cli.commandArgs, stderr, fetchImpl: remote.fetchImpl, readToken: remote.readToken,
+          workingDirectory: options.cwd ?? process.cwd(),
           input: options.mcpStdio?.input ?? process.stdin, output: options.mcpStdio?.output ?? process.stdout });
       }
       case 'webui': {

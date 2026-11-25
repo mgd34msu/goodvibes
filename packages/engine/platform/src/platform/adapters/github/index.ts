@@ -1,4 +1,5 @@
 import { logger } from '../../utils/logger.js';
+import { processSecretStoreUnreadable } from '../../config/secret-store-unreadable.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { GitHubIntegration, type GitHubReplyTarget } from '../../integrations/github.js';
 import type { ServiceRegistry } from '../../config/service-registry.js';
@@ -225,8 +226,12 @@ async function postRecordedAnswer(deps: ReplyDeps, post: OperationId, target: Gi
   const ops = deps.operations;
   const token = await deps.resolveToken();
   if (!token) {
-    logger.warn('handleGitHubAutomationWebhook: the answer was not posted; no GitHub token is configured', { where });
-    ops?.settle(post, failedOutcome(refusal({ code: 'NOT_POSTED', state: 'nothing was posted', reason: 'no GitHub token is configured', next: ['Configure the GitHub token, then ask again'], retryable: false })));
+    // A token absent because the secret store could not be read is said as such; nothing asks for it again.
+    const unreadable = await processSecretStoreUnreadable('GITHUB_TOKEN', 'the GitHub token');
+    logger.warn(`handleGitHubAutomationWebhook: the answer was not posted; ${unreadable ?? 'no GitHub token is configured'}`, { where });
+    ops?.settle(post, failedOutcome(refusal(unreadable
+      ? { code: 'NOT_POSTED', state: 'nothing was posted', reason: unreadable, next: ['Make the secret store readable on this computer, then ask again'], retryable: false }
+      : { code: 'NOT_POSTED', state: 'nothing was posted', reason: 'no GitHub token is configured', next: ['Configure the GitHub token, then ask again'], retryable: false })));
     return;
   }
   const github = new GitHubIntegration();

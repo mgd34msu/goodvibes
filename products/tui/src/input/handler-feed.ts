@@ -40,7 +40,8 @@ import { handleWorkTreeToken } from './handler-work-tree-route.ts';
 import { expandTextPastes } from './handler-content-actions.ts';
 import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';
 import { handleCommandModeToken } from './handler-command-route.ts';
-import { handleGlobalShortcutToken } from './handler-shortcuts.ts';
+import { handleGlobalShortcutToken, runShortcutAction } from './handler-shortcuts.ts';
+import { LeaderKeyState, leaderMayArm } from '@goodvibes/engine/terminal-shell/leader-key';
 import { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { KeybindingsManager } from './keybindings.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
@@ -226,4 +227,50 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   beforeComposer: (context, token, { now }) => guardCommandPaste(context, token, now),
   afterShortcut: refreshCommandAutocomplete,
   expandPastes: (context, text) => expandTextPastes(context.pasteRegistry, text),
+  // The leader sequence (terminal-shell/leader-key.ts), read over every screen. A config screen's action
+  // letters stay after the leader (handler-modal-routes.ts); every other key completes the table's sequence.
+  leader: {
+    state: leaderOf,
+    canArm: (context) => leaderMayArm(context.surfaceModals),
+    screenFollow: (context, follow) => {
+      if (!context.configModal.active) return false;
+      const name = follow.logicalName ?? '';
+      const key = [...name].length === 1 && follow.shift ? name.toUpperCase() : name;
+      if ([...key].length !== 1 || !context.configModal.resolveAction(key)) return false;
+      // The config screen fires its own action for the letter, as its own leader did.
+      const text: InputToken = { type: 'text', value: key };
+      context.configModal.armLeader();
+      handleModalTokenRoutes({
+        ...captureModalFeedState(context, text, context.getHistory()),
+        surfaceModals: context.surfaceModals,
+        configModal: context.configModal,
+        onboardingWizard: context.onboardingWizard,
+        onOnboardingAction: context.onOnboardingAction,
+      }, text);
+      return true;
+    },
+    // Over a config screen, the strip lists its own letters first (the ones screenFollow takes), then the table's.
+    screenKeys: (context) => (context.configModal.active ? context.configModal.leaderKeys() : []),
+    run: (context, action) => {
+      const shortcutState = {
+        ...captureShortcutFeedState(context),
+        killRing: context.killRing,
+      };
+      const handled = runShortcutAction(shortcutState, action);
+      return { ...shortcutState, handled };
+    },
+  },
 });
+
+/** One leader state per program, beside its modal stack. */
+const leaderStates = new WeakMap<SurfaceModalHost, LeaderKeyState>();
+function leaderOf(context: InputFeedContext): LeaderKeyState | undefined {
+  const modals = context.surfaceModals;
+  if (!modals) return undefined;
+  let state = leaderStates.get(modals);
+  if (!state) {
+    state = new LeaderKeyState(context.keybindingsManager, () => modals);
+    leaderStates.set(modals, state);
+  }
+  return state;
+}

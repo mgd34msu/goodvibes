@@ -106,7 +106,7 @@ const LOCAL_AUTH_COMMAND: CommandDescription<CommandContext> = {
       sentence: '{user} will be able to sign in to this machine\'s daemon and web app as a {role}, until you change it.',
       done: '{user} may sign in as a {role}.',
       touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'remove-user',
-      operator: { method: 'local_auth.users.create', fields: { username: 'user', password: 'password', roles: 'role' } },
+      operator: { method: 'local_auth.users.create', fields: { username: 'user', password: 'password', roles: 'role:lines' } },
       example: { user: 'sam', role: 'user' },
       async run(values, ctx) {
         const password = samePassword(values, 'No user was added');

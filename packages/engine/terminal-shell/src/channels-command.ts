@@ -12,6 +12,7 @@
  */
 import type { OperatorMethodInput, OperatorMethodOutput } from '@goodvibes/engine/platform/contracts';
 import { SESSION_GATE_PRESET_NAMES, gatePresetLabel } from '@goodvibes/engine/platform/platform/gate/presets';
+import { SECRET_STORE_UNREADABLE } from '@goodvibes/engine/platform/platform/config';
 import { commandRefusal } from './command-confirmation.js';
 import type { TerminalCommandRegistry } from './command-registry.js';
 import { defineCommand } from './command-actions/define.js';
@@ -96,9 +97,13 @@ function more(total: number, what: string): string[] {
 function formatStatus(body: unknown): string {
   const channels = records(body, 'channels');
   if (channels.length === 0) return 'The daemon reports no channels. /channels setup <channel> shows what one needs.';
-  return ['Channels:', ...channels.slice(0, SHOWN).map((channel) => {
+  return ['Channels:', ...channels.slice(0, SHOWN).flatMap((channel) => {
     const state = str(channel, 'state', str(channel, 'status', 'unknown'));
-    return `  ${str(channel, 'surface', 'unknown')}: ${flag(channel, 'enabled') ? 'on' : 'off'}; ${flag(channel, 'ready') ? 'ready' : 'not ready'}; ${state}`;
+    const line = `  ${str(channel, 'surface', 'unknown')}: ${flag(channel, 'enabled') ? 'on' : 'off'}; ${flag(channel, 'ready') ? 'ready' : 'not ready'}; ${state}`;
+    // A credential that does not resolve says why (a secret store this computer could not read included), never only "unresolved".
+    const runtime = isRecord(channel['runtime']) ? channel['runtime'] : {};
+    const reason = state === 'unresolved' ? str(runtime, 'reason') : '';
+    return reason ? [line, `    ${reason}`] : [line];
   }), ...more(channels.length, 'channels')].join('\n');
 }
 
@@ -108,6 +113,9 @@ function formatAccounts(body: unknown): string {
   return ['Channel accounts (secret values are never shown):', ...accounts.slice(0, SHOWN).map((account) => {
     const accountId = str(account, 'accountId');
     const secrets = records(account, 'secrets').map((secret) => str(secret, 'field', 'secret'));
+    const unreadable = records(account, 'secrets').filter((secret) => str(secret, 'source') === 'unreadable').map((secret) => str(secret, 'label', str(secret, 'field', 'secret')));
+    // A secret store this computer could not read is said as such: the secret is not missing and is not asked for again.
+    if (unreadable.length > 0) return `  ${str(account, 'surface', 'unknown')}${accountId ? `/${accountId}` : ''}: ${SECRET_STORE_UNREADABLE}, so ${unreadable.join(', ')} could not be read; nothing already given there is asked for again`;
     return `  ${str(account, 'surface', 'unknown')}${accountId ? `/${accountId}` : ''}: ${flag(account, 'configured') ? 'configured' : 'not configured'}; ${flag(account, 'linked') ? 'linked' : 'not linked'}; sign-in ${str(account, 'authState', str(account, 'state', 'unknown'))}${secrets.length > 0 ? `; secrets held for ${secrets.join(', ')}` : ''}`;
   }), ...more(accounts.length, 'accounts')].join('\n');
 }

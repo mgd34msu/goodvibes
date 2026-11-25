@@ -54,9 +54,12 @@ export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: 
       });
     const doc = policy.docLines(modal, selected >= 0, width);
     const area = Math.max(1, bottom - p.top + 1);
-    // The help takes what it needs up to two fifths of the column, and never the
-    // last rows the list needs to show the selection with a row either side.
-    const docHeight = doc.length === 0 ? 0 : Math.max(0, Math.min(doc.length, Math.floor(area * 0.4), area - 4));
+    // The help takes what it needs up to two fifths of the column, or all the room
+    // the rows leave empty when that is more (so "more ↓" never shows above empty
+    // space), and never the last rows the list needs to show the selection with a
+    // row either side.
+    const room = Math.max(Math.floor(area * 0.4), area - rows.length - 1);
+    const docHeight = doc.length === 0 ? 0 : Math.max(0, Math.min(doc.length, room, area - 4));
     const listBottom = docHeight > 0 ? bottom - docHeight - 1 : bottom;
     const result = drawList(f.canvas, {
       rows,
@@ -70,7 +73,9 @@ export function createSettingsLayout<Modal extends SettingsLayoutModal>(policy: 
     if (docHeight > 0) {
       // Right under the rows when they fit, at the foot of the column when they scroll.
       const docTop = Math.min(result.endY + 1, bottom - docHeight + 1);
-      const shown = policy.windowDoc(modal, doc, docHeight);
+      // Under rows that fit, the help takes every line down to the foot of the column, so no blank
+      // line is left below "more ↓" while help remains to be shown.
+      const shown = policy.windowDoc(modal, doc, Math.min(doc.length, bottom - docTop + 1));
       shown.forEach((line, k) => f.canvas.put(sx, docTop + k, line.text, { fg: line.fg, bold: line.bold === true }));
     }
     return result;

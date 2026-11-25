@@ -23,11 +23,30 @@ export const judgmentConfigDefaults: { judgment: JudgmentSettings } = {
     backend: {},
     timeoutMs: 30_000,
     fallbacks: [],
+    setAside: {},
+    noDecisionModel: false,
   },
 };
 
 function isEndpoint(value: unknown): boolean {
   return typeof value === 'string' && (value === '' || validEndpointURL(value));
+}
+
+const SET_ASIDE_FIELDS = new Set(['endpoint', 'model', 'keySource', 'keyName', 'backend', 'fallbacks']);
+
+/** `judgment.setAside`: an object of the primary decision model's own settings, each valid as its own key is, nothing else. */
+function validSetAside(value: unknown): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const entries = Object.entries(value as Record<string, unknown>);
+  if (entries.some(([field]) => !SET_ASIDE_FIELDS.has(field))) return false;
+  const set = value as Record<string, unknown>;
+  if (set['endpoint'] !== undefined && !isEndpoint(set['endpoint'])) return false;
+  if (set['model'] !== undefined && typeof set['model'] !== 'string') return false;
+  if (set['keySource'] !== undefined && set['keySource'] !== 'env' && set['keySource'] !== 'secret' && set['keySource'] !== 'none') return false;
+  if (set['keyName'] !== undefined && set['keyName'] !== '' && !validJudgmentCredentialName(set['keyName'])) return false;
+  if (set['fallbacks'] !== undefined && !validJudgmentFallbackSettings(set['fallbacks'])) return false;
+  if (set['backend'] !== undefined) { try { captureJudgmentBackendSettings(set['backend']); } catch { return false; } }
+  return true;
 }
 
 export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow)[] = [
@@ -58,14 +77,16 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     key: 'judgment.keySource',
     label: 'Where the decision model key comes from',
     type: 'enum',
-    description: 'Where the decision model\'s key comes from: env reads an environment variable, secret reads the secret store, and none sends no key. This setting stores only one of those three words, never a credential or a credential reference',
+    description: 'Where the decision model\'s key comes from. Environment variable: the variable named in Decision model key name. Secret store: the secret of that name in GoodVibes\' secret store. No key is sent: for a decision model server that needs none. Only this choice is stored here, never a key',
     enumValues: ['env', 'secret', 'none'],
+    // `none` sends the decision model no key at all (a server that needs none); it is not "no decision model".
+    enumLabels: { env: 'Environment variable', secret: 'Secret store', none: 'No key is sent' },
   },
   {
     key: 'judgment.keyName',
     label: 'Decision model key name',
     type: 'string',
-    description: 'Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Ignored when keySource is none',
+    description: 'Primary decision credential reference, such as TYPESAFE_API_KEY or CLOUDFLARE_API_TOKEN; never an inline key value. Not used when the key source is No key is sent',
     validate: validJudgmentCredentialName,
     validationHint: 'a credential reference name',
   },
@@ -98,5 +119,20 @@ export const judgmentConfigSettings: (ConfigSettingDefinition | ConfigSettingRow
     type: 'number',
     description: 'How long one attempt at one decision target may go without its answer before that target is treated as not answering, so the next target or the decision\'s own fallback is used; 0 uses 30000 ms. It exists for a server that took the request and never answered, or a connection lost without a reset: the decision API sends its whole answer at once, so nothing else can tell such an attempt from a slow one. Decisions are sized to what the model accepts and answer in seconds; raise it for a slow local model. Cancellation stops the operation sooner',
     ...intRange(0, 2_147_483_647),
+  },
+  {
+    key: 'judgment.setAside',
+    label: 'Decision model set aside',
+    type: 'object',
+    description: 'The decision model settings an earlier version held while decision models were switched off (No Decision Model): moved here, as they were, when that choice was carried to the mode Ask me with no decision model set, so nothing is sent to a decision model until you choose one. Choosing a decision model in Settings offers them back ("Use the decision model you had before"), which sets them again and empties this. Empty when nothing is set aside. Holds the names of credentials, never a credential',
+    validate: validSetAside,
+    closedShape: true,
+    validationHint: 'object with any of endpoint, model, keySource, keyName, backend and fallbacks, each valid as its judgment.* setting',
+  },
+  {
+    key: 'judgment.noDecisionModel',
+    label: 'No decision model',
+    type: 'boolean',
+    description: 'On: no decision model is asked, whatever this computer\'s environment holds (a decision model key or server address there is not used), so nothing is sent to one; Jev decides then asks you, as Ask me does. Choosing No decision model in Settings turns it on, as does carrying forward an earlier version\'s No Decision Model; choosing a decision model in Settings turns it off. Off (the default): a decision model set here or found in the environment is used',
   },
 ];

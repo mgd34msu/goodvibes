@@ -13,77 +13,27 @@ import type { ConcealedInputRequest } from '../concealed-input.js';
 import type { PlainLineInputRequest } from '../plain-line-input.js';
 import type { SurfaceModal } from '../surface-modal-host.js';
 
-/** What running an action reaches. Replaces `effect`, `readVerbs` and the Agent's verb table. */
-export type ActionTouches = 'reads' | 'this-machine' | 'another-machine' | 'credential';
+import type { ActionRisk, ActionLasts, ActionTouches, ActionValues, CapabilityDeclaration, InputDescription } from '@goodvibes/engine/platform/platform/capabilities';
+
 /**
- * The one risk word an action carries, shown in lists, in help and with the
- * result. A line the owner typed in full, or a form he submitted, is the
- * request and runs at once whatever its risk, its result saying what the risk
- * did; a line a model runs is put to the owner first when its risk is not `none`.
+ * An action IS a capability: the input shapes, risk, lifetime and touch words
+ * are defined once with the capabilities in the platform (where an action's
+ * definition goes when it moves beside its handler) and only re-exported here.
  */
-export type ActionRisk = 'none' | 'loosens-a-protection' | 'cannot-be-undone' | 'spends-money' | 'sends-out';
-/** How long a change lasts; `byInput` names the input whose chosen value decides it. */
-export type ActionLasts = 'session' | 'kept' | { readonly byInput: string };
-export type InputKind = 'choice' | 'text' | 'long-text' | 'secret' | 'number' | 'money' | 'date-time' | 'path' | 'yes-no' | 'list';
-/** The name of a live list registered with `defineList` (lists.ts). */
-export type ListName = string & { readonly __list: unique symbol };
-
-export interface FixedChoice {
-  readonly value: string;
-  readonly label: string;
-  readonly help?: string | undefined;
-  /** A choice that raises the action's risk (a looser trust mode). */
-  readonly risk?: ActionRisk | undefined;
-  /** For an input that decides how long the action lasts: what this value means. */
-  readonly lasts?: 'session' | 'kept' | undefined;
-}
-
-export interface ListChoices {
-  readonly list: ListName;
-  /** The earlier input whose value the list is read for (a server's tools). */
-  readonly dependsOn?: string | undefined;
-  /** A value outside the list is accepted, for the reason given (shown as the placeholder). */
-  readonly allowOther?: { readonly reason: string } | undefined;
-}
-
-export interface InputDescription {
-  readonly id: string;
-  /** A noun a person would say out loud: "Server". */
-  readonly label: string;
-  /** One line under the label. */
-  readonly help: string;
-  readonly kind: InputKind;
-  readonly choices?: ListChoices | readonly FixedChoice[] | undefined;
-  /** Required when the input is typed text with no list: why it has to be typed. */
-  readonly freeTextReason?: string | undefined;
-  readonly required: true | { readonly default: string; readonly defaultMeans: string };
-  /**
-   * Where it sits on the typed line: a bare word (first or second after the
-   * action word), a named option (`--scope global`, or a bare switch such as
-   * `--keep`), or the free-text tail.
-   */
-  readonly typed:
-    | { readonly position: 1 | 2 }
-    /** Not typed: read from whether another input was given (a web address given means "start it at an address"). */
-    /** `orIfGiven`: further inputs, each meaning its own value when given (the first given wins; `input` is tried first). */
-    | { readonly impliedBy: { readonly input: string; readonly ifGiven: string; readonly ifNot: string; readonly orIfGiven?: readonly { readonly input: string; readonly value: string }[] | undefined } }
-    /** `switchOn`: the option is a bare switch (`--keep`) whose presence means that value. `repeats`: given once per value. */
-    /** `untilNextFlag`: the value is every word up to the next `--option` (or `--`) or the end, so `--title Tomato blight notes` needs no quotes. */
-    | { readonly flag: `--${string}`; readonly repeats?: true | undefined; readonly switchOn?: string | undefined; readonly untilNextFlag?: true | undefined }
-    | { readonly tail: true };
-  /** The form step it is asked in (1, 2, ...); inputs of one step are shown together as one page. */
-  readonly step?: number | undefined;
-  /** Shown and needed only while another input holds a value ("Command" when it starts as a command). */
-  readonly showWhen?: { readonly input: string; readonly is: string } | undefined;
-  /** A value to offer from what is filled in so far, marked "suggested from ..." until the person changes it. */
-  readonly suggest?: ((earlier: ActionValues) => { readonly value: string; readonly from: string } | undefined) | undefined;
-}
-
-/** The values an action runs with, by input id. A repeating option's values are joined with a newline. */
-export type ActionValues = Readonly<Record<string, string>>;
+export type {
+  ActionLasts, ActionRisk, ActionTouches, ActionValues, CapabilityDeclaration, FixedChoice, InputDescription, InputKind, ListChoices, ListName,
+} from '@goodvibes/engine/platform/platform/capabilities';
+export { LASTS_WORDS, RISK_DONE_WORDS, RISK_WORDS } from '@goodvibes/engine/platform/platform/capabilities/words';
 
 export interface ActionDescription<Ctx> {
   readonly id: string;
+  /**
+   * What makes the action a capability on its own: its id, function group,
+   * home and what a repeat does. An action that carries it is reached by
+   * capability find and run; one moved to its home is built from its
+   * definition in the platform (capabilityAction, capability-actions.ts).
+   */
+  readonly capability?: CapabilityDeclaration | undefined;
   /** Named for what you get: "Block a tool". */
   readonly label: string;
   /** The confirming button's words when the label's verb cannot be read from it (actionButton, typed-line.ts): "Let them run it". */
@@ -233,25 +183,3 @@ export interface CommandActionContext extends ConfirmationHost {
   /** Push a kit modal on the surface's modal stack (the guided panel draws there). */
   readonly pushSurfaceModal?: ((modal: SurfaceModal) => void) | undefined;
 }
-
-/** The sentence ending for each lifetime, the same everywhere. */
-export const LASTS_WORDS: Readonly<Record<'session' | 'kept', string>> = {
-  session: 'for this session only',
-  kept: 'until you change it',
-};
-
-/** The risk word shown beside an action and in its question. */
-export const RISK_WORDS: Readonly<Record<Exclude<ActionRisk, 'none'>, string>> = {
-  'loosens-a-protection': 'loosens a protection',
-  'cannot-be-undone': 'cannot be undone',
-  'spends-money': 'spends money',
-  'sends-out': 'sends something outside this machine',
-};
-
-/** The risk words said with the result of an action that ran: "This loosened a protection." */
-export const RISK_DONE_WORDS: Readonly<Record<Exclude<ActionRisk, 'none'>, string>> = {
-  'loosens-a-protection': 'loosened a protection',
-  'cannot-be-undone': 'cannot be undone',
-  'spends-money': 'spent money',
-  'sends-out': 'sent something outside this machine',
-};

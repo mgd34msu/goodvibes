@@ -189,8 +189,9 @@ export const SECURE_ADDRESS_CHECKING_ROWS: readonly SecureAddressRow[] = [
   { label: 'In force now', state: 'checking', detail: ['Asking the daemon what its https address serves…'] },
 ];
 
+/** A certificate's end date in the one form every Secure address screen uses (the local date, month in words: the daemon's secureAddressDate). */
 function untilDay(ms: unknown): string {
-  return typeof ms === 'number' && ms > 0 ? new Date(ms).toISOString().slice(0, 10) : '';
+  return typeof ms === 'number' && ms > 0 ? new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : '';
 }
 
 /**
@@ -200,12 +201,14 @@ function untilDay(ms: unknown): string {
  */
 /** The parts of a `secureAddress.get` answer the list reads (the method's output schema; every part optional here). */
 interface SecureAddressAnswer {
+  /** A notice no owner channel carried; shown first (the daemon marks it given once it is in an answer). */
+  readonly notice?: string;
   readonly intro?: string;
   readonly node?: boolean;
   readonly groupLines?: readonly string[];
   readonly choices?: readonly { readonly id: string; readonly title: string; readonly does: string; readonly needs: string; readonly phoneGains: string; readonly sends: string; readonly caution?: string }[];
   readonly inForce?: { readonly on?: boolean; readonly certificate?: string; readonly serving?: boolean; readonly address?: string; readonly notAfter?: number; readonly problem?: string };
-  readonly letsEncrypt?: { readonly tokenStored?: boolean; readonly lastAttempt?: { readonly words: string }; readonly addressProblem?: string; readonly routerCheck?: { readonly words: string } };
+  readonly letsEncrypt?: { readonly tokenStored?: boolean; readonly tokenUnreadable?: string; readonly lastAttempt?: { readonly words: string }; readonly addressProblem?: string; readonly routerCheck?: { readonly words: string } };
   readonly ownFiles?: { readonly check?: { readonly ok: boolean; readonly problem?: string; readonly names?: readonly string[]; readonly notAfter?: number } };
   readonly localAuthority?: { readonly page?: string; readonly fingerprint?: string };
   readonly tailscale?: { readonly address?: string };
@@ -220,6 +223,7 @@ export function secureAddressRows(answer: unknown): SecureAddressRow[] {
   const a = (answer ?? {}) as SecureAddressAnswer;
   const force = a.inForce ?? {};
   const rows: SecureAddressRow[] = [];
+  if (a.notice) rows.push({ label: 'Notice', state: 'new', detail: [a.notice] });
   const intro = a.intro ? [a.intro] : [];
   rows.push(force.serving
     ? { label: 'In force now', state: 'https on', detail: [`Phones open ${force.address ?? 'the https address'}${force.notAfter ? `, certificate valid until ${untilDay(force.notAfter)}` : ''}. The plain http address keeps working.`, ...intro] }
@@ -256,7 +260,7 @@ export function secureAddressRows(answer: unknown): SecureAddressRow[] {
     ...(le.lastAttempt ? [le.lastAttempt.words] : []),
     ...(le.addressProblem ? [le.addressProblem] : []),
     ...(le.routerCheck ? [le.routerCheck.words] : []),
-    `Token: ${le.tokenStored ? 'stored' : 'none stored yet'}.`,
+    le.tokenStored ? 'Token: stored.' : le.tokenUnreadable ? `Token: ${le.tokenUnreadable}` : 'Token: none stored yet.',
     ...explain('lets-encrypt'),
   ] });
   const check = a.ownFiles?.check;

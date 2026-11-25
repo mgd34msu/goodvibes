@@ -22,7 +22,7 @@ export interface DnsProofRecord {
 
 /** A refusal from the DNS service, in plain words for the person. */
 export class DnsProviderError extends Error {
-  constructor(message: string, readonly code: 'token-missing' | 'token-refused' | 'zone-not-found' | 'record-taken' | 'unreachable' | 'refused') {
+  constructor(message: string, readonly code: 'token-missing' | 'store-unreadable' | 'token-refused' | 'zone-not-found' | 'record-taken' | 'unreachable' | 'refused') {
     super(message);
     this.name = 'DnsProviderError';
   }

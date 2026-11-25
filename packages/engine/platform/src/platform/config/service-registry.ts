@@ -29,6 +29,7 @@ import { readFileSync, statSync } from 'fs';
 import { dirname, join } from 'path';
 import { ProjectServiceApprovals } from './project-service-approvals.js';
 import { SecretsManager, captureSecretsReadSource } from './secrets.js';
+import { unreadableSecretStore } from './secret-store-unreadable.js';
 import {
   describeSecretRef,
   isSecretRefInput,
@@ -110,6 +111,12 @@ export interface ServiceInspection {
   readonly hasSigningSecret: boolean;
   readonly hasPublicKey: boolean;
   readonly hasAppToken: boolean;
+  /**
+   * Set when a credential read as absent and a secret store on this computer
+   * could not be read: the words, with the cause. The `has…` answers are then
+   * unknown, not "not stored", and nothing is asked for again.
+   */
+  readonly storeUnreadable?: string | undefined;
 }
 
 export interface ServiceConnectionTestResult {
@@ -632,9 +639,14 @@ export class ServiceRegistry {
       await Promise.allSettled(pending);
       throw error;
     });
+    // A credential that read as absent from a store this computer could not read is unknown, not "not stored".
+    // Asked only when the sign-in credential is absent (the store is read once more then, never otherwise).
+    const absent = !primary || (config.authType === 'basic' && !password);
+    const storeUnreadable = absent ? await unreadableSecretStore(this.secretsManager, `${serviceName}.unreadable-check`, `the credentials of ${serviceName}`) : null;
 
     return {
       config,
+      ...(storeUnreadable ? { storeUnreadable } : {}),
       hasPrimaryCredential: primary !== null && primary.length > 0,
       hasPasswordCredential: password !== null && password.length > 0,
       hasAuthTokenCredential: authToken !== null && authToken.length > 0,

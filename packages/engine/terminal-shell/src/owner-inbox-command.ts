@@ -353,7 +353,9 @@ export function registerOwnerInboxCommands<Context extends OwnerInboxCommandCont
           try { outcome = await inbox.answer(item.id, answer); } catch (error) { return failed('send the answer', error); }
           if (!outcome.applied) throw commandRefusal(formatRefusal(outcome.refusal));
           ctx.renderRequest();
-          return `Answered ${shortId(outcome.item.id)}: ${answerText(outcome.item)}${deliveryNotice(outcome.delivery)}`;
+          // The answer ends as a sentence before the delivery notice (" Sent to ...") follows it.
+          const said = answerText(outcome.item).trimEnd();
+          return `Answered ${shortId(outcome.item.id)}: ${said}${/[.!?]$/.test(said) ? '' : '.'}${deliveryNotice(outcome.delivery)}`;
         },
       },
       {

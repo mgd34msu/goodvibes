@@ -51,6 +51,7 @@
 import type { Secret } from '../security/secret.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
 import { parseEmailSecretRef } from './email-config.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../config/secret-store-unreadable.js';
 import type { EmailServiceDeps } from './email-service.js';
 
 export const SURFACE_EMAIL_PREFIX = 'surfaces.email';
@@ -423,7 +424,13 @@ export async function describeSurfaceEmailConfigProblem(
       code: 'EMAIL_NOT_CONFIGURED',
     };
   }
-  const password = await firstStoredSecret(secrets, sharedPasswordChain(getConfig));
+  const chain = sharedPasswordChain(getConfig);
+  const password = await firstStoredSecret(secrets, chain);
+  // A secret store this computer could not read is not a missing password: said with its cause, never asked for again.
+  const unreadable = password === null && chain[0] !== undefined
+    ? await unreadableSecretStore(secrets as unknown as StoredSecretReader, chain[0], 'the mailbox password')
+    : null;
+  if (unreadable) return { message: `${unreadable} Nothing is read from the mailbox until the store can be read.`, code: 'EMAIL_CREDENTIALS_UNREADABLE' };
   if (password === null) {
     return {
       message: 'Email password secret is missing from the daemon credential store.',

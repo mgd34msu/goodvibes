@@ -21,14 +21,31 @@ import { getDisplayWidth } from '@goodvibes/engine/platform/platform/utils/termi
 import { LAYOUT } from './layout.js';
 import { activeTokens } from './theme.js';
 
-/** The terminal key of each next step; a step without one is drawn as its words (a command to run). */
-export const TURN_FAILURE_KEYS: Readonly<Partial<Record<TurnFailureAction, string>>> = {
-  retry: 'alt+r',
-  'other-model': 'alt+o',
-  'choose-model': 'alt+o',
-  details: 'alt+i',
-  'sign-in': 'alt+s',
+/**
+ * The terminal key of each next step, as the key table binds it (the shell
+ * sets them each frame with setTurnFailureKeys); a step without one is drawn
+ * as its words (a command to run).
+ */
+export const TURN_FAILURE_KEYS: Partial<Record<TurnFailureAction, string>> = {
+  retry: 'ctrl+g r',
+  'other-model': 'ctrl+g o',
+  'choose-model': 'ctrl+g o',
+  details: 'ctrl+g i',
+  'sign-in': 'ctrl+g s',
 };
+
+/** The bound keys of the failure row's actions, as keycaps; an unbound one is drawn as its words. */
+export function setTurnFailureKeys(keys: { readonly retry?: string | undefined; readonly otherModel?: string | undefined; readonly details?: string | undefined; readonly signIn?: string | undefined }): void {
+  const put = (action: TurnFailureAction, key: string | undefined): void => {
+    if (key) TURN_FAILURE_KEYS[action] = key;
+    else delete TURN_FAILURE_KEYS[action];
+  };
+  put('retry', keys.retry);
+  put('other-model', keys.otherModel);
+  put('choose-model', keys.otherModel);
+  put('details', keys.details);
+  put('sign-in', keys.signIn);
+}
 
 export interface TurnFailureRowState {
   /** The newest failure, with no prompt after it: its keys and tip are live. */

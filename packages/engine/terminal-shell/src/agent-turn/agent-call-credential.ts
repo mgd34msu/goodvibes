@@ -48,6 +48,9 @@ const OWNER_STATE_WRITE_METHOD_IDS: ReadonlySet<string> = new Set([
   'occasions.answer', 'occasions.acknowledge', 'occasions.interview.answer',
   'occasions.interview.record', 'occasions.conflict.resolve', 'occasions.sweep',
   'channels.drafts.save', 'channels.drafts.delete', 'channels.routing.assign', 'channels.routing.delete',
+  // A capability the model runs after this program's own gate admitted it: the host judges it as the Agent's, and
+  // does not put it to the owner a second time (control-plane/routes/capabilities.ts).
+  'capabilities.run',
 ]);
 
 /** Which credential a call to `methodId` made by `actor` presents. A set lookup. */

@@ -1,11 +1,11 @@
 import { createShellCoreActions } from '@goodvibes/engine/terminal-shell/shell-core-actions';
 import { createBasicShellCommands, createShellNavigationCommands } from '@goodvibes/engine/terminal-shell/basic-shell-commands';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
-import { compactConversation, requireKeybindingsManager, requireProviderApi, requireShellPaths } from './runtime-services.ts';
+import { requireKeybindingsManager, requireProviderApi, requireShellPaths } from './runtime-services.ts';
 import { createAgentDaemonVerbCaller } from '../../runtime/client/daemon-verbs.ts';
 import { startFreshConversation } from './fresh-conversation.ts';
-import { createCompactCommand, refuseWhileTurnRuns } from '@goodvibes/engine/terminal-shell/everyday-commands';
-import { NOTHING_TO_COMPACT_YET, NothingToCompactError } from '@goodvibes/engine/platform/platform/core';
+import { createCompactCommand } from '@goodvibes/engine/terminal-shell/everyday-commands';
+import { conversationOf } from './session-capabilities.ts';
 import { createHelpCommand } from '@goodvibes/engine/terminal-shell/help-command';
 import { shortcutGroups } from '../../renderer/shortcut-groups.ts';
 import { registerModelCommands } from '@goodvibes/engine/terminal-shell/model-command';
@@ -50,13 +50,8 @@ export function registerShellCoreCommands(registry: CommandRegistry): void {
   registry.register(navigation.quit);
 }
 
-/** `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts). */
-const compactCommand = createCompactCommand<CommandContext>(async (_values, ctx) => {
-  refuseWhileTurnRuns(ctx, '/compact');
-  if (ctx.session.conversationManager.getMessagesForLLM().length === 0) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);
-  ctx.print('Compacting conversation...');
-  const receipt = await compactConversation(ctx);
-  if (!receipt) throw new NothingToCompactError(NOTHING_TO_COMPACT_YET);
-  ctx.print(`Conversation compacted (${receipt.messagesBefore} to ${receipt.messagesAfter} messages).`);
-  ctx.renderRequest();
-});
+/**
+ * `/compact` is a single-action command shared with the other terminal app (terminal-shell/everyday-commands.ts),
+ * the capability conversation.compact run on the Agent's conversation (session-capabilities.ts).
+ */
+const compactCommand = createCompactCommand<CommandContext>((ctx) => conversationOf(ctx));

@@ -17,6 +17,7 @@ const CHOICE_SCHEMA = objectSchema({
 }, ['id', 'title', 'does', 'needs', 'phoneGains', 'sends']);
 
 const STATUS_SCHEMA = objectSchema({
+  notice: STRING_SCHEMA,
   intro: STRING_SCHEMA,
   choices: arraySchema(CHOICE_SCHEMA),
   groupLines: STRINGS,
@@ -27,7 +28,7 @@ const STATUS_SCHEMA = objectSchema({
     from: stringEnumSchema(['this-machine', 'group']), servedSource: SOURCE,
   }, ['on', 'certificate', 'servedToNetwork', 'serving']),
   letsEncrypt: objectSchema({
-    domain: STRING_SCHEMA, tokenStored: BOOLEAN_SCHEMA, issuing: BOOLEAN_SCHEMA,
+    domain: STRING_SCHEMA, tokenStored: BOOLEAN_SCHEMA, tokenUnreadable: STRING_SCHEMA, issuing: BOOLEAN_SCHEMA,
     certificate: objectSchema({ names: STRINGS, notAfter: NUMBER_SCHEMA, issuedAt: NUMBER_SCHEMA }, ['names', 'notAfter', 'issuedAt']),
     lastAttempt: objectSchema({ at: NUMBER_SCHEMA, ok: BOOLEAN_SCHEMA, words: STRING_SCHEMA }, ['at', 'ok', 'words']),
     addressProblem: STRING_SCHEMA,
@@ -56,9 +57,9 @@ export const builtinGatewaySecureAddressMethodDescriptors: readonly GatewayMetho
   methodDescriptor({
     id: 'secureAddress.get',
     title: 'Read The Secure Address',
-    description: 'What the Secure address screen shows: the four ways to give the daemon an https address for phones (Let\'s Encrypt for a domain you own, a certificate you made, Tailscale, GoodVibes\' own certificate), each with what it does, what it needs from the person, what the phone gains and what is sent where; which one is in force and what the https listener serves now (address, names, end date, or why it does not serve); Let\'s Encrypt\'s last attempt, the address records written and this machine\'s own lookup of the name (a router that refuses local answers is named, with what to change); the own files\' check; the local authority\'s fingerprint and the page a phone installs it from; the Tailscale address while one is served; and the group: on a lead, the machines that follow it and the line that every machine serves with the same certificate; on a node, the line that its secure address comes from the lead and what it received. No key or token is ever returned.',
+    description: 'What the Secure address screen shows: the four ways to give the daemon an https address for phones (Let\'s Encrypt for a domain you own, a certificate you made, Tailscale, GoodVibes\' own certificate), each with what it does, what it needs from the person, what the phone gains and what is sent where; which one is in force and what the https listener serves now (address, names, end date, or why it does not serve); Let\'s Encrypt\'s last attempt, the address records written and this machine\'s own lookup of the name (a router that refuses local answers is named, with what to change); the own files\' check; the local authority\'s fingerprint and the page a phone installs it from; the Tailscale address while one is served; and the group: on a lead, the machines that follow it and the line that every machine serves with the same certificate; on a node, the line that its secure address comes from the lead and what it received. On a lead the ways say what differs there (GoodVibes\' own certificate covers the group\'s machines; a certificate you made and GoodVibes\' own are sent, sealed, with their key to the group\'s machines). `letsEncrypt.tokenUnreadable` says, with the cause, that the secret store on this computer could not be read when no token was read (the token is then not asked for again). `notice` is a notice no owner channel carried (a node\'s own certificate authority set aside while it follows its lead), shown at the top of the screen; returning it here marks it given. No key or token is ever returned. Needs read:remote, an owner-private read scope: a user without the admin role is not granted it.',
     category: 'remote-access',
-    effects: ['control-plane.read'],
+    effects: ['remote.read'],
     transport: ['ws'],
     inputSchema: objectSchema({}, []),
     outputSchema: STATUS_SCHEMA,

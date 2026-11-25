@@ -9,6 +9,7 @@ import type { MemorySpineClient } from '@goodvibes/engine/platform/platform/runt
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { buildMainSessionTurnInjectionsText, buildTurnInjectionsText } from '../../renderer/turn-injection.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
 /** This app's own memory store, for the reads that stay local (`/incident`, `/orchestration`). Prints why when absent. */
 export function getMemoryApi(context: CommandContext): MemoryApi | null {
@@ -35,4 +36,5 @@ export const memoryCommand: SlashCommand = createMemoryCommand<CommandContext>({
     if (!record) throw commandRefusal(`No agent is ${agentId}.`, '/agents lists them.');
     return buildTurnInjectionsText(agentId, record.turnInjections ?? []);
   },
+  daemon: capabilityBinding,
 });

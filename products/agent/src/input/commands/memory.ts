@@ -6,6 +6,7 @@
 import { createMemoryCommand } from '@goodvibes/engine/terminal-shell/memory-command';
 import type { CommandContext, SlashCommand } from '../command-registry.ts';
 import { commandRefusal } from './confirmation.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
 export const memoryCommand: SlashCommand = createMemoryCommand<CommandContext>({
   open(ctx) {
@@ -13,4 +14,5 @@ export const memoryCommand: SlashCommand = createMemoryCommand<CommandContext>({
     ctx.openAgentWorkspace('memory');
   },
   injections: undefined,
+  daemon: capabilityBinding,
 });

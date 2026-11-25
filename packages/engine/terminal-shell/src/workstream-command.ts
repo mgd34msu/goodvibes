@@ -237,7 +237,7 @@ function workstreamDescription<Ctx extends WorkstreamCommandContext>(start: Star
         ],
         sentence: '{workstream} gets your answer to {question}: "{answer}". It goes on from there until you change it.',
         done: '', touches: 'this-machine', lasts: 'kept', risk: 'none',
-        operator: { method: 'contracts.reply', fields: { id: 'workstream', escalationId: 'question', text: 'answer' } },
+        operator: { method: 'contracts.reply', fields: { contractId: 'workstream', escalationId: 'question', text: 'answer' } },
         example: { workstream: 'c-4f9c21', question: 'esc-1', answer: 'yes, keep the old setting too' },
         async run(values, ctx) {
           const contract = contractFor(ctx, values.workstream!);
@@ -255,7 +255,7 @@ function workstreamDescription<Ctx extends WorkstreamCommandContext>(start: Star
         inputs: [WORKSTREAM, listInput({ id: 'step', label: 'Step', help: 'The steps of this workstream', list: UNITS, position: 2, dependsOn: 'workstream' })],
         sentence: 'Step {step} of {workstream} runs again now.',
         done: '', touches: 'this-machine', lasts: 'not-a-change', risk: 'none',
-        operator: { method: 'contracts.retryUnit', fields: { id: 'workstream', unitId: 'step' } },
+        operator: { method: 'contracts.retryUnit', fields: { contractId: 'workstream', unitId: 'step' } },
         example: { workstream: 'c-4f9c21', step: 'u-2' },
         async run(values, ctx) {
           const contract = contractFor(ctx, values.workstream!);
@@ -269,7 +269,7 @@ function workstreamDescription<Ctx extends WorkstreamCommandContext>(start: Star
         inputs: [WORKSTREAM, { id: 'dollars', label: 'Most it may spend', help: 'In US dollars, for the whole workstream', kind: 'money', freeTextReason: 'an amount', required: true, typed: { position: 2 } }],
         sentence: '{workstream} may spend up to ${dollars} in all, until you change it.',
         done: '', touches: 'this-machine', lasts: 'kept', risk: 'spends-money',
-        operator: { method: 'contracts.budget', fields: { id: 'workstream', maxCostUsd: 'dollars' } },
+        operator: { method: 'contracts.budget', fields: { contractId: 'workstream', maxCostUsd: 'dollars:number' } },
         example: { workstream: 'c-4f9c21', dollars: '5' },
         async run(values, ctx) {
           const dollars = Number(values.dollars);

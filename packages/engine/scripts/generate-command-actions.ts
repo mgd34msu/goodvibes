@@ -39,6 +39,8 @@ function inputData(input: InputDescription): Record<string, unknown> {
 function actionData(command: CommandDescription<never>, action: ActionDescription<never>): Record<string, unknown> {
   return {
     id: action.id,
+    // An action that has moved beside its handler carries its capability declaration (id, group, home, repeat).
+    ...(action.capability ? { capability: action.capability } : {}),
     label: action.label,
     ...(action.button ? { button: action.button } : {}),
     word: action.word,

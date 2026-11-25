@@ -217,6 +217,9 @@ export function isAuthExpiredError(error: unknown): boolean {
  * read) or CALENDAR_CREDENTIALS_MISSING (the CalDAV password is not in the
  * credential store). Not a fault: distinguished from a genuine error so the
  * calendar view can show the daemon's words and point at setup.
+ * CALENDAR_CREDENTIALS_UNREADABLE (the secret store on the daemon's computer
+ * could not be read) is not one of these: nothing is asked for, the view shows
+ * the daemon's words as an error.
  */
 export function isCalendarUnconfiguredError(error: unknown): boolean {
   const code = errorCode(error);
@@ -259,6 +262,16 @@ export function isMethodNotInvokableError(error: unknown): boolean {
  * `EMAIL_CREDENTIALS_MISSING` (the password secret is not stored). The view points
  * at setup instead of rendering a failure.
  */
+/**
+ * True for the daemon's `EMAIL_CREDENTIALS_UNREADABLE` and `CALENDAR_CREDENTIALS_UNREADABLE` (HTTP 412): the secret
+ * store on the daemon's computer could not be read, so a password that may well be stored could not be read. Never a
+ * setup state: nothing is asked for again; the view shows the daemon's words, which give the cause.
+ */
+export function isSecretStoreUnreadableError(error: unknown): boolean {
+  const code = errorCode(error);
+  return code === 'EMAIL_CREDENTIALS_UNREADABLE' || code === 'CALENDAR_CREDENTIALS_UNREADABLE';
+}
+
 export function isEmailUnconfiguredError(error: unknown): boolean {
   const code = errorCode(error);
   return code === 'EMAIL_NOT_CONFIGURED' || code === 'EMAIL_NOT_ENABLED' || code === 'EMAIL_CREDENTIALS_MISSING';

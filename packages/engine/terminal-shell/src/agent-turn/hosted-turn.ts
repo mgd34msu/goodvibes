@@ -54,7 +54,8 @@ import type { ProtectedSourceOwner } from '@goodvibes/engine/platform/platform/s
 import { randomUUID } from 'node:crypto';
 import { registerAgentOperatorActionTool } from './operator-action-tool.js';
 import { registerAgentOperatorBriefingTool } from './operator-briefing-tool.js';
-import { registerAgentOperatorMethodTool } from './operator-method-tool.js';
+import { registerCapabilityTools } from './capability-tools.js';
+import { askBoundHiddenValue, boundCapabilityCatalog, boundSessionCapabilities, onBoundCapabilityCatalogChange } from '../capability-host.js';
 import { registerAgentAutonomyScheduleTool } from './autonomy-schedule-tool.js';
 import { registerAgentReminderScheduleTool } from './reminder-schedule-tool.js';
 import { registerAgentScheduleEditTool } from './schedule-edit-tool.js';
@@ -176,7 +177,16 @@ export function registerAgentTurnTools(registry: ToolRegistry, deps: AgentTurnTo
   if (deps.workPlan) registerAgentWorkPlanTool(registry, deps.workPlan);
   registerAgentOperatorActionTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
   registerAgentOperatorBriefingTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
-  registerAgentOperatorMethodTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
+  // GoodVibes' own capabilities by need and by id; daemon methods by id are reached through capability_run too, and
+  // the daemon-method runner it calls nested (the schedule tools call it too) is offered to the model no longer.
+  registerCapabilityTools(registry, deps.shellPaths, deps.settings, {
+    catalog: boundCapabilityCatalog,
+    // The Agent's own process binds its commands after this; a turn the daemon hosts has none to bind.
+    ...(deps.inProcessHost ? {} : { onCatalogChange: onBoundCapabilityCatalogChange, askHidden: askBoundHiddenValue }),
+    session: boundSessionCapabilities,
+    program: 'agent',
+    workingDirectory: () => deps.shellPaths.workingDirectory,
+  }, deps.inProcessHost);
   registerAgentAccountsTool(registry, agentAccountsToolOptions(deps.shellPaths, deps.settings, deps.accountExpectations));
   // Schedules are created and changed through agent_operator_method and agent_operator_action, as nested calls.
   registerAgentAutonomyScheduleTool(registry, deps.shellPaths, deps.settings, deps.inProcessHost);
@@ -240,8 +250,8 @@ function hostedAgentSection(): string {
     '## This Agent turn is hosted by the daemon',
     'You are the GoodVibes Agent, answering in a session the daemon hosts rather than in the Agent\'s own process. Your policy, persona, skills, routines and memory below are the Agent\'s, and the Agent tools `profile`, `occasions`, `agent_artifacts`, `agent_documents`, `agent_research_runs`, `agent_research_sources`, `agent_review_packet_presets`, `agent_review_packet_share`, `agent_media_generate`, `agent_notify`, `agent_local_registry`, `agent_learning_consolidation`, `agent_channel_send`, `browser` (the daemon\'s browser), `google` (the daemon\'s Google account and calendar), `connected_calendar` (the connected Google and Outlook calendars) and, in the daemon\'s own project, `agent_work_plan` are here, so recording what you learn works as the policy says.',
     'The Agent Knowledge, research report and model comparison tools `agent_knowledge`, `agent_knowledge_ingest`, `agent_research_report` and `agent_model_compare` are here too: Agent Knowledge is this daemon\'s own, reached in process as the Agent reaches it, reports and comparisons are saved to the same artifact store, and a comparison\'s apply mode sets the Agent\'s own model setting.',
-    'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing` and `agent_operator_method` are here too: their host is this daemon, reached in process with the credentials the GoodVibes Agent presents on this machine, so each call is admitted and judged exactly as in the Agent\'s own process: a call made on the owner\'s behalf (a schedule change, a channel draft, a profile or occasion write) is judged as the Agent\'s, and a purchase start or cancel carries the owner\'s request.',
-    'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through `agent_operator_method` and `agent_operator_action`, so each change is admitted and judged as in the Agent\'s own process.',
+    'The connected-host operator tools `agent_operator_action`, `agent_operator_briefing`, `capability_find` and `capability_run` (which also runs a daemon method by id) are here too: their host is this daemon, reached in process with the credentials the GoodVibes Agent presents on this machine, so each call is admitted and judged exactly as in the Agent\'s own process: a call made on the owner\'s behalf (a schedule change, a channel draft, a profile or occasion write) is judged as the Agent\'s, and a purchase start or cancel carries the owner\'s request.',
+    'The schedule tools `schedule`, `agent_autonomy_schedule`, `agent_reminder_schedule` and `agent_schedule_edit` are here too: they list, create, edit, run, pause, resume and delete this daemon\'s own schedules through the daemon\'s methods, so each change is admitted and judged as in the Agent\'s own process.',
     '`accounts` is here too: the Agent\'s register of the accounts it created, and a signup alias opens this daemon\'s own watch for the verification mail.',
     `These work through the Agent's own command registry and session and are not here: ${names(AGENT_SHELL_TOOL_NAMES)}. Use the platform tool that covers the same facts, or say the request runs when the owner continues in the GoodVibes Agent itself.`,
     ...(AGENT_NOT_YET_HOSTED_TOOL_NAMES.length > 0

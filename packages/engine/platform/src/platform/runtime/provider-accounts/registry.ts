@@ -1,6 +1,7 @@
 import { listBuiltinSubscriptionProviders } from '../../config/subscription-providers.js';
 import { resolveApiKeys } from '../../config/index.js';
 import type { SecretsManager } from '../../config/secrets.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../../config/secret-store-unreadable.js';
 import type { ProviderRegistry } from '../../providers/registry.js';
 import type { ProviderRuntimeMetadata } from '../../providers/interface.js';
 import { decodeJwtPayload } from '../auth/oauth-core.js';
@@ -183,6 +184,9 @@ export async function buildProviderAccountSnapshot(
       // one) has its key under the service's token name, the names its runtime
       // declares, or the conventional <ID>_API_KEY; environment first, then the store.
       let hasApiKey = providerId in apiKeys;
+      // A secret store this computer could not read: whether a key is stored there is not known. Said as such, and no
+      // key is asked for (secret-store-unreadable.ts).
+      let keyUnreadable: string | null = null;
       if (!hasApiKey) {
         const serviceConfig = services.find((entry) => (entry.providerId ?? entry.name) === providerId);
         const candidates = new Set<string>([
@@ -194,6 +198,8 @@ export async function buildProviderAccountSnapshot(
           if (process.env[key]) return true;
           return (await secrets.get(key)) !== null;
         }))).some(Boolean);
+        const firstKey = [...candidates][0];
+        if (!hasApiKey && firstKey !== undefined) keyUnreadable = await unreadableSecretStore(deps.secretsManager as unknown as StoredSecretReader, firstKey, `the ${providerId} API key`);
       }
       const routes = classifyRoutes({
         providerId,
@@ -225,6 +231,9 @@ export async function buildProviderAccountSnapshot(
           detail: 'Ambient API key is available for direct provider access.',
           issues: [],
         });
+      } else if (keyUnreadable) {
+        routeRecords.push({ route: 'api-key', usable: false, freshness: 'unconfigured', detail: keyUnreadable, issues: [] });
+        issues.push(keyUnreadable);
       }
 
       if (subscription) {
@@ -287,7 +296,10 @@ export async function buildProviderAccountSnapshot(
         issues.push('Service OAuth is configured but missing a usable credential.');
         recommendedActions.push({ description: `Repair service OAuth credentials for ${providerId}.`, command: { name: 'services', args: [providerId] } });
       }
-      if (!routes.includes('api-key') && !routes.includes('subscription') && !routes.includes('service-oauth')) {
+      if (keyUnreadable) {
+        // Nothing is asked for again: the key may well be stored; the store is what needs repair.
+        recommendedActions.push({ description: `Make the secret store on this computer readable (its key file must be the one the store was written with); the ${providerId} key is not asked for again.` });
+      } else if (!routes.includes('api-key') && !routes.includes('subscription') && !routes.includes('service-oauth')) {
         recommendedActions.push({ description: `Configure an API key or OAuth-backed route for ${providerId}.`, command: { name: 'secrets', args: ['set', ...(runtimeMetadata?.auth?.envVars?.slice(0, 1) ?? [])] } });
       } else if (activeRoute === 'unconfigured') {
         recommendedActions.push({ description: `No currently usable auth path exists for ${providerId}; repair the preferred route.` });
@@ -350,6 +362,8 @@ export async function buildProviderAccountSnapshot(
           : `The stored subscription session ended or expired; sign in again with /provider sign-in ${providerId} (from a shell: goodvibes subscription login ${providerId} start).`;
       } else if (preferredRoute === 'service-oauth') {
         activeRouteReason = 'Service OAuth is configured, but its credential is missing; no usable auth route remains.';
+      } else if (keyUnreadable) {
+        activeRouteReason = keyUnreadable;
       }
       const fallbackRoute = preferredRoute !== activeRoute && activeRoute !== 'unconfigured'
         ? activeRoute

@@ -73,6 +73,7 @@ import type {
   CloudflareVerifyResult,
 } from './types.js';
 import { CloudflareControlPlaneError } from './types.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../config/secret-store-unreadable.js';
 import {
   buildTokenPolicies,
   buildTokenRequirements,
@@ -166,11 +167,13 @@ export class CloudflareControlPlaneManager {
     const apiToken = await this.resolveApiToken({});
     const workerToken = await this.resolveOperatorToken({});
     const workerClientToken = await this.resolveWorkerClientToken({});
+    const storeUnreadable = !apiToken.value || !workerToken.value ? await this.storeUnreadable('the Cloudflare tokens') : null;
     return buildCloudflareControlPlaneStatus({
       config,
       apiToken,
       workerToken,
       workerClientToken,
+      storeUnreadable,
       provisioned: this.provisionedStore().read(),
       ...(this.options.tunnelConnector ? { tunnelConnector: this.options.tunnelConnector.status() } : {}),
     });
@@ -436,6 +439,7 @@ export class CloudflareControlPlaneManager {
   async discover(input: CloudflareDiscoverInput = {}): Promise<CloudflareDiscoverResult> {
     const apiToken = await this.resolveApiToken(input);
     if (!apiToken.value) {
+      await this.refuseUnreadableStore('the Cloudflare API token');
       throw new CloudflareControlPlaneError(
         'Cloudflare API token is required. Set CLOUDFLARE_API_TOKEN, configure cloudflare.apiTokenRef, or pass apiToken.',
         'CLOUDFLARE_API_TOKEN_REQUIRED',
@@ -510,6 +514,7 @@ export class CloudflareControlPlaneManager {
     const accountId = this.resolveAccountId(input.accountId);
     const apiToken = await this.resolveApiToken(input);
     if (!apiToken.value) {
+      await this.refuseUnreadableStore('the Cloudflare API token');
       throw new CloudflareControlPlaneError(
         'Cloudflare API token is required. Set CLOUDFLARE_API_TOKEN, configure cloudflare.apiTokenRef, or pass apiToken.',
         'CLOUDFLARE_API_TOKEN_REQUIRED',
@@ -599,6 +604,7 @@ export class CloudflareControlPlaneManager {
 
     const apiToken = await this.resolveApiToken(input);
     if (!apiToken.value) {
+      await this.refuseUnreadableStore('the Cloudflare API token');
       throw new CloudflareControlPlaneError(
         'Cloudflare API token is required. Set CLOUDFLARE_API_TOKEN, configure cloudflare.apiTokenRef, or pass apiToken.',
         'CLOUDFLARE_API_TOKEN_REQUIRED',
@@ -614,6 +620,7 @@ export class CloudflareControlPlaneManager {
     // at Cloudflare, so a missing credential never leaves a half-built account.
     const operatorToken = components.workers ? await this.resolveOperatorToken(input) : undefined;
     if (operatorToken && !operatorToken.value) {
+      await this.refuseUnreadableStore('the Worker-to-daemon operator token');
       throw new CloudflareControlPlaneError(
         'A Worker-to-daemon operator token is required. Pass operatorToken, configure cloudflare.workerTokenRef, or ensure the daemon has an operator token.',
         'CLOUDFLARE_OPERATOR_TOKEN_REQUIRED',
@@ -1305,6 +1312,17 @@ export class CloudflareControlPlaneManager {
 
   private resolveWorkerName(inputWorkerName: string | undefined): string {
     return _resolveWorkerName(this._tokenResolverCtx(), inputWorkerName, DEFAULTS.workerName);
+  }
+
+  /** The words for a secret store this computer could not read while looking for `what`, or null when it was read. */
+  private async storeUnreadable(what: string): Promise<string | null> {
+    return unreadableSecretStore(this.options.secretsManager as unknown as StoredSecretReader | undefined, 'CLOUDFLARE_API_TOKEN', what);
+  }
+
+  /** Refuses with CLOUDFLARE_CREDENTIALS_UNREADABLE (412) when a token read as absent because the store could not be read. */
+  private async refuseUnreadableStore(what: string): Promise<void> {
+    const words = await this.storeUnreadable(what);
+    if (words) throw new CloudflareControlPlaneError(words, 'CLOUDFLARE_CREDENTIALS_UNREADABLE', 412);
   }
 
   private async resolveApiToken(input: CloudflareValidateInput): Promise<CloudflareResolvedSecret> {

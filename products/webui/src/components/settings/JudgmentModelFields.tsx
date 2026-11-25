@@ -89,6 +89,57 @@ export function JudgmentModelField({
   );
 }
 
+const SET_ASIDE_FIELDS = ["endpoint", "model", "keySource", "keyName", "backend", "fallbacks"] as const;
+
+/**
+ * judgment.setAside: the decision model an earlier version had set up while
+ * decision models were switched off, kept aside when that choice was carried
+ * to Ask me with no decision model set. Offered back here: one button sets it
+ * again (every field in one update, the set-aside emptied with it).
+ */
+export function JudgmentSetAsideField({
+  value,
+  onCommitMany,
+}: {
+  readonly value: unknown;
+  readonly onCommitMany: CommitSettings;
+}) {
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const held = value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const present = SET_ASIDE_FIELDS.filter((field) => held[field] !== undefined);
+  if (present.length === 0) return <p>Nothing is set aside.</p>;
+  const model = typeof held.model === "string" && held.model ? held.model : "the default model";
+  const endpoint = typeof held.endpoint === "string" && held.endpoint ? held.endpoint : "the hosted endpoint";
+  const restore = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await onCommitMany([
+        ...present.map((field) => [`judgment.${field}`, held[field]] as const),
+        ["judgment.setAside", {}],
+        ["judgment.noDecisionModel", false],
+      ]);
+    } catch (err) {
+      if (!(err instanceof OwnerApprovalPendingError)) setError(`The decision model was not set again: ${formatError(err)}`);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return (
+    <div>
+      <p>
+        {model} at {endpoint}: what an earlier version had set up while decision models were switched
+        off, kept aside since. Nothing is sent to it until you set it again.
+      </p>
+      <Button size="sm" disabled={saving} onClick={() => void restore()}>
+        Use the decision model you had before
+      </Button>
+      {error && <p role="alert">{error}</p>}
+    </div>
+  );
+}
+
 export function JudgmentProviderField({
   value,
   onCommitMany,

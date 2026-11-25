@@ -325,12 +325,18 @@ try {
       await send(page, `QUAL_RESEARCH_${viewport.name}: Find the requested primary sources.`, startAnswers + 4);
       assert.equal(judgments.length, startJudgments + 2); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
       assert.equal(answers.at(-1)?.reasoning_effort, 'xhigh');
-      await policy(page, 'Hybrid'); await policy(page, 'No Decision Model');
+      await policy(page, 'Hybrid');
+      // No decision model set (endpoint and model cleared, no key): the router asks no classifier.
+      // Typed by what this step uses: the fixture's own type reads back through this closure.
+      const settings: { get(key: string): unknown; set(key: string, value: unknown): void } = host.services.configManager;
+      const decisionEndpoint = settings.get('judgment.endpoint');
+      settings.set('judgment.endpoint', ''); settings.set('judgment.model', ''); settings.set('judgment.keySource', 'env');
       const beforeNoModel = judgments.length;
       await page.goto(`${host.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}`);
       await send(page, `QUAL_NO_MODEL_${viewport.name}: Continue the same authorized conversation.`, startAnswers + 5);
       assert.equal(judgments.length, beforeNoModel); assert.equal(answers.at(-1)?.model, 'gpt-6.1-sol');
-      assert.equal(host.services.configManager.get('judgment.policy'), 'No Decision Model');
+      assert.equal(settings.get('judgment.model'), '');
+      settings.set('judgment.keySource', 'none'); settings.set('judgment.endpoint', decisionEndpoint); settings.set('judgment.model', 'jev-1.13.0');
       // Reload the original persisted reply under DefaultOn.
       await policy(page, 'Decision Model Only');
       await page.goto(`${host.baseUrl}/?view=chat&session=${encodeURIComponent(sessionId)}`);
@@ -354,7 +360,7 @@ try {
       speechReceipts.push({ viewport: viewport.name, savedRevision: true, judgmentRequests: judgmentRequests.length,
         synthesisRequests: synthesis.length - beforeSynthesis, stopped: true });
       await page.screenshot({ path: join(output, `${viewport.name}-default-on-speech.png`), fullPage: true });
-      receipts.push({ viewport: viewport.name, proof: 'real config persistence, ordinary xhigh/max actual wire and zero categorization, same-chat Router/full history/category effort, General fallback, No Decision Model without a classifier' });
+      receipts.push({ viewport: viewport.name, proof: 'real config persistence, ordinary xhigh/max actual wire and zero categorization, same-chat Router/full history/category effort, General fallback, no decision model set and no classifier' });
       // Keep each viewport independent without dropping history within its proof.
       assert.equal((await host.fetch(`/api/companion/chat/sessions/${sessionId}/close`, { method: 'POST', body: '{}' })).status, 200);
       assert.equal((await host.fetch(`/api/companion/chat/sessions/${sessionId}`, { method: 'DELETE' })).status, 200);

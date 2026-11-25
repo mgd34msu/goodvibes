@@ -9,6 +9,8 @@ import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { choiceInput, doAction, textInput } from './described-command-kit.js';
 import type { ActionValues, CommandActionContext, FixedChoice } from './command-actions/types.js';
+import { sessionCapabilityAction } from './command-actions/capability-actions.js';
+import { CONVERSATION_COMPACT, CONVERSATION_UNDO, type CompactServices, type UndoServices } from '@goodvibes/engine/platform/platform/capabilities';
 
 type Run<Ctx> = (values: ActionValues, ctx: Ctx) => Promise<string | void>;
 
@@ -30,7 +32,8 @@ function stepChoices(undo: boolean, rewind: boolean): readonly FixedChoice[] {
  * is not.
  */
 export function createUndoCommands<Ctx extends CommandActionContext>(policy: {
-  readonly undo: Run<Ctx>;
+  /** The live conversation, file undo stack and rewind `/undo` acts on (the capability conversation.undo runs with them). */
+  readonly undo: (ctx: Ctx) => UndoServices;
   readonly redo: Run<Ctx>;
 }): { readonly undo: DescribedCommand<Ctx>; readonly redo: DescribedCommand<Ctx> } {
   const make = (undo: boolean): DescribedCommand<Ctx> => defineCommand<Ctx>({
@@ -38,12 +41,15 @@ export function createUndoCommands<Ctx extends CommandActionContext>(policy: {
     title: undo ? 'Undo' : 'Redo',
     summary: undo ? 'Take back the last turn, file change or /checkpoint rewind' : 'Bring back what was undone last',
     group: 'Conversation',
-    actions: [doAction<Ctx>({
-        id: undo ? 'undo' : 'redo', label: undo ? 'Undo the last step' : 'Redo the step undone last', word: '',
-        inputs: [choiceInput({ id: 'what', label: 'What', help: undo ? 'What to take back' : 'What to bring back', choices: stepChoices(undo, true), typed: { position: 1 }, optional: { default: 'turn', means: undo ? 'the last turn' : 'the turn undone last' } })],
-        sentence: undo ? 'The last step of the kind chosen is taken back; /redo brings it back.' : 'The step of the kind chosen that was undone last is brought back.',
+    actions: [undo
+      // Moved beside its handler (capabilities/builtin/conversation.ts); it runs here, on this program's conversation.
+      ? sessionCapabilityAction<Ctx, UndoServices>(CONVERSATION_UNDO, policy.undo, TERMINAL)
+      : doAction<Ctx>({
+        id: 'redo', label: 'Redo the step undone last', word: '',
+        inputs: [choiceInput({ id: 'what', label: 'What', help: 'What to bring back', choices: stepChoices(false, true), typed: { position: 1 }, optional: { default: 'turn', means: 'the turn undone last' } })],
+        sentence: 'The step of the kind chosen that was undone last is brought back.',
         operator: TERMINAL, example: { what: 'file' },
-        run: undo ? policy.undo : policy.redo,
+        run: policy.redo,
       })],
   });
   return { undo: make(true), redo: make(false) };
@@ -76,14 +82,16 @@ export function createTitleCommand<Ctx extends CommandActionContext>(run: Run<Ct
   });
 }
 
-/** `/compact`: summarise the older part of the conversation to free the context window. */
-export function createCompactCommand<Ctx extends CommandActionContext>(run: Run<Ctx>): DescribedCommand<Ctx> {
+/**
+ * `/compact`: summarise the older part of the conversation to free the
+ * context window. The capability conversation.compact runs here with this
+ * program's own compaction (`compact` answers what happened, in words).
+ */
+export function createCompactCommand<Ctx extends CommandActionContext>(conversation: (ctx: Ctx) => CompactServices['conversation'], after?: (ctx: Ctx) => void): DescribedCommand<Ctx> {
   return defineCommand<Ctx>({
     name: 'compact', title: 'Compact the conversation', summary: 'Summarise the older part of the conversation to free the context window', group: 'Conversation',
-    actions: [doAction<Ctx>({
-      id: 'compact', label: 'Compact the conversation now', word: '',
-      sentence: 'The older messages are replaced by a summary, so the model has room again; /session compactions lists what each compaction removed.',
-      operator: TERMINAL, run,
+    actions: [sessionCapabilityAction<Ctx, CompactServices>(CONVERSATION_COMPACT, (ctx) => ({ conversation: conversation(ctx) }), {
+      ...TERMINAL, ...(after ? { after: (ctx: Ctx) => after(ctx) } : {}),
     })],
   });
 }

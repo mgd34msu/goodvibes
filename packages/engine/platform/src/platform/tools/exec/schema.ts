@@ -328,6 +328,12 @@ export interface ExecCommandResult {
   stdout: string;
   stderr: string;
   success: boolean;
+  /**
+   * The command's own process exited while a process it started still runs and still holds its output: one
+   * sentence with its pid. The result is returned at once with the output written up to then; that process is
+   * left running (tools/exec/command-end.ts).
+   */
+  left_running?: string | undefined;
   /** Set when expectations are violated. */
   expectation_error?: string | undefined;
   /** Set when command exceeded timeout. */

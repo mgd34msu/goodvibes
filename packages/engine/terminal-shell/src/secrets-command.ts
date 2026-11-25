@@ -14,6 +14,7 @@ import {
   BUILTIN_SECRET_PROVIDER_SOURCES,
   describeSecretRef,
   resolveSecretRef,
+  unreadableSecretStore,
   type SecretsManager,
   type SecretScope,
   type SecretStorageMedium,
@@ -22,9 +23,11 @@ import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
+import { daemonCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import { SECRETS_SET } from '@goodvibes/engine/platform/platform/capabilities';
 import type { CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
 
-type SecretsStore = Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed' | 'inspect'> & Partial<Pick<SecretsManager, 'confirmProjectSecret' | 'getSecretProviderHostConfig'>>;
+type SecretsStore = Pick<SecretsManager, 'get' | 'set' | 'delete' | 'listDetailed' | 'inspect'> & Partial<Pick<SecretsManager, 'confirmProjectSecret' | 'getSecretProviderHostConfig' | 'getStored'>>;
 
 export interface SecretsCommandContext extends CommandActionContext {
   readonly platform: { readonly secretsManager?: SecretsStore | null | undefined };
@@ -126,7 +129,7 @@ const REFERENCE: InputDescription = {
 // The description
 // ---------------------------------------------------------------------------
 
-function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsCommandPolicy): CommandDescription<Ctx> {
+function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsCommandPolicy, binding: DaemonCapabilityBinding<Ctx>): CommandDescription<Ctx> {
   async function write(values: Readonly<Record<string, string>>, ctx: Ctx, value: string): Promise<string> {
     const key = values.key!;
     const requested = (values.scope || 'project') as SecretScope;
@@ -160,24 +163,8 @@ function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsComma
           return ['Stored secrets:', ...records.map((record) => `  ${record.key}  ${whereKept(record)}`)].join('\n');
         },
       },
-      {
-        id: 'set-secret', label: 'Store a secret', word: 'set',
-        inputs: [
-          KEY_NEW,
-          { id: 'value', label: 'Value', help: 'The password or key itself; hidden as you type', kind: 'secret', required: true, typed: { position: 2 } },
-          SCOPE,
-          MEDIUM,
-        ],
-        sentence: '{key} will be kept in the {scope} secret store ({storage}) until you change it.',
-        done: 'Stored {key} in the {scope} secret store ({storage}).',
-        touches: 'credential', lasts: 'kept', risk: 'none', undoneBy: 'delete-secret',
-        operator: TERMINAL_ONLY, example: { key: 'OPENAI_API_KEY', value: 'example-value', scope: 'user' },
-        async run(values, ctx) {
-          if (!values.value) throw commandRefusal(`Nothing was stored: no value was given for ${values.key}.`);
-          if (isMalformedGoodVibesSecretRefInput(values.value)) throw commandRefusal('Nothing was stored: the value starts like a secret reference but is not one.', '"See where secrets can come from" shows the reference forms.');
-          return write(values, ctx, values.value);
-        },
-      },
+      // Moved to the daemon (capabilities/builtin/secrets.ts): the daemon stores it, and the value goes nowhere else.
+      daemonCapabilityAction<Ctx>(SECRETS_SET, binding),
       {
         id: 'link-secret', label: 'Point a secret at a password manager', word: 'link',
         inputs: [KEY_NEW, REFERENCE, SCOPE, MEDIUM],
@@ -196,6 +183,9 @@ function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsComma
         touches: 'reads', lasts: 'not-a-change', risk: 'none', operator: TERMINAL_ONLY, example: { key: 'OPENAI_API_KEY' },
         async run(values, ctx) {
           const value = await storeOf(ctx).get(values.key!);
+          // A store this computer could not read is said as such, never as "not stored".
+          const unreadable = value === null ? await unreadableSecretStore(storeOf(ctx), values.key!, values.key!) : null;
+          if (unreadable) throw commandRefusal(unreadable);
           if (value === null) throw commandRefusal(`${values.key} is not stored.`, '/secrets list shows what is stored.');
           return `${values.key} is stored and can be read (value not shown).`;
         },
@@ -311,7 +301,10 @@ function describeSecrets<Ctx extends SecretsCommandContext>(policy: SecretsComma
   };
 }
 
-/** `/secrets` for one app: the one description, with the app's filing rule for credentials. */
-export function createSecretsCommand<Ctx extends SecretsCommandContext>(policy: SecretsCommandPolicy): DescribedCommand<Ctx> {
-  return defineCommand(describeSecrets<Ctx>(policy));
+/**
+ * `/secrets` for one app: the one description, with the app's filing rule for
+ * credentials and how it reaches the daemon (storing a secret runs there).
+ */
+export function createSecretsCommand<Ctx extends SecretsCommandContext>(policy: SecretsCommandPolicy, binding: DaemonCapabilityBinding<Ctx>): DescribedCommand<Ctx> {
+  return defineCommand(describeSecrets<Ctx>(policy, binding));
 }

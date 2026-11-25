@@ -95,6 +95,12 @@ export interface HostedWorkspaceFloor {
    * must have no spelling that reaches the host.
    */
   readonly execPosture?: HostedExecPostureDecider | undefined;
+  /**
+   * GoodVibes' own capabilities for a terminal-app session on this floor (`capability_find`, `capability_run`,
+   * run in this daemon as the session owner's model). A session with a surface turn of its own (the Agent's)
+   * registers its own pair instead.
+   */
+  readonly capabilityTools?: import('../tools/capability/daemon-tools.js').DaemonCapabilityToolHost | undefined;
   /** Release everything this floor started. Called when its last session goes. */
   dispose(): void | Promise<void>;
 }

@@ -1930,7 +1930,7 @@ Seven screens list optional features, each as a checkbox that starts at its curr
 
 ### The Agent's first run
 
-The Agent's first start runs the same three-step first run as the terminal app (above). `goodvibes-agent setup` (or `goodvibes-agent onboarding`) starts the Agent on `/setup`, whose topics are listed in the Agent part; a topic opens the workspace with only that topic's rows. The setup pages below are the workspace's Onboarding areas, opened with `/agent` or `Ctrl+G`.
+The Agent's first start runs the same three-step first run as the terminal app (above). `goodvibes-agent setup` (or `goodvibes-agent onboarding`) starts the Agent on `/setup`, whose topics are listed in the Agent part; a topic opens the workspace with only that topic's rows. The setup pages below are the workspace's Onboarding areas, opened with `/agent` or `Ctrl+G` `w`.
 
 Keys: Up and Down move, Left and Right switch between the page list and the page, Enter opens a row, `/` searches, Ctrl+] goes to the next area, Ctrl+R checks the daemon again, Esc closes, and typing a letter closes the workspace with that letter in the message box.
 

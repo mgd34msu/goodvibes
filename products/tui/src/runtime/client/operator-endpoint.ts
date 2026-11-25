@@ -44,7 +44,8 @@ import { bearerFor, type DaemonTarget } from '@goodvibes/engine/platform/platfor
 import { configuredDaemonIsThisMachine, configuredDaemonOrigin, resolveDaemonTarget, resolveDaemonTargetProven, type DaemonTargetResolution } from '@goodvibes/engine/platform/platform/runtime/client/daemon-target-resolver';
 import { operatorTokenPath } from '@goodvibes/engine/platform/platform/pairing/companion-token';
 import { readDaemonOperatorBearer } from '@goodvibes/engine/platform/platform/runtime/operations';
-import type { DaemonVerbCaller } from '@goodvibes/engine/platform/platform/runtime/client';
+import type { DaemonVerbCaller, DaemonVerbInvokeOptions } from '@goodvibes/engine/platform/platform/runtime/client';
+import { CAPABILITY_METHOD_IDS } from '@goodvibes/engine/platform/platform/capabilities';
 import { DaemonVerbNotSentError } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-verb-error';
 
 /** Re-exported so this repo's importers keep one import site for the shape
@@ -254,11 +255,16 @@ async function invokeGatewayMethodOverHttp<T>(
   bearer: () => Promise<string>,
   methodId: string,
   input: unknown,
+  options?: DaemonVerbInvokeOptions,
 ): Promise<T> {
   const authToken = await bearer();
   const response = await fetchImpl(`${baseUrl}/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${authToken}`, 'Content-Type': 'application/json',
+      // A person's typed line or screen press, as the request itself; the daemon keeps the claim only from a person's credential.
+      ...(options?.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
+    },
     // The envelope the route requires: `body` must be PRESENT even when empty,
     // or the route refuses with a 400 naming the shape it wanted.
     body: JSON.stringify({ body: input ?? {} }),
@@ -300,6 +306,9 @@ async function invokeGatewayMethodOverHttp<T>(
  * it is instead of this layer sending it to the daemon.
  */
 function hasHttpBinding(client: GoodVibesPlatform, methodId: string): boolean {
+  // The capability methods are published for the WebSocket only, and this program's own platform declares them
+  // even where the generated contract is older than they are.
+  if (CAPABILITY_METHOD_IDS.includes(methodId)) return false;
   if (!isOperatorMethodId(methodId)) return true;
   try {
     return client.operator.getOperation(methodId).http !== undefined;
@@ -324,7 +333,7 @@ function withGatewayRouteForWsOnlyVerbs(
   const typedInvoke = client.operator.invoke;
   const invoke = ((methodId: string, ...rest: unknown[]) => {
     if (hasHttpBinding(client, methodId)) return (typedInvoke as (id: string, ...args: unknown[]) => Promise<unknown>)(methodId, ...rest);
-    return invokeGatewayMethodOverHttp<unknown>(fetchImpl, baseUrl, bearer, methodId, rest[0]);
+    return invokeGatewayMethodOverHttp<unknown>(fetchImpl, baseUrl, bearer, methodId, rest[0], rest[1] as DaemonVerbInvokeOptions | undefined);
   }) as typeof typedInvoke;
   return { ...client, operator: { ...client.operator, invoke } };
 }
@@ -373,10 +382,11 @@ export function createDaemonVerbCaller(deps: {
       const rpc = resolve();
       return rpc.available ? rpc : { ...rpc, thisMachine: configuredDaemonIsThisMachine(deps.configManager) };
     },
-    invoke: async <T,>(methodId: string, input?: unknown): Promise<T> => {
+    invoke: async <T,>(methodId: string, input?: unknown, options?: DaemonVerbInvokeOptions): Promise<T> => {
       const rpc = resolve();
       if (!rpc.available) throw new DaemonVerbNotSentError(methodId, rpc.reason);
-      return await rpc.platformClient.operator.invoke(methodId as never, (input ?? {}) as never) as T;
+      const invoke = rpc.platformClient.operator.invoke as (id: string, ...args: unknown[]) => Promise<unknown>;
+      return await (options === undefined ? invoke(methodId, input ?? {}) : invoke(methodId, input ?? {}, options)) as T;
     },
   };
 }

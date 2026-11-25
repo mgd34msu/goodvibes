@@ -41,19 +41,29 @@ export interface MemoryProvenanceEntry {
   readonly record?: { readonly summary: string; readonly cls: string } | null | undefined;
 }
 
+/** The chip's key as the program binds it (toggle-memory-provenance), set each frame. */
+let memoryProvenanceKey = 'Ctrl+G E';
+
+/** Keep the chip's key in step with the key table ('(unbound)' names no key). */
+export function setMemoryProvenanceKey(label: string): void {
+  memoryProvenanceKey = label;
+}
+
 /**
  * The optional "used N memories" turn chip. Collapsed: one small line naming the
- * count with the drill-in hint. Expanded (Alt+M): the same line followed by one
+ * count with the drill-in hint. Expanded (its key, toggle-memory-provenance): the same line followed by one
  * line per memory, its resolved SUMMARY (with the record class), a "resolving…"
  * placeholder while the fetch is in flight, or an honest "no longer available"
  * for a record that has since been forgotten. Empty when no memories were used.
  */
-export function renderMemoryProvenanceChip(width: number, count: number, entries: readonly MemoryProvenanceEntry[], expanded: boolean): Line[] {
+export function renderMemoryProvenanceChip(width: number, count: number, entries: readonly MemoryProvenanceEntry[], expanded: boolean, key = memoryProvenanceKey): Line[] {
   if (count <= 0) return [];
   const t = activeUiTones();
   const bodyBg = activeTheme().collapsedBodyBg;
   const noun = count === 1 ? 'memory' : 'memories';
-  const header = expanded ? `used ${count} ${noun}: Alt+M to hide` : `used ${count} ${noun}: Alt+M to list`;
+  // The key as bound (toggle-memory-provenance); unbound, the chip names no key.
+  const press = key && key !== '(unbound)' ? `: ${key} to ${expanded ? 'hide' : 'list'}` : '';
+  const header = `used ${count} ${noun}${press}`;
   const lines: Line[] = renderConversationFragment(header, width, { prefix: ' ◆ ', prefixFg: t.state.info, text: t.fg.dim, bodyBg });
   if (expanded) {
     entries.forEach((entry, index) => {

@@ -174,7 +174,6 @@ export function createFeedTokenRoutes<
   MouseState extends MouseRouteState<FooterTarget>,
 >(policy: {
   readonly openIndicator: (state: IndicatorState) => void;
-  readonly openKeyIndicator: (state: KeyState) => void;
   readonly mouseRowOffset: number;
 }) {
   function handleIndicatorFocusToken(
@@ -566,13 +565,7 @@ export function createFeedTokenRoutes<
       }
       return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
     }
-    // F2 is handled globally (handler-shortcuts.ts) before it reaches this
-    // route; this branch keeps the route correct when it is driven directly.
-    if (token.logicalName === 'f2') {
-      indicatorFocused = false;
-      policy.openKeyIndicator(state);
-      return { handled: true, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
-    }
+    // Your agents (F2 by default) is the key table's `open-agents`, run by the global shortcut route.
     return { handled: false, prompt, cursorPos, inputScrollTop, commandMode, indicatorFocused };
   }
   function handleMouseToken(

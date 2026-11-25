@@ -5,6 +5,7 @@ import {
   emitAutomationJobCreated,
   emitAutomationJobDisabled,
   emitAutomationJobEnabled,
+  emitAutomationJobRemoved,
   emitAutomationJobUpdated,
   emitAutomationRunCompleted,
   emitAutomationRunFailed,
@@ -56,6 +57,12 @@ export function emitAutomationManagerJobUpdated(
       reason: job.pausedReason ?? 'disabled',
     });
   }
+}
+
+/** Announces that a job left the manager (removed, or a one-shot job done), so a list showing it reads again. */
+export function emitAutomationManagerJobRemoved(runtimeBus: RuntimeEventBus | null, job: AutomationJob | undefined, jobId: string, reason: string): void {
+  if (!runtimeBus) return;
+  emitAutomationJobRemoved(runtimeBus, automationEmitterContext(jobId, job?.execution.target.sessionId), { jobId, reason });
 }
 
 export function emitAutomationManagerJobAutoDisabled(

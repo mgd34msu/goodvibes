@@ -16,7 +16,7 @@
  * screen says where it comes from and what it holds, and offers nothing to set.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { invokeMethod } from '../../lib/goodvibes';
 import { NO_EVENT_LIST_FRESHNESS } from '../../lib/queries';
 import { formatError } from '../../lib/errors';
@@ -43,6 +43,8 @@ interface ChoiceWords {
 
 /** The answer of secureAddress.get, as this screen reads it. */
 interface SecureAddressStatus {
+  /** A notice no owner channel carried (shown at the top; the daemon marks it given once it is in an answer). */
+  readonly notice?: string;
   readonly intro: string;
   readonly choices: readonly ChoiceWords[];
   readonly groupLines: readonly string[];
@@ -53,7 +55,7 @@ interface SecureAddressStatus {
     readonly notAfter?: number; readonly problem?: string; readonly from?: 'this-machine' | 'group';
   };
   readonly letsEncrypt: {
-    readonly domain: string; readonly tokenStored: boolean; readonly issuing: boolean;
+    readonly domain: string; readonly tokenStored: boolean; readonly tokenUnreadable?: string; readonly issuing: boolean;
     readonly certificate?: { readonly names: readonly string[]; readonly notAfter: number };
     readonly lastAttempt?: { readonly at: number; readonly ok: boolean; readonly words: string };
     readonly addressProblem?: string;
@@ -79,8 +81,9 @@ interface SecureAddressReissue {
   readonly status: SecureAddressStatus;
 }
 
+/** A certificate's end date in the one form every Secure address screen uses (the local date, month in words, as the daemon's own words write it). */
 function day(ms: number | undefined): string {
-  return ms ? new Date(ms).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }) : '';
+  return ms ? new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : '';
 }
 
 /** The four parts of a choice's words, each under its own plain label. */
@@ -107,6 +110,7 @@ export function SecureAddressSettings() {
   const [token, setToken] = useState('');
   const [certFile, setCertFile] = useState<string | null>(null);
   const [keyFile, setKeyFile] = useState<string | null>(null);
+  const [shownNotice, setShownNotice] = useState<string | null>(null);
 
   const change = useMutation({
     mutationFn: (input: { certificate: Choice; domain?: string; cloudflareToken?: string; certFile?: string; keyFile?: string }) =>
@@ -123,6 +127,9 @@ export function SecureAddressSettings() {
   });
 
   const data = (reissue.data && reissue.submittedAt > change.submittedAt ? reissue.data.status : undefined) ?? change.data ?? status.data;
+  // The daemon marks a notice given once an answer carried it: kept here for as long as this screen is open.
+  const arrivedNotice = data?.notice;
+  useEffect(() => { if (arrivedNotice) setShownNotice(arrivedNotice); }, [arrivedNotice]);
   if (status.isError && !data) return <div className="banner warning" role="alert">{formatError(status.error)}</div>;
   if (!data) return <p className="settings-empty">Reading the secure address…</p>;
 
@@ -137,6 +144,7 @@ export function SecureAddressSettings() {
 
   return (
     <>
+      {shownNotice && <div className="banner info" role="status">{shownNotice}</div>}
       <SettingsBlock title="In force now" description={data.intro}>
         <div className="secure-address__status" role="status">
           <StatusDot tone={force.serving ? 'ok' : force.on ? 'bad' : 'idle'} />
@@ -152,17 +160,22 @@ export function SecureAddressSettings() {
             ))}
           </ul>
         )}
+        {/* "Issue a new certificate now" with its own line and outcome, apart from "Switch https off". */}
+        {force.on && !data.node && data.reissue.available && (
+          <div className="secure-address__reissue">
+            <div className="settings-rows">
+              <Button disabled={busy} onClick={() => reissue.mutate()}>{reissue.isPending ? 'Issuing a new certificate…' : data.reissue.title}</Button>
+            </div>
+            <p className="settings-empty">{data.reissue.line}</p>
+            {reissue.data && <p className="settings-empty" role="status">{reissue.data.words}</p>}
+            {reissue.isError && <div className="banner warning" role="alert">{formatError(reissue.error)}</div>}
+          </div>
+        )}
         {force.on && !data.node && (
           <div className="settings-rows">
-            {data.reissue.available && (
-              <Button disabled={busy} onClick={() => reissue.mutate()}>{reissue.isPending ? 'Issuing a new certificate…' : data.reissue.title}</Button>
-            )}
             <Button disabled={busy} onClick={() => change.mutate({ certificate: 'off' })}>Switch https off</Button>
           </div>
         )}
-        {force.on && !data.node && data.reissue.available && <p className="settings-empty">{data.reissue.line}</p>}
-        {reissue.data && <p className="settings-empty" role="status">{reissue.data.words}</p>}
-        {reissue.isError && <div className="banner warning" role="alert">{formatError(reissue.error)}</div>}
       </SettingsBlock>
 
       {data.node ? (
@@ -189,14 +202,19 @@ export function SecureAddressSettings() {
                 <Field label="Your name for the address" help="A name under a domain you own, such as gv.example.com. Phones open it; the machines of your group get names under it.">
                   <Input value={domain ?? data.letsEncrypt.domain} onChange={(event) => setDomain(event.target.value)} placeholder="gv.example.com" autoComplete="off" spellCheck={false} />
                 </Field>
-                <Field
-                  label="Cloudflare API token"
-                  help={data.letsEncrypt.tokenStored
-                    ? 'A token is stored; leave this empty to use it, or give a new one to replace it.'
-                    : 'Needed once: a token with Zone, DNS, Edit on the zone that holds the name (dash.cloudflare.com, My Profile, API Tokens, template "Edit zone DNS"). It is kept in the daemon\'s secret store and never shown again.'}
-                >
-                  <Input type="password" value={token} onChange={(event) => setToken(event.target.value)} autoComplete="off" />
-                </Field>
+                {/* A secret store that could not be read is not "no token": the token already given is not asked for again. */}
+                {!data.letsEncrypt.tokenStored && data.letsEncrypt.tokenUnreadable ? (
+                  <div className="banner warning" role="status">{data.letsEncrypt.tokenUnreadable}</div>
+                ) : (
+                  <Field
+                    label="Cloudflare API token"
+                    help={data.letsEncrypt.tokenStored
+                      ? 'A token is stored; leave this empty to use it, or give a new one to replace it.'
+                      : 'Needed once: a token with Zone, DNS, Edit on the zone that holds the name (dash.cloudflare.com, My Profile, API Tokens, template "Edit zone DNS"). It is kept in the daemon\'s secret store and never shown again.'}
+                  >
+                    <Input type="password" value={token} onChange={(event) => setToken(event.target.value)} autoComplete="off" />
+                  </Field>
+                )}
                 <Button type="submit" variant="primary" disabled={busy}>
                   {busy ? 'Asking Let\'s Encrypt…' : force.certificate === 'lets-encrypt' && force.on ? 'Use this name again' : 'Get the certificate and use it'}
                 </Button>

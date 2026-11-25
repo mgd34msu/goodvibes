@@ -127,7 +127,7 @@ class DevicesModalSurface implements ConfigModalSurface {
       'legacy',
       legacyRevoked
         ? 'Shared token: revoked and replaced; only the apps on this machine hold it. Ctrl+S replaces it again if a copy may have left this machine; the apps here read the new one and stay signed in.'
-        : 'Shared token: active. This machine\'s own apps (this terminal, the Agent, the daemon CLI) sign in with it, as do devices paired before per-device tokens. Move a device to its own token with Ctrl+G then m. Revoking it (Ctrl+S) signs out every other device still using it; the daemon writes a new one for this machine, so its apps stay signed in.',
+        : `Shared token: active. This machine's own apps (this terminal, the Agent, the daemon CLI) sign in with it, as do devices paired before per-device tokens. Move a device to its own token with ${actionKeyText('m')}. Revoking it (Ctrl+S) signs out every other device still using it; the daemon writes a new one for this machine, so its apps stay signed in.`,
       legacyRevoked ? { fg: MODAL_TONES.dim } : { fg: MODAL_TONES.reasoning },
     ));
 
@@ -173,7 +173,7 @@ class DevicesModalSurface implements ConfigModalSurface {
       const minted = tokens.mintForMigration({ name: 'migrated device', origin: 'owner-pairing' });
       this.minted = { name: minted.name, token: minted.token };
       this.mintedRevealed = false;
-      ctx.setStatus(`Minted "${minted.name}" (id ${shortTokenId(minted.id)}). Press Ctrl+V to reveal its one-time token${this.deps.copyToClipboard ? ' or Ctrl+G then c to copy it' : ''}, then pair the device with it.`);
+      ctx.setStatus(`Minted "${minted.name}" (id ${shortTokenId(minted.id)}). Press Ctrl+V to reveal its one-time token${this.deps.copyToClipboard ? ` or ${actionKeyText('c')} to copy it` : ''}, then pair the device with it.`);
       this.requestRender();
       return;
     }

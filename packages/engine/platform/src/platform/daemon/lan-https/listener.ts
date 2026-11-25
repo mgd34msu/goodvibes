@@ -59,9 +59,14 @@ export class LanHttpsListener {
     readonly config: () => Pick<ConfigManager, 'get' | 'set' | 'setDaemonValues' | 'getControlPlaneConfigDir'>;
     readonly secrets: () => SecureAddressSecrets | null | undefined;
     readonly alertOwner?: ((text: string) => void) | undefined;
+    /** The same, answering whether an owner channel carried it. */
+    readonly noticeOwner?: ((text: string) => Promise<boolean>) | undefined;
     readonly secureAddress?: SecureAddressService | undefined;
   }) {
-    this.secureAddress = deps.secureAddress ?? new SecureAddressService({ config: deps.config, secrets: deps.secrets, alertOwner: (text) => deps.alertOwner?.(text) });
+    this.secureAddress = deps.secureAddress ?? new SecureAddressService({
+      config: deps.config, secrets: deps.secrets, alertOwner: (text) => deps.alertOwner?.(text),
+      ...(deps.noticeOwner ? { noticeOwner: deps.noticeOwner } : {}),
+    });
     this.secureAddress.attachListener(() => this.resync());
   }
 

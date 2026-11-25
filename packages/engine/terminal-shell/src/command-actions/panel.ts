@@ -55,8 +55,9 @@ function defaultValues(action: ActionDescription<never>): ActionValues {
   return Object.fromEntries(action.inputs.flatMap((input) => input.required === true ? [] : [[input.id, input.required.default]]));
 }
 
-function stepsOf(action: ActionDescription<never>): number[] {
-  return [...new Set(action.inputs.filter((input) => !('impliedBy' in input.typed) || fixedChoices(input)).map((input) => input.step ?? 1))].sort((a, b) => a - b);
+/** The form's steps; inputs a place already gave (`given`) are not asked, so a step of only those is not shown. */
+function stepsOf(action: ActionDescription<never>, given: ReadonlySet<string> = new Set()): number[] {
+  return [...new Set(action.inputs.filter((input) => !given.has(input.id) && (!('impliedBy' in input.typed) || fixedChoices(input))).map((input) => input.step ?? 1))].sort((a, b) => a - b);
 }
 
 /** How a list or repeated blank's typed text becomes its value (one entry per line). */
@@ -86,14 +87,20 @@ export class GuidedPanel implements SurfaceModal {
   private settled = false;
   private host: SurfaceModalHost | undefined;
   private readonly startedInForm: boolean;
+  /** A form opened from a place: titled with the place, and no command line is shown (places/place-modal.ts). */
+  private readonly place: GuidedPanelStart['place'];
+  /** Inputs the place gave from its selected item: kept, never asked. */
+  private readonly given: ReadonlySet<string>;
 
   constructor(
     private readonly command: CommandDescription<never>,
     private readonly ctx: CommandActionContext,
-    start: { readonly action?: ActionDescription<never> | undefined; readonly values?: ActionValues | undefined; readonly step?: number | undefined },
+    start: GuidedPanelStart,
     private readonly resolve: (result: PanelResult) => void,
   ) {
     this.startedInForm = start.action !== undefined;
+    this.place = start.place;
+    this.given = new Set(start.place?.given ?? []);
     if (start.action) this.openForm(start.action, start.values ?? {}, start.step ?? 0);
     else this.readRowValues(firstScreenRows(command));
   }
@@ -128,7 +135,7 @@ export class GuidedPanel implements SurfaceModal {
       if (value !== undefined) this.texts[input.id] = textFromValue(input, value);
       else if (fixedChoices(input) && input.required !== true) this.texts[input.id] = input.required.default;
     }
-    this.stepIndex = Math.max(0, Math.min(step, stepsOf(action).length - 1));
+    this.stepIndex = Math.max(0, Math.min(step, stepsOf(action, this.given).length - 1));
     this.field = this.firstOpenField();
     this.note = '';
   }
@@ -164,9 +171,9 @@ export class GuidedPanel implements SurfaceModal {
   private stepFields(): readonly InputDescription[] {
     const action = this.action;
     if (!action) return [];
-    const step = stepsOf(action)[this.stepIndex] ?? 1;
+    const step = stepsOf(action, this.given)[this.stepIndex] ?? 1;
     const values = this.values();
-    return action.inputs.filter((input) => (input.step ?? 1) === step && isShown(input, values) && (!('impliedBy' in input.typed) || fixedChoices(input) !== undefined));
+    return action.inputs.filter((input) => !this.given.has(input.id) && (input.step ?? 1) === step && isShown(input, values) && (!('impliedBy' in input.typed) || fixedChoices(input) !== undefined));
   }
 
   private missingInStep(): InputDescription | undefined {
@@ -236,7 +243,7 @@ export class GuidedPanel implements SurfaceModal {
     const missing = this.missingInStep();
     if (missing) { this.note = `${missing.label} is needed.`; this.field = Math.max(0, fields.indexOf(missing)); return; }
     const action = this.action!;
-    if (this.stepIndex < stepsOf(action).length - 1) { this.stepIndex += 1; this.field = this.firstOpenField(); this.note = ''; return; }
+    if (this.stepIndex < stepsOf(action, this.given).length - 1) { this.stepIndex += 1; this.field = this.firstOpenField(); this.note = ''; return; }
     this.settle({ kind: 'run', action, values: this.values() });
   }
 
@@ -309,7 +316,7 @@ export class GuidedPanel implements SurfaceModal {
   private frame(screenWidth: number, screenHeight: number, rows: number, hints: readonly KitHint[], sub?: string) {
     const t = activeTokens();
     return beginModal(screenWidth, screenHeight, {
-      title: `/${this.command.name}`,
+      title: this.place ? this.place.title : `/${this.command.name}`,
       ...(sub ? { sub } : {}),
       titleGlyph: { char: '', fg: t.text },
       hints,
@@ -345,13 +352,15 @@ export class GuidedPanel implements SurfaceModal {
   private renderForm(screenWidth: number, screenHeight: number): SurfaceLayer {
     const t = activeTokens();
     const action = this.action!;
-    const steps = stepsOf(action);
+    const steps = stepsOf(action, this.given);
     const fields = this.stepFields();
     const values = this.values();
     const line = renderTypedLine(this.command, action.id, withoutSecrets(action, values));
     const lastStep = this.stepIndex >= steps.length - 1;
-    // On the last step Enter submits: its key says what it does, and what submitting does is said above the line.
-    const consequence = lastStep ? wrapLines(actionConsequence(action, values), Math.max(20, standardModalWidth(screenWidth) - 12)) : [];
+    // On the last step Enter submits: its key says what it does, and what submitting does is said above the line
+    // (with a place's item named as the place names it, never by its id).
+    const said = this.place?.display ? { ...values, ...this.place.display } : values;
+    const consequence = lastStep ? wrapLines(actionConsequence(action, said), Math.max(20, standardModalWidth(screenWidth) - 12)) : [];
     const f = this.frame(screenWidth, screenHeight, fields.length * 2 + 6 + (consequence.length > 0 ? consequence.length + 1 : 0),
       [['⏎', lastStep ? actionSubmitLabel(action, values) : 'next'], ['tab', 'field'], ['esc', 'back']]);
     // Text starts at the title's column; the form scrolls so the blank being answered is always shown.
@@ -432,6 +441,8 @@ export class GuidedPanel implements SurfaceModal {
       f.canvas.put(l + 3, consequenceY, row, { fg: t.text });
       consequenceY += 1;
     }
+    // A place's form says what submitting does and shows no command line.
+    if (this.place) return finishModal(f);
     const runY = Math.min(f.bottom, consequence.length > 0 ? consequenceY + 1 : y + 2);
     const lead = '   This will run: ';
     f.canvas.put(l, runY, lead, { fg: t.textMuted });
@@ -440,11 +451,28 @@ export class GuidedPanel implements SurfaceModal {
   }
 }
 
+/** Where the panel starts: a form for one action (with values and a step), or the first screen. */
+export interface GuidedPanelStart {
+  readonly action?: ActionDescription<never> | undefined;
+  readonly values?: ActionValues | undefined;
+  readonly step?: number | undefined;
+  /**
+   * Opened from a place (places/place-modal.ts): its title heads the form, and no command line is shown;
+   * `given` are the inputs the place filled from its selected item (kept, not asked), `display` how the
+   * form's sentence names them (the item's title in place of its id).
+   */
+  readonly place?: {
+    readonly title: string;
+    readonly given?: readonly string[] | undefined;
+    readonly display?: ActionValues | undefined;
+  } | undefined;
+}
+
 /** Open the guided panel and resolve what the person chose (an action and its values) or that they left. */
 export function openGuidedPanel(
   command: CommandDescription<never>,
   ctx: CommandActionContext,
-  start: { readonly action?: ActionDescription<never> | undefined; readonly values?: ActionValues | undefined; readonly step?: number | undefined } = {},
+  start: GuidedPanelStart = {},
 ): Promise<PanelResult> | undefined {
   const push = ctx.pushSurfaceModal;
   if (!push) return undefined;

@@ -27,7 +27,7 @@ export const MEMORY_SHOW_PROVENANCE_SETTING: HostBooleanSetting = Object.freeze(
   type: 'boolean',
   default: MEMORY_SHOW_PROVENANCE_DEFAULT,
   description: 'Show a "used N memories" chip on turns that drew on your standing memories, with a drill-in '
-    + 'listing them (Alt+M to expand). Off by default; when off, nothing is rendered and no metadata is read.',
+    + 'listing them (Ctrl+G then e to expand, unless rebound). Off by default; when off, nothing is rendered and no metadata is read.',
 });
 
 /** Whether the memory-provenance chip is on. */

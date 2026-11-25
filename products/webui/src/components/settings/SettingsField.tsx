@@ -1,6 +1,6 @@
 import { validEndpointURL } from '@goodvibes/judgment/decisions';
 import { JudgmentFallbackEditor } from "./JudgmentFallbackEditor";
-import { JudgmentModelField, JudgmentProviderField, commitJudgmentDestination, type CommitSettings } from "./JudgmentModelFields";
+import { JudgmentModelField, JudgmentProviderField, JudgmentSetAsideField, commitJudgmentDestination, type CommitSettings } from "./JudgmentModelFields";
 import { DecisionRouterEditor } from "./DecisionRouterEditor";
 /**
  * SettingsField, one typed config editor row, driven by the platform schema. Laid
@@ -174,11 +174,16 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
       return (
         <JudgmentModelField
           value={effectiveValue(field)}
-          onCommit={(value) => onCommit(field.key, value)}
+          onCommit={(value) =>
+            // A decision model chosen is no longer "No decision model" (judgment.noDecisionModel).
+            onCommitMany([[field.key, value], ["judgment.noDecisionModel", false]])
+          }
         />
       );
     if (field.key === "judgment.backend")
       return <JudgmentProviderField value={effectiveValue(field)} onCommitMany={onCommitMany} />;
+    if (field.key === "judgment.setAside")
+      return <JudgmentSetAsideField value={effectiveValue(field)} onCommitMany={onCommitMany} />;
     // Object-typed keys get structured editors (see module header).
     if (field.type === "object") {
       if (field.key === "judgment.fallbacks")

@@ -757,6 +757,12 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   readonly #announced = new Map<string, string>();
   /** Effects of an answer, by the key prefix their items are posted under (handleAnswers). */
   readonly #answerEffects = new Map<string, OwnerAnswerEffect>();
+  /** The one wake at the next open item's deadline, while this inbox publishes to surfaces (#armExpiry). */
+  #expiryTimer: ReturnType<typeof setTimeout> | undefined;
+  /** Items whose expiry this inbox announced, so each is announced once. */
+  readonly #expiredAnnounced = new Set<string>();
+  /** The wake was armed once with a publisher: later posts and heard rows re-arm it. */
+  #expiryArmed = false;
 
   constructor(options: OwnerInboxOptions) {
     this.#questions = options.questions;
@@ -768,6 +774,36 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       this.#approvalRevision += 1;
       this.#emit(projectApproval(record, readApproval(record, this.#viewer(undefined), this.#now())));
     });
+    this.#armExpiry();
+  }
+
+  /**
+   * Expiry closes an item without a write, so the inbox that publishes to
+   * surfaces (the daemon's: its approvals carry the event publisher) wakes
+   * once at the next open item's deadline and announces each item that
+   * expired, as an answer or a withdrawal is announced: a list showing it
+   * (Waiting for you, the web UI) drops it with no key pressed. One timer,
+   * re-armed for the next deadline; none while nothing has one.
+   */
+  #armExpiry(): void {
+    if (!this.#approvals?.eventPublisher) return;
+    this.#expiryArmed = true;
+    const now = this.#now();
+    let next: number | undefined;
+    for (const entry of this.#questions.entries()) {
+      const expiresAt = entry.item.expiresAt;
+      if (expiresAt === undefined || entry.closedAt !== undefined || this.#expiredAnnounced.has(entry.item.id)) continue;
+      if (expiresAt > now) { if (next === undefined || expiresAt < next) next = expiresAt; continue; }
+      const projected = this.#project(entry, now);
+      if (projected.status !== 'expired') continue;
+      this.#expiredAnnounced.add(entry.item.id);
+      this.#emit(projected);
+    }
+    if (this.#expiryTimer) clearTimeout(this.#expiryTimer);
+    this.#expiryTimer = undefined;
+    if (next === undefined) return;
+    this.#expiryTimer = setTimeout(() => { this.#expiryTimer = undefined; this.#armExpiry(); }, Math.max(0, next - now) + 1);
+    this.#expiryTimer.unref?.();
   }
 
   /** Moves on every post, answer, withdrawal and delivery in any process, and on every approval change. Expiry by time does not move it. */
@@ -921,6 +957,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   listPageNow(filter: OwnerInboxListFilter = {}): OwnerInboxPage {
     const after = parseOwnerInboxCursor(filter.cursor);
     if (after === null) throw new OwnerInboxInputError(`"${filter.cursor}" is not an inbox list cursor; pass back a nextCursor the list returned.`, 'cursor');
+    // The publisher is set after this inbox is built: the first read once it is set arms the expiry wake.
+    if (!this.#expiryArmed && this.#approvals?.eventPublisher) this.#armExpiry();
     const now = this.#now();
     const kinds = filter.kinds && filter.kinds.length > 0 ? new Set(filter.kinds) : null;
     const limit = Math.min(MAX_LIST_LIMIT, Math.max(1, Math.trunc(filter.limit ?? DEFAULT_LIST_LIMIT)));
@@ -972,6 +1010,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
     );
     const projected = this.#project(entry, now);
     if (created) this.#emitStored(entry, projected);
+    // A deadline sooner than the one the expiry wake waits for moves it.
+    if (created && projected.expiresAt !== undefined) this.#armExpiry();
     return { created, item: projected };
   }
 
@@ -1289,6 +1329,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
   }
 
   dispose(): void {
+    if (this.#expiryTimer) clearTimeout(this.#expiryTimer);
+    this.#expiryTimer = undefined;
     this.#decisionFences.retire('the owner inbox closed');
     this.#answerEffects.clear();
     this.#unsubscribeApprovals?.();
@@ -1315,6 +1357,8 @@ export class OwnerInbox implements RevisionSource, OwnerInboxPort, OwnerAnswerRe
       this.#emit(item);
       this.#applyHeardAnswer(item);
     }
+    // An item another process posted with a deadline: the expiry wake covers it too.
+    if (changed.some((entry) => entry.item.expiresAt !== undefined)) this.#armExpiry();
   }
 
   /** Announce a change this inbox wrote, and note it so the store's feed does not announce it twice. */

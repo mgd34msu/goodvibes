@@ -54,9 +54,11 @@ runs the three steps again).
 
 ## The Agent workspace
 
-`Ctrl+G` (or `/agent`, or a click on `ctrl+g workspace` at the right end of
-the status bar) opens the Agent workspace; `Ctrl+P`, `?` and `/help` open the
-list of every command and key instead. The workspace is a set of pages, each a
+`Ctrl+G` then `w` (or `/agent`) opens the Agent workspace; `Ctrl+G` then `m`
+(or a click on `ctrl+g m menu` at the right end of the status bar) opens the
+menu of every place; `Ctrl+P`, `?` and `/help` open the list of every command
+and key instead. `Ctrl+G` is the leader: after it the screen lists every key
+that can follow. The workspace is a set of pages, each a
 list of rows. A row changes a setting, opens the shared model picker, or opens
 the guided form of the slash command that does it, the same form the command
 opens when you type it. Under the rows, the pane says what the selected row

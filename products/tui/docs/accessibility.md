@@ -59,5 +59,7 @@ background (a transparent one) depends on that background colour.
   it. It opens on `No` for anything that cannot be undone or that weakens a
   protection, so Enter never allows those.
 - `?` or `Ctrl+P` lists every command and key, searchable by words.
-- `/help keys` shows the current key bindings; every key but `F2`, `Esc`, `?`
-  and `@` can be rebound in `~/.goodvibes/tui/keybindings.json`.
+- `/help keys` shows the current key bindings; every key but `?` and `@` can be
+  rebound, in the Keys place or in
+  `~/.goodvibes/tui/keybindings.json`. Places, rows and tabs can also be
+  clicked.

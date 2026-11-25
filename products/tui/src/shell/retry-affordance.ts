@@ -3,30 +3,26 @@
  * did: retry the turn that just failed, and open a fix session that was just
  * started for the owner (a CI fix session, a conflict-resolution session).
  *
- * Each is reached by a chord that can never be typed text, Alt+R and Alt+J,
- * so a sentence that starts with "r" or "j", or `j` pressed to move down a
- * list, always goes where it was typed. The retry is named on the failed
- * turn's own row in the transcript (alt+r try again, beside alt+o and alt+i;
- * terminal-shell turn-failure-actions.ts), so the footer names only the fix
- * session (actionHint). An offer stays until it is used, replaced by a newer
- * one, or (for retry) a new prompt is sent.
+ * Each is an action of the key table (`failure-retry`, `open-fix-session`:
+ * Ctrl+G then r and Ctrl+G then j by default, beside F12 and F10), so a
+ * sentence that starts with "r" or "j", or `j` pressed to move down a list,
+ * always goes where it was typed, and both can be rebound. The retry is named
+ * on the failed turn's own row in the transcript (terminal-shell
+ * turn-failure-actions.ts), so the footer names only the fix session
+ * (actionHint). An offer stays until it is used, replaced by a newer one, or
+ * (for retry) a new prompt is sent.
  */
 import { offerFailedTurnRetry } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
 
-/** Alt+<letter> in both encodings a terminal sends: ESC-prefixed, or CSI-u with the Alt modifier (kitty keyboard protocol). */
-function isAltChord(data: string, letter: string): boolean {
-  return data === `\x1b${letter}` || data === `\x1b[${letter.charCodeAt(0)};3u`;
+/** The keys as bound, set by the shell each frame ("Ctrl+G R"). */
+export let RETRY_CHORD_LABEL = 'Ctrl+G R';
+export let FIX_SESSION_CHORD_LABEL = 'Ctrl+G J';
+
+/** Keep the labels in step with the key table; an unbound key keeps the last label. */
+export function setShellActionKeyLabels(labels: { readonly retry: string; readonly fixSession: string }): void {
+  if (labels.retry !== '(unbound)') RETRY_CHORD_LABEL = labels.retry;
+  if (labels.fixSession !== '(unbound)') FIX_SESSION_CHORD_LABEL = labels.fixSession;
 }
-
-/**
- * The second chord of each, for a terminal that sends no Alt (macOS Terminal
- * by default): a function key every terminal sends (F12 retry, F10 the fix session).
- */
-const F10 = '\x1b[21~';
-const F12 = '\x1b[24~';
-
-export const RETRY_CHORD_LABEL = 'Alt+R';
-export const FIX_SESSION_CHORD_LABEL = 'Alt+J';
 
 export interface ShellActionOffers {
   /** A failed turn can be sent again; `exhausted` when automatic failover already tried every provider. */
@@ -42,7 +38,7 @@ export function createShellActionOffers(): ShellActionOffers {
 
 /** The footer line while a fix session is on offer; null when none is. The retry is on the failed turn's row. */
 export function actionHint(offers: ShellActionOffers): string | null {
-  return offers.fixSessionId ? `${FIX_SESSION_CHORD_LABEL} or F10 open fix session` : null;
+  return offers.fixSessionId ? `${FIX_SESSION_CHORD_LABEL} open fix session` : null;
 }
 
 /** Offer the retry whenever a user-visible error surfaces and a retry is actually possible. */
@@ -69,30 +65,26 @@ export interface ShellActionChordDeps {
 }
 
 /**
- * Run the action a chord names when that action is on offer. Returns true when
- * the chunk was the chord and was consumed; every other chunk, including a
- * chord with nothing on offer, is left for normal input.
+ * What the two key-table actions do: each acts only while its offer stands
+ * (nothing on offer, the key does nothing). The failed turn's row sends its
+ * prompt to the model chosen there through this same retry.
  */
-export function handleShellActionChord(data: string, offers: ShellActionOffers, deps: ShellActionChordDeps): boolean {
-  // The failed turn's row sends its prompt to the model chosen with alt+o through this same retry.
-  offerFailedTurnRetry(() => {
+export function wireShellActionOffers(offers: ShellActionOffers, deps: ShellActionChordDeps): { readonly retry: () => void; readonly openFixSession: () => void } {
+  const retry = (): void => {
     if (!offers.retry) return;
     offers.retry = null;
     deps.retry();
     deps.render();
-  });
-  if (offers.retry && (isAltChord(data, 'r') || data === F12)) {
-    offers.retry = null;
-    deps.retry();
-    deps.render();
-    return true;
-  }
-  if (offers.fixSessionId && (isAltChord(data, 'j') || data === F10)) {
-    const sessionId = offers.fixSessionId;
-    offers.fixSessionId = null;
-    deps.openSession(sessionId);
-    deps.render();
-    return true;
-  }
-  return false;
+  };
+  offerFailedTurnRetry(retry);
+  return {
+    retry,
+    openFixSession: () => {
+      if (!offers.fixSessionId) return;
+      const sessionId = offers.fixSessionId;
+      offers.fixSessionId = null;
+      deps.openSession(sessionId);
+      deps.render();
+    },
+  };
 }

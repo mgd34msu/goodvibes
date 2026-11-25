@@ -2,6 +2,7 @@ import { createSecretsCommand } from '@goodvibes/engine/terminal-shell/secrets-c
 import { createLocalCommandActions } from '@goodvibes/engine/terminal-shell/local-command-actions';
 import type { CommandRegistry, CommandContext } from '../command-registry.ts';
 import { toolsCommand } from './tools-command.ts';
+import { capabilityBinding } from './capability-binding.ts';
 
 import { requireProviderApi } from './runtime-services.ts';
 
@@ -20,7 +21,7 @@ const secretsCommand = createSecretsCommand<CommandContext>({
   writeScope: (_key, requested) => requested,
   deleteScope: (_key, requested) => requested,
   relocationNote: () => '',
-});
+}, capabilityBinding);
 
 export function registerLocalRuntimeCommands(registry: CommandRegistry): void {
   registry.register(toolsCommand);

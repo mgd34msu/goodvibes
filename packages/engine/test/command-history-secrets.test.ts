@@ -60,8 +60,13 @@ function terminal() {
   const secrets = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: home, projectRoot: project });
   const { CommandRegistry } = createTerminalCommandRegistry<Ctx>();
   const registry = new CommandRegistry();
+  // Storing a secret runs in the daemon (capability secrets.set); no daemon runs here, so the line is refused after the
+  // history has taken it, which is all this proof reads.
   registry.register(createSecretsCommand<Ctx>({
     writeScope: (_key, requested) => requested, deleteScope: (_key, requested) => requested, relocationNote: () => '',
+  }, {
+    daemon: () => ({ probe: () => ({ available: false, reason: 'no daemon in this proof' }), invoke: async () => { throw new Error('no daemon in this proof'); } }),
+    caller: () => ({ workingDirectory: project, program: 'tui' }),
   }));
 
   let settled: () => void = () => {};
@@ -133,7 +138,7 @@ const { handlePromptKeyToken } = createFeedTokenRoutes<
   KeyRouteState<FeedCommandContext>,
   string,
   MouseRouteState
->({ openIndicator: () => {}, openKeyIndicator: () => {}, mouseRowOffset: 0 });
+>({ openIndicator: () => {}, mouseRowOffset: 0 });
 
 /** The composer state both terminal programs keep (their input handlers extend it), with its text. */
 class Composer extends TerminalInputHandlerState {

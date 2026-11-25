@@ -36,6 +36,7 @@ import { lookup as dnsLookup } from 'node:dns/promises';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { ConfigManager } from '../../config/manager.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../../config/secret-store-unreadable.js';
 import { CLOUDFLARE_API_TOKEN_KEY } from '../../cloudflare/constants.js';
 import { readCloudflareConfig } from '../../cloudflare/config.js';
 import { resolveApiToken, type TokenResolverContext } from '../../cloudflare/cloudflare-token-resolvers.js';
@@ -48,7 +49,7 @@ import { lanAuthorityCertificate, lanHostName, lanServerNames, loadOrCreateLanAu
 import { CloudflareDnsProvider } from './cloudflare-dns.js';
 import { DnsProviderError, type DnsProvider } from './dns-provider.js';
 import { checkCertificatePair, nameCovered, publicCheck, readOwnCertificate, ownCertificateStamp, type OwnCertificateCheck } from './own-certificate.js';
-import { LETS_ENCRYPT_DIRECTORY } from './secure-address-words.js';
+import { LETS_ENCRYPT_DIRECTORY, secureAddressDate } from './secure-address-words.js';
 import { isLanAddress, issueLanServerCertificate } from './x509.js';
 import { httpsCertificateSource, type HttpsCertificateSource } from './served-https.js';
 
@@ -80,8 +81,8 @@ export const SECURE_ADDRESS_SECRET_KEYS = {
   groupCertificate: 'secureAddress.groupCertificate',
 } as const;
 
-/** The daemon's secret store as this file uses it: the authority's calls and what the Cloudflare token resolver reads. */
-export type SecureAddressSecrets = LanAuthoritySecrets & NonNullable<TokenResolverContext['secretsManager']>;
+/** The daemon's secret store as this file uses it: the authority's calls, what the Cloudflare token resolver reads, and the read that tells a store it cannot read from "not stored". */
+export type SecureAddressSecrets = LanAuthoritySecrets & NonNullable<TokenResolverContext['secretsManager']> & StoredSecretReader;
 
 /** This machine's Let's Encrypt certificate, as kept in the secret store. */
 interface StoredLetsEncrypt {
@@ -120,8 +121,10 @@ interface SecureAddressState {
   lastAttempt?: { at: number; ok: boolean; words: string; pauses?: boolean | undefined } | undefined;
   /** Address records written: name to address. */
   addressRecords?: Record<string, string> | undefined;
-  /** The group whose set-aside notice was given (a node's own authority kept while it follows the lead). */
+  /** The group whose set-aside notice was given (a node's own authority kept while it follows the lead): an owner channel carried it, or the Secure address screen showed it. */
   setAsideNoticeFor?: string | undefined;
+  /** The set-aside notice no owner channel carried yet: the Secure address screen shows it at the top until a person has seen it. */
+  setAsideNoticePending?: { groupId: string; text: string } | undefined;
   /** Whom this lead sent its Let's Encrypt certificate (issued at `issuedAt`) to, under which signing generation. */
   groupShare?: { groupId: string; generation: number; issuedAt: number; sharedWith: string[] } | undefined;
 }
@@ -136,8 +139,9 @@ function revealJson<T>(secret: Secret | null): T | null {
   try { return JSON.parse(secret.reveal('dispatch')) as T; } catch { return null; }
 }
 
+/** A certificate's end date, the one form every screen uses (secure-address-words.ts). */
 function day(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 10);
+  return secureAddressDate(ms);
 }
 
 /** This machine's address on its home network: a private IPv4 address, preferring 192.168, then 10, then 172.16. */
@@ -163,6 +167,8 @@ export interface SecureAddressDeps {
   readonly secrets: () => SecureAddressSecrets | null | undefined;
   /** Put one line in front of the owner (owner-alert.ts); never throws. */
   readonly alertOwner?: ((text: string) => void) | undefined;
+  /** The same, answering whether an owner channel carried it (a notice that must be seen waits on the screen otherwise); never throws. */
+  readonly noticeOwner?: ((text: string) => Promise<boolean>) | undefined;
   /** The DNS provider for the names (tests pass a stand-in); default: Cloudflare with the product's token. */
   readonly dnsProvider?: (() => DnsProvider) | undefined;
   readonly fetch?: typeof fetch | undefined;
@@ -365,12 +371,17 @@ export class SecureAddressService {
   private dnsProvider(): DnsProvider {
     if (this.deps.dnsProvider) return this.deps.dnsProvider();
     const config = this.deps.config();
-    return new CloudflareDnsProvider(async () => (await this.cloudflareToken(config)).value);
+    return new CloudflareDnsProvider(async () => (await this.cloudflareToken(config)).value, undefined, () => this.tokenUnreadable());
   }
 
   /** The product's Cloudflare token (cloudflare-token-resolvers.ts): the setting's reference, the environment, the stored secret. */
   private async cloudflareToken(config: Pick<ConfigManager, 'get'>): Promise<{ readonly value: string | null; readonly source: string }> {
     return resolveApiToken({ secretsManager: this.deps.secrets(), readConfig: () => readCloudflareConfig(config) }, {});
+  }
+
+  /** When no token was read: the words for a secret store this daemon could not read (so the person is not asked for it again), or null. */
+  private async tokenUnreadable(): Promise<string | null> {
+    return unreadableSecretStore(this.deps.secrets(), CLOUDFLARE_API_TOKEN_KEY, 'the Cloudflare API token');
   }
 
   /**
@@ -578,13 +589,42 @@ export class SecureAddressService {
     return true;
   }
 
-  /** The one carried-forward notice: this machine's own authority is kept, set aside while it follows the lead. */
+  /**
+   * The one carried-forward notice: this machine's own authority is kept, set
+   * aside while it follows the lead. Marked given only when an owner channel
+   * carried it; otherwise it waits, and the Secure address screen shows it at
+   * the top until a person has seen it there (takeScreenNotice).
+   */
   private async noteSetAside(groupId: string, leadName: string): Promise<void> {
-    if (this.readState().setAsideNoticeFor === groupId) return;
+    const state = this.readState();
+    if (state.setAsideNoticeFor === groupId || state.setAsideNoticePending?.groupId === groupId) return;
     const secrets = this.deps.secrets();
     const own = secrets ? await secrets.get('controlPlane.lanHttps.authority') : null;
-    this.writeState((state) => { state.setAsideNoticeFor = groupId; });
-    if (own) this.deps.alertOwner?.(`This machine now serves https with the certificate of its group's lead, ${leadName}. Its own GoodVibes certificate authority is kept, set aside: phones that installed it trust this machine again if it leaves the group; while it is a node they trust it through the lead's certificate.`);
+    if (!own) { this.writeState((next) => { next.setAsideNoticeFor = groupId; }); return; }
+    const text = `This machine now serves https with the certificate of its group's lead, ${leadName}. Its own GoodVibes certificate authority is kept, set aside: phones that installed it trust this machine again if it leaves the group; while it is a node they trust it through the lead's certificate.`;
+    let carried = false;
+    if (this.deps.noticeOwner) carried = await this.deps.noticeOwner(text).catch(() => false);
+    else this.deps.alertOwner?.(text);
+    this.writeState((next) => {
+      if (carried) { next.setAsideNoticeFor = groupId; delete next.setAsideNoticePending; }
+      else next.setAsideNoticePending = { groupId, text };
+    });
+  }
+
+  /**
+   * The set-aside notice no owner channel carried, for the top of the Secure
+   * address screen; showing it there marks it given. Undefined when none waits.
+   */
+  takeScreenNotice(): string | undefined {
+    const pending = this.readState().setAsideNoticePending;
+    if (!pending) return undefined;
+    this.writeState((next) => { next.setAsideNoticeFor = pending.groupId; delete next.setAsideNoticePending; });
+    return pending.text;
+  }
+
+  /** Whether this machine leads a group (it is in one and follows no lead): its certificate is shared with the group's machines. */
+  leadsGroup(): boolean {
+    return this.group?.groupFacts() != null && this.group?.following() == null;
   }
 
   // ── for the screen ────────────────────────────────────────────────────────
@@ -597,6 +637,7 @@ export class SecureAddressService {
     const state = this.readState();
     const domain = String(config.get('secureAddress.domain') ?? '');
     const tokenSource = (await this.cloudflareToken(config).catch(() => ({ source: 'missing' }))).source;
+    const tokenUnreadable = tokenSource === 'missing' ? await this.tokenUnreadable() : null;
     const followers = this.group?.followers() ?? [];
     const servedNames = this.served?.names ?? [];
     return {
@@ -604,6 +645,7 @@ export class SecureAddressService {
       letsEncrypt: {
         domain,
         tokenStored: tokenSource !== 'missing',
+        ...(tokenUnreadable ? { tokenUnreadable } : {}),
         ...(stored ? { certificate: { names: stored.names, notAfter: stored.notAfter, issuedAt: stored.issuedAt } } : {}),
         issuing: this.issuing !== null,
         ...(state.lastAttempt ? { lastAttempt: { at: state.lastAttempt.at, ok: state.lastAttempt.ok, words: state.lastAttempt.words } } : {}),
@@ -691,6 +733,8 @@ export interface SecureAddressStatusFacts {
   readonly letsEncrypt: {
     readonly domain: string;
     readonly tokenStored: boolean;
+    /** No token was read because the secret store on this computer could not be read: the words, with the cause. */
+    readonly tokenUnreadable?: string | undefined;
     readonly certificate?: { readonly names: readonly string[]; readonly notAfter: number; readonly issuedAt: number } | undefined;
     readonly issuing: boolean;
     readonly lastAttempt?: { readonly at: number; readonly ok: boolean; readonly words: string } | undefined;

@@ -2,17 +2,17 @@ import { renderStatusLine as paint, type StatusLineOptions } from '@goodvibes/en
 import { tagFooterRegion } from './footer-targets.ts';
 export * from '@goodvibes/engine/terminal-shell/status-line';
 
-/** The key that opens the Agent workspace as bound ("ctrl+g"); undefined when it is unbound. */
-let workspaceKey: string | undefined = 'ctrl+g';
+/** The keys that open the menu of every place as bound ("ctrl+g m"); undefined when unbound. */
+let menuKey: string | undefined = 'ctrl+g m';
 
 /** Set from the keybindings each frame, so a rebound key shows as bound. */
-export function setStatusWorkspaceKey(key: string | undefined): void {
-  workspaceKey = key;
+export function setStatusMenuKey(key: string | undefined): void {
+  menuKey = key;
 }
 
-/** The Agent's status line ends with how to open its workspace (`ctrl+g workspace`), the screen most of its work starts from. */
+/** The Agent's status line ends with how to open the menu of every place (`ctrl+g m menu`); a click on it opens the menu. */
 export const renderStatusLine = (options: StatusLineOptions) => paint({
   ...options,
   tagRegion: tagFooterRegion,
-  menu: options.menu ?? (workspaceKey ? { hints: [[workspaceKey, 'workspace']], target: 'workspace' } : null),
+  menu: options.menu ?? (menuKey ? { hints: [[menuKey, 'menu']], target: 'places' } : null),
 });

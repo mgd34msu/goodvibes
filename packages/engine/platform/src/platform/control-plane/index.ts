@@ -287,6 +287,7 @@ export type { NativeInboundBrokerIdentity, NativeInboundSourceRef, NativeInbound
 
 export { createNativeInboundHandoff, NativeInboundReceiverRefusal } from './native-inbound-handoff.js';
 export type { NativeMutationHost } from './native-mutation.js';
+export { NATIVELY_ADMITTED_METHOD_IDS } from './native-admission-methods.js';
 export { captureOccasionsGatewayTarget } from './routes/native-profile-mutation.js';
 export { registerNativeAutomationGatewayMethods } from '../daemon/http/native-automation.js';
 // The one admission check of a cataloged call and the grant a pairing token holds, for a call made in-process on a paired caller's behalf.

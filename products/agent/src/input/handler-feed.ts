@@ -37,7 +37,8 @@ import { handleWorkTreeToken } from './handler-work-tree-route.ts';
 
 import { handleModalTokenRoutes } from './handler-modal-token-routes.ts';
 import { handleCommandModeToken } from './handler-command-route.ts';
-import { handleGlobalShortcutToken } from './handler-shortcuts.ts';
+import { handleGlobalShortcutToken, runShortcutAction } from './handler-shortcuts.ts';
+import { LeaderKeyState, leaderMayArm } from '@goodvibes/engine/terminal-shell/leader-key';
 import type { PromptEdit } from './handler-shortcuts.ts';
 import { SelectionManager } from '@goodvibes/engine/terminal-shell';
 import type { KeybindingsManager } from './keybindings.ts';
@@ -185,8 +186,8 @@ export interface InputFeedContext {
 }
 
 export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
-  // Every token goes to an open kit modal, mouse included: the modals ignore a mouse
-  // token, so a click or wheel over one never reaches the transcript underneath.
+  // Every token goes to an open kit modal, mouse included: a click on one was already made its
+  // keys by the pointer (handler.ts, terminal-shell/surface-pointer), and nothing reaches the transcript underneath.
   surfaceModalTokens: 'all',
   pairing: (context, token) => context.handleSetupPairingToken?.(token) ?? false,
   modal: (context, token, { history }) => handleModalTokenRoutes(
@@ -234,4 +235,33 @@ export const feedInputTokens = createFeedInputTokens<InputFeedContext>({
   },
   command: createCommandModeFeedRoute<InputFeedContext>(handleCommandModeToken),
   beforeComposer: (context, token, { now }) => guardCommandPaste(context, token, now),
+  // The leader sequence (terminal-shell/leader-key.ts): read from the composer and over kit modals (a place,
+  // the menu); over a screen of the handler's own (the model picker keeps its Ctrl+G group key) the key is that
+  // screen's. What it completes runs as its own key would.
+  leader: {
+    state: leaderOf,
+    canArm: (context) => leaderMayArm(context.surfaceModals),
+    run: (context, action) => {
+      const shortcutState = {
+        ...captureShortcutFeedState(context),
+        cycleAgentWorkspaceCategory: context.cycleAgentWorkspaceCategory,
+        dismissAgentWorkspace: context.dismissAgentWorkspace,
+      };
+      const handled = runShortcutAction(shortcutState, action);
+      return { ...shortcutState, handled };
+    },
+  },
 });
+
+/** One leader state per program, beside its modal stack. */
+const leaderStates = new WeakMap<SurfaceModalHost, LeaderKeyState>();
+function leaderOf(context: InputFeedContext): LeaderKeyState | undefined {
+  const modals = context.surfaceModals;
+  if (!modals) return undefined;
+  let state = leaderStates.get(modals);
+  if (!state) {
+    state = new LeaderKeyState(context.keybindingsManager, () => modals);
+    leaderStates.set(modals, state);
+  }
+  return state;
+}

@@ -34,6 +34,16 @@ export type AutomationEvent =
       jobId: string;
       changedFields: string[];
     }
+  /**
+   * A scheduled job was removed, by its owner, an agent, a script, or a
+   * one-shot job finishing; `reason` says which (`job-removed` for a removal
+   * asked for). It no longer runs or lists anywhere.
+   */
+  | {
+      type: 'AUTOMATION_JOB_REMOVED';
+      jobId: string;
+      reason: string;
+    }
   /** A scheduled job was turned on and will run at its next due time. */
   | {
       type: 'AUTOMATION_JOB_ENABLED';

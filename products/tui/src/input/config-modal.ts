@@ -391,6 +391,24 @@ export class ConfigModal {
   }
 
   /**
+   * The letters this screen takes after the leader, for the selected row now:
+   * each single-character action key that `resolveAction` gives, as the leader
+   * strip shows a key (`d`, `shift+d`), with the action's label.
+   */
+  leaderKeys(): readonly (readonly [key: string, label: string])[] {
+    const seen = new Set<string>();
+    const keys: (readonly [string, string])[] = [];
+    for (const { key } of this.surface?.actions ?? []) {
+      if ([...key].length !== 1 || seen.has(key)) continue;
+      seen.add(key);
+      const action = this.resolveAction(key);
+      if (!action) continue;
+      keys.push([/^[A-Z]$/.test(key) ? `shift+${key.toLowerCase()}` : key, action.label]);
+    }
+    return keys;
+  }
+
+  /**
    * Attempt to fire the action bound to `key`. Returns true if a key was an
    * action (consumed). Handles the two-press confirm for destructive actions.
    * This is an interaction boundary (syncs structure first).

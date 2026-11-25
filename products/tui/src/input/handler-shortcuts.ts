@@ -1,6 +1,8 @@
 import {
   handleGlobalShortcutToken as routeShortcut,
   handleKillRingShortcut,
+  runGlobalShortcutAction,
+  type GlobalShortcutPolicy,
   type GlobalShortcutState,
 } from '@goodvibes/engine/terminal-shell/global-shortcuts';
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
@@ -22,18 +24,17 @@ const FAILURE_KEY_ACTIONS = {
 } as const;
 
 export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token: InputToken, viewportHeight: number): boolean {
-  return routeShortcut(state, token, viewportHeight, {
-    modifiedPageScroll: false,
+  return routeShortcut(state, token, viewportHeight, SHORTCUT_POLICY);
+}
+
+/** Do what a completed leader sequence names, exactly as its own key would (leader-key.ts). */
+export function runShortcutAction(state: GlobalShortcutRouteState, action: string): boolean {
+  return runGlobalShortcutAction(state, action, SHORTCUT_POLICY);
+}
+
+const SHORTCUT_POLICY: GlobalShortcutPolicy<GlobalShortcutRouteState> = {
     killRing: (current) => current.killRing,
     rawKey(state, token) {
-      // Bare F2 opens the Agents modal (hardcoded, like pageup/pagedown/escape;
-      // F2 inside the Agents modal closes it, see input/agents-modal.ts).
-      if (token.logicalName === 'f2' && !token.ctrl && !token.meta) {
-        state.commandContext?.openAgents?.();
-        state.requestRender();
-        return true;
-      }
-
       // cycle-permission-mode (Shift+Tab by default; the tokenizer reads the
       // xterm back-tab CSI Z as tab-with-shift). Only when the composer owns
       // focus: modal/picker routes run earlier and keep their reverse-tab.
@@ -88,7 +89,7 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
           return true;
 
         case 'open-agents':
-          // Ctrl+O: the Agents modal (the same as F2).
+          // F2 and Ctrl+O by default: the Agents modal.
           state.commandContext?.openAgents?.();
           state.requestRender();
           return true;
@@ -102,8 +103,38 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
         case 'failure-other-model':
         case 'failure-details':
         case 'failure-sign-in':
-          // Alt+O / Alt+I / Alt+S on the newest failed turn's row; consumed either way, never typed text.
+          // On the newest failed turn's row; consumed either way, never typed text.
           state.commandContext?.failedTurnAction?.(FAILURE_KEY_ACTIONS[action]);
+          state.requestRender();
+          return true;
+
+        case 'failure-retry':
+          // Send the failed turn again, when one is on offer (shell/retry-affordance.ts).
+          state.commandContext?.retryFailedTurn?.();
+          state.requestRender();
+          return true;
+
+        case 'open-fix-session':
+          // Open the fix session just started, when one is on offer.
+          state.commandContext?.openFixSession?.();
+          state.requestRender();
+          return true;
+
+        case 'open-menu':
+          // The menu of every place (terminal-shell/places).
+          state.commandContext?.openPlaceMenu?.();
+          state.requestRender();
+          return true;
+
+        case 'contract-question-ordinary':
+          // A contract's open question: the next message is an ordinary one.
+          state.commandContext?.answerContractQuestionPlainly?.();
+          state.requestRender();
+          return true;
+
+        case 'model-picker-group':
+          // The model list's grouping, while the list is open.
+          state.commandContext?.cycleModelPickerGroup?.();
           state.requestRender();
           return true;
 
@@ -111,8 +142,7 @@ export function handleGlobalShortcutToken(state: GlobalShortcutRouteState, token
           return undefined;
       }
     },
-  });
-}
+};
 
 /**
  * Shift+Tab: this session's permission mode (session-permission-mode.ts). The

@@ -22,7 +22,7 @@
  * permission ask that was invisible to every surface but the one that raised it.
  */
 
-export type { DaemonReachability, DaemonVerbCaller } from './daemon-verbs.js';
+export type { DaemonReachability, DaemonVerbCaller, DaemonVerbInvokeOptions } from './daemon-verbs.js';
 export { OwnedSelectionObservation } from './selection-observation.js';
 
 export { createClientApprovalRaiser } from './approval-raiser.js';
@@ -79,7 +79,8 @@ export { createWireSessionDispatch, readSurfaceAgentOutcome } from './session-di
 export type { SessionInputChangeHandlers, SessionInputsWireClient, SurfaceAgentOutcome, WireSessionDispatch, WireSessionDispatchOptions } from './session-dispatch.js';
 export { SESSION_UPDATE_DOMAIN, SESSION_UPDATE_WIRE_EVENT, createSessionInputChangeSubscriber, inputChangeSessionId } from './session-input-updates.js';
 export type { SessionInputChangeSubscriberOptions } from './session-input-updates.js';
-export { LIST_CHANGE_DOMAIN, LIST_CHANGE_WIRE_EVENT, listChangeOf, subscribeDaemonListChanges } from './list-change-updates.js';
+export { LIST_CHANGE_DOMAIN, LIST_CHANGE_WIRE_EVENT, listChangeOf, subscribeDaemonEventFrames, subscribeDaemonListChanges } from './list-change-updates.js';
+export type { DaemonFrameInterest, DaemonFrameStreamState } from './list-change-updates.js';
 export type { ListChangeSubscriberOptions } from './list-change-updates.js';
 
 export { createConversationRewindHost } from './conversation-rewind-host.js';
@@ -114,6 +115,8 @@ export type { DaemonFleetRows, DaemonFleetRowsPoller, DaemonFleetRowsPollerOptio
 export {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  daemonNotInstalledNotice,
+  daemonProgramInstalled,
   describeDaemonAutostart,
   waitForStartingDaemon,
 } from './daemon-autostart.js';

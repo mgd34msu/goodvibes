@@ -119,6 +119,14 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   openWorkspacePicker?: () => void;
   /** Open the command palette (terminal-shell/command-palette.ts): every registered command, searchable; Enter runs or opens its guided path. */
   openCommandPalette?: () => void;
+  /** Open the menu of every place (Ctrl+G then m; terminal-shell/places). */
+  openPlaceMenu?: () => void;
+  /** Open one place by id (`automation`, `waiting`, `keys`). */
+  openPlace?: (placeId: string) => void;
+  /** A contract's open question on offer: the next message is sent as an ordinary one (contract-question-composer.ts). */
+  answerContractQuestionPlainly?: () => void;
+  /** The model list's grouping, while the list is open (model-picker-token-route.ts). */
+  cycleModelPickerGroup?: () => void;
 
   openAgentWorkspace?: (categoryId?: string) => void;
   /** Opens the form of one `/setup` topic: these rows of the setup category, and nothing else. */

@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.5.0
- * Methods: 661 total, 538 REST-routed, 123 ws-only invoke.
+ * Methods: 663 total, 538 REST-routed, 125 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -2205,6 +2205,8 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "inbox.post",
   "inbox.withdraw",
   "automation.schedules.preview",
+  "capabilities.find",
+  "capabilities.run",
   "channels.test.send",
   "checkpoints.create",
   "checkpoints.diff",
@@ -2409,6 +2411,8 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "calendar.events.update": "rest",
   "calendar.ics.export": "rest",
   "calendar.ics.import": "rest",
+  "capabilities.find": "ws-invoke",
+  "capabilities.run": "ws-invoke",
   "channels.accounts.action.default": "rest",
   "channels.accounts.action.named": "rest",
   "channels.accounts.get": "rest",
@@ -8514,6 +8518,56 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       ]
     }
   },
+  "capabilities.find": {
+    "input": {
+      "need": "sample"
+    },
+    "output": {
+      "need": "sample",
+      "group": "conversation",
+      "groupChosenBy": "decision",
+      "capabilities": [
+        {
+          "id": "sample",
+          "does": "sample",
+          "group": "conversation",
+          "runsIn": "daemon",
+          "repeat": "safe",
+          "inputs": [
+            {
+              "name": "sample",
+              "kind": "sample",
+              "required": false,
+              "about": "sample",
+              "choices": [
+                "sample"
+              ],
+              "default": "sample"
+            }
+          ],
+          "risk": "sample"
+        }
+      ]
+    }
+  },
+  "capabilities.run": {
+    "input": {
+      "id": "sample",
+      "inputs": {},
+      "workingDirectory": "sample",
+      "program": "tui"
+    },
+    "output": {
+      "id": "sample",
+      "ok": false,
+      "text": "sample",
+      "detail": "sample",
+      "data": {},
+      "risk": "sample",
+      "repeat": "safe",
+      "method": "sample"
+    }
+  },
   "channels.accounts.action.default": {
     "input": {
       "surface": "sample",
@@ -8548,6 +8602,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -8616,6 +8671,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -8671,6 +8727,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "field": "sample",
           "label": "sample",
           "configured": false,
+          "resolved": false,
           "source": "sample"
         }
       ],
@@ -8705,6 +8762,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -8743,6 +8801,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -8994,6 +9053,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "field": "sample",
               "label": "sample",
               "configured": false,
+              "resolved": false,
               "source": "sample"
             }
           ],
@@ -9794,9 +9854,21 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "label": "sample",
           "state": "sample",
           "enabled": false,
+          "configured": false,
+          "credentialResolves": false,
+          "runtime": {
+            "observable": false,
+            "running": false,
+            "reason": "sample",
+            "lastError": "sample",
+            "observedAt": 0
+          },
           "accountId": "sample",
           "metadata": {}
         }
+      ],
+      "health": [
+        {}
       ]
     }
   },
@@ -29832,6 +29904,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
   "secureAddress.get": {
     "input": {},
     "output": {
+      "notice": "sample",
       "intro": "sample",
       "choices": [
         {
@@ -29866,6 +29939,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "letsEncrypt": {
         "domain": "sample",
         "tokenStored": false,
+        "tokenUnreadable": "sample",
         "issuing": false,
         "certificate": {
           "names": [
@@ -29943,6 +30017,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "ok": false,
       "words": "sample",
       "status": {
+        "notice": "sample",
         "intro": "sample",
         "choices": [
           {
@@ -29977,6 +30052,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
         "letsEncrypt": {
           "domain": "sample",
           "tokenStored": false,
+          "tokenUnreadable": "sample",
           "issuing": false,
           "certificate": {
             "names": [
@@ -30058,6 +30134,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "keyFile": "sample"
     },
     "output": {
+      "notice": "sample",
       "intro": "sample",
       "choices": [
         {
@@ -30092,6 +30169,7 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       "letsEncrypt": {
         "domain": "sample",
         "tokenStored": false,
+        "tokenUnreadable": "sample",
         "issuing": false,
         "certificate": {
           "names": [

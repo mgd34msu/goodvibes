@@ -70,7 +70,8 @@ const KEY_GAP = 2;
 /** The room a background summary keeps before the model gives way to it. */
 const SUMMARY_MIN = 20;
 /** What a click on a part of the status line opens. */
-export type StatusTarget = 'mode' | 'notices' | 'context' | 'changes' | 'model' | 'usage' | 'agents' | 'commands' | 'workspace';
+/** `places`: the menu of every place (terminal-shell/places). */
+export type StatusTarget = 'mode' | 'notices' | 'context' | 'changes' | 'model' | 'usage' | 'agents' | 'commands' | 'workspace' | 'places';
 /** A chip at the left end of the status line. */
 export interface StatusChip {
     readonly text: string;

@@ -9,3 +9,4 @@ export * from './catalog.js';
 export * from './completion.js';
 export * from './panel.js';
 export * from './report.js';
+export * from './capability-actions.js';

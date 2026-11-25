@@ -11,11 +11,15 @@
  * and `cluster` resolve them (--host/--port/--token, defaulting to this
  * machine's daemon and its operator token), so there is no second auth path.
  *
- * WHAT IS SERVED by default is the agent slice: the session, task, contract and
- * approval methods that only read, plus the session lifecycle (create, send a
- * message, steer). `--allow-write` adds the other methods of the chosen
- * families, `--categories` picks other families (`all` for every one), and a
- * method the contract marks dangerous is served only with `--allow-destructive`.
+ * WHAT IS SERVED by default is two tools, `capability_find` and
+ * `capability_run`, over the daemon's `capabilities.find` and
+ * `capabilities.run`: every capability, each run decided by the daemon under
+ * the owner's mode. With any of the flags below it serves one tool per method
+ * instead: the agent slice (the session, task, contract and approval methods
+ * that only read, plus the session lifecycle) by default, `--allow-write` adds
+ * the other methods of the chosen families, `--categories` picks other
+ * families (`all` for every one), and a method the contract marks dangerous is
+ * served only with `--allow-destructive`.
  * The served count goes to stderr at start, so a person can see what a client
  * was handed.
  *
@@ -29,6 +33,9 @@ import { callDaemonRoute, resolveRemoteDaemonTarget } from '@goodvibes/engine/te
 import { createHttpJsonTransport, createOperatorRemoteClient } from '@goodvibes/engine/platform/platform/runtime/transport';
 import {
   AGENT_MCP_TOOL_CATEGORIES,
+  CAPABILITY_MCP_INSTRUCTIONS,
+  CAPABILITY_MCP_TOOL_SET,
+  OperatorMcpServer,
   buildOperatorMcpTools,
   createOperatorMcpServer,
   createStreamTransport,
@@ -68,6 +75,8 @@ export interface RunMcpCommandInput {
   /** Asks the daemon with the configured outbound TLS trust (`createDaemonCommandRemote`); never the bare global fetch. */
   readonly fetchImpl: McpFetch;
   readonly readToken?: ((daemonHomeDir: string) => string | undefined) | undefined;
+  /** The project a capability acts on when a call names none: the folder the server was started in. */
+  readonly workingDirectory?: string | undefined;
 }
 
 /**
@@ -107,6 +116,27 @@ export async function runMcpCommand(input: RunMcpCommandInput): Promise<number> 
     (url, init) => fetchImpl(url, init),
   );
   if (!reachable.ok) return refuse(reachable.error, reachable.fix);
+
+  // By default two tools, capability_find and capability_run, through the daemon's capabilities.find and
+  // capabilities.run; the one-tool-per-method listing is behind --categories, --allow-write and --allow-destructive.
+  const perMethod = (input.flags.categories ?? []).length > 0 || input.flags.allowWrite === true || input.flags.allowDestructive === true;
+  if (!perMethod) {
+    const workingDirectory = input.workingDirectory ?? process.cwd();
+    const transport = createHttpJsonTransport({ baseUrl: target.baseUrl, authToken: target.token, fetchImpl });
+    const server = new OperatorMcpServer({
+      toolSet: CAPABILITY_MCP_TOOL_SET,
+      // Reached by id over the daemon's invoke endpoint, behind the same access gate; the client's cancel aborts it.
+      invoke: (methodId, params, { signal }) => transport.requestJson(`/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`, {
+        method: 'POST', methodId, signal,
+        body: { body: methodId === 'capabilities.run' && typeof params['workingDirectory'] !== 'string' ? { ...params, workingDirectory } : params },
+      }),
+      serverInfo: { name: 'goodvibes-operator', version: VERSION },
+      instructions: CAPABILITY_MCP_INSTRUCTIONS,
+    });
+    input.stderr('goodvibes-daemon mcp serve: serving 2 tools (capability_find, capability_run: every GoodVibes capability, decided under your permission mode); --categories, --allow-write or --allow-destructive serve one tool per method instead');
+    await serveOperatorMcp(server, createStreamTransport(input.input, input.output));
+    return 0;
+  }
 
   const contract = getOperatorContract();
   const known = new Set(contract.operator.methods.map((method) => method.category));

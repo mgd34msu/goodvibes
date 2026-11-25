@@ -41,7 +41,7 @@ export const JUDGMENT_KEY_NAME = 'TYPESAFE_API_KEY';
 /** What the judgment settings are read from. */
 export interface JudgmentSettingsSource {
   readonly config: {
-    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks' | 'judgment.volumeMonitor' | 'atRest.retentionMaxAgeDays'): unknown;
+    get(key: 'judgment.policy' | 'judgment.endpoint' | 'judgment.keySource' | 'judgment.keyName' | 'judgment.model' | 'judgment.backend' | 'judgment.timeoutMs' | 'judgment.fallbacks' | 'judgment.volumeMonitor' | 'judgment.noDecisionModel' | 'atRest.retentionMaxAgeDays'): unknown;
     subscribe?(key: 'judgment.volumeMonitor', listener: () => void): () => void;
     getConfigurationIncarnation?(): number;
     onDidChangeIncarnation?(listener: () => void): () => void;

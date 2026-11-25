@@ -47,8 +47,27 @@ const POLICY_DETAILS: Readonly<Record<string, string>> = {
 const NO_DECISION_MODEL = {
   id: '__none__',
   label: 'No decision model',
-  detail: 'Clear the primary decision model: decisions take their fallbacks. A key in TYPESAFE_API_KEY or a fallback target still sets one.',
+  detail: 'Nothing is sent to a decision model, even with a decision model key or server address in this computer\'s environment; Jev decides asks you instead. What is set up stays as it is; choosing a decision model here again uses it.',
 } as const;
+
+/** The entry that puts back the decision model an earlier version had set up while decision models were switched off (judgment.setAside). */
+const SET_ASIDE_ID = '__set_aside__';
+
+/** The settings `judgment.setAside` holds, as the writes that put them back (and empty it); null when nothing is set aside. */
+function setAsideRestore(config: Pick<ConfigManager, 'get'>): { readonly label: string; readonly detail: string; readonly writes: ReadonlyArray<readonly [ConfigKey, unknown]> } | null {
+  const held = config.get('judgment.setAside') as unknown as Readonly<Record<string, unknown>> | undefined;
+  if (!held || typeof held !== 'object' || Object.keys(held).length === 0) return null;
+  const fields = ['endpoint', 'model', 'keySource', 'keyName', 'backend', 'fallbacks'] as const;
+  const writes: Array<readonly [ConfigKey, unknown]> = fields.filter((field) => held[field] !== undefined).map((field) => [`judgment.${field}` as ConfigKey, held[field]] as const);
+  writes.push(['judgment.setAside', {}], ['judgment.noDecisionModel', false]);
+  const model = typeof held['model'] === 'string' && held['model'] ? held['model'] : 'the default model';
+  const endpoint = typeof held['endpoint'] === 'string' && held['endpoint'] ? held['endpoint'] : 'the hosted endpoint';
+  return {
+    label: 'Use the decision model you had before',
+    detail: `${model} at ${endpoint}: what an earlier version had set up while decision models were switched off, kept aside since. Choosing it sets it again.`,
+    writes,
+  };
+}
 
 /** A decision model profile as one list entry: its name, its model id and the service it runs on. */
 function decisionProfileEntry(profile: DecisionModelProfile): { readonly id: string; readonly label: string; readonly detail: string; readonly category: string } {
@@ -64,7 +83,9 @@ function decisionProfileEntry(profile: DecisionModelProfile): { readonly id: str
 export function decisionModelChoices(config: Pick<ConfigManager, 'get'>, env: Readonly<Record<string, string | undefined>> = process.env): readonly ModelPickerChoice[] {
   const set = decisionModelSet(decisionModelSettings(key => config.get(key)), env);
   const model = String(config.get('judgment.model') ?? '');
+  const restore = setAsideRestore(config);
   return [
+    ...(restore ? [{ id: SET_ASIDE_ID, label: restore.label, detail: restore.detail, current: false }] : []),
     { ...NO_DECISION_MODEL, current: !set },
     ...DECISION_MODEL_PROFILES.map(profile => {
       const entry = decisionProfileEntry(profile);
@@ -88,7 +109,7 @@ export function openSettingsChoice(
   const watchedKeys: readonly ConfigKey[] = action === 'judgment-fallbacks' ? ['judgment.fallbacks']
     : action === 'decision-policy' ? ['judgment.policy'] : action === 'permission-mode' ? ['permissions.mode']
     : action === 'payments-mode' ? ['payments.enabled', 'payments.confirmEveryPurchase']
-    : ['judgment.model', 'judgment.backend', 'judgment.endpoint', 'judgment.keySource', 'judgment.keyName'];
+    : ['judgment.model', 'judgment.backend', 'judgment.endpoint', 'judgment.keySource', 'judgment.keyName', 'judgment.setAside', 'judgment.noDecisionModel'];
   const revision = () => JSON.stringify(watchedKeys.map(key => config.get(key)));
   const openedRevision = revision();
   const current = () => {
@@ -214,6 +235,10 @@ export function openSettingsChoice(
           ['judgment.endpoint', endpoint], ['judgment.model', profile.model],
           ['judgment.backend', backend],
           ['judgment.keySource', keySource],
+          // Another decision model chosen: what was set aside is no longer offered.
+          ...(setAsideRestore(config) ? [['judgment.setAside', {}] as const] : []),
+          // A decision model chosen: no longer "no decision model".
+          ...(config.get('judgment.noDecisionModel') === true ? [['judgment.noDecisionModel', false] as const] : []),
         ]);
         };
         const currentSource = previousTarget?.keySource ?? config.get('judgment.keySource');
@@ -257,8 +282,14 @@ export function openSettingsChoice(
     const previousTarget = editingFallback();
     const profiles = DECISION_MODEL_PROFILES.filter(profile => !adapter || profile.adapter === adapter);
     const chosen = (id: string): void => {
+      if (id === SET_ASIDE_ID) {
+        const restore = setAsideRestore(config);
+        if (restore) save(restore.writes);
+        return;
+      }
       if (id === NO_DECISION_MODEL.id) {
-        save([['judgment.endpoint', ''], ['judgment.model', ''], ['judgment.keySource', 'env'], ['judgment.keyName', 'TYPESAFE_API_KEY'], ['judgment.backend', {}]]);
+        // The choice itself, stored: it wins over the decision model settings and the environment (decision-model-set.ts).
+        save([['judgment.noDecisionModel', true]]);
         return;
       }
       const profile = profiles.find(profile => profile.id === id);
@@ -274,6 +305,9 @@ export function openSettingsChoice(
     const items: SelectionItem[] = profiles.map(profile => ({ ...decisionProfileEntry(profile), primaryAction: 'select' }));
     // The primary model can be cleared as well as chosen; a fallback target is removed from its own menu.
     if (action !== 'judgment-fallbacks' && !adapter) items.unshift({ ...NO_DECISION_MODEL, primaryAction: 'select' });
+    // A decision model an earlier version set aside is offered back first.
+    const restore = action !== 'judgment-fallbacks' && !adapter ? setAsideRestore(config) : null;
+    if (restore) items.unshift({ id: SET_ASIDE_ID, label: restore.label, detail: restore.detail, primaryAction: 'select' });
     open('Choose decision model', items, {
       allowSearch: true,
       preSelectId: profiles.find(profile => profile.model === (previousTarget?.model ?? config.get('judgment.model')))?.id,

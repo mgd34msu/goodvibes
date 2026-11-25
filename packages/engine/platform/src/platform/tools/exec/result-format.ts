@@ -120,6 +120,8 @@ function noticeFields(result: ExecCommandResult): Record<string, unknown> {
     ...(result.retries !== undefined && { retries: result.retries }),
     ...(result.progress_file && { progress_file: result.progress_file }),
     ...(result.warnings && { warnings: result.warnings }),
+    // The command ended while a process it started still runs with its output: said at every verbosity.
+    ...(result.left_running && { left_running: result.left_running }),
     ...(result.pending_prompt && { pending_prompt: result.pending_prompt }),
     ...(result.prompt_declined && { prompt_declined: true }),
     // A command that failed because the scrub withheld its token must say so at

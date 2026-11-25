@@ -73,6 +73,8 @@ export const OPERATOR_METHOD_IDS = [
   "calendar.events.update",
   "calendar.ics.export",
   "calendar.ics.import",
+  "capabilities.find",
+  "capabilities.run",
   "channels.accounts.action.default",
   "channels.accounts.action.named",
   "channels.accounts.get",

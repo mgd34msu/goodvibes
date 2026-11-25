@@ -36,12 +36,20 @@ export class CloudflareDnsProvider implements DnsProvider {
   private clientPromise: Promise<CloudflareApiClient> | null = null;
   private readonly zones = new Map<string, { readonly id: string; readonly name: string }>();
 
-  constructor(private readonly token: () => Promise<string | null>, private readonly makeClient: (token: string) => Promise<CloudflareApiClient> = createCloudflareApiClient) {}
+  constructor(
+    private readonly token: () => Promise<string | null>,
+    private readonly makeClient: (token: string) => Promise<CloudflareApiClient> = createCloudflareApiClient,
+    /** When no token was read: the words for a secret store that could not be read (config/secret-store-unreadable.ts), or null. */
+    private readonly unreadable: () => Promise<string | null> = async () => null,
+  ) {}
 
   private async client(): Promise<CloudflareApiClient> {
     if (!this.clientPromise) {
       this.clientPromise = (async () => {
         const token = await this.token();
+        // A store this computer could not read is not "no token": the person is not asked for one they gave.
+        const unreadable = token ? null : await this.unreadable();
+        if (unreadable) throw new DnsProviderError(unreadable, 'store-unreadable');
         if (!token) throw new DnsProviderError('No Cloudflare API token is stored. Give one with the permission Zone, DNS, Edit on the zone that holds the name (dash.cloudflare.com, My Profile, API Tokens, template "Edit zone DNS").', 'token-missing');
         return this.makeClient(token);
       })();

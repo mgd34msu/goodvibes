@@ -26,7 +26,6 @@ const FIXED_KEYS: readonly { readonly key: string; readonly description: string;
   { key: 'Tab', description: 'Autocomplete slash command or file mention', chords: [{ key: 'tab' }] },
   { key: 'Esc', description: 'Close overlays, pickers, and transient input modes', chords: [{ key: 'escape' }] },
   { key: '?', description: 'Open help: every command and keyboard shortcut in one list', chords: [{ key: '?' }] },
-  { key: 'F2', description: 'Open Your agents (the same as Ctrl+O)', chords: [{ key: 'f2' }] },
   { key: '/help keys', description: 'List every key and the file that changes them', chords: [] },
 ];
 const FIXED_SHORTCUTS: readonly { readonly key: string; readonly description: string }[] = FIXED_KEYS.map(({ key, description }) => ({ key, description }));
@@ -219,7 +218,7 @@ function readCombosFromArgs(args: HarnessKeybindingArgs): KeyCombo[] {
 }
 
 function comboFingerprint(combo: KeyCombo): string {
-  return `${combo.key.toLowerCase()}:${combo.ctrl ? 1 : 0}:${combo.shift ? 1 : 0}:${combo.alt ? 1 : 0}`;
+  return `${combo.leader ? 'leader:' : ''}${combo.key.toLowerCase()}:${combo.ctrl ? 1 : 0}:${combo.shift ? 1 : 0}:${combo.alt ? 1 : 0}`;
 }
 
 function combosEqual(left: readonly KeyCombo[], right: readonly KeyCombo[]): boolean {
@@ -234,7 +233,7 @@ function formatCombo(manager: KeybindingsManager | null, combo: KeyCombo): strin
   if (combo.alt) parts.push('Alt');
   if (combo.shift) parts.push('Shift');
   parts.push(combo.key.length === 1 ? combo.key.toUpperCase() : combo.key);
-  return parts.join('+');
+  return `${combo.leader ? 'the leader then ' : ''}${parts.join('+')}`;
 }
 
 function describeCombo(manager: KeybindingsManager | null, combo: KeyCombo): Record<string, unknown> {
@@ -243,6 +242,7 @@ function describeCombo(manager: KeybindingsManager | null, combo: KeyCombo): Rec
     ctrl: combo.ctrl === true,
     shift: combo.shift === true,
     alt: combo.alt === true,
+    ...(combo.leader ? { leader: true } : {}),
     label: formatCombo(manager, combo),
   };
 }
@@ -424,7 +424,7 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         effect: 'visible-ui-navigation',
         preferredMode: 'run_keybinding',
         confirmation: 'agent_harness mode:"run_keybinding" requires current recorded Jev effect admission.',
-        note: 'Dismisses the Agent workspace (alias chord: Ctrl+Shift+X has the same effect as Ctrl+X).',
+        note: 'Dismisses the Agent workspace (its leader sequence, Ctrl+G then x, has the same effect as Ctrl+X).',
       };
     case 'history-search':
       return {
@@ -533,6 +533,40 @@ function keybindingOperationRoute(action: KeyAction): KeybindingOperationRoute {
         confirmation: 'Direct user interaction only.',
         note: 'Shows the next or previous agent or process from the session row above the conversation.',
       };
+    case 'leader':
+    case 'next-field':
+    case 'choose':
+    case 'back':
+    case 'move-up':
+    case 'move-down':
+    case 'move-left':
+    case 'move-right':
+      return {
+        supported: false,
+        effect: 'visible-ui-navigation',
+        preferredMode: 'direct-user-interaction',
+        confirmation: 'Direct user interaction only.',
+        note: 'A key the person presses on what is on screen: the leader starts a two-key shortcut; Tab, Enter, Esc and the arrows move, choose and go back.',
+      };
+    case 'open-menu':
+      return {
+        supported: false,
+        effect: 'visible-ui-navigation',
+        preferredMode: 'direct-user-interaction',
+        confirmation: 'Direct user interaction only.',
+        note: 'Opens the menu of every place for the person at the screen.',
+      };
+    case 'scroll-page-up':
+    case 'scroll-page-down':
+    case 'contract-question-ordinary':
+    case 'model-picker-group':
+      return {
+        supported: false,
+        effect: 'visible-ui-navigation',
+        preferredMode: 'direct-user-interaction',
+        confirmation: 'Direct user interaction only.',
+        note: 'Acts on what the person sees: scrolls the conversation a page, sends the next typed message as an ordinary one instead of the answer to a contract\'s question, or groups the open model list another way.',
+      };
   }
 }
 
@@ -548,7 +582,6 @@ function fixedShortcutModelRoute(shortcut: Record<string, string>): string {
   switch (shortcut.key) {
     case '/help keys': return 'workspace action:"keybindings"';
     case '?': return 'workspace action:"open" surfaceId:"help-overlay"';
-    case 'F2': return 'run_command command:"/agents"';
     case 'Tab': return 'workspace action:"commands"';
     case 'Enter':
     case 'Shift+Enter / Ctrl+J': return 'main conversation';

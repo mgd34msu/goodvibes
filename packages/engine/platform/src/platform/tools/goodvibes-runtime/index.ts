@@ -33,6 +33,7 @@ import type { CloudflareComponentSelection } from '../../cloudflare/types.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { mapWithConcurrency } from '../../utils/concurrency.js';
 import { SETUP_INTENT_CONTRACT_PROMPT } from '../../runtime/setup-contract.js';
+import { CAPABILITY_GROUPS_PROMPT } from '../../capabilities/groups.js';
 import { redactConfigValue, redactObjectByPath } from './credential-redaction.js';
 import { executeAdmittedAgentSettings } from './settings-admission.js';
 
@@ -62,6 +63,8 @@ export const GOODVIBES_RUNTIME_AWARENESS_PROMPT = [
   // was FOR. The contract is stated generally, in runtime/setup-contract.ts, so
   // a service nobody has named yet gets the same treatment.
   SETUP_INTENT_CONTRACT_PROMPT,
+  // The fourteen function groups, so a need is found by capability_find without the full list of capabilities in the prompt.
+  CAPABILITY_GROUPS_PROMPT,
 ].join('\n');
 
 export function appendGoodVibesRuntimeAwarenessPrompt(systemPrompt?: string | null): string {

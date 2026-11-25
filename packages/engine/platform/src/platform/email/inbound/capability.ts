@@ -73,6 +73,7 @@ const STATE_BY_REASON: Readonly<Record<InboundCapabilityReason, InboundCapabilit
   reconnecting: 'degraded',
   'server-unavailable': 'degraded',
   'credentials-missing': 'insufficient',
+  'store-unreadable': 'insufficient',
   'credentials-rejected': 'insufficient',
   'mailbox-unreadable': 'insufficient',
   'uidvalidity-missing': 'insufficient',
@@ -123,6 +124,9 @@ const FIX_BY_REASON: Readonly<Record<InboundCapabilityReason, string>> = {
   'credentials-missing':
     'No mail password is stored where the daemon reads secrets, so there is '
     + 'nothing to sign in with. Store one at daemon scope.',
+  'store-unreadable':
+    'The secret store on this computer could not be read, so the mailbox password could not be read; '
+    + 'nothing already given there is asked for again. Make the store readable on this computer.',
   'credentials-rejected':
     'The mail server refused the sign-in. Replace the stored password for this '
     + 'account (surfaces.email.password); if the account uses two-factor '
@@ -335,6 +339,7 @@ const REASON_FOR_NOTICE: Readonly<
   Record<EmailCapabilityFailureReason, InboundCapabilityReason>
 > = {
   'credential-unavailable': 'credentials-missing',
+  'store-unreadable': 'store-unreadable',
   'authentication-rejected': 'credentials-rejected',
   'mailbox-unavailable': 'mailbox-unreadable',
   'server-unavailable': 'server-unavailable',

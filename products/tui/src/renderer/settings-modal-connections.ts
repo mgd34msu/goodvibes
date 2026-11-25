@@ -26,7 +26,7 @@ export function connectionRows(modal: SettingsModal, selectable: boolean): KitRo
   const selectedIndex = Math.max(0, Math.min(modal.selectedIndex, items.length - 1));
   return items.map((entry, index) => ({
     label: connectionSurfaceLabel(entry.surface),
-    right: entry.state,
+    right: entry.state === 'unreadable' ? 'could not be read' : entry.state,
     selected: selectable && index === selectedIndex,
     current: !selectable && index === selectedIndex,
   }));
@@ -43,7 +43,7 @@ export function buildConnectionHelp(modal: SettingsModal): HelpLine[] {
   if (!entry) return [helpText('Connections'), helpText('No connection surface is selected.')];
   return [
     helpText(connectionSurfaceLabel(entry.surface)),
-    helpFact('State', entry.state),
+    helpFact('State', entry.state === 'unreadable' ? 'the secret store could not be read' : entry.state),
     helpText(entry.detail),
     ...(entry.nextActions.length > 0 ? [helpText(''), helpHeading('Next steps:'), ...entry.nextActions.map((action) => helpText(action))] : []),
     helpText(''),

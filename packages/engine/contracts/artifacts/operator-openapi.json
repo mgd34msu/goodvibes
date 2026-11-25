@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.5.0",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 661 cataloged methods: 538 with dedicated REST bindings, 123 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 663 cataloged methods: 538 with dedicated REST bindings, 125 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -26917,6 +26917,9 @@
                                       "configured": {
                                         "type": "boolean"
                                       },
+                                      "resolved": {
+                                        "type": "boolean"
+                                      },
                                       "source": {
                                         "type": "string"
                                       }
@@ -27297,6 +27300,9 @@
                                       "configured": {
                                         "type": "boolean"
                                       },
+                                      "resolved": {
+                                        "type": "boolean"
+                                      },
                                       "source": {
                                         "type": "string"
                                       }
@@ -27651,6 +27657,9 @@
                           "configured": {
                             "type": "boolean"
                           },
+                          "resolved": {
+                            "type": "boolean"
+                          },
                           "source": {
                             "type": "string"
                           }
@@ -27836,6 +27845,9 @@
                                 "configured": {
                                   "type": "boolean"
                                 },
+                                "resolved": {
+                                  "type": "boolean"
+                                },
                                 "source": {
                                   "type": "string"
                                 }
@@ -28008,6 +28020,9 @@
                                   "type": "string"
                                 },
                                 "configured": {
+                                  "type": "boolean"
+                                },
+                                "resolved": {
                                   "type": "boolean"
                                 },
                                 "source": {
@@ -29506,6 +29521,9 @@
                                         "type": "string"
                                       },
                                       "configured": {
+                                        "type": "boolean"
+                                      },
+                                      "resolved": {
                                         "type": "boolean"
                                       },
                                       "source": {
@@ -33831,6 +33849,45 @@
                           "enabled": {
                             "type": "boolean"
                           },
+                          "configured": {
+                            "type": "boolean"
+                          },
+                          "credentialResolves": {
+                            "type": "boolean"
+                          },
+                          "runtime": {
+                            "type": "object",
+                            "properties": {
+                              "observable": {
+                                "type": "boolean"
+                              },
+                              "running": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "reason": {
+                                "type": "string"
+                              },
+                              "lastError": {
+                                "type": "string"
+                              },
+                              "observedAt": {
+                                "type": "number"
+                              }
+                            },
+                            "required": [
+                              "observable",
+                              "running",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          },
                           "accountId": {
                             "type": "string"
                           },
@@ -33871,6 +33928,36 @@
                           "metadata"
                         ],
                         "additionalProperties": false
+                      }
+                    },
+                    "health": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            }
+                          ]
+                        }
                       }
                     }
                   },
@@ -36078,7 +36165,7 @@
       "post": {
         "operationId": "cloudflare.credentials.verify",
         "summary": "Validate Cloudflare Credentials",
-        "description": "Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400) and a token Cloudflare rejects fails the call with Cloudflare's error. Changes nothing.",
+        "description": "Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400), a stored one this computer's secret store could not read with CLOUDFLARE_CREDENTIALS_UNREADABLE (412, the cause named, nothing asked for again), and a token Cloudflare rejects fails the call with Cloudflare's error. Changes nothing.",
         "tags": [
           "cloudflare"
         ],
@@ -173026,6 +173113,8 @@
           "acp.sessions.create",
           "approvals.raise",
           "automation.schedules.preview",
+          "capabilities.find",
+          "capabilities.run",
           "channels.test.send",
           "checkpoints.create",
           "checkpoints.diff",
@@ -173213,6 +173302,11 @@
               "AUTH_REQUIRED",
               "CANCELLED",
               "CANCEL_NOT_ALLOWED",
+              "CAPABILITY_ELSEWHERE",
+              "CAPABILITY_INPUT_INVALID",
+              "CAPABILITY_NOT_APPROVED",
+              "CAPABILITY_NOT_FOUND",
+              "CAPABILITY_REFUSED",
               "CAPACITY_EXCEEDED",
               "CONFLICT",
               "CONTRACT_ENDED",
@@ -174208,6 +174302,22 @@
       "category": "calendar",
       "access": "admin",
       "rest": "POST /api/calendar/ics/import",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "capabilities.find",
+      "category": "capabilities",
+      "access": "authenticated",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "capabilities.run",
+      "category": "capabilities",
+      "access": "authenticated",
+      "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
     },

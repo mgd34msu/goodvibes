@@ -53,7 +53,9 @@ background (a transparent one) depends on that background colour.
 
 ## Focus and keys
 
-- `Ctrl+G` opens the workspace; the area list or the action list holds the
+- `Ctrl+G` then `w` opens the workspace (`Ctrl+G` then `m` the menu of every
+  place; after `Ctrl+G` the screen lists every key that can follow, with no
+  time limit); the area list or the action list holds the
   focus, drawn highlighted, and the workspace's last row lists its keys. `Esc`
   closes the top overlay.
 - On the approval card the chosen button is drawn highlighted, and Enter presses

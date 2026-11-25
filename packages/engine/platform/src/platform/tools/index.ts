@@ -63,6 +63,9 @@ import { createCapturedReplTool } from './repl/captured.js';
 import { createControlTool, type ControlToolOptions } from './control/index.js';
 import { createProfileTool } from './profile/index.js';
 import { createChannelTool } from './channel/index.js';
+import { createDaemonCapabilityTools } from './capability/daemon-tools.js';
+import { CapabilityCatalog } from '../capabilities/catalog.js';
+import { movedCapabilityEntries } from '../capabilities/builtin/index.js';
 import { createWebSearchTool } from './web-search/index.js';
 import { ProcessManager } from './shared/process-manager.js';
 import type { AgentManager } from './agent/index.js';
@@ -452,6 +455,13 @@ export function registerAllTools(
      * such a delegation starts once the gate admitted the call.
      */
     delegationAsk?: import('../agents/delegation-authority.js').DelegationOwnerAsk | undefined;
+    /**
+     * The daemon's own capabilities for this registry's turns (`capability_find`,
+     * `capability_run`, tools/capability/daemon-tools.ts). A terminal program
+     * registers its own pair (terminal-shell agent-turn/capability-tools.ts) and
+     * passes none.
+     */
+    capabilityTools?: import('./capability/daemon-tools.js').DaemonCapabilityToolHost | undefined;
   },
 ): { fileCache: FileStateCache; projectIndex: ProjectIndex; /** Flushes and stops the session key-value store; call at shutdown. */ dispose: () => Promise<void> } {
   const fileCache = deps?.fileCache ?? new FileStateCache();
@@ -801,6 +811,13 @@ export function registerAllTools(
   // A composition that supplies no lists (hosted, daemon) has no command surface; the tool says so instead of an empty list.
   registerTool(createControlTool(deps.controlSurfaces ?? {}));
   registerTool(createChannelTool(channelRegistry));
+  // A registry that already has the pair (one composition handing its tools on) keeps the first.
+  if (deps.capabilityTools && !registry.has('capability_run')) {
+    const { tools: [find, run], runProjection } = createDaemonCapabilityTools(deps.capabilityTools, new CapabilityCatalog(movedCapabilityEntries()));
+    registerTool(find!);
+    // A secret input is hidden from the call before anything keeps or shows it.
+    registerTool(run!, { inputProjection: runProjection });
+  }
   return { fileCache, projectIndex, dispose };
 }
 export { booleanValue } from './batteries/boolean-value.js';

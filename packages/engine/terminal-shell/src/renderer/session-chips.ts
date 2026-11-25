@@ -36,7 +36,7 @@ const CHIP_PAD = 2;
 const CHIP_GAP = 1;
 /** Longest name a chip shows before it is cut with an ellipsis. */
 const NAME_MAX = 24;
-const DEFAULT_KEYS = { next: 'alt+n', previous: 'alt+p' } as const;
+const DEFAULT_KEYS = { next: 'ctrl+g n', previous: 'ctrl+g p' } as const;
 
 function put(line: Line, x: number, endX: number, text: string, style: { fg: string; bg: string; bold?: (boolean) | undefined }): number {
   let cx = x;

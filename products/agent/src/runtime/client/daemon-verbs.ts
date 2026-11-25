@@ -210,6 +210,8 @@ export interface AgentDaemonVerbInvokeOptions {
    * request under the same key with its first answer instead of acting again.
    */
   readonly idempotencyKey?: string | undefined;
+  /** A person asked for exactly this, now: sent as the explicit-user-request claim (kept by the host only from a person's credential). */
+  readonly explicitUserRequest?: boolean | undefined;
 }
 
 /** The engine's verb caller, whose `invoke` also takes {@link AgentDaemonVerbInvokeOptions}. */
@@ -300,6 +302,7 @@ export function createAgentDaemonVerbCaller(options: AgentDaemonVerbCallerOption
             headers: {
               Authorization: `Bearer ${resolved.token}`, 'Content-Type': 'application/json', 'x-goodvibes-client': 'agent',
               ...(invokeOptions?.idempotencyKey ? { 'Idempotency-Key': invokeOptions.idempotencyKey } : {}),
+              ...(invokeOptions?.explicitUserRequest === true ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
             },
             // The envelope the route requires: `body` must be PRESENT even when
             // empty, or the route refuses with a 400 naming the shape it wanted.

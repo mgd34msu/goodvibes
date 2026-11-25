@@ -235,6 +235,8 @@ declareLoosening('permissions.commandParser', { loosening: 'stop parsing shell c
 for (const key of ['judgment.endpoint', 'judgment.model', 'judgment.backend', 'judgment.fallbacks', 'judgment.keySource', 'judgment.keyName']) {
   declareLoosening(key, { loosening: 'change which decision model decides for you', loosens: changes });
 }
+// No decision model chosen, turned off: a decision model (set here or in the environment) decides again.
+declareLoosening('judgment.noDecisionModel', { loosening: 'let a decision model decide for you again', loosens: flagTurnsOff });
 for (const key of [...PINNED_NETWORK, ...PINNED_SAFETY_GATE]) declareLoosening(key, PINNED);
 // Each names a program the host runs or a token variable it hands over when a secret reference resolves.
 declareLoosening('storage.secretProviders.', { loosening: 'change the program or token a password manager runs with', loosens: changes });

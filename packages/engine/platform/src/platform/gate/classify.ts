@@ -168,10 +168,12 @@ export interface CallFacts {
    * decision yet, or no workspace trust policy applies.
    */
   readonly workspaceRestricted?: boolean | undefined;
+  /** The host the call is sent to decides it itself when it arrives (hostDecidesCall). */
+  readonly hostDecides?: boolean | undefined;
 }
 
 /** What settled a fact, for the caller's own records. */
-export type FactBasis = 'surface' | 'plan' | 'mode' | 'rule' | 'owner-rule' | 'declared-effect' | 'owner-act';
+export type FactBasis = 'surface' | 'plan' | 'mode' | 'rule' | 'owner-rule' | 'declared-effect' | 'owner-act' | 'host';
 
 export type CallClass =
   | { readonly kind: 'fact'; readonly allow: boolean; readonly basis: FactBasis; readonly decision: ToolDecision; readonly rule?: CallRuleFact | undefined }
@@ -255,6 +257,12 @@ export function classifyCall(mode: GatePresetName, facts: CallFacts): CallClass 
   const rule = facts.rule;
   if (rule?.effect === 'deny') return { kind: 'fact', allow: false, basis: 'rule', rule, decision: ruleDecision(rule, false) };
   if (rule?.effect === 'ask') return { kind: 'owner-only', item: 'standing-ask' };
+  // One decision, at the host: it admits this call itself under the owner's mode when it arrives.
+  if (facts.hostDecides === true) {
+    return { kind: 'fact', allow: true, basis: 'host', decision: {
+      state: 'allowed', decidedBy: 'code', reason: `${facts.tool} is decided by the daemon it is sent to, under your mode, when it arrives`,
+    } };
+  }
   if (facts.ownerOnly !== undefined) {
     if (rule?.effect === 'allow' && rule.ownerOnly === facts.ownerOnly) {
       return { kind: 'fact', allow: true, basis: 'owner-rule', rule, decision: {
@@ -382,6 +390,18 @@ export interface OwnerOnlyCallFacts {
 /** The definition fields the owner-only list is recognised from. */
 export type OwnerOnlyDefinition = Pick<ToolDefinition, 'dangerous' | 'ownerActs' | 'ownerDecisions' | 'subjects' | 'sideEffects'>;
 
+/**
+ * Whether the host this call is sent to decides it itself (`hostDecides`): only when the call names exactly one value
+ * and it is one of them; a value that cannot be read, or several, is this gate's to decide (fails closed).
+ */
+export function hostDecidesCall(args: Record<string, unknown>, definition: Pick<ToolDefinition, 'hostDecides'> | undefined): boolean {
+  const declared = definition?.hostDecides;
+  if (declared === undefined || declared.values.length === 0) return false;
+  const named = argumentValues(args, declared.field);
+  if (named === undefined || named.length !== 1) return false;
+  return declared.values.some((value) => value.trim().toLowerCase() === named[0]!.trim().toLowerCase());
+}
+
 /** Whether the value the call gives `field` is one of `values`; a value that cannot be read counts as one (fails closed). */
 function namesOneOf(args: Record<string, unknown>, field: string, values: readonly string[] | undefined): boolean {
   if (values === undefined || values.length === 0) return false;
@@ -442,11 +462,34 @@ export function recognizeOwnerOnly(toolName: string, args: Record<string, unknow
   if (definition?.dangerous === true || changesMcpTrust(toolName, args)) return 'grant-access';
   if (facts.loosensSetting === true) return 'loosen-security';
   const decisions = definition?.ownerDecisions;
+  if (decisions !== undefined && (namesOneOf(args, decisions.field, decisions.loosens) || loosensByArguments(args, decisions))) return 'loosen-security';
   if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.contractChanges)) return 'change-contract';
   if (decisions !== undefined && namesOneOf(args, decisions.field, decisions.irreversible)) return 'irreversible-operator';
   if (unrecoverableDeletion(toolName, args, definition, directory) !== undefined) return 'unrecoverable-delete';
   if (facts.newRecipient === true) return 'new-recipient';
   return undefined;
+}
+
+/**
+ * Whether the value the call names loosens a protection with the arguments it
+ * carries (`ownerDecisions.loosensWhen`): one of the listed values at the
+ * listed path. A path that cannot be read counts as loosening (fails closed).
+ */
+function loosensByArguments(args: Record<string, unknown>, decisions: NonNullable<OwnerOnlyDefinition['ownerDecisions']>): boolean {
+  const when = decisions.loosensWhen;
+  if (when === undefined) return false;
+  const named = argumentValues(args, decisions.field);
+  if (named === undefined) return Object.keys(when).length > 0;
+  for (const value of named) {
+    const key = Object.keys(when).find((candidate) => candidate.trim().toLowerCase() === value.trim().toLowerCase());
+    if (key === undefined) continue;
+    for (const condition of when[key]!) {
+      const given = argumentValues(args, condition.path);
+      if (given === undefined) return true;
+      if (given.some((entry) => condition.values.includes(entry.trim()))) return true;
+    }
+  }
+  return false;
 }
 
 /**

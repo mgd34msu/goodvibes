@@ -136,7 +136,8 @@ const UNREADABLE_REASON_TEXT: Readonly<Record<string, string>> = {
 };
 
 /** Reader verdicts after which stored mail is hidden until the reader signs in again. */
-const REFUSED_REASONS = new Set(['credentials-rejected', 'credentials-missing', 'mailbox-unreadable']);
+// A store that could not be read refuses too, but leaves the mailbox configured: nothing is missing.
+const REFUSED_REASONS = new Set(['credentials-rejected', 'credentials-missing', 'store-unreadable', 'mailbox-unreadable']);
 
 /** No credentials, provider calls or mail connections happen here at all. */
 export function createEmailInboxOwner(options: EmailInboxOwnerOptions): EmailInboxOwner {

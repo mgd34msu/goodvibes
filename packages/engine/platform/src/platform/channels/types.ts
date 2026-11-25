@@ -48,7 +48,8 @@ export type ChannelAuthState = 'linked' | 'configured' | 'not-configured' | 'deg
  * Where a channel secret came from. `unresolved` is the case config alone
  * cannot express: a value IS declared, and it resolves to nothing here.
  */
-export type ChannelSecretSource = 'service-registry' | 'config' | 'env' | 'derived' | 'unresolved' | 'missing';
+/** `unreadable`: the secret store on this computer could not be read, so whether the credential is stored is not known. */
+export type ChannelSecretSource = 'service-registry' | 'config' | 'env' | 'derived' | 'unresolved' | 'missing' | 'unreadable';
 export type ChannelCapabilityScope = 'surface' | 'accounts' | 'directory' | 'delivery' | 'interaction' | 'tooling';
 export type ChannelAccountLifecycleAction =
   | 'inspect'

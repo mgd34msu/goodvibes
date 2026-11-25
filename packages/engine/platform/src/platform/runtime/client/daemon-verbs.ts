@@ -58,5 +58,15 @@ export interface DaemonVerbCaller {
    * Invoke a verb. Throws on a non-2xx, and on "no daemon is configured at all"
    *, a seam that wants to degrade instead of failing calls `probe()` first.
    */
-  invoke<T = unknown>(methodId: string, input?: unknown): Promise<T>;
+  invoke<T = unknown>(methodId: string, input?: unknown, options?: DaemonVerbInvokeOptions): Promise<T>;
+}
+
+/** Per-call facts a verb caller may send with a call. */
+export interface DaemonVerbInvokeOptions {
+  /**
+   * A person asked for exactly this, now (a typed line, a submitted form, a
+   * key on a screen): sent as the explicit-user-request claim, which the
+   * daemon keeps only from a person's credential.
+   */
+  readonly explicitUserRequest?: boolean | undefined;
 }

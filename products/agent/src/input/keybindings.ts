@@ -5,6 +5,15 @@ import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
 
 /** Product action vocabulary and defaults; loading, validation and matching are platform owned. */
 export type KeyAction =
+  | 'leader'
+  | 'open-menu'
+  | 'next-field'
+  | 'choose'
+  | 'back'
+  | 'move-up'
+  | 'move-down'
+  | 'move-left'
+  | 'move-right'
   | 'copy-selection'
   | 'clear-cancel'
   | 'screen-clear'
@@ -36,7 +45,11 @@ export type KeyAction =
   | 'failure-retry'
   | 'failure-sign-in'
   | 'next-session'
-  | 'previous-session';
+  | 'previous-session'
+  | 'scroll-page-up'
+  | 'scroll-page-down'
+  | 'contract-question-ordinary'
+  | 'model-picker-group';
 
 export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION_DESCRIPTIONS,
   'command-palette':       'Open help: every command and keyboard shortcut in one searchable list',
@@ -58,6 +71,8 @@ export const ACTION_DESCRIPTIONS: Record<KeyAction, string> = { ...COMMON_ACTION
 };
 
 export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindingDefaults<KeyAction>([
+  'leader', 'open-menu', 'next-field', 'choose', 'back',
+  'move-up', 'move-down', 'move-left', 'move-right',
   'copy-selection', 'clear-cancel', 'screen-clear', 'command-palette', 'workspace-picker',
   'workspace-close', 'workspace-close-all', 'workspace-tab-next', 'workspace-tab-prev',
   'open-agents', 'history-search', 'search', 'block-copy',
@@ -65,18 +80,24 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'next-error-line-end', 'kill-line', 'clear-prompt', 'undo',
   'redo', 'paste', 'focus-work-tree', 'cycle-permission-mode',
   'open-notifications', 'failure-other-model', 'failure-details', 'failure-retry', 'failure-sign-in',
-  'next-session', 'previous-session',
+  'next-session', 'previous-session', 'scroll-page-up', 'scroll-page-down',
+  'contract-question-ordinary', 'model-picker-group',
 ], {
   // Ctrl+P: the same help list as ? and /help, in both terminal programs.
   'command-palette':       [{ key: 'p', ctrl: true }],
-  'workspace-picker':      [{ key: 'g', ctrl: true }],
+  // Ctrl+G is the leader now: the workspace opens with Ctrl+G then w, the menu of every place with Ctrl+G then m.
+  'workspace-picker':      [{ key: 'w', leader: true }],
   'workspace-close':       [{ key: 'x', ctrl: true }],
-  // Every Alt and Ctrl+Shift chord here has a second one a terminal without Alt
-  // (macOS Terminal) or without the extended keyboard protocol still sends (keybinding-catalog.ts).
-  'workspace-close-all':   [{ key: 'x', ctrl: true, shift: true }, { key: '\\', ctrl: true }],
+  // The actions that sat on an Alt or Ctrl+Shift chord are a leader sequence by default, beside
+  // a second key every terminal sends (keybinding-catalog.ts); a person can bind the chord back.
+  'workspace-close-all':   [{ key: 'x', leader: true }, { key: '\\', ctrl: true }],
   'workspace-tab-next':    [{ key: ']', ctrl: true }],
   'workspace-tab-prev':    [{ key: '[', ctrl: true }],
-  'open-agents':           [{ key: 'o', ctrl: true }],
+  // F2 and Ctrl+O: Your agents.
+  'open-agents':           [{ key: 'f2' }, { key: 'o', ctrl: true }],
+  // The Agent's conversation scrolls a page with PageUp and PageDown, with or without Ctrl.
+  'scroll-page-up':        [{ key: 'pageup' }, { key: 'pageup', ctrl: true }],
+  'scroll-page-down':      [{ key: 'pagedown' }, { key: 'pagedown', ctrl: true }],
   'line-start':            [{ key: 'a', ctrl: true }],
   'kill-line':             [{ key: 'k', ctrl: true }],
   'clear-prompt':          [{ key: 'u', ctrl: true }],
@@ -84,12 +105,11 @@ export const DEFAULT_KEYBINDINGS: Record<KeyAction, KeyCombo[]> = createKeybindi
   'cycle-permission-mode': [{ key: 'tab', shift: true }],
   // Ctrl+N: the notices the status bar counts.
   'open-notifications':    [{ key: 'n', ctrl: true }],
-  // Alt+O and Alt+I: the failed turn's "use another model" and "details"; chords that can never be typed text.
-  'failure-other-model':   [{ key: 'o', alt: true }, { key: 'f9' }],
-  'failure-details':       [{ key: 'i', alt: true }, { key: 'f3' }],
-  // Alt+R and Alt+S: the failed turn's "try again" and "sign in again".
-  'failure-retry':         [{ key: 'r', alt: true }, { key: 'f12' }],
-  'failure-sign-in':       [{ key: 's', alt: true }, { key: 'f4' }],
+  // The failed turn's row: Ctrl+G then o (another model), i (details), r (try again), s (sign in again).
+  'failure-other-model':   [{ key: 'o', leader: true }, { key: 'f9' }],
+  'failure-details':       [{ key: 'i', leader: true }, { key: 'f3' }],
+  'failure-retry':         [{ key: 'r', leader: true }, { key: 'f12' }],
+  'failure-sign-in':       [{ key: 's', leader: true }, { key: 'f4' }],
 });
 
 const KEY_ACTION_ALIASES: Readonly<Record<string, KeyAction>> = {

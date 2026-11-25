@@ -105,7 +105,12 @@ export interface ProviderRuntimeMetadata {
 }
 
 export interface ProviderRuntimeMetadataDeps {
-  readonly secretsManager: Pick<SecretsManager, 'listDetailed' | 'get'>;
+  readonly secretsManager: Pick<SecretsManager, 'listDetailed' | 'get'> & {
+    /** The read that throws on a store this process cannot read; absent on a fake (the store is then taken as read). */
+    readonly getStored?: ((key: string) => Promise<unknown>) | undefined;
+    /** One answer per listing: the words for a secret store this computer could not read, or null (snapshotRuntimeMetadataDeps). */
+    readonly storeUnreadable?: (() => Promise<string | null>) | undefined;
+  };
   readonly serviceRegistry: Pick<ServiceRegistry, 'getAll' | 'inspect'>;
   readonly subscriptionManager: Pick<SubscriptionManager, 'get' | 'getPending'>;
 }

@@ -15,7 +15,7 @@ import { conversationMessagesAsSessionRecords } from '../core/conversation-messa
 import { claimHeadlessSession, restoreHeadlessSession } from '@goodvibes/engine/terminal-shell/startup-lifecycle';
 import { closeSessionHere, createSessionSurface } from '@goodvibes/engine/platform/platform/runtime/operations';
 import { GOODVIBES_AGENT_SURFACE_ROOT } from '../config/surface.ts';
-import { announceHeadlessRecovery, announceHeadlessSession, refusedHeadlessRun } from '@goodvibes/engine/terminal-shell/headless-command';
+import { announceHeadlessRecovery, announceHeadlessSession, readFolderTrustFacts, refusedHeadlessRun, settleHeadlessFolderTrust } from '@goodvibes/engine/terminal-shell/headless-command';
 import { keepHeadlessSessionRecoverable } from '@goodvibes/engine/terminal-shell/session-crash-recovery';
 
 /**
@@ -114,8 +114,16 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
                 if (refused) return refused;
                 throw error;
               }
+              // A folder with no trust decision and nothing of its own to run is trusted as the terminal app's interactive
+              // start does (recorded the same way); one that brings hooks or tool servers is not trusted in this run: what needs trust is refused at once.
+              await settleHeadlessFolderTrust(ctx.commandContext.workspace?.workspaceTrustManager,
+                () => readFolderTrustFacts(workingDirectory, homeDirectory, String(configManager.get('tools.hooksFile') ?? '')));
               announceHeadlessSession(ctx, workingDirectory, cli.flags.outputFormat, configManager);
               const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
+              // The connected host is found (this machine's started when installed and stopped, or the paired one), before the turn.
+              await ctx.daemonReady;
+              const missing = ctx.daemonMissing();
+              if (missing) process.stderr.write(`${missing}\n`);
               sessionReady = true;
               const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, { ...limits, settings: configManager });
               return recovery ? { ...result, recovery } : result;

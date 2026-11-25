@@ -22,6 +22,21 @@ export interface JudgmentFallbackSettings {
 
 import type { JudgmentVolumeMonitorControl } from '../observe/judgment-volume-monitor.js';
 
+/**
+ * Decision-model settings moved aside, as they were: what a home that had
+ * decision models switched off (No Decision Model, 3.5.0 and earlier) held, kept
+ * so that choosing a decision model again in Settings offers them back. Never a
+ * credential: `keyName` is a reference name, like `judgment.keyName`.
+ */
+export interface JudgmentSetAside {
+  readonly endpoint?: string;
+  readonly model?: string;
+  readonly keySource?: JudgmentKeySource;
+  readonly keyName?: string;
+  readonly backend?: JudgmentBackendSettings;
+  readonly fallbacks?: readonly JudgmentFallbackSettings[];
+}
+
 export interface JudgmentSettings {
   /** Optional owner-configured local call-volume alerts. */
   volumeMonitor?: Partial<JudgmentVolumeMonitorControl>;
@@ -41,4 +56,8 @@ export interface JudgmentSettings {
   timeoutMs: number;
   /** Ordered compatible endpoints. An explicit empty list disables inherited fallbacks. */
   fallbacks: readonly JudgmentFallbackSettings[];
+  /** Decision-model settings moved aside (empty when none are); Settings offers them back. */
+  setAside: JudgmentSetAside;
+  /** No decision model chosen: none is asked, whatever the environment holds (config/decision-model-set.ts). */
+  noDecisionModel: boolean;
 }

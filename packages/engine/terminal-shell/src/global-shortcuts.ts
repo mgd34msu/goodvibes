@@ -38,7 +38,6 @@ export interface GlobalShortcutState {
   handleEscape(): void;
 }
 export interface GlobalShortcutPolicy<State extends GlobalShortcutState> {
-  readonly modifiedPageScroll: boolean;
   readonly rawKey?: ((state: State, token: Extract<InputToken, { type: 'key' }>) => boolean | undefined) | undefined;
   readonly action?: ((state: State, action: string | null) => boolean | undefined) | undefined;
   readonly killRing?: ((state: State) => KillRing) | undefined;
@@ -57,16 +56,7 @@ export function handleGlobalShortcutToken<State extends GlobalShortcutState>(
 ): boolean {
   if (token.type !== 'key') return false;
 
-  // Fast-path: bare pageup/pagedown have no keybinding entry.
-  if (token.logicalName === 'pageup' && (policy.modifiedPageScroll || !token.ctrl)) {
-    state.scroll(-Math.max(1, viewportHeight - 2));
-    return true;
-  }
-  if (token.logicalName === 'pagedown' && (policy.modifiedPageScroll || !token.ctrl)) {
-    state.scroll(Math.max(1, viewportHeight - 2));
-    return true;
-  }
-  // Bare escape is also not in the keybinding table.
+  // Esc is the navigation action `back` (keybindings.ts translates a key bound to it into Esc).
   if (token.logicalName === 'escape') {
     state.handleEscape();
     return true;
@@ -76,10 +66,34 @@ export function handleGlobalShortcutToken<State extends GlobalShortcutState>(
   if (rawResult !== undefined) return rawResult;
 
   // O(1) lookup via inverted map.
-  const kb = state.keybindingsManager;
-  const action = kb.lookup(token);
+  return runGlobalShortcutAction(state, state.keybindingsManager.lookup(token), policy, viewportHeight);
+}
 
+/** Rows a page scroll moves when the caller does not know the viewport (a leader sequence). */
+const DEFAULT_PAGE_ROWS = 20;
+
+/**
+ * Do what a shortcut action does, from its key or from a completed leader
+ * sequence (leader-key.ts): the same switch for both, so a sequence and a key
+ * bound to the same action can never differ.
+ */
+export function runGlobalShortcutAction<State extends GlobalShortcutState>(
+  state: State,
+  action: string | null,
+  policy: GlobalShortcutPolicy<State>,
+  viewportHeight?: number,
+): boolean {
+  const page = Math.max(1, (viewportHeight ?? DEFAULT_PAGE_ROWS + 2) - 2);
   switch (action) {
+    // PageUp and PageDown by default; rebindable like every other key.
+    case 'scroll-page-up':
+      state.scroll(-page);
+      return true;
+
+    case 'scroll-page-down':
+      state.scroll(page);
+      return true;
+
     case 'copy-selection':
       state.handleCopy();
       return true;

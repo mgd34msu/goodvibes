@@ -159,7 +159,7 @@ export const builtinGatewayCloudflareMethodDescriptors: readonly GatewayMethodDe
   methodDescriptor({
     id: 'cloudflare.credentials.verify',
     title: 'Validate Cloudflare Credentials',
-    description: 'Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400) and a token Cloudflare rejects fails the call with Cloudflare\'s error. Changes nothing.',
+    description: 'Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400), a stored one this computer\'s secret store could not read with CLOUDFLARE_CREDENTIALS_UNREADABLE (412, the cause named, nothing asked for again), and a token Cloudflare rejects fails the call with Cloudflare\'s error. Changes nothing.',
     category: 'cloudflare',
     effects: ['cloudflare.inspect'],
     http: { method: 'POST', path: '/api/cloudflare/validate' },

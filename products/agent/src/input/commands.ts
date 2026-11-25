@@ -53,6 +53,7 @@ import { registerArtifactsRuntimeCommands } from './commands/artifacts-runtime.t
 import { registerCompareRuntimeCommands } from './commands/compare-runtime.ts';
 import { registerResearchRuntimeCommands } from './commands/research-runtime.ts';
 import { registerHooksCommand } from '@goodvibes/engine/terminal-shell/hooks-command';
+import { capabilityBinding } from './commands/capability-binding.ts';
 import type { RememberedRuleStore } from '@goodvibes/engine/platform/platform/gate/policy';
 
 
@@ -99,7 +100,7 @@ export function registerBuiltinCommands(
   registerSecurityRuntimeCommands(registry);
   registerMcpRuntimeCommands(registry);
   // The Agent loads the hooks file too, so the hook messages that name /hooks hold here.
-  registerHooksCommand<CommandContext>(registry);
+  registerHooksCommand<CommandContext>(registry, capabilityBinding);
   registerExperienceRuntimeCommands(registry);
   registerTasksRuntimeCommands(registry);
   registerLocalProviderRuntimeCommands(registry);

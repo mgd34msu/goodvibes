@@ -84,14 +84,16 @@ Press `?` on an empty prompt, `Ctrl+P` or `/help` for one searchable list of eve
 | `Ctrl+P` / `Ctrl+K` | The same list as `?`: search and run any command, view or setting |
 | `F2` / `Ctrl+O` | Open or close Your agents |
 | `Ctrl+N` | Open the notices the status bar counts |
-| `Alt+R` / `Alt+O` / `Alt+I` | On a failed turn: try again, use another model, show the details |
+| `Ctrl+G` | The leader: the next key completes a two-key shortcut, and the screen lists every key that can follow |
+| `Ctrl+G` `m` | The menu of every place (Waiting for you, Automation, Keys, ...) |
+| `Ctrl+G` `r` / `o` / `i` | On a failed turn: try again, use another model, show the details |
 | `Shift+Tab` | Cycle this session's permission mode (asks before `yolo`; the saved default is unchanged) |
-| `Alt+N` / `Alt+P` | With the session chips showing: the next / previous agent or process |
+| `Ctrl+G` `n` / `Ctrl+G` `p` | With the session chips showing: the next / previous agent or process |
 | `Esc` | One step back per press: close the top modal (one level), clear the composer, leave an agent or process view (never stops it), or interrupt main's turn. The status bar names what the next `Esc` does |
 | `Ctrl+X` | Inside an agent or process view: stop it (press twice to confirm) |
 | `Ctrl+C` | Clear input, cancel a running turn. Press twice to quit |
 
-Most bindings are customizable in `~/.goodvibes/tui/keybindings.json`, and `/help keys` shows what is currently bound. Four keys are fixed and stay out of that file: `F2` (Your agents), `Esc` (leave the current mode), `?` (help), and `@` (file picker). The permission-mode cycle (`Shift+Tab`) is the rebindable `cycle-permission-mode`. The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
+Every key the program acts on can be changed, in the Keys place (`Ctrl+G` `m`, then System) or in `~/.goodvibes/tui/keybindings.json`, `Tab`, `Enter`, `Esc` and the arrows included; `/help keys` shows what is currently bound. Each place's own letters are keys of the table too, listed in the Keys place under the place's name. Two keys are fixed: `?` (help) and `@` (file picker). The permission-mode cycle (`Shift+Tab`) is the rebindable `cycle-permission-mode`. The full reference is in [docs/tools-and-commands.md](docs/tools-and-commands.md).
 
 ---
 

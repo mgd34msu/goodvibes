@@ -4,6 +4,7 @@ import { accessSync, constants as fsConstants } from 'node:fs';
 import { delimiter, join } from 'node:path';
 import type { ConfigManager } from '../config/manager.js';
 import type { SecretsManager } from '../config/secrets.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../config/secret-store-unreadable.js';
 import { summarizeError } from '../utils/error-display.js';
 import { logger } from '../utils/logger.js';
 import { readCloudflareConfig } from './config.js';
@@ -44,7 +45,7 @@ export interface TunnelConnectorProcess {
 export interface CloudflareTunnelConnectorOptions {
   /** `subscribe`, when present, lets {@link CloudflareTunnelConnector.start} follow the tunnel settings. */
   readonly configManager: Pick<ConfigManager, 'get'> & Partial<Pick<ConfigManager, 'subscribe'>>;
-  readonly secretsManager?: Pick<SecretsManager, 'get' | 'getGlobalHome'> | null | undefined;
+  readonly secretsManager?: (Pick<SecretsManager, 'get' | 'getGlobalHome'> & StoredSecretReader) | null | undefined;
   /** Path of the cloudflared binary; found on PATH when absent. */
   readonly binary?: string | undefined;
   readonly spawnConnector?: ((binary: string, args: readonly string[], env: NodeJS.ProcessEnv) => TunnelConnectorProcess) | undefined;
@@ -168,6 +169,14 @@ export class CloudflareTunnelConnector implements CloudflareTunnelConnectorHandl
     const token = await this.resolveToken(config.tunnelTokenRef);
     // Disposed while the token was being read: start nothing.
     if (!fence.current) return this.current;
+    // A secret store this computer could not read is not "no token": the token is not asked for again.
+    const unreadable = token ? null : await unreadableSecretStore(this.options.secretsManager, CLOUDFLARE_TUNNEL_TOKEN_KEY, 'the Cloudflare Tunnel token');
+    if (!fence.current) return this.current;
+    if (unreadable) {
+      await this.stop();
+      this.set({ state: 'not-configured', tunnelId: config.tunnelId, detail: `${unreadable} The tunnel connector is not started until it can be read.` });
+      return this.current;
+    }
     if (!token) {
       await this.stop();
       this.set({

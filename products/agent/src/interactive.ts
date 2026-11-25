@@ -71,7 +71,9 @@ import { drawSplashAdditions, openModeSegment } from '@goodvibes/engine/terminal
 import { GitStatusProvider, type GitHeaderInfo } from '@goodvibes/engine/terminal-shell/git-status';
 import { describeExecutionModeWords } from './permissions/execution-mode.ts';
 import { footerTargetRows } from './renderer/footer-targets.ts';
-import { setStatusWorkspaceKey } from './renderer/status-line.ts';
+import { setStatusMenuKey } from './renderer/status-line.ts';
+import { setTurnFailureKeys } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
+import { setMemoryProvenanceKey, setModelPickerGroupKey } from '@goodvibes/engine/terminal-shell/leader-key';
 import { getSharedNotificationFeed } from './core/notifications-feed.ts';
 import { watchDaemonPowerEvents, type PowerState } from '@goodvibes/engine/platform/platform/power';
 import { buildPersistedSessionContextFromFacts, holdOfferedRecoverySnapshot } from '@goodvibes/engine/platform/platform/runtime/operations';
@@ -96,7 +98,8 @@ import { buildCommandArgsHint } from './input/command-args-hint.ts';
 import { createAutonomySurfacing, buildSkillDraftProposer } from './shell/autonomy-surfacing.ts';
 import { bindApprovals } from './shell/approvals-binding.ts';
 import { listAutomationRunsSince } from './agent/automation-runs-source.ts';
-import { createConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { createConnectedHost, resolveConnectedHost } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-client';
+import { wirePlaces } from '@goodvibes/engine/terminal-shell/places';
 import { readApprovalPostureFromConfig } from './permissions/approval-posture.ts';
 import { cancelConversationGeneration, installRemoteConversationRouting } from './shell/remote-conversation-wiring.ts';
 import { applyAtModelSwitches } from './input/at-model-switch.ts';
@@ -402,6 +405,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     facts: () => terminalAskFacts(askContext()),
     render: () => render(),
     notify: (message) => { systemMessageRouter.high(message); render(); },
+    // Its arrows, Enter and Esc are the key table's move-up, move-down, choose and back.
+    keys: ctx.services.keybindingsManager,
   });
   unsubs.push(ownerQuestionCard.start());
   // The status bar's branch: read once, then polled the way the terminal app does (a few file stats
@@ -669,8 +674,9 @@ async function main(prepared: PreparedShellCliRuntime) {
     intake: () => commandContext.nativeConversationIntake,
     shellContextHold,
     restoreDraft,
-    runTurn: (text, spokenOutput, turnOptions) => orchestrator.handleUserInput(text, undefined,
-      spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions),
+    // The turn starts once the connected host is found or started (at once after the first): nothing is asked.
+    runTurn: (text, spokenOutput, turnOptions) => ctx.daemonReady.then(() => orchestrator.handleUserInput(text, undefined,
+      spokenOutput ? { ...turnOptions, ...createSpokenTurnInputOptions() } : turnOptions)),
     dispatchNativeTurn: (state, spokenOutput, turnOptions) => dispatchNativeTurn(state, spokenOutput, turnOptions),
     isBusy: () => orchestrator.isBusy,
     announcements: {
@@ -970,6 +976,30 @@ async function main(prepared: PreparedShellCliRuntime) {
   orchestratorRefs.scrollToEnd = scrollToEnd;
 
   input.setCommandRegistry(commandRegistry, commandContext);
+  // The menu of every place and the places themselves (terminal-shell/places), on this program's
+  // modal stack: their lists are the connected host's (the daemon) or this session's own.
+  const places = wirePlaces({
+    context: commandContext,
+    // A key pressed or a form submitted in a place is the owner's own request, as a line typed in full.
+    executeFromOwner: (name, args, context) => commandRegistry.executeFromOwner(name, args, context as typeof commandContext),
+    keys: ctx.services.keybindingsManager,
+    invoke: (method, input) => automationHost.invoke(method as never, input as never),
+    daemonEndpoint: async () => {
+      const connection = resolveConnectedHost({ configManager, homeDirectory });
+      return connection.token !== null ? { baseUrl: connection.baseUrl, token: connection.token } : { unavailable: connection.unavailable?.reason ?? 'no connected-host credential was found' };
+    },
+    // A place opened while the daemon was down reads again when the Agent attaches to it again.
+    onDaemonBack: onDaemonAttached,
+    program: 'agent',
+    modals: input.surfaceModals,
+    requestRender: () => render(),
+  });
+  unsubs.push(() => places.stop());
+  commandContext.openPlaceMenu = places.openMenu;
+  commandContext.openPlace = (id) => { places.openPlace(id); };
+  // Key-table actions that act on a screen of this program (keybinding-catalog.ts).
+  commandContext.answerContractQuestionPlainly = () => { contractQuestions.sendNextAsOrdinary(); };
+  commandContext.cycleModelPickerGroup = () => { if (input.modelPicker.active && input.modelPicker.mode === 'model') input.modelPicker.cycleGroupBy(); };
   input.setConversationManager(conversation);
   input.setContentWidth(getPromptContentWidth());
   input.filePicker.setOnUpdate(() => render());
@@ -986,6 +1016,7 @@ async function main(prepared: PreparedShellCliRuntime) {
     else if (target === 'agents') commandContext.openAgents?.();
     else if (target === 'commands') commandContext.openCommandPalette?.();
     else if (target === 'workspace') commandContext.openWorkspacePicker?.();
+    else if (target === 'places') commandContext.openPlaceMenu?.();
     render();
   };
   input.sessionView = sessionViews;
@@ -1119,7 +1150,16 @@ async function main(prepared: PreparedShellCliRuntime) {
       hasAttachments: input.getImageAttachments().size > 0,
       turnState: sessionSnapshot.turnState,
     });
-    setStatusWorkspaceKey(keycapLabel(ctx.services.keybindingsManager.getComboLabel('workspace-picker'))); // the status line's `ctrl+g workspace`, as bound
+    setStatusMenuKey(keycapLabel(ctx.services.keybindingsManager.getComboLabel('open-menu'))); // the status line's `ctrl+g m menu`, as bound
+    // The failed turn's row names its keys as bound.
+    setTurnFailureKeys({
+      retry: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-retry')),
+      otherModel: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-other-model')),
+      details: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-details')),
+      signIn: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-sign-in')),
+    });
+    setModelPickerGroupKey(ctx.services.keybindingsManager.getComboLabel('model-picker-group'));
+    setMemoryProvenanceKey(ctx.services.keybindingsManager.getComboLabel('toggle-memory-provenance'));
     const footerLines = buildShellFooter({
       width,
       promptText: promptInfo.visibleLines.join('\n'),
@@ -1176,7 +1216,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       composerFlags: composerState.flags,
       composerPendingRisk: composerState.pendingRisk,
       voiceCapture: voiceCaptureStatus(),
-      contractQuestionHint: contractQuestions.hint(),
+      contractQuestionHint: contractQuestions.hint(ctx.services.keybindingsManager.getComboLabel('contract-question-ordinary')),
       // Esc leads back only while what was typed is still in the composer (handler-interactions.ts).
       workspaceReturnArea: input.prompt.length > 0 ? input.agentWorkspace.typedAwayFromArea : null,
       throbber,
@@ -1253,6 +1293,26 @@ async function main(prepared: PreparedShellCliRuntime) {
       contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel) ?? 0,
     });
 
+    // Modals, the permission dialog and kit modals: stamped over the dimmed screen. The pointer reads the same
+    // layers, so a click lands on what was painted (terminal-shell/surface-pointer).
+    const layers = withOwnerQuestionCard(buildConversationLayers({
+      input,
+      conversation,
+      commandRegistry,
+      keybindingsManager: ctx.services.keybindingsManager,
+      screenWidth: width,
+      screenHeight: height,
+      contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel) ?? 0,
+      providerInputTokens: orchestrator.lastInputTokens,
+      permission: pendingPermission
+        ? PermissionPromptUI.createPromptLayer(width, height, pendingPermission, {
+          awaitingTab: cardAwaitsTab(pendingPermission, input.prompt.length === 0),
+          queueCount: commandUi.waitingCount(),
+          context: askContext(),
+        })
+        : null,
+    }), ownerQuestionCard, { width, height, footerRows: shellFooterLines.length, hidden: pendingPermission !== null });
+    input.surfacePointer.layers = layers;
     compositor.composite({
       width,
       height,
@@ -1274,24 +1334,7 @@ async function main(prepared: PreparedShellCliRuntime) {
               viewportStartY: shellHeaderLines.length,
             }
           : undefined,
-      // Modals, the permission dialog and kit modals: stamped over the dimmed screen.
-      layers: withOwnerQuestionCard(buildConversationLayers({
-        input,
-        conversation,
-        commandRegistry,
-        keybindingsManager: ctx.services.keybindingsManager,
-        screenWidth: width,
-        screenHeight: height,
-        contextWindow: providerRegistry.getKnownContextWindowForModel(currentModel) ?? 0,
-        providerInputTokens: orchestrator.lastInputTokens,
-        permission: pendingPermission
-          ? PermissionPromptUI.createPromptLayer(width, height, pendingPermission, {
-            awaitingTab: cardAwaitsTab(pendingPermission, input.prompt.length === 0),
-            queueCount: commandUi.waitingCount(),
-            context: askContext(),
-          })
-          : null,
-      }), ownerQuestionCard, { width, height, footerRows: shellFooterLines.length, hidden: pendingPermission !== null }),
+      layers,
     });
   }
   unsubs.push(announceSettingsIngestionNotices(configManager, (line, level) => {
@@ -1406,13 +1449,9 @@ async function main(prepared: PreparedShellCliRuntime) {
       render();
       return;
     }
-    // The question card's keys (arrows, 1-9, Enter, Esc) while it is on screen and the composer is empty.
+    // The question card's keys (the table's up, down, choose and back; its answers' own keys) while it is
+    // on screen and the composer is empty.
     if (input.prompt.length === 0 && ownerQuestionCard.handleInput(data)) return;
-    // Alt+X sends the next message as an ordinary one instead of the answer to a contract's question.
-    if (contractQuestions.handleChord(data)) {
-      render();
-      return;
-    }
 
     input.feed(data);
   };

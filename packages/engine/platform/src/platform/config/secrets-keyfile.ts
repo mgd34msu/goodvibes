@@ -22,9 +22,12 @@ export const SECRETS_STORE_FORMAT_VERSION = 2;
  * Writes to that store are refused so its contents are never overwritten.
  */
 export class SecretStoreUnreadableError extends Error {
-  constructor(message: string) {
+  /** Why the store could not be read, in a few words (no secret), when the thrower knows it. */
+  readonly reason: string | undefined;
+  constructor(message: string, reason?: string) {
     super(message);
     this.name = 'SecretStoreUnreadableError';
+    this.reason = reason;
   }
 }
 

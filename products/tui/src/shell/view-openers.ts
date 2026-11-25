@@ -107,6 +107,7 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
     else if (target === 'model') commandContext.openModelPicker?.();
     else if (target === 'agents') commandContext.openAgents?.();
     else if (target === 'commands') commandContext.openCommandPalette?.();
+    else if (target === 'places') commandContext.openPlaceMenu?.();
     else if (target === 'bottom') {
       if (input.sessionView?.active) input.sessionView.follow();
       else input.transcriptScroll?.toBottom();

@@ -62,3 +62,5 @@ function readPromptFile(path: string, typed: string | undefined, workingDirector
 
 // The turn a headless command runs, shared by both terminal products.
 export * from './headless-turn.js';
+// A folder with nothing of its own to run is trusted the same way in `run` as at the interactive start.
+export { headlessUntrustedFolderSentence, readFolderTrustFacts, settleHeadlessFolderTrust, trustFolderWithNothingOfItsOwn, type FolderTrustFacts } from './folder-trust.js';

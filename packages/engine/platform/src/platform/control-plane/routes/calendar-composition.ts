@@ -41,7 +41,8 @@ import { createCalDavCalendarGatewayService } from '../../calendar/caldav-gatewa
 import { readCalendarAccountsOnRecord } from '../../calendar/oauth-token-store.js';
 import { createMicrosoftCalendarGatewayService, isOutlookId } from '../../calendar/microsoft-gateway-service.js';
 import { fetchAdapter } from '../../calendar/http-fetch-adapter.js';
-import { GOOGLE_CONFIG_KEYS } from '../../google/setup-plan.js';
+import { GOOGLE_CONFIG_KEYS, GOOGLE_SECRET_KEYS } from '../../google/setup-plan.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../../config/secret-store-unreadable.js';
 import type { CalendarUntrustedIngestRecorder } from '../../calendar/untrusted-events.js';
 import {
   getProcessUntrustedContentLedger,
@@ -210,6 +211,7 @@ export function createDaemonCalendarGatewayService(
         get: async (key) => revealOrNull(await secretsManager.get(key), 'dispatch'),
         set: (key, value) => writeSecret(key, value),
         delete: (key) => deleteSecret(key),
+        unreadable: (key) => unreadableSecretStore(secretsManager as unknown as StoredSecretReader, key, 'the calendar connection'),
       },
       config: { get: (key) => deps.configManager.get(key as never) },
       fetchImpl: fetchAdapter(calendarFetch === undefined ? undefined : (url, init) => calendarFetch.fetch(url, init ?? {})),
@@ -258,6 +260,9 @@ export function createDaemonCalendarGatewayService(
     } catch (error) {
       // With an Outlook account on record the refusal is that account's own (or the one backend named), and stands.
       if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_CONFIGURED' && !caldavConfigured() && !(await onRecord()).outlook) {
+        // A secret store this computer could not read hides the accounts: said as such, and nothing is asked for.
+        const unreadable = await unreadableSecretStore(deps.secretsManager as unknown as StoredSecretReader, GOOGLE_SECRET_KEYS.oauthRefreshToken, 'the calendar connections');
+        if (unreadable) throw new GatewayVerbError(`No calendar this daemon can read: ${unreadable}`, 'CALENDAR_CREDENTIALS_UNREADABLE', 412);
         throw new GatewayVerbError(await noUsableCalendar(deps), 'CALENDAR_NOT_CONFIGURED', error.status);
       }
       throw error;

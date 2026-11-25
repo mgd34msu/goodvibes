@@ -74,8 +74,10 @@ import {
   actionHint,
   createShellActionOffers,
   FIX_SESSION_CHORD_LABEL,
-  handleShellActionChord,
+  RETRY_CHORD_LABEL,
+  setShellActionKeyLabels,
   wireRetryOfferOnError,
+  wireShellActionOffers,
 } from './shell/retry-affordance.ts';
 import { wireShellUiOpeners } from './shell/ui-openers.ts';
 import { deriveComposerState } from './core/composer-state.ts';
@@ -122,13 +124,19 @@ import { createModeWordsSource, getSharedModeFlash } from '@goodvibes/engine/ter
 import { terminalAskFacts, type TerminalAskContext } from '@goodvibes/engine/terminal-shell/permission-prompt-facts';
 import { OwnerQuestionCard, ownerQuestionInbox, withOwnerQuestionCard } from '@goodvibes/engine/terminal-shell/question-card';
 import { keycapLabel } from '@goodvibes/engine/terminal-shell/status-line';
+import { setStatusMenuKey } from './renderer/status-line.ts';
+import { setConfigModalLeaderLabel } from './input/config-modal-keys.ts';
+import { setTurnFailureKeys } from '@goodvibes/engine/terminal-shell/turn-failure-actions';
+import { setMemoryProvenanceKey, setModelPickerGroupKey } from '@goodvibes/engine/terminal-shell/leader-key';
 import { newestUnreadNoticeTitle } from '@goodvibes/engine/terminal-shell/shell-footer';
 import { drawSplashAdditions } from '@goodvibes/engine/terminal-shell/first-run';
 import { getSharedNotificationFeed } from './views/notifications-feed.ts';
 import { keepAwakeHolding } from './core/power-status.ts';
 import { watchDaemonPowerEvents, type PowerState } from '@goodvibes/engine/platform/platform/power';
 import { resolveOperatorRpc } from './input/commands/operator-rpc.ts';
-import { resolveDaemonEndpoint } from './runtime/client/operator-endpoint.ts';
+import { createDaemonVerbCaller, resolveDaemonEndpoint } from './runtime/client/operator-endpoint.ts';
+import { wirePlaces } from '@goodvibes/engine/terminal-shell/places';
+import { onDaemonAttached } from './runtime/daemon-attach-signal.ts';
 import { wireGuidanceNotices } from './input/commands/guidance-runtime.ts';
 import { proposesSpeechToText, runWakeSetupPlan, wakeSetupRunning } from './core/wake-setup-plan.ts';
 import { wrapRequestPermissionWithAlert } from './core/approval-alert.ts';
@@ -461,6 +469,8 @@ async function main(prepared: PreparedShellCliRuntime) {
     facts: () => terminalAskFacts(askContext()),
     render,
     notify: (message) => { systemMessageRouter.high(message); render(); },
+    // Its arrows, Enter and Esc are the key table's move-up, move-down, choose and back.
+    keys: ctx.services.keybindingsManager,
   });
   unsubs.push(ownerQuestionCard.start());
   // Turning wake detection on from anywhere (settings, /settings, a model's settings
@@ -656,8 +666,9 @@ async function main(prepared: PreparedShellCliRuntime) {
     submissionStatus = null;
     // Optional memory refresh must not delay displaying or sending the prompt.
     void refreshMemoryRecallSnapshot(ctx.services);
-    void orchestrator
-      .handleUserInput(text, content, inputOptions)
+    // The turn starts once the local daemon is found or started (at once after the first): nothing is asked.
+    void (ctx.daemonReady ?? Promise.resolve())
+      .then(() => orchestrator.handleUserInput(text, content, inputOptions))
       .catch((error) => {
         // A turn that ran answers from its own events; one that failed to start is answered here.
         answered?.({ answer: `This message could not be answered: ${summarizeError(error)}`, status: 'failed' });
@@ -1088,6 +1099,18 @@ async function main(prepared: PreparedShellCliRuntime) {
     const throbber = throbberActivity
       ? { spinner: reduceMotion ? STILL_SPINNER : SPINNER_FRAMES[activityFrame % SPINNER_FRAMES.length]!, frame: activityFrame, activity: throbberActivity }
       : null;
+    // The status line's `ctrl+g m menu` and the config screens' leader keycaps, as bound.
+    setStatusMenuKey(keycapLabel(ctx.services.keybindingsManager.getComboLabel('open-menu')));
+    setConfigModalLeaderLabel(ctx.services.keybindingsManager.getComboLabel('leader'));
+    setShellActionKeyLabels({ retry: ctx.services.keybindingsManager.getComboLabel('failure-retry'), fixSession: ctx.services.keybindingsManager.getComboLabel('open-fix-session') });
+    setTurnFailureKeys({
+      retry: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-retry')),
+      otherModel: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-other-model')),
+      details: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-details')),
+      signIn: keycapLabel(ctx.services.keybindingsManager.getComboLabel('failure-sign-in')),
+    });
+    setModelPickerGroupKey(ctx.services.keybindingsManager.getComboLabel('model-picker-group'));
+    setMemoryProvenanceKey(ctx.services.keybindingsManager.getComboLabel('toggle-memory-provenance'));
     const footerLines = buildShellFooter({
       width,
       promptText: promptInfo.visibleLines.join('\n'),
@@ -1123,7 +1146,7 @@ async function main(prepared: PreparedShellCliRuntime) {
       contextStatusHint,
       submissionStatus,
       retryHint: actionHint(actionOffers),
-      contractQuestionHint: contractQuestions.hint(),
+      contractQuestionHint: contractQuestions.hint(ctx.services.keybindingsManager.getComboLabel('contract-question-ordinary')),
       scriptableStatusLine: scriptableStatusline.current(),
       // behavior.autoCompactThreshold is stored as a percent integer (e.g. 80);
       // the bar expects a fraction [0..1]. Clamp to [0,1] to guard nonsense values.
@@ -1381,6 +1404,32 @@ async function main(prepared: PreparedShellCliRuntime) {
     onProvidersChanged: (listener) => uiServices.events.providers?.on('PROVIDERS_CHANGED', listener) ?? (() => {}),
   });
 
+  // The menu of every place and the places themselves (terminal-shell/places), on this program's
+  // modal stack: their lists are the daemon's (through the verb caller) or this session's own.
+  const placeVerbs = createDaemonVerbCaller({ configManager, homeDirectory });
+  const places = wirePlaces({
+    context: commandContext,
+    // A key pressed or a form submitted in a place is the owner's own request, as a line typed in full.
+    executeFromOwner: (name, args, context) => commandRegistry.executeFromOwner(name, args, context as typeof commandContext),
+    keys: ctx.services.keybindingsManager,
+    invoke: (method, input) => placeVerbs.invoke(method, input),
+    daemonEndpoint: async () => {
+      const endpoint = await resolveDaemonEndpoint({ configManager, homeDirectory });
+      return endpoint.available ? { baseUrl: endpoint.baseUrl, token: endpoint.token } : { unavailable: endpoint.reason };
+    },
+    // A place opened while the daemon was down reads again when this program's daemon connection is back.
+    onDaemonBack: onDaemonAttached,
+    program: 'tui',
+    modals: input.surfaceModals,
+    requestRender: render,
+  });
+  unsubs.push(() => places.stop());
+  commandContext.openPlaceMenu = places.openMenu;
+  commandContext.openPlace = (id) => { places.openPlace(id); };
+  // Key-table actions that act on a screen of this program (keybinding-catalog.ts).
+  commandContext.answerContractQuestionPlainly = () => { contractQuestions.sendNextAsOrdinary(); };
+  commandContext.cycleModelPickerGroup = () => { if (input.modelPicker.active && input.modelPicker.mode === 'model') input.modelPicker.cycleGroupBy(); };
+
   // One owner of the user turn and its failover retries, read by the turn-end
   // notices and the failover path alike (core/user-turn.ts).
   const userTurn = createUserTurnOwner({ turns: uiServices.events.turns, sessionId: () => runtime.sessionId });
@@ -1465,12 +1514,12 @@ async function main(prepared: PreparedShellCliRuntime) {
         return orchestrator.handleUserInput(text, rContent, rOpts);
       },
     }).then((submitted) => {
-      if (!submitted) { systemMessageRouter.high('[Retry] Not sent: the session or the failed turn changed while it was being prepared. Alt+R sends it again.', 'warning'); render(); }
+      if (!submitted) { systemMessageRouter.high(`[Retry] Not sent: the session or the failed turn changed while it was being prepared. ${RETRY_CHORD_LABEL} sends it again.`, 'warning'); render(); }
     }, (e: unknown) => {
       logger.debug('retryTurn', { error: summarizeError(e) });
       // Before submission nothing was taken away; the retry is still offered.
       if (orchestrator.failedTurnInput()?.turnId === failed.turnId) {
-        systemMessageRouter.high(`[Retry] Not sent: ${summarizeError(e)}. The failed turn is kept; Alt+R tries again.`, 'warning');
+        systemMessageRouter.high(`[Retry] Not sent: ${summarizeError(e)}. The failed turn is kept; ${RETRY_CHORD_LABEL} tries again.`, 'warning');
         render();
       }
     });
@@ -1492,11 +1541,22 @@ async function main(prepared: PreparedShellCliRuntime) {
     isApprovalPending: () => pendingPermission !== null,
   });
   unsubs.push(...streamResult.unsubs);
-  // Offer Alt+R when a user-visible error surfaces and the turn can be sent again.
+  // Offer the retry when a user-visible error surfaces and the turn can be sent again.
   wireRetryOfferOnError(streamResult.onErrorSurfaced, actionOffers, () => orchestrator.failedTurnInput() !== null, render, () => {
     const failed = orchestrator.failedTurnInput();
     return failed !== null && !failed.superseded && turnRanTools(conversation, failed.rollbackCount);
   });
+  // The retry and the fix session are actions of the key table (failure-retry, open-fix-session):
+  // each acts while its offer stands; plain letters always go to the composer or the open view.
+  const shellActions = wireShellActionOffers(actionOffers, {
+    retry: () => {
+      if (!resubmitLastTurn()) systemMessageRouter.high('[Retry] Nothing to send again: the failed prompt was already sent again, or a prompt sent after it has completed.');
+    },
+    openSession: (sessionId) => { void runPickedCommand(commandContext.executeCommand, 'session', ['resume', sessionId], (message) => commandContext.print(message)).finally(render); },
+    render,
+  });
+  commandContext.retryFailedTurn = shellActions.retry;
+  commandContext.openFixSession = shellActions.openFixSession;
   // Companion messages and an activated plan take the composer's turn path as sent
   // (no composer grammar), carrying their origin. Bound once that path's state exists.
   unsubs.push(bindOwnerInput(orchestrator, (text, inputOptions, answered) => {
@@ -1593,23 +1653,9 @@ async function main(prepared: PreparedShellCliRuntime) {
     if (blocking.handled) {
       return;
     }
-    // The question card's keys (arrows, 1-9, Enter, Esc) while it is on screen and the composer is empty.
+    // The question card's keys (the table's up, down, choose and back; its answers' own keys) while it is
+    // on screen and the composer is empty.
     if (input.prompt.length === 0 && ownerQuestionCard.handleInput(data)) return;
-    // Alt+X sends the next message as an ordinary one instead of the answer to a contract's question.
-    if (contractQuestions.handleChord(data)) {
-      render();
-      return;
-    }
-    // Alt+R retries a failed turn, Alt+J opens a started fix session; plain
-    // letters always go to the composer or the open view.
-    if (handleShellActionChord(data, actionOffers, {
-      retry: () => {
-        if (!resubmitLastTurn()) systemMessageRouter.high('[Retry] Nothing to send again: the failed prompt was already sent again, or a prompt sent after it has completed.');
-      },
-      openSession: (sessionId) => { void runPickedCommand(commandContext.executeCommand, 'session', ['resume', sessionId], (message) => commandContext.print(message)).finally(render); },
-      render,
-    })) return;
-
     lastComposerKeyAt = Date.now();
     input.feed(data);
   };

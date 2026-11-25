@@ -592,7 +592,10 @@ export function MailView({ tabs }: MailViewProps = {}) {
           role="status"
           action={notAvailable
             ? <Button variant="outline" onClick={() => openSettingsSection('about')}>Update daemon</Button>
-            : <Button variant="outline" onClick={() => openSettingsSection('account')}>Open settings</Button>}
+            // A store that could not be read is repaired on the daemon's computer: nothing to enter in Settings.
+            : inboxNote.kind === 'store-unreadable'
+              ? <Button variant="outline" onClick={() => void inbox.refetch()}>Try again</Button>
+              : <Button variant="outline" onClick={() => openSettingsSection('account')}>Open settings</Button>}
         >
           {notAvailable
             ? 'This daemon doesn’t serve mail. Updating the daemon adds it, and your inbox shows up here with nothing else to set up.'

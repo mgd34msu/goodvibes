@@ -6,7 +6,7 @@ import {
   projectFeedContextClosures,
 } from '@goodvibes/engine/terminal-shell/input-feed-context';
 import { resolveFooterTarget } from '../renderer/footer-targets.ts';
-import { SurfacePointer } from './surface-pointer.ts';
+import { SurfacePointer } from '@goodvibes/engine/terminal-shell/surface-pointer';
 import { InputTokenizer, type InputToken } from '@goodvibes/engine/platform/platform/core';
 import { reportDroppedPaste } from '@goodvibes/engine/terminal-shell/input-content';
 import { createOAuthLocalListener } from '@goodvibes/engine/platform/platform/config';

@@ -2,6 +2,10 @@ import type { Secret } from '../security/secret.js';
 import { listBuiltinSubscriptionProviders } from '../config/subscription-providers.js';
 import { subscriptionAuthFreshness } from '../config/subscriptions.js';
 import type { ProviderAuthRouteDescriptor, ProviderRuntimeMetadataDeps } from './interface.js';
+import { SECRET_STORE_UNREADABLE, unreadableSecretStore } from '../config/secret-store-unreadable.js';
+
+/** A key no store holds: reading it walks every store, so an unreadable one throws (secret-store-unreadable.ts). */
+const STORE_CHECK_KEY = 'GOODVIBES_STORE_READABLE_CHECK';
 
 export interface StandardProviderAuthOptions {
   readonly providerId: string;
@@ -38,10 +42,14 @@ export function snapshotRuntimeMetadataDeps(deps: ProviderRuntimeMetadataDeps): 
     map.set(key, value);
     return value;
   };
+  let unreadable: Promise<string | null> | undefined;
   return {
     secretsManager: {
       listDetailed: () => (listed ??= deps.secretsManager.listDetailed()),
       get: (key: string) => once(values, key, () => deps.secretsManager.get(key)),
+      // Read once for the whole listing (a decrypt of each store), only when a provider has no key in sight.
+      storeUnreadable: () => (unreadable ??= deps.secretsManager.storeUnreadable?.()
+        ?? unreadableSecretStore(deps.secretsManager, STORE_CHECK_KEY, 'stored API keys')),
     },
     serviceRegistry: {
       getAll: () => (services ??= deps.serviceRegistry.getAll()),
@@ -91,7 +99,11 @@ export function summarizeProviderAuth(
 ): { readonly configured: boolean; readonly detail: string } {
   if (base.configured) return base;
   const winner = routes.find((route) => route.route !== 'none' && isProviderAuthRouteUsable(route));
-  if (winner === undefined) return base;
+  if (winner === undefined) {
+    // A key that may sit in a secret store this computer could not read: said as such, never "not set".
+    const unreadable = routes.find((route) => route.detail?.startsWith(SECRET_STORE_UNREADABLE));
+    return unreadable?.detail !== undefined ? { configured: false, detail: unreadable.detail } : base;
+  }
   return {
     configured: true,
     detail: winner.detail === undefined ? winner.label : `${winner.label}: ${winner.detail}`,
@@ -131,6 +143,15 @@ export async function buildStandardProviderAuthRoutes(
   const hasUsableServiceOauth = serviceInspections.some(({ inspection }) => Boolean(inspection?.hasPrimaryCredential));
 
   const routes: ProviderAuthRouteDescriptor[] = [];
+  // A provider with no key in sight while a secret store could not be read: its key is unknown, not missing.
+  const keyInSight = (envVars: readonly string[], keys: readonly string[]): boolean =>
+    detailedSecrets.some((record) => keys.includes(record.key) && record.source !== 'env')
+    || envVars.some((envVar) => { const value = process.env[envVar]; return typeof value === 'string' && value.length > 0; });
+  const declaredEnv: readonly string[] = options.apiKeyEnvVars ?? [];
+  const derived: readonly string[] = [deriveProviderApiKeyEnvVar(options.providerId)];
+  const declares = declaredEnv.length > 0 || secretKeys.length > 0;
+  const storeUnreadable: string | null = keyInSight(declares ? declaredEnv : derived, declares ? secretKeys : derived) ? null
+    : await (deps.secretsManager.storeUnreadable?.() ?? unreadableSecretStore(deps.secretsManager, STORE_CHECK_KEY, 'stored API keys'));
   const pushApiKeyRoutes = (envVars: readonly string[], keys: readonly string[]): void => {
     const matchingSecretRecords = detailedSecrets.filter((record) => keys.includes(record.key) && record.source !== 'env');
     const hasSecretRef = matchingSecretRecords.some((record) => Boolean(record.refSource));
@@ -139,6 +160,8 @@ export async function buildStandardProviderAuthRoutes(
       const value = process.env[envVar]!;
       return typeof value === 'string' && value.length > 0;
     });
+    const unreadableWords = !hasEnv && !hasStoredDirectSecret ? storeUnreadable : null;
+    const unknown = unreadableWords !== null;
     routes.push({
       route: 'api-key',
       label: 'Ambient API key',
@@ -149,10 +172,11 @@ export async function buildStandardProviderAuthRoutes(
         ? 'Environment-backed API key is available.'
         : hasStoredDirectSecret
           ? 'GoodVibes secret store contains a direct API key value.'
-          : 'No direct API key is configured.',
+          : unreadableWords ?? 'No direct API key is configured.',
       ...(envVars.length > 0 ? { envVars } : {}),
       ...(keys.length > 0 ? { secretKeys: keys } : {}),
-      repairHints: [
+      // A key that may be stored in a store that could not be read is not asked for again.
+      repairHints: unknown ? [] : [
         ...(envVars.length > 0
           ? [
             keys.length > 0 && !envVars.every((envVar) => keys.includes(envVar))

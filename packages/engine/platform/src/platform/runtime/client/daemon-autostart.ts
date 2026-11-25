@@ -37,8 +37,8 @@
  * - Every failure is reported and none of them break boot. Discovery failing is
  *   a reason to say so, not a reason to refuse to start.
  */
-import { mkdirSync, readFileSync, watch } from 'node:fs';
-import { basename, dirname } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, watch } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { PlatformServiceManager, resolveDaemonServiceDefault, resolveServiceUnitHome, type ManagedServiceActionResult, type ManagedServiceStatus } from '../../daemon/index.js';
 import { readLifecycleMarker } from '../../daemon/lifecycle-marker.js';
 import { logger, summarizeError } from '../../utils/index.js';
@@ -186,7 +186,8 @@ export type DaemonAutostartInactionReason =
 /** What the one boot-time recovery step did. */
 export type DaemonAutostartOutcome =
   | { readonly action: 'none'; readonly reason: DaemonAutostartInactionReason }
-  | { readonly action: 'not-installed' }
+  /** No service entry to start; `program: false` when the daemon program itself is not on this machine either. */
+  | { readonly action: 'not-installed'; readonly program?: boolean | undefined }
   | { readonly action: 'started'; readonly serviceName: string }
   | { readonly action: 'came-online'; readonly serviceName: string }
   /**
@@ -207,6 +208,25 @@ export interface DaemonAutostartOptions {
   readonly pollIntervalMs?: number | undefined;
   /** Injectable so tests drive the wait loop deterministically. */
   readonly sleep?: ((ms: number) => Promise<void>) | undefined;
+  /** Whether the daemon program is on this machine (default {@link daemonProgramInstalled}). */
+  readonly programInstalled?: (() => boolean) | undefined;
+}
+
+/** The daemon program's name, as the installer puts it beside the other programs. */
+const DAEMON_PROGRAM = 'goodvibes-daemon';
+
+/**
+ * Whether the daemon program is on this machine: beside the program running now (the installers put the
+ * programs in one directory) or on the PATH.
+ */
+export function daemonProgramInstalled(): boolean {
+  try {
+    if (existsSync(join(dirname(process.execPath), DAEMON_PROGRAM))) return true;
+    return typeof Bun !== 'undefined' && Bun.which(DAEMON_PROGRAM) !== null;
+  } catch {
+    // Unknown is not "missing": the line then names the service step, which is right if the program is there.
+    return true;
+  }
 }
 
 const DEFAULT_WAIT_TIMEOUT_MS = 8_000;
@@ -375,7 +395,7 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
   };
 
   const installedEntries = options.control.snapshot().filter((entry) => entry.installed);
-  if (installedEntries.length === 0) return { action: 'not-installed' };
+  if (installedEntries.length === 0) return { action: 'not-installed', program: (options.programInstalled ?? daemonProgramInstalled)() };
   // Prefer a unit already running (wait only), then one this host can actually
   // start, and only then whatever is installed, so a machine carrying both a
   // startable unit and an unstartable one is not refused because of the latter.
@@ -414,6 +434,14 @@ export async function autostartInstalledDaemon(options: DaemonAutostartOptions):
 /** What a surface says when no daemon answers and no daemon service is installed to start. */
 export const DAEMON_NOT_INSTALLED_NOTICE = 'No GoodVibes daemon is running and none is installed on this machine, so shared sessions, the web UI, phone access, push and the relay are off. Install and start it with: goodvibes-daemon install-service';
 
+/** What a surface says when the daemon program itself is not on this machine: the installer puts it there. */
+export const DAEMON_PROGRAM_MISSING_NOTICE = 'The GoodVibes daemon is not installed on this machine, so GoodVibes runs without it (no shared sessions, web UI, phone access or daemon capabilities). Install it with the GoodVibes installer: curl -fsSL https://goodvibes.sh/install.sh | sh';
+
+/** The not-installed line for an outcome: the installer when the program is missing, the service step when only the service is. */
+export function daemonNotInstalledNotice(outcome: { readonly program?: boolean | undefined }): string {
+  return outcome.program === false ? DAEMON_PROGRAM_MISSING_NOTICE : DAEMON_NOT_INSTALLED_NOTICE;
+}
+
 /**
  * Render one autostart outcome as the line the user reads.
  *
@@ -438,7 +466,7 @@ export function describeDaemonAutostart(
     case 'not-installed':
       // Nothing answers and nothing is installed to start: without this line
       // every daemon-backed feature would fail one at a time with no reason given.
-      return { level: 'high', text: `[Startup] ${DAEMON_NOT_INSTALLED_NOTICE}` };
+      return { level: 'high', text: `[Startup] ${daemonNotInstalledNotice(outcome)}` };
     case 'none':
       return null;
   }

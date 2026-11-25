@@ -9,6 +9,8 @@ import {
   projectOrchestratorCoreServices,
 } from '@goodvibes/engine/terminal-shell/bootstrap-orchestrator';
 import { buildPluginStartupContext } from '@goodvibes/engine/terminal-shell/plugin-startup';
+import { bindCapabilityHost, hiddenValuePrompt } from '@goodvibes/engine/terminal-shell/capability-host';
+import { sessionCapabilityServices } from '../input/commands/session-capabilities.ts';
 import { ownerInputFor } from '@goodvibes/engine/terminal-shell/companion-input';
 import { createPluginStartupTask } from '@goodvibes/engine/terminal-shell/plugin-startup';
 import { readTierPromptSupplement } from '@goodvibes/engine/platform/platform/providers';
@@ -131,6 +133,13 @@ export type BootstrapContext = RuntimeContext & {
   systemMessageRouter: SystemMessageRouter;
   /** True once `shutdown` has saved the session durably, even while its releases are still running. */
   sessionSaved: () => boolean;
+  /**
+   * Settles once the connected host was found (this machine's daemon started when it was installed and stopped,
+   * or another machine's the Agent is paired to), or found missing (said in one line). The first turn waits for it.
+   */
+  daemonReady: Promise<void>;
+  /** The one line that says no daemon is installed here (and how to install it), once discovery found that; else undefined. */
+  daemonMissing: () => string | undefined;
 };
 
 // ── Bootstrap function ────────────────────────────────────────────────────
@@ -499,6 +508,15 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
   void services.judgment.decisionLogCarriedForward.then((text) => { if (text) systemMessageRouter.high(`[Decision log] ${text}`); });
   const commandRegistry = shell.commandRegistry;
   const commandContext = shell.commandContext;
+  // The model's capability tools find every action of the Agent's commands and run the conversation's own on this conversation.
+  bootstrapUnsubs.push(bindCapabilityHost({
+    commands: () => commandRegistry.getAll(), session: () => sessionCapabilityServices(commandContext),
+    // The composer's hidden line, once the screen has set it up: a value a model's call needs is typed there.
+    hidden: () => {
+      const begin = commandContext.beginConcealedInput;
+      return begin ? (request) => { commandContext.print(hiddenValuePrompt(request.label)); begin(request); } : undefined;
+    },
+  }));
   const inputHistory = shell.inputHistory;
   // A failed or refused turn is a row in the transcript with its next steps on keys:
   // alt+r sends the prompt again, alt+o picks another model for it, alt+i opens its details, alt+s the sign-ins.
@@ -786,6 +804,8 @@ export async function bootstrapRuntime(stdout: NodeJS.WriteStream, options: Boot
     daemonHost: agentExternalServices.daemon,
     shutdown: runtimeShutdown,
     sessionSaved: runtimeShutdown.sessionSaved,
+    daemonReady: agentExternalServices.whenDiscovered(),
+    daemonMissing: () => agentExternalServices.missingDaemon(),
   };
 
   // Wire exit from options if provided; otherwise main.ts binds the operator route.

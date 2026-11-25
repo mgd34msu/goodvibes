@@ -78,5 +78,9 @@ registry.register(localBenchmarkPrompt);
 import { commandDiscovery } from './command-discovery.js';
 registry.register(commandDiscovery);
 
+// Capability find: which of the fourteen function groups serves a need (capabilities/find.ts).
+import { capabilityGroupSelection } from '../capabilities/find.js';
+registry.register(capabilityGroupSelection);
+
 import { decisionRouterCategory } from './batteries/decision-router.js';
 registry.register(decisionRouterCategory);

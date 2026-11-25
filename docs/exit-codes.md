@@ -30,6 +30,11 @@ The same number, different meaning:
 - `1` always means the command ran and did not succeed. For `run` it also
   covers a refusal, which is not an error to retry.
 
+`do` and `find` (`goodvibes`, `goodvibes-agent`, `goodvibes-daemon`) run and find a GoodVibes capability through the
+daemon: `0` it was done (or found), `1` it was refused or failed (a capability that acts on a conversation is refused
+in one line, since it needs the terminal app or the Agent), `2` the command line was wrong. With `--output json`
+(`--json` for the daemon) the answer, or the `{ok:false, code, error, fix}` refusal, is one document on stdout.
+
 Branching rules that hold for every program:
 
 - `0` means the requested effect happened. Anything else means it did not, or

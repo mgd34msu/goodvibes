@@ -123,8 +123,12 @@ async function serviceProblems(registry: ServiceRegistry): Promise<{ readonly co
   for (const inspection of inspections) {
     const { name, authType, baseUrl } = inspection.config;
     byAuth.set(authType, (byAuth.get(authType) ?? 0) + 1);
-    if (!inspection.hasPrimaryCredential) problems.push(`${name}: its key is not stored`);
-    if (authType === 'basic' && !inspection.hasPasswordCredential) problems.push(`${name}: its password is not stored`);
+    // A secret store this computer could not read is said as such: its credentials are not asked for again.
+    if (inspection.storeUnreadable) problems.push(`${name}: ${inspection.storeUnreadable}`);
+    else {
+      if (!inspection.hasPrimaryCredential) problems.push(`${name}: its key is not stored`);
+      if (authType === 'basic' && !inspection.hasPasswordCredential) problems.push(`${name}: its password is not stored`);
+    }
     if (!baseUrl) problems.push(`${name}: it has no address`);
   }
   return { count: names.length, byAuth, problems };
@@ -173,9 +177,10 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
           if (waiting) throw commandRefusal(`${name} comes from this project's services file and waits for you; it is not used: ${describePendingProjectService(waiting)}.`, `/services trust ${name} uses it.`);
           throw commandRefusal(`No service is named ${name}.`, '/services list shows them.');
         }
-        const has = (value: boolean) => (value ? 'stored' : 'not stored');
+        const has = (value: boolean) => (value ? 'stored' : inspection.storeUnreadable ? 'could not be read' : 'not stored');
         return [
           `${name}`,
+          ...(inspection.storeUnreadable ? [`  ${inspection.storeUnreadable}`] : []),
           `  signs in with: ${inspection.config.authType}`,
           `  address: ${inspection.config.baseUrl ?? '(none)'}`,
           `  key: ${has(inspection.hasPrimaryCredential)}`,
@@ -220,7 +225,10 @@ export const SERVICES_COMMAND: CommandDescription<ServicesCommandContext> = {
       operator: { terminalOnly: TERMINAL_ONLY },
       example: { service: 'github' },
       async run(values, ctx) {
-        const headers = await readable(ctx).resolveAuth(values.service!);
+        const registry = readable(ctx);
+        const headers = await registry.resolveAuth(values.service!);
+        const unreadable = headers ? undefined : (await registry.inspect(values.service!))?.storeUnreadable;
+        if (unreadable) throw commandRefusal(`${values.service} cannot sign in right now: ${unreadable}`);
         if (!headers) throw commandRefusal(`${values.service} cannot sign in right now: a credential it needs is not stored.`, `/services show ${values.service} shows which.`);
         return [`${values.service} signs in with these headers (values not shown):`, ...Object.keys(headers).map((key) => `  ${key}`)].join('\n');
       },

@@ -22,6 +22,17 @@ export interface SecureAddressChoiceWords {
   readonly sends: string;
   /** Anything else the person must know before choosing it (public logs, routers, untried on a phone). */
   readonly caution?: string | undefined;
+  /** What differs on a machine that leads a group (its certificate is shared with the group's machines). */
+  readonly onLead?: { readonly does?: string | undefined; readonly sends: string } | undefined;
+}
+
+/**
+ * A certificate's end date as every Secure address screen and message writes
+ * it: the local date, month in words ("February 22, 2027"). The web UI, the
+ * terminal programs and the daemon's own words use this same form.
+ */
+export function secureAddressDate(ms: number): string {
+  return new Date(ms).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
 export const SECURE_ADDRESS_INTRO =
@@ -36,6 +47,9 @@ export const SECURE_ADDRESS_CHOICES: readonly SecureAddressChoiceWords[] = [
     phoneGains: 'Every phone, tablet and computer trusts the address at once: microphone, push notifications, installing the app, camera and passkeys all work, with nothing installed on the phone.',
     sends: 'To Let\'s Encrypt: the name and the public half of keys made on this computer (the private keys never leave it). To your DNS provider: the name, the proof value (a digest, no secret) and this computer\'s local network address, which becomes readable by anyone who looks the name up. Nothing goes to GoodVibes.',
     caution: 'Let\'s Encrypt publishes the name of every certificate it issues in public logs (Certificate Transparency) that anyone can search, so pick a name that says nothing about you or your home. Some home routers refuse DNS answers that point at a local address (DNS rebinding protection); GoodVibes looks the name up from this computer after writing it and tells you if that happens, and what to change on the router.',
+    onLead: {
+      sends: 'To Let\'s Encrypt: the name and the public half of keys made on this computer. To your DNS provider: the name, the proof value (a digest, no secret) and the local network address of this computer and of each machine in the group, which become readable by anyone who looks the names up. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; they go nowhere else. Nothing goes to GoodVibes.',
+    },
   },
   {
     id: 'own-files',
@@ -44,6 +58,9 @@ export const SECURE_ADDRESS_CHOICES: readonly SecureAddressChoiceWords[] = [
     needs: 'The paths of two files on this computer: the certificate (with its chain) and its private key, unencrypted. The names it covers must be the names phones open.',
     phoneGains: 'The same as any https address, on every device that trusts whoever signed your certificate. A device that does not trust the signer shows a certificate warning.',
     sends: 'Nothing leaves this computer: the files are read here and used here.',
+    onLead: {
+      sends: 'The files are read here. Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group that the certificate covers, so that machine serves the same certificate; they go nowhere else.',
+    },
   },
   {
     id: 'tailscale',
@@ -61,8 +78,19 @@ export const SECURE_ADDRESS_CHOICES: readonly SecureAddressChoiceWords[] = [
     phoneGains: 'Everything an https address gives, on each phone that installed the certificate; a phone that did not shows a certificate warning.',
     sends: 'Nothing leaves this computer.',
     caution: 'Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone.',
+    onLead: {
+      does: 'GoodVibes makes a certificate authority on this computer and serves https with a certificate it signs. Because this computer leads a group, that certificate covers the names and private network addresses of every machine in the group as well as this computer\'s own, so a phone that installed the authority once trusts them all. It is made again at each start for the addresses the machines have then.',
+      sends: 'Because this computer leads a group, the certificate and its key are sent, sealed, to each machine in the group, so they serve the same certificate; the certificate authority\'s own key never leaves this computer.',
+    },
   },
 ];
+
+/** The four ways as a machine shows them: on the lead of a group, what differs there (what it covers, what is sent where). */
+export function secureAddressChoicesFor(leadsGroup: boolean): readonly SecureAddressChoiceWords[] {
+  return SECURE_ADDRESS_CHOICES.map(({ onLead, ...choice }) => (leadsGroup && onLead
+    ? { ...choice, does: onLead.does ?? choice.does, sends: onLead.sends }
+    : choice));
+}
 
 /** The line every group screen shows: one certificate for the whole group. */
 export const SECURE_ADDRESS_GROUP_LINE = 'Every machine in this group serves with the same certificate.';
@@ -72,7 +100,17 @@ export const SECURE_ADDRESS_LEAD_LINE = 'The machines that joined this computer\
 
 /** The lead's one action for a new certificate, and its one line (the web UI, the terminal app and the Agent show both). */
 export const SECURE_ADDRESS_REISSUE_TITLE = 'Issue a new certificate now';
-export const SECURE_ADDRESS_REISSUE_LINE = 'Gets a new certificate with a new key at once, for this computer and the machines that follow it; Let\'s Encrypt allows only five for the same name a week, so use it when a key may have been seen by someone else.';
+/**
+ * The reissue action's one line, as true where it is shown: the group's
+ * machines are named only on a machine that leads a group, and Let's Encrypt's
+ * weekly limit only while Let's Encrypt is the certificate in force.
+ */
+export function secureAddressReissueLine(leadsGroup: boolean, certificate: 'local-authority' | 'own-files' | 'lets-encrypt'): string {
+  const scope = leadsGroup ? ', for this computer and the machines of its group' : '';
+  return certificate === 'lets-encrypt'
+    ? `Gets a new certificate from Let's Encrypt with a new key at once${scope}; Let's Encrypt allows only five for the same name a week, so use it when a key may have been seen by someone else.`
+    : `Makes a new certificate with a new key at once${scope}, signed by GoodVibes' own certificate authority, so phones that installed it trust the new one as before; use it when a key may have been seen by someone else.`;
+}
 
 /** What a node's screen says; `<lead>` is the lead's name. */
 export function secureAddressNodeLine(lead: string): string {
@@ -81,5 +119,6 @@ export function secureAddressNodeLine(lead: string): string {
 
 /** One choice's words as one paragraph, for a settings description. */
 export function secureAddressChoiceParagraph(choice: SecureAddressChoiceWords): string {
-  return `${choice.title}: ${choice.does} Needs: ${choice.needs} The phone gains: ${choice.phoneGains} Sent: ${choice.sends}${choice.caution ? ` Before you choose: ${choice.caution}` : ''}`;
+  const lead = choice.onLead ? ` On a machine that leads a group: ${choice.onLead.does ? `${choice.onLead.does} ` : ''}Sent: ${choice.onLead.sends}` : '';
+  return `${choice.title}: ${choice.does} Needs: ${choice.needs} The phone gains: ${choice.phoneGains} Sent: ${choice.sends}${choice.caution ? ` Before you choose: ${choice.caution}` : ''}${lead}`;
 }

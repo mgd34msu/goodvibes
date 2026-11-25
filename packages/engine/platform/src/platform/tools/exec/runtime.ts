@@ -4,6 +4,7 @@ import { currentExternalOperationSource } from '../../permissions/external-opera
 import { assertProjectionCurrent, captureProjectionStructure, projectionFunction, projectionProperty } from '../input-projection.js';
 import { SANDBOX_RUNTIME_BIN, withSandboxRuntimes } from './sandbox-runtimes.js';
 import { startCapturedBackground } from './captured-exec-background.js';
+import { EndMarkReader, leftRunningNote, newEndMark, readToEndMark, withEndMark } from './command-end.js';
 import { capturedExecUnsupportedOptions, MAX_CAPTURE_CHARS, UNTIL_PATTERN_WINDOW_CHARS, runCapturedCommand, type CapturedExecAuthority } from './captured-exec.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { appendFile, rm } from 'node:fs/promises';
@@ -258,22 +259,6 @@ async function stopForeground(proc: ReturnType<typeof Bun.spawn>): Promise<void>
   signalForeground(proc, 'SIGKILL');
 }
 
-/** Reads a child stream into `sink` as it arrives, so a stopped run keeps what it printed. */
-async function readStreamInto(stream: ReadableStream<Uint8Array>, sink: CaptureSink, onProgress?: () => void): Promise<void> {
-  const decoder = new TextDecoder();
-  const reader = stream.getReader();
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      appendCapped(sink, decoder.decode(value, { stream: true }));
-      onProgress?.();
-    }
-    appendCapped(sink, decoder.decode());
-  } finally {
-    reader.releaseLock();
-  }
-}
 
 function getProgressDirectory(workingDirectory: string): string {
   return join(workingDirectory, ...OVERFLOW_SUBDIR);
@@ -492,7 +477,9 @@ async function runAdmittedCommand(
   }
 
   beforeSpawn?.();
-  const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
+  // The command is finished when its own process exits: the shell writes an end mark after it (command-end.ts).
+  const endMark = newEndMark();
+  const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', withEndMark(cmdStr, endMark)], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
   let timedOut = false;
   let cancelled = false;
   let killTimer: ReturnType<typeof setTimeout> | undefined;
@@ -532,9 +519,16 @@ async function runAdmittedCommand(
     type ProcResult = [string, string, number];
     const stdoutSink: CaptureSink = { text: '', dropped: false };
     const stderrSink: CaptureSink = { text: '', dropped: false };
+    // Each stream is read up to the shell's end mark: output a process the command left running writes later is not
+    // the command's, and waiting for it would wait as long as it lives (command-end.ts).
+    const releases: Array<() => void> = [];
+    const readOne = (stream: ReadableStream<Uint8Array>, sink: CaptureSink) => readToEndMark(stream, new EndMarkReader(endMark), (chunk) => {
+      appendCapped(sink, chunk);
+      policy.onProgress?.();
+    }).then((release) => { releases.push(release); return sink.text; });
     const procPromise = Promise.all([
-      readStreamInto(proc.stdout as ReadableStream<Uint8Array>, stdoutSink, policy.onProgress).then(() => stdoutSink.text),
-      readStreamInto(proc.stderr as ReadableStream<Uint8Array>, stderrSink, policy.onProgress).then(() => stderrSink.text),
+      readOne(proc.stdout as ReadableStream<Uint8Array>, stdoutSink),
+      readOne(proc.stderr as ReadableStream<Uint8Array>, stderrSink),
       proc.exited,
     ]) as Promise<ProcResult>;
 
@@ -562,6 +556,9 @@ async function runAdmittedCommand(
     }
 
     const [stdoutRaw, stderrRaw, exitCode] = procResult!;
+    // Looked for before the streams are let go: a holder is found by the pipe this process still reads.
+    const leftRunning = leftRunningNote(proc.pid);
+    for (const release of releases) release();
     const stdoutResult = await truncate(overflowHandler, stdoutRaw, 'stdout');
     const stderrResult = await truncate(overflowHandler, stderrRaw, 'stderr');
     const duration = Date.now() - startTime;
@@ -574,6 +571,7 @@ async function runAdmittedCommand(
       duration_ms: duration,
       cwd,
       env: cmdInput.env,
+      ...(leftRunning ? { left_running: leftRunning } : {}),
       ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }),
       ...((stderrResult.truncated || stderrSink.dropped) && { stderr_truncated: true }),
     };
@@ -605,7 +603,9 @@ async function runCommandWithProgress(
   const stderrSink: CaptureSink = { text: '', dropped: false };
   const withProgressFile = (path: string | undefined): { progress_file?: string } => (path ? { progress_file: path } : {});
   beforeSpawn?.();
-  const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
+  // The command is finished when its own process exits: the shell writes an end mark after it (command-end.ts).
+  const endMark = newEndMark();
+  const proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', withEndMark(cmdStr, endMark)], { ...(cwd !== undefined ? { cwd } : {}), env: mergedEnv, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
   // Opened only once the command has started: a command that never starts
   // arms no timer and leaves no file. Nothing is read before the readers below.
   const progressFile = openProgressFile(cmdStr, workingDirectory, progressRequested, () => stdoutSink.text);
@@ -644,43 +644,32 @@ async function runCommandWithProgress(
   }
 
   const warnings: string[] = [];
+  const releases: Array<() => void> = [];
+  // Each stream is read up to the shell's end mark (or its end, when the shell was stopped): output a process the
+  // command left running writes later is not the command's, and waiting for it would wait as long as it lives.
   const readStdout = async (): Promise<void> => {
-    const decoder = new TextDecoder();
-    const reader = (proc.stdout as ReadableStream<Uint8Array>).getReader();
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
+      releases.push(await readToEndMark(proc.stdout as ReadableStream<Uint8Array>, new EndMarkReader(endMark), (chunk) => {
         appendCapped(stdoutSink, chunk);
         progressFile.append(chunk);
         onProgress?.();
-      }
+      }));
     } catch (err: unknown) {
       const warning = `stdout stream read failed: ${summarizeError(err)}`;
       warnings.push(warning);
       logger.warn('[ExecRuntime] stdout stream read ended with error', { error: summarizeError(err) });
-    } finally {
-      reader.releaseLock();
     }
   };
   const readStderr = async (): Promise<void> => {
-    const decoder = new TextDecoder();
-    const reader = (proc.stderr as ReadableStream<Uint8Array>).getReader();
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
+      releases.push(await readToEndMark(proc.stderr as ReadableStream<Uint8Array>, new EndMarkReader(endMark), (chunk) => {
         appendCapped(stderrSink, chunk);
         onProgress?.();
-      }
+      }));
     } catch (err: unknown) {
       const warning = `stderr stream read failed: ${summarizeError(err)}`;
       warnings.push(warning);
       logger.warn('[ExecRuntime] stderr stream read ended with error', { error: summarizeError(err) });
-    } finally {
-      reader.releaseLock();
     }
   };
 
@@ -720,6 +709,9 @@ async function runCommandWithProgress(
     return [undefined, undefined, undefined] as [void, void, number | undefined];
   });
   const actualExitCode = (ioResult[2] as number | undefined) ?? await proc.exited;
+  // Looked for before the streams are let go: a holder is found by the pipe this process still reads.
+  const leftRunning = leftRunningNote(proc.pid);
+  for (const release of releases) release();
   const stdoutResult = await truncate(overflowHandler, stdoutSink.text, 'stdout');
   const stderrResult = await truncate(overflowHandler, stderrSink.text, 'stderr');
   const duration = Date.now() - startTime;
@@ -734,6 +726,7 @@ async function runCommandWithProgress(
     duration_ms: duration,
     cwd,
     env: cmdInput.env,
+    ...(leftRunning ? { left_running: leftRunning } : {}),
     ...withProgressFile(progressFile.path),
     ...(warnings.length > 0 && { warnings }),
     ...((stdoutResult.truncated || stdoutSink.dropped) && { stdout_truncated: true }),
@@ -807,11 +800,17 @@ async function runUntil(
     current();
     await using pattern = await createSafeRegex(until.pattern, '', { operation: 'exec until pattern', signal: active, assertCurrent: current });
     current(); beforeSpawn?.();
-    proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', cmdStr], { ...(cwd !== undefined ? { cwd } : {}), env, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
+    // The command is finished when its own process exits: the shell writes an end mark after it (command-end.ts).
+    const endMark = newEndMark();
+    proc = spawnForeground([...sandboxArgv, '/bin/sh', '-c', withEndMark(cmdStr, endMark)], { ...(cwd !== undefined ? { cwd } : {}), env, stdout: 'pipe', stderr: 'pipe' } as Parameters<typeof Bun.spawn>[1]);
     const untilTimeout = until.timeout_ms ?? timeoutMs;
     if (untilTimeout > 0) untilTimer = setTimeout(() => { if (!matched) deadline.abort(); }, untilTimeout);
+    const encoder = new TextEncoder();
     const readStream = async (stream: ReadableStream<Uint8Array>, isStderr: boolean): Promise<void> => {
       const decoder = new TextDecoder();
+      // Each stream ends at the shell's end mark: a process the command left running keeps the pipe open, and what
+      // it writes later is not the command's (handed-off jobs included).
+      const mark = new EndMarkReader(endMark);
       const reader = stream.getReader(); readers.add(reader);
       try {
         while (true) {
@@ -820,23 +819,36 @@ async function runUntil(
           const forward = relay.handoff?.[isStderr ? 'stderr' : 'stdout'];
           if (forward) {
             // Backpressure reaches the child through the manager's reads, as for any background job.
-            if (done) { await forward.close(); break; }
-            await forward.write(value);
+            if (done) {
+              const tail = mark.take(decoder.decode()) + mark.flush();
+              if (tail) await forward.write(encoder.encode(tail));
+              await forward.close(); break;
+            }
+            const text = mark.take(decoder.decode(value, { stream: true }));
+            if (text) await forward.write(encoder.encode(text));
+            if (mark.found) { await forward.close(); void reader.cancel().catch(() => {}); break; }
             continue;
           }
           current();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          appendCapped(isStderr ? stderrSink : stdoutSink, chunk);
-          if (matched) continue;
-          // A test still running when the other stream matched and handed off settles as no match.
-          const hit = await pattern.test((stdoutSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderrSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))
-            .catch((error: unknown) => { if (relay.handoff) return false; throw error; });
-          if (hit && !matched) {
-            current(); matched = true; clearTimeout(untilTimer);
-            if (until.kill_after) stop();
-            else startHandoff();
+          if (done) {
+            const tail = mark.take(decoder.decode()) + mark.flush();
+            if (tail) appendCapped(isStderr ? stderrSink : stdoutSink, tail);
+            break;
           }
+          const chunk = mark.take(decoder.decode(value, { stream: true }));
+          appendCapped(isStderr ? stderrSink : stdoutSink, chunk);
+          if (!matched) {
+            // A test still running when the other stream matched and handed off settles as no match.
+            const hit = await pattern.test((stdoutSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS) + stderrSink.text.slice(-UNTIL_PATTERN_WINDOW_CHARS)).slice(-UNTIL_PATTERN_WINDOW_CHARS))
+              .catch((error: unknown) => { if (relay.handoff) return false; throw error; });
+            if (hit && !matched) {
+              current(); matched = true; clearTimeout(untilTimer);
+              if (until.kill_after) stop();
+              else startHandoff();
+            }
+          }
+          // The command's own process wrote its end mark: what follows is not its output.
+          if (mark.found) { void reader.cancel().catch(() => {}); break; }
         }
       } catch (error) {
         const handoff = relay.handoff;

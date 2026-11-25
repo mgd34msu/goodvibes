@@ -120,6 +120,8 @@ function translate(error: unknown): never {
     throw new GatewayVerbError(message, 'EMAIL_NOT_CONFIGURED', 400);
   }
   if (error instanceof EmailCredentialUnavailableError) {
+    // The password may well be stored: the store could not be read, so nothing asks for it again.
+    if (error.storeUnreadable) throw new GatewayVerbError(message, 'EMAIL_CREDENTIALS_UNREADABLE', 412);
     throw new GatewayVerbError(message, 'EMAIL_NOT_CONFIGURED', 400);
   }
   if (error instanceof EmailInputError) {
@@ -348,7 +350,8 @@ export function instrumentEmailGateway(
   /** Refuse before the mailbox is touched when setup is not finished. */
   async function ready(): Promise<void> {
     const problem = await options.describeEmailConfigProblem?.();
-    if (problem) throw new GatewayVerbError(problem.message, problem.code, 400);
+    // A secret store this computer could not read is a precondition, not a mistake in the request (as CALENDAR_CREDENTIALS_UNREADABLE).
+    if (problem) throw new GatewayVerbError(problem.message, problem.code, problem.code === 'EMAIL_CREDENTIALS_UNREADABLE' ? 412 : 400);
   }
 
   return {

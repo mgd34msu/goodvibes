@@ -23,6 +23,7 @@ import { startExternalServices } from '@/runtime/index.ts';
 import {
   autostartInstalledDaemon,
   createDaemonServiceControl,
+  daemonNotInstalledNotice,
   waitForStartingDaemon,
   type DaemonServiceControl,
 } from '@goodvibes/engine/platform/platform/runtime/client';
@@ -69,6 +70,8 @@ export interface AgentExternalServicesController {
    * they see the post-discovery daemon state instead of racing it.
    */
   whenDiscovered(): Promise<void>;
+  /** The one line that says no daemon is installed here (and how to install it), once discovery found that; else undefined. */
+  missingDaemon(): string | undefined;
   /** The daemon's service state and its bring-up (re-probe, autostart, adopt), for the repair. */
   readonly daemon: DaemonHost;
   stop(): Promise<void>;
@@ -201,6 +204,7 @@ export function wireAgentExternalServices(options: {
   // lifecycle marker turning ready or its unit stopping; nothing at start-up
   // waits on it, and stopping this controller (app exit) ends the wait.
   const startingDaemonWait = new AbortController();
+  let missingDaemonLine: string | undefined;
   const adoptOnceAnswered = async (serviceName: string, since: number): Promise<DaemonBringUpResult & { readonly level: 'low' | 'high' | null }> => {
     const result = await waitForStartingDaemon({
       control: daemonServiceControl(),
@@ -276,11 +280,15 @@ export function wireAgentExternalServices(options: {
           detail: `Connected host is installed but not answering, and starting it did not succeed: ${outcome.reason}. Start it with: ${DAEMON_START_COMMAND}`,
         };
       case 'not-installed':
+        // A headless run says it on every run (missingDaemon); the interface once on this machine.
+        missingDaemonLine = daemonNotInstalledNotice(outcome);
         // Said once on this machine (not at every start): without it every host-backed feature fails one at a time with no reason given.
         return {
           answered: false,
           level: services.featureAnnouncementStore.record(DAEMON_NOT_INSTALLED_ANNOUNCEMENT) ? 'high' : null,
-          detail: `No GoodVibes host is running and no daemon service is installed on this machine, so host-backed features are off. Install and start it with: ${DAEMON_INSTALL_COMMAND}`,
+          detail: outcome.program === false
+            ? daemonNotInstalledNotice(outcome)
+            : `No GoodVibes host is running and no daemon service is installed on this machine, so host-backed features are off. Install and start it with: ${DAEMON_INSTALL_COMMAND}`,
         };
       case 'none':
         // A daemon answers: losing it again is said again.
@@ -367,6 +375,7 @@ export function wireAgentExternalServices(options: {
   return {
     getStatus: () => externalServices,
     whenDiscovered: () => discoveryComplete,
+    missingDaemon: () => missingDaemonLine,
     daemon,
     stop: async () => {
       startingDaemonWait.abort();

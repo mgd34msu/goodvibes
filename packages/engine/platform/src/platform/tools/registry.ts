@@ -513,7 +513,8 @@ export class ToolRegistry {
    * always validated against the full registered schema.
    */
   getModelToolDefinitions(): ToolDefinition[] {
-    const definitions = this.getToolDefinitions();
+    // A tool other tools call nested (nestedOnly) is never offered to the model.
+    const definitions = this.getToolDefinitions().filter((definition) => definition.nestedOnly !== true);
     if (definitions.every((definition) => this.sentInFull(definition))) return definitions;
     const schemaTool = this.tools.get(TOOL_SCHEMA_TOOL_NAME);
     return [

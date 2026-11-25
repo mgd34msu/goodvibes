@@ -178,6 +178,18 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
    * Bound to Ctrl+P, Ctrl+K, `?` and /help. Enter runs a command; tab fills the composer.
    */
   openCommandPalette?: () => void;
+  /** Open the menu of every place (Ctrl+G then m; terminal-shell/places). */
+  openPlaceMenu?: () => void;
+  /** Open one place by id (`automation`, `waiting`, `keys`). */
+  openPlace?: (placeId: string) => void;
+  /** Send the failed turn again, when one is on offer (shell/retry-affordance.ts). */
+  retryFailedTurn?: () => void;
+  /** Open the fix session just started, when one is on offer. */
+  openFixSession?: () => void;
+  /** A contract's open question on offer: the next message is sent as an ordinary one (contract-question-composer.ts). */
+  answerContractQuestionPlainly?: () => void;
+  /** The model list's grouping, while the list is open (model-picker-token-route.ts). */
+  cycleModelPickerGroup?: () => void;
   /**
    * Ask a yes/no question in a small centered confirm dialog (a kit modal on
    * top of whatever is open). Resolves true only when the confirming button

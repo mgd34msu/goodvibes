@@ -13,10 +13,12 @@ export interface DecisionModelSettings {
   readonly keySource?: unknown;
   readonly keyName?: unknown;
   readonly fallbacks?: unknown;
+  /** `judgment.noDecisionModel`: no decision model chosen, which wins over every other setting and the environment. */
+  readonly noDecisionModel?: unknown;
 }
 
 /** The settings keys whose change can set or unset a decision model. */
-export const DECISION_MODEL_SET_KEYS = ['judgment.policy', 'judgment.endpoint', 'judgment.model', 'judgment.keySource', 'judgment.keyName', 'judgment.fallbacks'] as const;
+export const DECISION_MODEL_SET_KEYS = ['judgment.policy', 'judgment.endpoint', 'judgment.model', 'judgment.keySource', 'judgment.keyName', 'judgment.fallbacks', 'judgment.noDecisionModel'] as const;
 
 const text = (value: unknown): string => (typeof value === 'string' ? value.trim() : '');
 
@@ -26,8 +28,11 @@ const text = (value: unknown): string => (typeof value === 'string' ? value.trim
  * authentication), a key in the environment, or a model (setting or
  * TYPESAFE_DEFAULT_MODEL). With none there is nothing to ask. A set model that
  * then fails is reported, not treated as unset. The policy is not read here.
+ * No decision model chosen (`judgment.noDecisionModel`) is not set, whatever
+ * else the settings or the environment hold.
  */
 export function decisionModelSet(settings: DecisionModelSettings, env: Readonly<Record<string, string | undefined>>): boolean {
+  if (settings.noDecisionModel === true) return false;
   if (text(settings.endpoint) || text(env['TYPESAFE_BASE_URL'])) return true;
   if (Array.isArray(settings.fallbacks) && settings.fallbacks.length > 0) return true;
   if (settings.keySource === 'secret' || settings.keySource === 'none') return true;
@@ -40,5 +45,6 @@ export function decisionModelSettings(get: (key: (typeof DECISION_MODEL_SET_KEYS
   return {
     policy: get('judgment.policy'), endpoint: get('judgment.endpoint'), model: get('judgment.model'),
     keySource: get('judgment.keySource'), keyName: get('judgment.keyName'), fallbacks: get('judgment.fallbacks'),
+    noDecisionModel: get('judgment.noDecisionModel'),
   };
 }

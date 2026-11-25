@@ -66,16 +66,30 @@ export const RETIRED_SETTING_KEYS: readonly string[] = [
 /**
  * The `judgment.policy` values 3.5.0 and earlier stored for "no decision model is
  * used" (`Classic - Off` is its 3.2.0 name). This release does not have it: a
- * home that holds one is carried once to the mode Ask me (ConfigManager,
- * decision models off).
+ * home that holds one is carried once to the mode Ask me with no decision model
+ * set (ConfigManager, decision models off), so nothing is sent to one.
  */
 export const RETIRED_NO_DECISION_MODEL_POLICIES: readonly string[] = ['No Decision Model', 'Classic - Off'];
+
+/**
+ * The decision-model settings a home carried from No Decision Model has moved
+ * aside: taken out (so no decision model is set and nothing is sent to one) and
+ * kept, as they were, under `judgment.setAside`, where choosing a decision
+ * model again in Settings offers them back.
+ */
+export const DECISION_MODEL_SETTINGS_SET_ASIDE = ['judgment.endpoint', 'judgment.model', 'judgment.keySource', 'judgment.keyName', 'judgment.backend', 'judgment.fallbacks'] as const;
+
+/** Where the moved-aside decision-model settings are kept (a settings key of its own, in the daemon's settings file). */
+export const DECISION_MODEL_SET_ASIDE_KEY = 'judgment.setAside';
+
+/** No decision model chosen (the carry writes it too): it wins over every decision-model setting and the environment. */
+export const DECISION_MODEL_NONE_KEY = 'judgment.noDecisionModel';
 
 /**
  * The settings folders of the programs on this machine (the terminal app's,
  * which the daemon's own settings also use, and the Agent's), under the
  * GoodVibes home: where the daemon sets the mode Ask me when it carries
- * decision models switched off forward.
+ * decision models switched off forward (no decision model set).
  */
 export const PROGRAM_SETTINGS_ROOTS: readonly string[] = ['tui', 'agent'];
 

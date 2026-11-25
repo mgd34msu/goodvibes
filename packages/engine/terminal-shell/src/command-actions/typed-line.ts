@@ -10,7 +10,11 @@
  */
 import { quoteSlashCommandArg } from '../slash-command-parser.js';
 import {
-  LASTS_WORDS,
+  effectiveRisk as capabilityEffectiveRisk,
+  fillSentence as capabilityFillSentence,
+  lastsWords as capabilityLastsWords,
+} from '@goodvibes/engine/platform/platform/capabilities/words';
+import {
   RISK_DONE_WORDS,
   RISK_WORDS,
   type ActionDescription,
@@ -278,22 +282,12 @@ export function linePattern(action: ActionShape): string {
 
 /** How long a change with these values lasts, as the sentence's last words; empty for a read. */
 export function lastsWords(action: ActionShape, values: ActionValues): string {
-  const lasts = action.lasts;
-  if (lasts === 'not-a-change') return '';
-  if (lasts === 'session' || lasts === 'kept') return LASTS_WORDS[lasts];
-  const input = action.inputs.find((candidate) => candidate.id === lasts.byInput);
-  const chosen = input ? fixedChoices(input)?.find((choice) => choice.value === values[input.id]) : undefined;
-  return LASTS_WORDS[chosen?.lasts ?? 'session'];
+  return capabilityLastsWords(action, values);
 }
 
-/** The action's risk with these values: a chosen value can raise it (a looser trust mode). */
+/** The action's risk with these values: a chosen value can raise it (a looser trust mode). One rule, read by the gate too. */
 export function effectiveRisk(action: ActionShape, values: ActionValues): ActionRisk {
-  if (action.risk !== 'none') return action.risk;
-  for (const input of action.inputs) {
-    const chosen = fixedChoices(input)?.find((choice) => choice.value === values[input.id]);
-    if (chosen?.risk && chosen.risk !== 'none') return chosen.risk;
-  }
-  return 'none';
+  return capabilityEffectiveRisk(action, values);
 }
 
 /** The risk words for an action, or empty for none. */
@@ -303,12 +297,7 @@ export function riskWords(risk: ActionRisk): string {
 
 /** Fill `{input}` blanks and `{lasts}`; a blank with no value reads as its label in angle brackets. */
 export function fillSentence(template: string, values: ActionValues, lasts: string): string {
-  return template
-    .replace(/\{lasts\}/g, lasts)
-    .replace(/\{([a-zA-Z0-9_-]+)\}/g, (_whole, id: string) => values[id] !== undefined && values[id] !== '' ? values[id]! : `<${id}>`)
-    .replace(/\s+([.,;:])/g, '$1')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
+  return capabilityFillSentence(template, values, lasts);
 }
 
 /** The action's sentence for these values. */
@@ -396,42 +385,5 @@ export function actionConsequence(action: ActionShape, values: ActionValues): st
   return risk === 'none' ? sentence : `${sentence} This ${riskWords(risk)}.`;
 }
 
-/**
- * What an action sends to its operator method: each field (a dot path) takes
- * the value of the input it names. `input:first` and `input:rest` take the
- * first line and the lines after it as a list (a command and its arguments),
- * `input:lines` all lines as a list, `input:pairs` NAME=VALUE lines as an
- * object, and `input:number` a number. `=<json>` is a fixed value the method
- * always takes (`=true` for its `confirm`). A blank value is left out, so the
- * method sees only what was given.
- */
-export function operatorInputFromValues(fields: Readonly<Record<string, string>>, values: ActionValues): Record<string, unknown> {
-  const input: Record<string, unknown> = {};
-  for (const [field, spec] of Object.entries(fields)) {
-    const [id, shape] = spec.startsWith('=') ? ['', '='] as [string, string] : spec.split(':') as [string, string | undefined];
-    const raw = shape === '=' ? spec.slice(1) : values[id];
-    if (raw === undefined || raw === '') continue;
-    const lines = raw.split('\n').map((line) => line.trim()).filter(Boolean);
-    let value: unknown = raw;
-    if (shape === '=') value = JSON.parse(raw) as unknown;
-    else if (shape === 'number') value = Number(raw);
-    else if (shape === 'first') value = lines[0];
-    else if (shape === 'rest') value = lines.slice(1);
-    else if (shape === 'lines') value = lines;
-    else if (shape === 'pairs') {
-      value = Object.fromEntries(lines.flatMap((line) => {
-        const eq = line.indexOf('=');
-        return eq > 0 ? [[line.slice(0, eq).trim(), line.slice(eq + 1)]] : [];
-      }));
-    }
-    if (value === undefined || (Array.isArray(value) && value.length === 0) || (typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length === 0)) continue;
-    let node = input;
-    const parts = field.split('.');
-    for (const part of parts.slice(0, -1)) {
-      const next = node[part];
-      node = (next && typeof next === 'object' ? next : (node[part] = {})) as Record<string, unknown>;
-    }
-    node[parts.at(-1)!] = value;
-  }
-  return input;
-}
+// What an action sends to its operator method; defined once with the capabilities, which the daemon runs too.
+export { operatorInputFromValues } from '@goodvibes/engine/platform/platform/capabilities/words';

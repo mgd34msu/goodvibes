@@ -23,6 +23,8 @@ import {
 } from '@goodvibes/engine/platform/platform/core';
 import { registerTranscriptRowRenderer } from './transcript-row-renderers.js';
 import { renderTurnFailureRow } from './renderer/turn-failure-row.js';
+/** The row's keys as the key table binds them; the shell sets them each frame. */
+export { setTurnFailureKeys } from './renderer/turn-failure-row.js';
 
 /** What the row reads of the conversation it is drawn in. */
 export interface TurnFailureConversation {

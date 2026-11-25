@@ -16,10 +16,17 @@ export interface CommandDiscoveryEntry {
 export interface CommandDiscoveryRequest {
   readonly query: string;
   readonly commands: readonly CommandDiscoveryEntry[];
+  /**
+   * Plain ranking only (literal overlap), never the decision model: capability
+   * find ranks within a group a decision already picked (capabilities/find.ts).
+   */
+  readonly plain?: true | undefined;
 }
 export interface CommandDiscoveryReading {
   readonly provenance?: 'classic';
   readonly ids: readonly string[];
+  /** With plain ranking: each returned id's share of the query's words it contains (0 to 1). */
+  readonly scores?: Readonly<Record<string, number>> | undefined;
   /** Recheck before displaying a suggestion or using its command reference. */
   readonly assertCurrent: () => void;
 }
@@ -41,7 +48,7 @@ export const commandDiscovery = defineSelector({
 
 /** The selector batches all commands in each wire request, with no lexical prefilter. */
 export async function readCommandDiscovery(input: CommandDiscoveryRequest, options: JudgmentReadingOptions = {}): Promise<CommandDiscoveryReading> {
-  return decisionOrClassic(() => readDecisionCommandDiscovery(input, options), () => {
+  const classic = () => {
     const source = retainStrictJudgmentJson(input);
     const signal = options.signal, callerCurrent = options.assertCurrent;
     const current = () => {
@@ -51,11 +58,14 @@ export async function readCommandDiscovery(input: CommandDiscoveryRequest, optio
       signal?.throwIfAborted(); source.assertCurrent();
     };
     current();
-    const ids = rankClassicCatalog(source.snapshot.commands, source.snapshot.query, command => ({ id: command.id,
-      description: [command.title, command.description, ...command.aliases, ...command.keywords].join('\n') })).slice(0, 5).map(match => match.entry.id);
+    const matches = rankClassicCatalog(source.snapshot.commands, source.snapshot.query, command => ({ id: command.id,
+      description: [command.title, command.description, ...command.aliases, ...command.keywords].join('\n') })).slice(0, 5);
     current();
-    return { ids, provenance: 'classic' as const, assertCurrent: current };
-  });
+    const ids = matches.map(match => match.entry.id);
+    return { ids, provenance: 'classic' as const, scores: Object.fromEntries(matches.map(match => [match.entry.id, match.score])), assertCurrent: current };
+  };
+  if (input.plain === true) return classic();
+  return decisionOrClassic(() => readDecisionCommandDiscovery(input, options), classic);
 }
 async function readDecisionCommandDiscovery(input: CommandDiscoveryRequest, options: JudgmentReadingOptions): Promise<CommandDiscoveryReading> {
   const source = retainStrictJudgmentJson(input);

@@ -2,7 +2,8 @@ import { reportStartupFailure, applySeededCliPrompt, resumeSessionAndRender } fr
 import type { CommandContext, CommandRegistry } from '../input/command-registry.ts';
 import type { InputHandler } from '../input/handler.ts';
 import type { SelectionItem } from '../input/selection-modal.ts';
-import { NOTHING_OF_ITS_OWN_TO_RUN, type WorkspaceRegistrationManager, type WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
+import type { WorkspaceRegistrationManager, WorkspaceTrustManager } from '@goodvibes/engine/platform/platform/runtime/operations';
+import { readFolderTrustFacts, trustFolderWithNothingOfItsOwn, type FolderTrustFacts } from '@goodvibes/engine/terminal-shell/headless-command';
 import { readOnboardingCheckMarker, readWhoDecidesAsked, writeOnboardingCheckMarker, writeWhoDecidesAsked } from '../runtime/onboarding/index.ts';
 import { FirstRunModal, firstRunDecisionModel, installSplashAdditions, openWhoDecides, startFirstRun, type FirstRunDeps } from '@goodvibes/engine/terminal-shell/first-run';
 import { requireSecretsManager, requireServiceRegistry, requireSubscriptionManager } from '../input/commands/runtime-services.ts';
@@ -12,9 +13,6 @@ import { logger, summarizeError } from '@goodvibes/engine/platform/platform/util
 import { writeFatalLine } from '@goodvibes/engine/platform/platform/daemon';
 import type { GoodVibesCliParseResult } from '@goodvibes/engine/terminal-shell';
 import { openDeepLink, parseDeepLink } from '../input/commands/deep-link.ts';
-import { existsSync, realpathSync } from 'node:fs';
-import { isAbsolute, join, relative, sep } from 'node:path';
-import { loadMcpEffectiveConfig, ownerAddedServers } from '@goodvibes/engine/platform/platform/mcp';
 
 export type TuiStartupShellPaths = Parameters<typeof readOnboardingCheckMarker>[0] & {
   readonly workingDirectory: string;
@@ -73,32 +71,8 @@ export function buildFirstOpenItems(folder: FolderTrustFacts): { readonly title:
   };
 }
 
-/** What the trust prompt names: the folder (home shortened to ~) and the files of its own that trusting would let run. */
-export interface FolderTrustFacts {
-  readonly shownPath: string;
-  /** The folder's own hooks file as shown ("hooks.json"), or null when it has none. */
-  readonly hooksFile: string | null;
-  /** Its own MCP server files as shown (".mcp.json") that name a server you did not add yourself; empty when it has none. */
-  readonly mcpFiles: readonly string[];
-  /** Those servers, by name: the ones the folder brought (a cloned file, a write from outside), never one you added with /mcp add. */
-  readonly mcpServers: readonly string[];
-  /** True when it has a hooks file or MCP server files of its own. */
-  readonly hasItsOwn: boolean;
-}
-
-/** Read which of the folder's own hooks and MCP files exist (two or three stat calls, once per prompt). */
-export function readFolderTrustFacts(workingDirectory: string, homeDirectory: string, hooksFile: string): FolderTrustFacts {
-  let real = workingDirectory;
-  try { real = realpathSync(workingDirectory); } catch { /* the folder as given */ }
-  const shownPath = homeDirectory && (real === homeDirectory || real.startsWith(`${homeDirectory}${sep}`)) ? `~${real.slice(homeDirectory.length)}` : real;
-  const hooks = isAbsolute(hooksFile) ? hooksFile : join(workingDirectory, hooksFile || 'hooks.json');
-  const hooksShown = existsSync(hooks) ? relative(workingDirectory, hooks) || hooks : null;
-  // The servers the folder's own MCP files name that you did not add yourself (with /mcp add or a form): those are its own.
-  const brought = loadMcpEffectiveConfig({ workingDirectory, homeDirectory }, { holdProjectFile: () => true, ownerAdded: ownerAddedServers(homeDirectory) }).held ?? [];
-  const mcpFiles = [...new Set(brought.map((entry) => relative(workingDirectory, entry.source.path)))];
-  const mcpServers = [...new Set(brought.map((entry) => entry.server.name))];
-  return { shownPath, hooksFile: hooksShown, mcpFiles, mcpServers, hasItsOwn: hooksShown !== null || mcpFiles.length > 0 };
-}
+// What a folder brings of its own, read the same way here and in `run` (terminal-shell native/folder-trust.ts).
+export { readFolderTrustFacts, type FolderTrustFacts };
 
 /**
  * Registration self-records: a workspace the user actually works in becomes
@@ -155,12 +129,10 @@ async function askTrustOnOpen(
   try {
     await manager.load();
     manager.askWhenRepositoryFilesAppear(requestTrustDecision);
-    const hasItsOwn = folder().hasItsOwn;
-    if (!manager.isDecided() && !hasItsOwn) {
-      const saved = await manager.setLevel('trusted', NOTHING_OF_ITS_OWN_TO_RUN);
-      if (!saved.saved) logger.warn('The workspace was trusted for this session (nothing of its own to run) but the decision could not be saved', { fault: saved.fault });
-      return;
-    }
+    const facts = folder();
+    const hasItsOwn = facts.hasItsOwn;
+    // The same rule, recorded the same way, as `run` applies (trustFolderWithNothingOfItsOwn).
+    if (await trustFolderWithNothingOfItsOwn(manager, () => facts)) return;
     if (!manager.isDecided() || (manager.trustedForNothingToRun() && hasItsOwn)) await manager.trustQuestion(requestTrustDecision).answer;
   } catch (error) {
     logger.info('The workspace trust question asked on opening was not answered', { error: summarizeError(error) });

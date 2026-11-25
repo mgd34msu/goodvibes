@@ -1,6 +1,8 @@
 export type GoodVibesCliCommand =
   | 'tui'
   | 'run'
+  | 'do'
+  | 'find'
   | 'status'
   | 'doctor'
   | 'onboarding'

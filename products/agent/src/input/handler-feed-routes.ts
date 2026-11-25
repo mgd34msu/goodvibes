@@ -25,13 +25,9 @@ export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKey
   FooterTarget,
   MouseRouteState
 >({
-  // The running indicator and F2 open Your agents, as in the terminal app;
-  // a background process opens in the process monitor from there.
+  // The running indicator opens Your agents, as in the terminal app (F2 is the
+  // key table's open-agents); a background process opens in the process monitor from there.
   openIndicator(state) {
-    state.openAgentsView();
-    state.syncModals();
-  },
-  openKeyIndicator(state) {
     state.openAgentsView();
     state.syncModals();
   },

@@ -16,6 +16,8 @@ import type { ConfigManager } from '../config/index.ts';
 import { readConnectedHostOperatorToken } from '@goodvibes/engine/terminal-shell/agent-turn/connected-host-auth';
 import { createShellPathService } from '@/runtime/index.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils';
+import { runCapabilityCommand, type CapabilityCliInvoke } from '@goodvibes/engine/terminal-shell/capability-cli';
+import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
 import { writeFatalLine } from '../utils/fatal-boot-write.ts';
 import type { GoodVibesCliParseResult } from './types.ts';
 import { formatProviderAuthRoute } from './provider-auth-routes.ts';
@@ -56,6 +58,20 @@ export interface CliCommandRuntime {
 interface CliCommandResult {
   readonly handled: boolean;
   readonly exitCode: number;
+}
+
+/** `do` and `find` reach the connected host the way every Agent verb does (runtime/client/daemon-verbs.ts). */
+function agentCapabilityInvoke(runtime: CliCommandRuntime): CapabilityCliInvoke {
+  const caller = createAgentDaemonVerbCaller({ configManager: runtime.configManager, homeDirectory: runtime.homeDirectory });
+  return async (methodId, input, options) => {
+    try {
+      return { ok: true, data: await caller.invoke(methodId, input, { explicitUserRequest: options.explicitUserRequest }) };
+    } catch (error) {
+      const message = summarizeError(error).replace(/^'[^']+' failed:\s*/, '');
+      const code = (error as { readonly code?: unknown } | null)?.code;
+      return { ok: false, code: typeof code === 'string' ? code : 'refused', error: message, fix: `${runtime.cli.binary} status shows the connected host` };
+    }
+  };
 }
 
 export function getNestedValue(source: unknown, key: string): unknown {
@@ -286,6 +302,13 @@ export async function handleGoodVibesCliCommand(runtime: CliCommandRuntime): Pro
         console.log(result.output);
         return { handled: true, exitCode: result.exitCode };
       }
+      // A capability by id, and the capabilities that serve a need: the connected host's capabilities.run and capabilities.find.
+      case 'do':
+      case 'find':
+        return { handled: true, exitCode: await runCapabilityCommand({
+          program: 'goodvibes-agent', verb: runtime.cli.command, args: runtime.cli.commandArgs, json: runtime.cli.flags.outputFormat === 'json', caller: 'agent',
+          invoke: agentCapabilityInvoke(runtime), workingDirectory: runtime.workingDirectory,
+        }) };
       case 'ask':
       case 'search': {
         const result = await handleAgentKnowledgeShortcutCommand(runtime, runtime.cli.command);

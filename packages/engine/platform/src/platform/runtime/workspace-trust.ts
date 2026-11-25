@@ -77,7 +77,7 @@ export interface TrustGateOptions {
  *   (bounded by `options.waitMs` when set) rather than opening a second one.
  */
 export function trustGatedAsk(
-  manager: Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'trustQuestion'> & { readonly workspaceRoot?: string },
+  manager: Pick<WorkspaceTrustManager, 'isCategoryAllowed' | 'isDecided' | 'trustQuestion'> & Partial<Pick<WorkspaceTrustManager, 'refusalForThisRun'>> & { readonly workspaceRoot?: string },
   ask: PermissionRequestHandler,
   requestTrustDecision: () => Promise<WorkspaceTrustLevel>,
   options: TrustGateOptions = {},
@@ -87,6 +87,9 @@ export function trustGatedAsk(
     assertPermissionActive(signal);
     if (manager.isCategoryAllowed(request.category)) return ask(request, execution);
     if (manager.isDecided()) return { approved: false };
+    // A headless run in a folder that brings hooks or tool servers of its own: refused at once, no question.
+    const refusal = manager.refusalForThisRun?.() ?? null;
+    if (refusal !== null) return { approved: false, reason: refusal };
     const question = manager.trustQuestion(requestTrustDecision);
     const where = manager.workspaceRoot ? ` for ${manager.workspaceRoot}` : '';
     const unanswered = {
@@ -589,6 +592,9 @@ export class WorkspaceTrustManager {
       if (this.isDecided() && !this.isCategoryAllowed(category)) {
         throw new WorkspaceRestrictedError(RESTRICTED_FOR_MODEL, 'Not run: this folder is restricted (/security trust-folder trusts it).');
       }
+      // A headless run in an undecided folder that brings hooks or tool servers of its own: not trusted here.
+      const refusal = this.runRefusal;
+      if (refusal !== null && !this.isDecided() && !this.isCategoryAllowed(category)) throw new WorkspaceRestrictedError(refusal, `Not run: ${refusal}`);
     };
     assertCurrent();
     return assertCurrent;
@@ -596,6 +602,47 @@ export class WorkspaceTrustManager {
 
   isDecided(): boolean {
     return this.level !== null;
+  }
+
+  /** Set by refuseForThisRun: the sentence every call that needs trust is refused with at once, or null. */
+  private runRefusal: string | null = null;
+
+  /**
+   * A run with nobody to ask (`run`) in a folder with no trust decision that
+   * brings hooks or tool servers of its own: the folder is not trusted for this
+   * run, so every call that needs trust (a write, a command, delegation) is
+   * refused at once with `sentence`, whoever would have decided it, and no trust
+   * question is raised. Reads keep working. Nothing is saved: the folder stays
+   * undecided, and a decision made later (here or in another program) wins.
+   */
+  refuseForThisRun(sentence: string): void {
+    this.runRefusal = sentence;
+  }
+
+  /** The sentence a call that needs trust is refused with in this run, while the folder is undecided; null otherwise. */
+  refusalForThisRun(): string | null {
+    return this.runRefusal !== null && !this.isDecided() ? this.runRefusal : null;
+  }
+
+  /**
+   * The run refusal alone, as the permission gate's autonomous constraint, for
+   * a product whose own actions pass no workspace trust gate (the Agent): in a
+   * headless run in a folder that brings hooks or tool servers of its own, a
+   * call that needs trust is refused at once with refuseForThisRun's sentence;
+   * otherwise nothing changes for it.
+   */
+  runRefusalConstraint(): Pick<WorkspaceTrustManager, 'prepareAutonomousConstraint'> {
+    return {
+      prepareAutonomousConstraint: async (category: PermissionCategory, signal?: AbortSignal) => {
+        const check = (): void => {
+          assertPermissionActive(signal);
+          const refusal = this.refusalForThisRun();
+          if (refusal !== null && !this.isCategoryAllowed(category)) throw new WorkspaceRestrictedError(refusal, `Not run: ${refusal}`);
+        };
+        check();
+        return check;
+      },
+    };
   }
 
   /** Why the saved decision could not be read, or null when it was read or never existed. */

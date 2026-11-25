@@ -17,6 +17,8 @@ import type { ToolExecutionEffect } from '../tools/registry.js';
 import type { RetainedAutomationJobTarget } from '../automation/job-mutations.js';
 import { projectAutomationTargetRequest } from '../automation/job-mutations.js';
 import { missingScopes } from '@goodvibes/engine/daemon-api/route-helpers';
+import { NATIVELY_ADMITTED_METHOD_IDS } from './native-admission-methods.js';
+import { logger } from '../utils/logger.js';
 
 export type NativeMutationHost = ExternalPermissionHost;
 export interface NativeMutationAdmission { readonly kind: 'native-recorded-mutation'; }
@@ -93,6 +95,10 @@ export async function runNativeMutation<T>(input: {
   readonly mutate: (assertCurrent: () => void, admission?: NativeMutationAdmission, withPublication?: MutationPublication) => Promise<T>;
 }): Promise<T> {
   const { body, context } = input;
+  // The list the sending program reads to leave this decision to the daemon (native-admission-methods.ts).
+  if (!NATIVELY_ADMITTED_METHOD_IDS.has(input.method)) {
+    logger.error('[native-mutation] a natively admitted method is missing from NATIVELY_ADMITTED_METHOD_IDS; a model call to it is decided twice', { method: input.method });
+  }
   if (!isDelegatedCaller(context)) {
     if (input.confirmation !== 'none') requireConfirmation('owner-request', input.method, body, context);
     const current = () => { context.signal?.throwIfAborted(); };

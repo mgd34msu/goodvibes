@@ -325,7 +325,7 @@ export interface ConfigSetting {
  * Settings whose value is one object, read and written whole, rather than a
  * section of further keys. Every other object in GoodVibesConfig is a section.
  */
-type ObjectValuedConfigKey = 'provider.decisionRouter' | 'judgment.volumeMonitor' | 'judgment.backend';
+type ObjectValuedConfigKey = 'provider.decisionRouter' | 'judgment.volumeMonitor' | 'judgment.backend' | 'judgment.setAside';
 
 /**
  * The dot paths of every leaf of `T`: a scalar, a list (or a value that may be

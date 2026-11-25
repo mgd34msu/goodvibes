@@ -132,6 +132,8 @@ type AgentOrchestratorToolDeps = {
   readonly triggers?: import('../triggers/manager.js').TriggerManager | import('../triggers/operations.js').TriggerOperations | undefined;
   /** Saves a working-directory change for the next start; `state set runtime.workingDir` uses it (registerAllTools). */
   readonly workspaceSwap?: import('../tools/state/index.js').StateSwapManager | undefined;
+  /** The daemon's capabilities for its own turns (`capability_find`, `capability_run`; registerAllTools); absent, none. */
+  readonly capabilityTools?: import('../tools/capability/daemon-tools.js').DaemonCapabilityToolHost | undefined;
   /** Supplying it registers the `profile` capture tool. See registerAllTools. */
   readonly personalCapture?: import('../personal-capture/index.js').PersonalCaptureHolder | undefined;
   readonly codeIndex?: import('./turn-knowledge-injection.js').TurnCodeIndexSource | undefined;

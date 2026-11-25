@@ -48,6 +48,7 @@ import { logger } from '../../utils/logger.js';
 import { summarizeError } from '../../utils/error-display.js';
 import { sleep } from '../../utils/concurrency.js';
 import { killProcessTree } from './process-tree.js';
+import { EndMarkReader, leftRunningNote, newEndMark, readToEndMark, withEndMark } from './command-end.js';
 import { captureJudgmentPort } from '@goodvibes/engine/errors';
 import { prepareJudgmentResult } from '../../gate/judgment-result.js';
 import { execPrompt, pendingPromptView } from '../batteries/exec-prompt.js';
@@ -320,7 +321,9 @@ interface InteractiveRunInput {
  */
 export async function runInteractiveCommand(input: InteractiveRunInput): Promise<ExecCommandResult> {
   const { cmdStr, cwd, env, timeoutMs, startTime, interaction, signal } = input;
-  const ptyArgv = buildPtyArgv(interaction.availability, cmdStr);
+  // The command is finished when its own process exits: the shell writes an end mark after it (command-end.ts).
+  const endMark = newEndMark();
+  const ptyArgv = buildPtyArgv(interaction.availability, withEndMark(cmdStr, endMark));
   const quietWindowMs = interaction.quietWindowMs ?? DEFAULT_QUIET_WINDOW_MS;
   const lifetime = new AbortController();
   const policySignal = signal ? AbortSignal.any([signal, lifetime.signal]) : lifetime.signal;
@@ -382,21 +385,18 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
     else signal.addEventListener('abort', onAbort, { once: true });
   }
 
+  // Read up to the shell's end mark (or the end of the stream): a process the command left running keeps the
+  // terminal open, and what it writes later is not the command's output (command-end.ts).
+  const releases: Array<() => void> = [];
   const readStream = async (stream: ReadableStream<Uint8Array>): Promise<void> => {
-    const decoder = new TextDecoder();
-    const reader = stream.getReader();
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
+      releases.push(await readToEndMark(stream, new EndMarkReader(endMark), (text) => {
         // PTYs emit CRLF; normalize so transcripts and prompt tails are stable.
-        transcript += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+        transcript += text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
         lastDataAt = Date.now();
-      }
+      }));
     } catch (err: unknown) {
       logger.debug('[ExecInteractive] stream read ended with error', { error: summarizeError(err) });
-    } finally {
-      reader.releaseLock();
     }
   };
 
@@ -509,8 +509,12 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
   lifetime.abort();
   clearTimeout(killTimer);
   if (signal) signal.removeEventListener('abort', onAbort);
-  // Bounded drain, a PTY grandchild can hold the pipe open past the kill.
-  await Promise.race([io.then(() => undefined, () => undefined), sleep(500)]);
+  // A run that ended by itself is read to its end mark; only a stopped one (no mark: the shell was killed) keeps the
+  // bounded drain, since a terminal process can hold the output past the kill.
+  if (timedOut || cancelled) await Promise.race([io.then(() => undefined, () => undefined), sleep(500)]);
+  else await io.then(() => undefined, () => undefined);
+  const leftRunning = timedOut || cancelled ? null : leftRunningNote(proc.pid);
+  for (const release of releases) release();
   await watcher;
   if (judgmentFailure !== undefined) throw judgmentFailure;
 
@@ -527,6 +531,7 @@ export async function runInteractiveCommand(input: InteractiveRunInput): Promise
           : `Stopped: the command asked ${JSON.stringify(declinedPrompt.prompt)} and the answer was declined, so nothing was typed.`
         : '',
     success: !timedOut && !cancelled && !promptDeclined && exitCode === 0,
+    ...(leftRunning ? { left_running: leftRunning } : {}),
     duration_ms: duration,
     cwd,
     pty: true,

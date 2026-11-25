@@ -54,6 +54,7 @@ import {
   createOAuthLocalListener,
   readConsumerSetting,
   resolveSecretWriteScope,
+  unreadableSecretStore,
   type SecretScope,
 } from '@goodvibes/engine/platform/platform/config';
 
@@ -76,6 +77,8 @@ export interface CalendarSecretSlice {
   get(key: string): Promise<Secret | null>;
   set(key: string, value: string, options?: { readonly scope?: SecretScope }): Promise<void>;
   delete(key: string, options?: { readonly scope?: SecretScope }): Promise<void>;
+  /** The read that throws on a store this process cannot read (SecretsManager.getStored); absent on a test fake. */
+  getStored?(key: string): Promise<unknown>;
 }
 
 /** The slice the connector and its token store read: each value revealed for the calendar service it is sent to. */
@@ -83,6 +86,8 @@ export interface CalendarSecretTextSlice {
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: { readonly scope?: SecretScope }): Promise<void>;
   delete(key: string, options?: { readonly scope?: SecretScope }): Promise<void>;
+  /** After `key` read as absent: the words for a secret store this computer could not read, or null. */
+  unreadable?(key: string): Promise<string | null>;
 }
 
 /**
@@ -119,6 +124,7 @@ export function daemonScopedSecrets(secrets: CalendarSecretSlice): CalendarSecre
       scope: resolveSecretWriteScope(key, options?.scope),
     }),
     delete: (key, options) => secrets.delete(key, options),
+    unreadable: (key) => unreadableSecretStore(secrets, key, 'the calendar connection'),
   };
 }
 
@@ -455,6 +461,14 @@ export class CalendarOAuthService {
       overrides = clientId ? { clientId } : {};
     }
     return this.connector.disconnect(provider, overrides);
+  }
+
+  /**
+   * When no account reads: the words for a secret store this computer could not
+   * read (so the accounts are unknown, not absent), or null when it was read.
+   */
+  async storeUnreadable(): Promise<string | null> {
+    return this.connector.storeUnreadable();
   }
 
   /** List connected accounts with their honest connection state. */

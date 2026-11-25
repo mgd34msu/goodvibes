@@ -76,6 +76,7 @@ import {
 import { pasteImageFromClipboard, pasteFromClipboard } from '../utils/clipboard.ts';
 import type { ClipboardPasteSource } from './handler-content-actions.ts';
 import { feedInputTokens } from './handler-feed.ts';
+import { SurfacePointer } from '@goodvibes/engine/terminal-shell/surface-pointer';
 import { buildInitialFeedContext } from './feed-context-factory.ts';
 import type { UiRuntimeServices } from '../runtime/ui-services.ts';
 import type { ModelPickerTarget } from './model-picker.ts';
@@ -130,6 +131,8 @@ export class InputHandler extends TerminalInputHandlerState {
   public contextInspectorModal = new ContextInspectorModal();
   /** The one stack of open modals: kit modals and the handler's own, one Esc level at a time (terminal-shell/surface-modal-host). */
   public surfaceModals = new SurfaceModalHost();
+  /** The mouse over the last painted frame: a kit modal's rows, tabs and keycaps are clickable (terminal-shell/surface-pointer). */
+  public readonly surfacePointer = new SurfacePointer();
   /** The handler's own modals as objects on that stack: the shared ones, the workspace, the process monitor and its live tail. */
   public readonly modals: HandlerModals & {
     readonly agentWorkspace: TrackedModal;
@@ -551,7 +554,10 @@ export class InputHandler extends TerminalInputHandlerState {
       // Swap requestRender to buffered version for this feed.
       context.requestRender = bufferedRequestRender;
       context.handleSetupPairingToken = (token) => this.setupPairing?.handleToken(token) ?? false;
-      feedInputTokens(context, this.tokenizer.feed(data));
+      const tokens = this.tokenizer.feed(data);
+      // A mouse token goes through the pointer first: over a kit modal it is a click on what was painted there.
+      const routed = tokens.some((token) => token.type === 'mouse') ? tokens.flatMap((token) => this.surfacePointer.route(token)) : tokens;
+      feedInputTokens(context, routed);
       reportDroppedPaste(this.tokenizer, this.conversationManager, bufferedRequestRender);
     } finally {
       renderBuffer.release();

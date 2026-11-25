@@ -22,6 +22,7 @@ import {
 import { applyAnthropicReasoning, isAnthropicThinkingEnabled } from './anthropic-stream.js';
 import { reasoningRejectionHint } from './reasoning-rejection-hint.js';
 import { ProviderError } from '../types/errors.js';
+import { processSecretStoreUnreadable } from '../config/secret-store-unreadable.js';
 import { withRetry, type RetryConfig } from '../utils/retry.js';
 import { instrumentedLlmCall } from '../runtime/llm-observability.js';
 import {
@@ -263,6 +264,11 @@ export class AnthropicCompatProvider implements LLMProvider {
   async chat(params: ChatRequest): Promise<ChatResponse> {
     const { messages, tools, model, maxTokens, signal, systemPrompt, onRetry, reasoningEffort } = params;
     const { onDelta, canRetry } = trackDeliveredOutput(params.onDelta);
+    // A key that is absent because the secret store could not be read is said as such, never "no API key configured".
+    if (!this.isConfigured()) {
+      const unreadable = await processSecretStoreUnreadable(this.authEnvVars[0] ?? 'GOODVIBES_STORE_READABLE_CHECK', `the "${this.name}" API key`);
+      if (unreadable) throw new ProviderError(`${unreadable} The request for model "${model ?? this.defaultModel}" was not sent.`);
+    }
     this.assertConfiguredForChat(model);
 
     return (await instrumentedLlmCall(

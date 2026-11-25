@@ -23,6 +23,9 @@ const CHANNEL_SECRET_STATUS_SCHEMA = objectSchema({
   field: STRING_SCHEMA,
   label: STRING_SCHEMA,
   configured: BOOLEAN_SCHEMA,
+  // Whether a declared value resolves in the store the daemon reads (ChannelSecretStatus.resolved); a client that refused it could not list accounts.
+  resolved: BOOLEAN_SCHEMA,
+  // service-registry, config, env, derived, unresolved, missing or unreadable (the secret store could not be read).
   source: STRING_SCHEMA,
 }, ['field', 'label', 'configured', 'source']);
 
@@ -248,12 +251,25 @@ export const CHANNEL_GROUP_POLICY_SCHEMA = objectSchema({
   metadata: METADATA_SCHEMA,
 }, ['id']);
 
+/** What a channel's state was derived from (ChannelRuntimeObservation): `reason` says why, and what to change. */
+const CHANNEL_RUNTIME_OBSERVATION_SCHEMA = objectSchema({
+  observable: BOOLEAN_SCHEMA,
+  running: nullableSchema(BOOLEAN_SCHEMA),
+  reason: STRING_SCHEMA,
+  lastError: STRING_SCHEMA,
+  observedAt: NUMBER_SCHEMA,
+}, ['observable', 'running', 'reason']);
+
 export const CHANNEL_STATUS_SCHEMA = objectSchema({
   id: STRING_SCHEMA,
   surface: STRING_SCHEMA,
   label: STRING_SCHEMA,
   state: STRING_SCHEMA,
   enabled: BOOLEAN_SCHEMA,
+  // Every built-in channel's snapshot carries these (ChannelStatusSnapshot); a client that refused them could not list channels.
+  configured: BOOLEAN_SCHEMA,
+  credentialResolves: BOOLEAN_SCHEMA,
+  runtime: CHANNEL_RUNTIME_OBSERVATION_SCHEMA,
   accountId: STRING_SCHEMA,
   metadata: METADATA_SCHEMA,
 }, ['id', 'surface', 'label', 'state', 'enabled', 'metadata']);
@@ -367,6 +383,9 @@ export const CHANNEL_OPERATOR_ACTION_OUTPUT_SCHEMA = objectSchema({
 
 export const CHANNEL_STATUS_LIST_OUTPUT_SCHEMA = objectSchema({
   channels: arraySchema(CHANNEL_STATUS_SCHEMA),
+  // The route's health list (daemon-api channel-routes.ts): each channel as `{ kind: 'channel', channel }`, then the
+  // inbound mail watcher's health when one runs. A client that refused it could not read channel status at all.
+  health: arraySchema(JSON_RECORD_SCHEMA),
 }, ['channels']);
 
 export const CHANNEL_ACCOUNT_ENTITY_OUTPUT_SCHEMA = CHANNEL_ACCOUNT_RECORD_SCHEMA;

@@ -10,7 +10,8 @@ import { connectedHostRequestDeadline, type ConnectedHostConfigReader as AgentCo
 import type { AgentInProcessHost } from './in-process-host.js';
 import { assertOperatorEffect, captureOperatorConnection } from './operator-connection-owner.js';
 import { forgetDelegatedCredential } from './agent-delegation-credential.js';
-import { agentCallConnection } from './agent-call-credential.js';
+import { agentCallConnection, agentCallCredential } from './agent-call-credential.js';
+import { NATIVELY_ADMITTED_METHOD_IDS } from '@goodvibes/engine/platform/platform/control-plane';
 import { publishOperatorMethodReceipt } from './operator-method-receipt.js';
 import { appendOperatorQuery, operatorMethodIsReadOnly, operatorOwnerDecisions, ownerOnlyOperatorMethodIds, READ_ONLY_HTTP_METHODS, resolveOperatorContractMethod, substituteOperatorPath } from './operator-contract-routes.js';
 import { createOperatorInputProjector, operatorExecutionConnection, operatorExecutionWireInput, operatorExecutionRequestPolicy, operatorMethodIsOutward, operatorMethodIsOwnerOnly } from './operator-input-projector.js';
@@ -375,7 +376,13 @@ export function createAgentOperatorMethodTool(
         additionalProperties: false,
       },
       sideEffects: ['network', 'state'],
+      // Folded into capability_run (capability-tools.ts): the model names a capability or a method there, and
+      // capability_run and the schedule tools call this one nested, so its admission and credentials stay one path.
+      nestedOnly: true,
       ownerActs: { field: 'methodId', values: ownerOnlyOperatorMethodIds() },
+      // A method the daemon admits natively for the Agent's credential, and sent with it: the daemon's admission is
+      // the one decision, so this gate does not decide it first.
+      hostDecides: { field: 'methodId', values: [...NATIVELY_ADMITTED_METHOD_IDS].filter((methodId) => agentCallCredential(methodId, 'agent') === 'delegated') },
       // Irreversible methods, contract changes and sends to a recipient nobody allowed are the owner's to decide.
       ownerDecisions: operatorOwnerDecisions('methodId', 'input'),
     },
@@ -405,6 +412,10 @@ export function createAgentOperatorMethodTool(
           success: false,
           error: `operator method '${method.id}' is the owner's own act (answering a purchase window, typing a card security code, recording what the merchant history shows, or approving a purchase in advance). Nothing was sent. Ask the owner: /payments pending answers windows and codes, /payments approve <shop> --most <amount> <item> approves a purchase in advance, and the web UI Purchases panel does both. payments.purchase.status and payments.purchases.list can be read here to tell him where it stands; payments.checkout.begin and payments.purchase.cancel can be called here. Standing authorisations for scheduled purchases are his to add with /payments repeat; payments.standing.list can be read here, and a scheduled begin names one as standingId.`,
         };
+      }
+      // A capability's risk is read from the capability itself, by capability_run; through this tool it would not be.
+      if (method.id.startsWith('capabilities.')) {
+        return { success: false, error: `operator method '${method.id}' is reached through capability_run, which reads each capability's own risk; call capability_run with the capability's id instead. Nothing was sent.` };
       }
       if (PROFILE_TOOL_ONLY_METHOD_IDS.has(method.id)) {
         return {

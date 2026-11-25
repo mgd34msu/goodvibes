@@ -28,8 +28,5 @@ export const { handleIndicatorFocusToken, handlePromptTextToken, handlePromptKey
   openIndicator(state) {
     state.openAgentsView();
   },
-  openKeyIndicator(state) {
-    state.openAgentsView();
-  },
   mouseRowOffset: 0,
 });

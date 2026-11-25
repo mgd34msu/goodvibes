@@ -30,7 +30,7 @@ import { readOwnCertificate } from '../../daemon/lan-https/own-certificate.js';
 import { primaryLanAddress } from '../../daemon/lan-https/secure-address.js';
 import { DnsProviderError } from '../../daemon/lan-https/dns-provider.js';
 import {
-  SECURE_ADDRESS_CHOICES, SECURE_ADDRESS_GROUP_LINE, SECURE_ADDRESS_INTRO, SECURE_ADDRESS_LEAD_LINE, SECURE_ADDRESS_REISSUE_LINE, SECURE_ADDRESS_REISSUE_TITLE, secureAddressNodeLine,
+  SECURE_ADDRESS_GROUP_LINE, SECURE_ADDRESS_INTRO, SECURE_ADDRESS_LEAD_LINE, SECURE_ADDRESS_REISSUE_TITLE, secureAddressChoicesFor, secureAddressReissueLine, secureAddressNodeLine,
 } from '../../daemon/lan-https/secure-address-words.js';
 
 export interface SecureAddressRouteDeps {
@@ -62,9 +62,13 @@ async function status(deps: SecureAddressRouteDeps): Promise<Record<string, unkn
   const groupLines = following
     ? [secureAddressNodeLine(following.name)]
     : facts.group.followers.length > 0 ? [SECURE_ADDRESS_LEAD_LINE, SECURE_ADDRESS_GROUP_LINE] : [];
+  // A notice no owner channel carried (a node's own authority set aside): shown at the top of the screen, which marks it given.
+  const notice = service.takeScreenNotice();
   return {
+    ...(notice ? { notice } : {}),
     intro: SECURE_ADDRESS_INTRO,
-    choices: SECURE_ADDRESS_CHOICES.map((choice) => ({ ...choice })),
+    // On the lead of a group, the ways say what differs there: what GoodVibes' own certificate covers, what is sent where.
+    choices: secureAddressChoicesFor(service.leadsGroup()).map((choice) => ({ ...choice })),
     groupLines,
     node: following !== undefined,
     inForce: {
@@ -88,7 +92,7 @@ async function status(deps: SecureAddressRouteDeps): Promise<Record<string, unkn
     // The lead's "Issue a new certificate now" (secureAddress.reissue): shown where it can act.
     reissue: {
       title: SECURE_ADDRESS_REISSUE_TITLE,
-      line: SECURE_ADDRESS_REISSUE_LINE,
+      line: secureAddressReissueLine(service.leadsGroup(), facts.source),
       available: following === undefined && config.get('controlPlane.lanHttps.enabled') === true && facts.source !== 'own-files',
     },
   };
@@ -122,7 +126,12 @@ function createSetHandler(deps: SecureAddressRouteDeps): GatewayMethodHandler {
       try {
         // A token given here is stored only once Cloudflare accepted it for the name's zone.
         if (token) await service.storeCloudflareToken(token, domain);
-        else if (!(await service.status()).letsEncrypt.tokenStored) refuse('No Cloudflare API token is stored: give one with the permission Zone, DNS, Edit on the zone that holds the name (dash.cloudflare.com, My Profile, API Tokens, template "Edit zone DNS").', 'cloudflareToken');
+        else {
+          const known = (await service.status()).letsEncrypt;
+          // A secret store this computer could not read is said as such: the token the person gave is not asked for again.
+          if (!known.tokenStored && known.tokenUnreadable) refuse(known.tokenUnreadable, 'cloudflareToken');
+          if (!known.tokenStored) refuse('No Cloudflare API token is stored: give one with the permission Zone, DNS, Edit on the zone that holds the name (dash.cloudflare.com, My Profile, API Tokens, template "Edit zone DNS").', 'cloudflareToken');
+        }
       } catch (error) {
         if (error instanceof DnsProviderError) refuse(error.message, 'cloudflareToken');
         throw error;

@@ -167,6 +167,11 @@ export class CalendarConnector {
     return this.store.connectionState(provider);
   }
 
+  /** The words for a secret store this computer could not read (the connections are then unknown), or null. */
+  storeUnreadable(): Promise<string | null> {
+    return this.store.storeUnreadable();
+  }
+
   // --- Connect: authorization-code (loopback) flow --------------------------
 
   /** Begin the loopback auth-code flow; returns the URL to open and the waiter. */

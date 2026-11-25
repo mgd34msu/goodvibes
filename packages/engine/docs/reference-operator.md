@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `661`
+- Methods: `663`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -31489,6 +31489,312 @@ Import raw .ics content into the configured calendar. Requires explicit confirma
 }
 ```
 
+### capabilities
+
+#### `capabilities.find`
+
+What the caller needs, in words, in; three to five capabilities out, never the whole list. Step one picks the function group (the decision model when one is usable, keyword ranking otherwise); step two ranks the capabilities of that group, and of the nearest group when the best match is weak. Each comes with its id, one line on what it does, where it runs (daemon: here; session: in the program holding a conversation; terminal: only inside a terminal program for now), what a repeat does, its inputs (name, kind, required, choices, default) and its risk. Nothing runs.
+
+- Title: `Find A Capability`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "need": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "need"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "need": {
+      "type": "string"
+    },
+    "group": {
+      "type": "string",
+      "enum": [
+        "conversation",
+        "sessions",
+        "code",
+        "work",
+        "waiting",
+        "models",
+        "safety",
+        "tools",
+        "memory",
+        "messages",
+        "automation",
+        "devices",
+        "money",
+        "system"
+      ]
+    },
+    "groupChosenBy": {
+      "type": "string",
+      "enum": [
+        "decision",
+        "classic"
+      ]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "does": {
+            "type": "string"
+          },
+          "group": {
+            "type": "string",
+            "enum": [
+              "conversation",
+              "sessions",
+              "code",
+              "work",
+              "waiting",
+              "models",
+              "safety",
+              "tools",
+              "memory",
+              "messages",
+              "automation",
+              "devices",
+              "money",
+              "system"
+            ]
+          },
+          "runsIn": {
+            "type": "string",
+            "enum": [
+              "daemon",
+              "session",
+              "terminal"
+            ]
+          },
+          "repeat": {
+            "type": "string",
+            "enum": [
+              "safe",
+              "unsafe"
+            ]
+          },
+          "inputs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "kind": {
+                  "type": "string"
+                },
+                "required": {
+                  "type": "boolean"
+                },
+                "about": {
+                  "type": "string"
+                },
+                "choices": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "default": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "kind",
+                "required",
+                "about"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "risk": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "does",
+          "group",
+          "runsIn",
+          "inputs",
+          "risk"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "need",
+    "group",
+    "groupChosenBy",
+    "capabilities"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `capabilities.run`
+
+Runs one capability by id with its inputs (names and values as capabilities.find lists them), as the same act would run from any other source: the inputs are checked against its definition, its effects are admitted for the caller, and then a person's own request (a sign-in, a paired device or an app on this machine stating a person asked) runs at once, a call the Agent makes after its own gate admitted it runs, and any other caller's call is decided under the owner's permission mode (an act that loosens a protection or cannot be undone is put to the owner and opens on No). A capability with its own method runs through that method. workingDirectory is the caller's project (a hooks file, a project secret store); program is the terminal program asking (tui or agent). The answer is the text a person reads (detail: the capability's own words without its done line), the facts a script reads (never a secret value), the risk and what a repeat of this capability does.
+
+- Title: `Run A Capability`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {},
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    },
+    "workingDirectory": {
+      "type": "string"
+    },
+    "program": {
+      "type": "string",
+      "enum": [
+        "tui",
+        "agent"
+      ]
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "text": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "data": {
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "number"
+          },
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "null"
+          },
+          {},
+          {
+            "type": "array",
+            "items": {}
+          }
+        ]
+      }
+    },
+    "risk": {
+      "type": "string"
+    },
+    "repeat": {
+      "type": "string",
+      "enum": [
+        "safe",
+        "unsafe"
+      ]
+    },
+    "method": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "ok",
+    "text",
+    "risk"
+  ],
+  "additionalProperties": false
+}
+```
+
 ### channels
 
 #### `channels.accounts.action.default`
@@ -31639,6 +31945,9 @@ Run a lifecycle action on the default channel account for a surface.
                         "type": "string"
                       },
                       "configured": {
+                        "type": "boolean"
+                      },
+                      "resolved": {
                         "type": "boolean"
                       },
                       "source": {
@@ -31984,6 +32293,9 @@ Run a lifecycle action on a specific channel account.
                       "configured": {
                         "type": "boolean"
                       },
+                      "resolved": {
+                        "type": "boolean"
+                      },
                       "source": {
                         "type": "string"
                       }
@@ -32261,6 +32573,9 @@ Return a single channel account record.
           "configured": {
             "type": "boolean"
           },
+          "resolved": {
+            "type": "boolean"
+          },
           "source": {
             "type": "string"
           }
@@ -32423,6 +32738,9 @@ Return channel account lifecycle posture.
                   "type": "string"
                 },
                 "configured": {
+                  "type": "boolean"
+                },
+                "resolved": {
                   "type": "boolean"
                 },
                 "source": {
@@ -32601,6 +32919,9 @@ Return account posture for a single channel surface.
                   "type": "string"
                 },
                 "configured": {
+                  "type": "boolean"
+                },
+                "resolved": {
                   "type": "boolean"
                 },
                 "source": {
@@ -34027,6 +34348,9 @@ Evaluate channel authorization and availability for a requested action.
                         "type": "string"
                       },
                       "configured": {
+                        "type": "boolean"
+                      },
+                      "resolved": {
                         "type": "boolean"
                       },
                       "source": {
@@ -37988,6 +38312,45 @@ Return status for channel plugins and provider-backed channels.
           "enabled": {
             "type": "boolean"
           },
+          "configured": {
+            "type": "boolean"
+          },
+          "credentialResolves": {
+            "type": "boolean"
+          },
+          "runtime": {
+            "type": "object",
+            "properties": {
+              "observable": {
+                "type": "boolean"
+              },
+              "running": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "reason": {
+                "type": "string"
+              },
+              "lastError": {
+                "type": "string"
+              },
+              "observedAt": {
+                "type": "number"
+              }
+            },
+            "required": [
+              "observable",
+              "running",
+              "reason"
+            ],
+            "additionalProperties": false
+          },
           "accountId": {
             "type": "string"
           },
@@ -38028,6 +38391,36 @@ Return status for channel plugins and provider-backed channels.
           "metadata"
         ],
         "additionalProperties": false
+      }
+    },
+    "health": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": {}
+            },
+            {
+              "type": "array",
+              "items": {}
+            }
+          ]
+        }
       }
     }
   },
@@ -41015,7 +41408,7 @@ Poll a standing watch immediately: returns the per-job report, whether a complet
 
 #### `cloudflare.credentials.verify`
 
-Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400) and a token Cloudflare rejects fails the call with Cloudflare's error. Changes nothing.
+Check that the API token (inline, by reference, or the stored one) is valid and return the account it belongs to. A missing token is refused with CLOUDFLARE_API_TOKEN_REQUIRED (400), a stored one this computer's secret store could not read with CLOUDFLARE_CREDENTIALS_UNREADABLE (412, the cause named, nothing asked for again), and a token Cloudflare rejects fails the call with Cloudflare's error. Changes nothing.
 
 - Title: `Validate Cloudflare Credentials`
 - Source: `builtin`
@@ -149125,14 +149518,14 @@ Return queued and leased remote work items.
 
 #### `secureAddress.get`
 
-What the Secure address screen shows: the four ways to give the daemon an https address for phones (Let's Encrypt for a domain you own, a certificate you made, Tailscale, GoodVibes' own certificate), each with what it does, what it needs from the person, what the phone gains and what is sent where; which one is in force and what the https listener serves now (address, names, end date, or why it does not serve); Let's Encrypt's last attempt, the address records written and this machine's own lookup of the name (a router that refuses local answers is named, with what to change); the own files' check; the local authority's fingerprint and the page a phone installs it from; the Tailscale address while one is served; and the group: on a lead, the machines that follow it and the line that every machine serves with the same certificate; on a node, the line that its secure address comes from the lead and what it received. No key or token is ever returned.
+What the Secure address screen shows: the four ways to give the daemon an https address for phones (Let's Encrypt for a domain you own, a certificate you made, Tailscale, GoodVibes' own certificate), each with what it does, what it needs from the person, what the phone gains and what is sent where; which one is in force and what the https listener serves now (address, names, end date, or why it does not serve); Let's Encrypt's last attempt, the address records written and this machine's own lookup of the name (a router that refuses local answers is named, with what to change); the own files' check; the local authority's fingerprint and the page a phone installs it from; the Tailscale address while one is served; and the group: on a lead, the machines that follow it and the line that every machine serves with the same certificate; on a node, the line that its secure address comes from the lead and what it received. On a lead the ways say what differs there (GoodVibes' own certificate covers the group's machines; a certificate you made and GoodVibes' own are sent, sealed, with their key to the group's machines). `letsEncrypt.tokenUnreadable` says, with the cause, that the secret store on this computer could not be read when no token was read (the token is then not asked for again). `notice` is a notice no owner channel carried (a node's own certificate authority set aside while it follows its lead), shown at the top of the screen; returning it here marks it given. No key or token is ever returned. Needs read:remote, an owner-private read scope: a user without the admin role is not granted it.
 
 - Title: `Read The Secure Address`
 - Source: `builtin`
 - Access: `authenticated`
 - Transport: `ws`
 - HTTP: none
-- Scopes: `read:control-plane`
+- Scopes: `read:remote`
 - Emits events: none
 - Dangerous: `no`
 - Invokable: `yes`
@@ -149153,6 +149546,9 @@ What the Secure address screen shows: the four ways to give the daemon an https 
 {
   "type": "object",
   "properties": {
+    "notice": {
+      "type": "string"
+    },
     "intro": {
       "type": "string"
     },
@@ -149279,6 +149675,9 @@ What the Secure address screen shows: the four ways to give the daemon an https 
         },
         "tokenStored": {
           "type": "boolean"
+        },
+        "tokenUnreadable": {
+          "type": "string"
         },
         "issuing": {
           "type": "boolean"
@@ -149596,6 +149995,9 @@ The Secure address screen's "Issue a new certificate now", on the machine that s
     "status": {
       "type": "object",
       "properties": {
+        "notice": {
+          "type": "string"
+        },
         "intro": {
           "type": "string"
         },
@@ -149722,6 +150124,9 @@ The Secure address screen's "Issue a new certificate now", on the machine that s
             },
             "tokenStored": {
               "type": "boolean"
+            },
+            "tokenUnreadable": {
+              "type": "string"
             },
             "issuing": {
               "type": "boolean"
@@ -150063,6 +150468,9 @@ The Secure address screen's change. certificate lets-encrypt (domain, and cloudf
 {
   "type": "object",
   "properties": {
+    "notice": {
+      "type": "string"
+    },
     "intro": {
       "type": "string"
     },
@@ -150189,6 +150597,9 @@ The Secure address screen's change. certificate lets-encrypt (domain, and cloudf
         },
         "tokenStored": {
           "type": "boolean"
+        },
+        "tokenUnreadable": {
+          "type": "string"
         },
         "issuing": {
           "type": "boolean"

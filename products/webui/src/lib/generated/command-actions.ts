@@ -5260,6 +5260,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "actions": [
         {
           "id": "clear",
+          "capability": {
+            "id": "conversation.clear",
+            "group": "conversation",
+            "home": "session",
+            "repeat": "unsafe"
+          },
           "label": "Start a fresh conversation",
           "word": "",
           "line": "/clear",
@@ -7789,10 +7795,16 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "actions": [
         {
           "id": "compact",
+          "capability": {
+            "id": "conversation.compact",
+            "group": "conversation",
+            "home": "session",
+            "repeat": "unsafe"
+          },
           "label": "Compact the conversation now",
           "word": "",
           "line": "/compact",
-          "sentence": "The older messages are replaced by a summary, so the model has room again; /session compactions lists what each compaction removed.",
+          "sentence": "The conversation is made shorter: the older messages are replaced by a summary, so the model has room again; /session compactions lists what each compaction removed.",
           "done": "",
           "touches": "this-machine",
           "lasts": "not-a-change",
@@ -12757,6 +12769,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "actions": [
         {
           "id": "contracts",
+          "capability": {
+            "id": "hooks.contracts",
+            "group": "tools",
+            "home": "daemon",
+            "repeat": "safe"
+          },
           "label": "See the hook points and your hooks",
           "word": "contracts",
           "line": "/hooks contracts [<only those about...>]",
@@ -12766,7 +12784,11 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "Done from a terminal app."
+            "method": "capabilities.run",
+            "fields": {
+              "id": "=\"hooks.contracts\"",
+              "inputs.filter": "filter"
+            }
           },
           "inputs": [
             {
@@ -12912,6 +12934,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         },
         {
           "id": "enable",
+          "capability": {
+            "id": "hooks.enable",
+            "group": "tools",
+            "home": "daemon",
+            "repeat": "safe"
+          },
           "label": "Switch a hook on",
           "word": "enable",
           "line": "/hooks enable <hook>",
@@ -12922,7 +12950,11 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "risk": "none",
           "undoneBy": "disable",
           "operator": {
-            "terminalOnly": "Managed hooks are kept in this machine's hooks file."
+            "method": "capabilities.run",
+            "fields": {
+              "id": "=\"hooks.enable\"",
+              "inputs.hook": "hook"
+            }
           },
           "inputs": [
             {
@@ -12942,6 +12974,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         },
         {
           "id": "disable",
+          "capability": {
+            "id": "hooks.disable",
+            "group": "tools",
+            "home": "daemon",
+            "repeat": "safe"
+          },
           "label": "Switch a hook off",
           "word": "disable",
           "line": "/hooks disable <hook>",
@@ -12952,7 +12990,11 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "risk": "none",
           "undoneBy": "enable",
           "operator": {
-            "terminalOnly": "Managed hooks are kept in this machine's hooks file."
+            "method": "capabilities.run",
+            "fields": {
+              "id": "=\"hooks.disable\"",
+              "inputs.hook": "hook"
+            }
           },
           "inputs": [
             {
@@ -15125,7 +15167,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             "fields": {
               "username": "user",
               "password": "password",
-              "roles": "role"
+              "roles": "role:lines"
             }
           },
           "inputs": [
@@ -18944,7 +18986,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "operator": {
             "method": "memory.records.links.add",
             "fields": {
-              "fromId": "from",
+              "id": "from",
               "toId": "to",
               "relation": "relation"
             }
@@ -19094,6 +19136,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         },
         {
           "id": "explain",
+          "capability": {
+            "id": "memory.explain",
+            "group": "memory",
+            "home": "daemon",
+            "repeat": "safe"
+          },
           "label": "See what memory a task would be given",
           "word": "explain",
           "line": "/memory explain [--scope <files it would change>]... <task...>",
@@ -19103,7 +19151,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "lasts": "not-a-change",
           "risk": "none",
           "operator": {
-            "terminalOnly": "It is worked out from this app's own memory store."
+            "method": "capabilities.run",
+            "fields": {
+              "id": "=\"memory.explain\"",
+              "inputs.task": "task",
+              "inputs.paths": "paths"
+            }
           },
           "inputs": [
             {
@@ -28686,7 +28739,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "when",
               "label": "Describe it",
-              "help": "In your words, such as every weekday at 9am",
+              "help": "In your words, such as every weekday at 9am, nightly at 2am or hourly",
               "kind": "text",
               "freeTextReason": "your own words for when",
               "required": true,
@@ -29365,7 +29418,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
             {
               "id": "when",
               "label": "Describe it",
-              "help": "In your words, such as every weekday at 9am",
+              "help": "In your words, such as every weekday at 9am, nightly at 2am or hourly",
               "kind": "text",
               "freeTextReason": "your own words for when",
               "required": {
@@ -29594,6 +29647,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
         },
         {
           "id": "set-secret",
+          "capability": {
+            "id": "secrets.set",
+            "group": "safety",
+            "home": "daemon",
+            "repeat": "safe"
+          },
           "label": "Store a secret",
           "word": "set",
           "line": "/secrets set <name> [<value>] [--scope <where to keep it>] [--storage <how to keep it>]",
@@ -29604,7 +29663,14 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "risk": "none",
           "undoneBy": "delete-secret",
           "operator": {
-            "terminalOnly": "Secrets are kept by the app that reads them; manage them in a terminal app."
+            "method": "capabilities.run",
+            "fields": {
+              "id": "=\"secrets.set\"",
+              "inputs.key": "key",
+              "inputs.value": "value",
+              "inputs.scope": "scope",
+              "inputs.storage": "storage"
+            }
           },
           "inputs": [
             {
@@ -36801,6 +36867,12 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "actions": [
         {
           "id": "undo",
+          "capability": {
+            "id": "conversation.undo",
+            "group": "conversation",
+            "home": "session",
+            "repeat": "unsafe"
+          },
           "label": "Undo the last step",
           "word": "",
           "line": "/undo [<what>]",
@@ -37114,7 +37186,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "operator": {
             "method": "config.set",
             "fields": {
-              "value": "usd"
+              "key": "=\"behavior.budgetAlertUsd\"",
+              "value": "usd:number"
             }
           },
           "inputs": [
@@ -37135,7 +37208,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "id": "attribution",
           "label": "See cost by who spent it",
           "word": "by-source",
-          "line": "/usage by-source [<over>] [--as <as>]",
+          "line": "/usage by-source [<over>] [--as <as>] [--by <split by>]",
           "sentence": "Shows what the daemon spent, split by agent, model, provider and the other ways it records cost.",
           "done": "",
           "touches": "reads",
@@ -37144,7 +37217,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "operator": {
             "method": "cost.attribution.get",
             "fields": {
-              "window": "window"
+              "window": "window",
+              "dimension": "by"
             }
           },
           "inputs": [
@@ -37192,6 +37266,49 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
               },
               "typed": {
                 "flag": "--as"
+              }
+            },
+            {
+              "id": "by",
+              "label": "Split by",
+              "help": "Which way to split it when one split is asked for (the web UI, a script, a model)",
+              "kind": "choice",
+              "choices": [
+                {
+                  "value": "model",
+                  "label": "Model"
+                },
+                {
+                  "value": "provider",
+                  "label": "Provider"
+                },
+                {
+                  "value": "agent",
+                  "label": "Agent"
+                },
+                {
+                  "value": "tool",
+                  "label": "Tool"
+                },
+                {
+                  "value": "hook",
+                  "label": "Hook"
+                },
+                {
+                  "value": "mcp",
+                  "label": "Tool server"
+                },
+                {
+                  "value": "session",
+                  "label": "Session"
+                }
+              ],
+              "required": {
+                "default": "model",
+                "defaultMeans": "by model"
+              },
+              "typed": {
+                "flag": "--by"
               }
             }
           ]
@@ -38558,7 +38675,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "operator": {
             "method": "contracts.reply",
             "fields": {
-              "id": "workstream",
+              "contractId": "workstream",
               "escalationId": "question",
               "text": "answer"
             }
@@ -38617,7 +38734,7 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "operator": {
             "method": "contracts.retryUnit",
             "fields": {
-              "id": "workstream",
+              "contractId": "workstream",
               "unitId": "step"
             }
           },
@@ -38665,8 +38782,8 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
           "operator": {
             "method": "contracts.budget",
             "fields": {
-              "id": "workstream",
-              "maxCostUsd": "dollars"
+              "contractId": "workstream",
+              "maxCostUsd": "dollars:number"
             }
           },
           "inputs": [
@@ -39701,7 +39818,17 @@ export const COMMAND_ACTIONS: CommandActionsSnapshot = {
       "terminalOnly": "Held calls belong to the terminal session that held them."
     },
     "hooks.managed": {
-      "terminalOnly": "Managed hooks are kept in this machine's hooks file."
+      "method": "capabilities.run",
+      "input": {
+        "id": "hooks.contracts"
+      },
+      "rows": {
+        "from": "data.managed",
+        "value": "name",
+        "label": "name",
+        "detail": "detail",
+        "state": "state"
+      }
     },
     "hooks.managed-entries": {
       "terminalOnly": "Managed hooks are kept in this machine's hooks file."

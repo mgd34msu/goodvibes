@@ -61,6 +61,7 @@ import {
 } from './manager-runtime-delivery.js';
 import {
   emitAutomationManagerJobAutoDisabled,
+  emitAutomationManagerJobRemoved,
   emitAutomationManagerJobCreated,
   emitAutomationManagerJobUpdated,
   emitAutomationManagerRunCompleted,
@@ -421,6 +422,8 @@ export class AutomationManager {
     const removed = this.jobs.get(jobId);
     this.jobs.delete(jobId);
     removeAutomationJobFromRuntime(this.runtimeDispatch, jobId, `automation.${reason}`);
+    // A list that shows the job (a place, the web UI) reads again on this, wherever it was removed from.
+    if (removed) emitAutomationManagerJobRemoved(this.runtimeBus, removed, jobId, reason);
     // Removed in the group, for good: no machine runs or lists it again.
     let groupRemoval: Promise<void> = Promise.resolve();
     if (removed && this.sharedWithGroup(removed) && this.group?.shared()) {

@@ -60,6 +60,14 @@ export function modelWorkspaceTargetLine(info: ModelPickerTargetInfo | null): st
   return `${info.description}${state}`;
 }
 
+/** The grouping key as the key table binds it (`model-picker-group`), set by the program each frame. */
+let groupKeyLabel = 'ctrl+g g';
+
+/** Keep the filter row's grouping key in step with the key table; an unbound action hides it. */
+export function setModelPickerGroupKey(label: string): void {
+  groupKeyLabel = label === '(unbound)' ? '' : label.toLowerCase();
+}
+
 /** The filter keys with what each is set to now, for the row under the search field. */
 export function modelWorkspaceFilterRow(picker: Pick<ModelPickerModal, 'categoryFilter' | 'capabilityFilter' | 'availableOnly' | 'benchmarkSort' | 'groupBy'>): string {
   return [
@@ -67,7 +75,7 @@ export function modelWorkspaceFilterRow(picker: Pick<ModelPickerModal, 'category
     `ctrl+k needs: ${picker.capabilityFilter === 'none' ? 'any' : picker.capabilityFilter}`,
     `ctrl+a ${picker.availableOnly ? 'usable only' : 'all models'}`,
     `ctrl+b sort: ${picker.benchmarkSort === 'none' ? 'off' : picker.benchmarkSort}`,
-    `ctrl+g by: ${picker.groupBy}`,
+    ...(groupKeyLabel ? [`${groupKeyLabel} by: ${picker.groupBy}`] : []),
   ].join('  ');
 }
 

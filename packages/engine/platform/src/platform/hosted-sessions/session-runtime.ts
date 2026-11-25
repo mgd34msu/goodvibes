@@ -316,6 +316,8 @@ export function createHostedSessionRuntime(options: HostedSessionRuntimeOptions)
     ...(ownerQuestions ? { ownerQuestions } : {}),
     ...(workPlanHere ? { workPlan: workPlanHere } : {}),
     ...(options.triggers ? { triggers: options.triggers } : {}),
+    // A terminal-app session finds and runs GoodVibes' own capabilities; the Agent's turn brings its own pair.
+    ...(options.floor.capabilityTools && !options.surfaceTurn ? { capabilityTools: options.floor.capabilityTools } : {}),
     // Shared per WORKSPACE, deliberately: two sessions editing one tree must
     // agree about the file they both just wrote (see workspace-floor.ts).
     fileCache: services.fileCache,

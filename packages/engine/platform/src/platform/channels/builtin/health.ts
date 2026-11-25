@@ -31,6 +31,7 @@ import type {
   ChannelSurface,
 } from '../types.js';
 import { builtinSendCredentials } from './setup-schema.js';
+import { SECRET_STORE_UNREADABLE } from '../../config/secret-store-unreadable.js';
 
 /**
  * Surfaces whose inbound path is a webhook this daemon merely registers.
@@ -258,6 +259,10 @@ export function builtinHealthState(
 function describeUnresolvedCredentials(account: ChannelAccountRecord, facts: BuiltinCredentialFacts): string {
   const fields = facts.unresolved.map((secret) => secret.label);
   const named = fields.length > 0 ? fields.join(', ') : 'its credential';
+  // A store this computer could not read: the credential is unknown, never "not stored", and not asked for again.
+  if (facts.unresolved.some((secret) => secret.source === 'unreadable')) {
+    return `${account.label} cannot send now: ${SECRET_STORE_UNREADABLE}, so ${named} could not be read; nothing already given there is asked for again.`;
+  }
   return `${account.label} is configured but cannot send: ${named} names a secret that does not resolve in the store `
     + 'this process reads. A goodvibes://secrets/... reference pointing at a key held in another surface\'s store '
     + '(or an empty store) reads as configured and delivers nothing. Put the secret in THIS surface\'s store, or '

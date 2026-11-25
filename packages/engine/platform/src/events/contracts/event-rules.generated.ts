@@ -124,6 +124,10 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
   AUTOMATION_JOB_ENABLED: {
     jobId: { kind: 'string' },
   },
+  AUTOMATION_JOB_REMOVED: {
+    jobId: { kind: 'string' },
+    reason: { kind: 'string' },
+  },
   AUTOMATION_JOB_UPDATED: {
     jobId: { kind: 'string' },
     changedFields: { kind: 'string[]' },

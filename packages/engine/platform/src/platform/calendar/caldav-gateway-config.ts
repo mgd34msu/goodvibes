@@ -31,6 +31,7 @@
 import { revealOrNull, type Secret } from '../security/secret.js';
 import { GatewayVerbError } from '../control-plane/routes/gateway-verb-error.js';
 import { daemonSecretKeyFor } from '../config/daemon-secret-keys.js';
+import { unreadableSecretStore, type StoredSecretReader } from '../config/secret-store-unreadable.js';
 
 /**
  * Secret-store names a calendar password reference may point at. The reference
@@ -56,6 +57,8 @@ export interface CalDavSecretPort {
   resolveRef(ref: string): Promise<string | null>;
   /** The secret a config key implies (`daemonSecretKeyFor`). */
   resolveConfigSecret(configKey: string): Promise<string | null>;
+  /** After a password read as absent: the words for a secret store this computer could not read, or null (config/secret-store-unreadable.ts). */
+  whyUnreadable?(ref: string | null, configKey: string): Promise<string | null>;
 }
 
 export interface CalDavGatewayConfig {
@@ -73,27 +76,34 @@ export interface CalDavGatewayConfig {
  * derivation cannot drift from the one `setup-plan.ts` writes with.
  */
 export function createCalDavSecretPort(
-  secretsManager: { get(key: string): Promise<Secret | null> },
+  secretsManager: { get(key: string): Promise<Secret | null> } & StoredSecretReader,
 ): CalDavSecretPort {
+  // `goodvibes://secrets/<provider>/<key>`, the key is the last segment,
+  // percent-decoded, exactly as `buildGoodVibesSecretRef` wrote it. Any
+  // other string is taken as a bare store key.
+  const keyOf = (ref: string): string | null => {
+    const normalized = ref.trim();
+    try {
+      return normalized.startsWith('goodvibes://secrets/')
+        ? decodeURIComponent(normalized.split('/').pop() ?? '')
+        : normalized;
+    } catch {
+      return null;
+    }
+  };
   return {
     async resolveRef(ref: string): Promise<string | null> {
-      const normalized = ref.trim();
-      // `goodvibes://secrets/<provider>/<key>`, the key is the last segment,
-      // percent-decoded, exactly as `buildGoodVibesSecretRef` wrote it. Any
-      // other string is taken as a bare store key.
-      let key: string;
-      try {
-        key = normalized.startsWith('goodvibes://secrets/')
-          ? decodeURIComponent(normalized.split('/').pop() ?? '')
-          : normalized;
-      } catch {
-        return null;
-      }
-      if (!key.startsWith(CALENDAR_SECRET_PREFIX)) return null;
+      const key = keyOf(ref);
+      if (key === null || !key.startsWith(CALENDAR_SECRET_PREFIX)) return null;
       return revealOrNull(await secretsManager.get(key), 'dispatch');
     },
     async resolveConfigSecret(configKey: string): Promise<string | null> {
       return revealOrNull(await secretsManager.get(daemonSecretKeyFor(configKey)), 'dispatch');
+    },
+    async whyUnreadable(ref: string | null, configKey: string): Promise<string | null> {
+      const key = ref === null ? daemonSecretKeyFor(configKey) : keyOf(ref);
+      if (key === null || (ref !== null && !key.startsWith(CALENDAR_SECRET_PREFIX))) return null;
+      return unreadableSecretStore(secretsManager, key, 'the CalDAV password');
     },
   };
 }
@@ -173,6 +183,12 @@ export async function resolveCalDavGatewayConfig(
   const password = passwordConfig
     ? await secrets.resolveRef(passwordConfig)
     : await secrets.resolveConfigSecret(CALDAV_PASSWORD_KEY);
+  // A secret store this computer could not read is said as such; the password the person gave is not asked for again.
+  const unreadable = password ? null : await secrets.whyUnreadable?.(passwordConfig ?? null, CALDAV_PASSWORD_KEY) ?? null;
+  if (unreadable) {
+    // Its own code: a client must not ask for a password the person already gave (CALENDAR_CREDENTIALS_MISSING asks).
+    throw new GatewayVerbError(`${unreadable} Nothing is read from CalDAV until the store can be read.`, 'CALENDAR_CREDENTIALS_UNREADABLE', 412);
+  }
   if (!password) {
     throw new GatewayVerbError(
       passwordConfig

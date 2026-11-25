@@ -4,8 +4,9 @@
  * review records, explain what a task would be given, keep memory as files in
  * its own repository, save it to a file or load one, and list or restore the
  * copies taken of it. Every read and write goes through the memory spine, so
- * with a daemon attached it acts on the daemon's store; `explain` and the
- * search index stay on this app's own store, as before.
+ * with a daemon attached it acts on the daemon's store; `explain` is the
+ * daemon's capability `memory.explain`, and the search index stays on this
+ * app's own store, as before.
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { atomicWriteFileSync, type ConfigManager } from '@goodvibes/engine/platform/platform/config';
@@ -37,6 +38,8 @@ import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native
 import { commandRefusal } from './command-confirmation.js';
 import { defineCommand, type DescribedCommand } from './command-actions/define.js';
 import { defineList, type ListRow } from './command-actions/lists.js';
+import { daemonCapabilityAction, type DaemonCapabilityBinding } from './command-actions/capability-actions.js';
+import { MEMORY_EXPLAIN } from '@goodvibes/engine/platform/platform/capabilities';
 import type { CommandActionContext, CommandDescription, FixedChoice, InputDescription } from './command-actions/types.js';
 import { VALID_CLASSES, VALID_REVIEW_STATES, VALID_SCOPES, resolveConfinedBundlePath, temporalStatusLabel } from './recall-shared.js';
 import { assertActorMayMarkReviewed } from './agent-turn/review-authority.js';
@@ -72,6 +75,8 @@ export interface MemoryCommandPolicy<Ctx> {
   readonly open: (ctx: Ctx) => void;
   /** The memory a turn (or an agent's turns) was given; undefined when this app does not record it. */
   readonly injections: ((ctx: Ctx, agentId: string) => string) | undefined;
+  /** How this app reaches the daemon, where "what memory a task would be given" is worked out. */
+  readonly daemon: DaemonCapabilityBinding<Ctx>;
 }
 
 /** The most records one read takes; a read that reaches it is not the whole store. */
@@ -478,7 +483,7 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
         sentence: '{from} will be linked to {to} as "{relation}" until you change it.',
         done: 'Linked {from} to {to} ({relation}).',
         touches: 'this-machine', lasts: 'kept', risk: 'none',
-        operator: { method: 'memory.records.links.add', fields: { fromId: 'from', toId: 'to', relation: 'relation' } },
+        operator: { method: 'memory.records.links.add', fields: { id: 'from', toId: 'to', relation: 'relation' } },
         example: { from: 'mem-1', to: 'mem-2', relation: 'supersedes' },
         async run(values, ctx) {
           const link = await spineOf(ctx).link(values.from!, values.to!, values.relation!);
@@ -511,21 +516,8 @@ function describeMemory<Ctx extends MemoryCommandContext>(policy: MemoryCommandP
           return [`Waiting for review (${queue.length}):`, ...queue.map((record) => `${recordLine(record)}  ${STATE_LABELS[record.reviewState] ?? record.reviewState}, ${record.confidence}%${record.staleReason ? `: ${record.staleReason}` : ''}`)].join('\n');
         },
       },
-      {
-        id: 'explain', label: 'See what memory a task would be given', word: 'explain',
-        inputs: [
-          { id: 'task', label: 'Task', help: 'The task, the way you would ask for it', kind: 'long-text', freeTextReason: 'your own words', required: true, typed: { tail: true } },
-          { id: 'paths', label: 'Files it would change', help: 'Paths the task would write, separated by commas', kind: 'path', freeTextReason: 'a path in this project', required: { default: '', defaultMeans: 'any' }, typed: { flag: '--scope', repeats: true } },
-        ],
-        sentence: 'Shows the reviewed memory that would be given to "{task}", and why.', done: '',
-        touches: 'reads', lasts: 'not-a-change', risk: 'none',
-        operator: { terminalOnly: 'It is worked out from this app\'s own memory store.' }, example: { task: 'add a login page' },
-        async run(values, ctx) {
-          const explanation = await localMemoryOf(ctx).explain(values.task!, (values.paths ?? '').split('\n').flatMap((entry) => entry.split(',')).map((path) => path.trim()).filter(Boolean));
-          if (explanation.injections.length === 0) return 'No reviewed project memory would be given to that task.';
-          return explanation.prompt ?? 'No reviewed project memory would be given to that task.';
-        },
-      },
+      // Moved to the daemon (capabilities/builtin/memory.ts), which reads the one memory store every program reads.
+      daemonCapabilityAction<Ctx>(MEMORY_EXPLAIN, policy.daemon),
       {
         id: 'see-injections', label: 'See what memory a turn was given', word: 'injections',
         inputs: [{ id: 'agent', label: 'Agent', help: 'An agent this session started', kind: 'text', freeTextReason: 'an agent id from /agents', required: { default: '', defaultMeans: 'this session\'s own turns' }, typed: { position: 1 } }],

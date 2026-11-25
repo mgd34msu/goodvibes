@@ -38,6 +38,7 @@ const CONNECTION_STATE_NOTE: Record<string, string> = {
   'refresh-due': 'connected (token refresh due)',
   'reconnect-needed': 'reconnect needed, run the connect command again',
   disconnected: 'disconnected',
+  unreadable: 'the secret store on this computer could not be read',
 };
 
 function defaultServiceFactory(ctx: CommandContext): CalendarOAuthService {
@@ -186,6 +187,9 @@ export async function calendarAccounts(
 ): Promise<string> {
   const service = factory(ctx);
   const accounts = await service.listAccounts();
+  // A store this computer could not read hides every account: said as such, never "None".
+  const unreadable = accounts.length === 0 ? await service.storeUnreadable() : null;
+  if (unreadable) return ['Connected calendar accounts', `  ${unreadable}`].join('\n');
   if (accounts.length === 0) {
     return [
       'Connected calendar accounts',

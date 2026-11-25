@@ -9,7 +9,8 @@ import { terminalOwnerQuestions } from './client/owner-questions.ts';
 import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
 import { remoteTriggerOperations } from '@goodvibes/engine/platform/platform/triggers';
 import { controlSurfacesFor } from './control-surfaces.ts';
-import { registerAgentOperatorMethodTool } from '@goodvibes/engine/terminal-shell/agent-turn/operator-method-tool';
+import { registerCapabilityTools } from '@goodvibes/engine/terminal-shell/agent-turn/capability-tools';
+import { askBoundHiddenValue, boundCapabilityCatalog, boundSessionCapabilities, onBoundCapabilityCatalogChange } from '@goodvibes/engine/terminal-shell/capability-host';
 import type { RuntimeServices } from './services.ts';
 
 /**
@@ -29,10 +30,17 @@ interface TuiTurnToolOptions {
 
 export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: RuntimeServices, options: TuiTurnToolOptions) {
   const registered = registerTerminalTurnTools(toolRegistry, services, options);
-  // The daemon's methods by id (the same tool the Agent and the daemon's own turns carry): what a person's
-  // screens do through the daemon, the model here does through this, each call admitted by the gate under
-  // the mode in force; the owner's own acts are refused (operator-method-tool.ts).
-  registerAgentOperatorMethodTool(toolRegistry, services.shellPaths, services.configManager);
+  // GoodVibes' own capabilities, found by need and run by id (the same two tools the Agent and the daemon's own
+  // turns carry): what a person does in this app's screens and through the daemon, the model does through these,
+  // each call admitted by the gate under the mode in force; the owner's own acts are refused (capability-tools.ts).
+  registerCapabilityTools(toolRegistry, services.shellPaths, services.configManager, {
+    catalog: boundCapabilityCatalog,
+    onCatalogChange: onBoundCapabilityCatalogChange,
+    askHidden: askBoundHiddenValue,
+    session: boundSessionCapabilities,
+    program: 'tui',
+    workingDirectory: () => services.workingDirectory,
+  });
   return registered;
 }
 

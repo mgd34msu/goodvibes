@@ -12,6 +12,7 @@ import type {
   InputDescription,
   ListRowsFromOutput,
 } from '@goodvibes/engine/terminal-shell/command-actions/data';
+import type { CapabilityDeclaration } from '@goodvibes/engine/platform/platform/capabilities';
 
 export type { ActionRisk, FixedChoice };
 
@@ -35,6 +36,8 @@ export interface ActionData extends Omit<ActionShape, 'inputs'> {
   readonly inputs: readonly InputData[];
   /** A question heading each form step, by step (index 0 is step 1). */
   readonly stepTitles?: readonly string[];
+  /** An action that has moved beside its handler: its capability declaration (id, group, home, what a repeat does). */
+  readonly capability?: CapabilityDeclaration;
 }
 
 export interface CommandActionsData {

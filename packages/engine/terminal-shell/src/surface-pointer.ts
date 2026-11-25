@@ -1,5 +1,14 @@
+/**
+ * surface-pointer.ts, the mouse over what was last painted, in both terminal
+ * programs: the top layer that dims the screen or has click targets (a kit
+ * modal: a place, the menu, a form) owns the pointer. A press and release on
+ * the same target clicks it (its `onClick`, then the keys it stands for); the
+ * wheel is three moves up or down; nothing clicks through a modal into the
+ * conversation underneath. With no such layer the token goes on as it came
+ * (the composer's own mouse route: selection, the status bar's keycaps).
+ */
 import type { InputToken } from '@goodvibes/engine/platform/platform/core';
-import type { SurfaceLayer } from '../renderer/surface-kit.ts';
+import type { SurfaceLayer } from './renderer/surface-kit.js';
 
 /** Hit-test the last painted frame, with the top modal owning the pointer. */
 export class SurfacePointer {
@@ -28,8 +37,8 @@ export class SurfacePointer {
   }
 }
 
+/** The key a click stands for, as a token (a one-character key is typed text). */
 export function pointerKey(name: string): InputToken {
   if (name.length === 1) return { type: 'text', value: name };
   return { type: 'key', name, logicalName: name, ctrl: false, meta: false, shift: false };
 }
-

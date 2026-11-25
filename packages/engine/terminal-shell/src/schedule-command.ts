@@ -154,7 +154,7 @@ function timingInputs(step: number, required: boolean): readonly InputDescriptio
       required: { default: 'describe', defaultMeans: required ? 'described in your words' : 'keep its timing' },
       typed: { impliedBy: { input: 'when', ifGiven: 'describe', ifNot: 'describe', orIfGiven: [{ input: 'at', value: 'at' }, { input: 'every', value: 'every' }, { input: 'cron', value: 'cron' }] } },
     },
-    { id: 'when', label: 'Describe it', help: 'In your words, such as every weekday at 9am', kind: 'text', freeTextReason: 'your own words for when', required: need('keep its timing'), typed: { flag: '--when' }, step, showWhen: { input: 'how', is: 'describe' } },
+    { id: 'when', label: 'Describe it', help: 'In your words, such as every weekday at 9am, nightly at 2am or hourly', kind: 'text', freeTextReason: 'your own words for when', required: need('keep its timing'), typed: { flag: '--when' }, step, showWhen: { input: 'how', is: 'describe' } },
     { id: 'at', label: 'At', help: 'A date and time such as 2026-12-01T09:00', kind: 'date-time', required: need('keep its timing'), typed: { flag: '--at' }, step, showWhen: { input: 'how', is: 'at' } },
     { id: 'every', label: 'Every', help: 'An interval such as 15m, 2h or 1d', kind: 'text', freeTextReason: 'an interval such as 15m', required: need('keep its timing'), typed: { flag: '--every' }, step, showWhen: { input: 'how', is: 'every' } },
     { id: 'cron', label: 'Pattern', help: 'Five cron fields, such as 0 9 * * 1-5', kind: 'text', freeTextReason: 'a cron expression', required: need('keep its timing'), typed: { flag: '--cron' }, step, showWhen: { input: 'how', is: 'cron' } },

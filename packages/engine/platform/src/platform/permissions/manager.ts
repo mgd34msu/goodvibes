@@ -39,7 +39,7 @@ import { extractPathArgs } from '../runtime/permissions/rules/path-scope.js';
 import { buildDurableRuleForDecision, buildRememberOptions, compileRules, sessionApprovalKey, type CompiledRules, type RememberTier } from './approval-rules.js';
 import { undoFactOf } from './ask-consequence.js';
 import { canonicalJson } from '../utils/target-ref.js';
-import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
+import { callCommands, callRecipients, changesMcpTrust, classifyCall, classifyPaths, declaredRecoverable, declaredValues, hostDecidesCall, ownerOnlyReason, recognizeOwnerOnly, type CallClass, type CallFacts, type CallRuleFact, type OwnerOnlyKind } from '../gate/classify.js';
 import { OWNER_ADDRESS_CONFIG_KEYS, splitRecipients } from '../security/owner-identity.js';
 import { isSecretReferenceValue } from '../config/secret-bearing-config-keys.js';
 import { resolveNotificationWebhookLocally } from '../integrations/notification-webhooks.js';
@@ -1669,6 +1669,7 @@ export class PermissionManager {
       recoverable: declaredRecoverable(i.definition, i.args),
       ownerOnly: i.ownerOnly, untrustedRead: i.untrustedRead, declaredReadOnly: i.declaredReadOnly,
       workspaceRestricted: this.gate.workspaceTrust?.isRestricted?.(),
+      hostDecides: hostDecidesCall(i.args, i.definition),
     };
   }
 
@@ -1730,6 +1731,7 @@ export class PermissionManager {
       case 'plan': return this.result(false, false, 'runtime_mode', 'plan_mode', analysis, { decision });
       case 'mode': return this.result(true, false, 'runtime_mode', 'mode_allow_all', analysis, { decision, preset: { preset: 'yolo', action: 'allow' } });
       case 'declared-effect': return this.result(true, false, 'config_policy', 'config_allow', analysis, { decision, detail: decision.reason });
+      case 'host': return this.result(true, false, 'config_policy', 'config_allow', analysis, { decision, detail: decision.reason });
       case 'rule': case 'owner-rule': {
         const [layer, allowCode, denyCode, persisted] = RULE_LAYERS[decided.rule?.source ?? 'tool-setting'];
         return this.result(decided.allow, persisted, layer, decided.allow ? allowCode : denyCode, analysis, { decision, detail: decision.reason });

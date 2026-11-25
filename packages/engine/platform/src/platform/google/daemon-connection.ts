@@ -17,7 +17,11 @@ import type { GoogleFilePort } from './credential-adoption.js';
 
 export interface DaemonGoogleConnectionDeps {
   readonly configManager: { get(key: never): unknown };
-  readonly secretsManager: { get(key: string): Promise<Secret | null> };
+  readonly secretsManager: {
+    get(key: string): Promise<Secret | null>;
+    /** Throws when the secret store this computer holds cannot be read (config/secrets.ts). */
+    getStored?(key: string): Promise<Secret | null>;
+  };
   readonly homeDirectory: string;
   /** Where the adopted credential files are read (the node file port in the daemon). */
   readonly files: GoogleFilePort;
@@ -56,7 +60,13 @@ export function daemonGoogleConnectionOwner(deps: DaemonGoogleConnectionDeps): G
         // connector reads every value through its own guard, so an absent
         // section reads as "not configured".
         configGet: (key) => deps.configManager.get(key as never),
-        secretGet: async (key) => revealOrNull(await deps.secretsManager.get(key), 'dispatch'),
+        // Absent from every source because the store could not be read: the stored read throws, so the connection is
+        // "could not be read" (google-tool's status), never "No Google credentials found on this machine".
+        secretGet: async (key) => {
+          const value = revealOrNull(await deps.secretsManager.get(key), 'dispatch');
+          if (value === null) await deps.secretsManager.getStored?.(key);
+          return value;
+        },
       },
       fetch: deps.fetch ?? { fetch: (url: string, init: RequestInit) => fetch(url, init) },
       // The repair the daemon installed for its store: a refused request starts the consent or the enable and is sent again.

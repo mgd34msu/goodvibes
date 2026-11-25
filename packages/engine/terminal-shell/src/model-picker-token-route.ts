@@ -218,7 +218,7 @@ export function createModelPickerTokenHandler<Context extends ModelPickerCommand
         } else if (token.logicalName === 'k') cycleCapabilityFilter(picker);
         else if (token.logicalName === 'a') picker.toggleAvailableOnly();
         else if (token.logicalName === 'b') picker.cycleBenchmarkSort();
-        else if (token.logicalName === 'g') picker.cycleGroupBy();
+        // Grouping is the key table's `model-picker-group` (the leader then g by default), Ctrl+G being the leader.
         // Pin and refresh work in both apps: Ctrl+R reads every provider's model list again (as /model refresh does).
         else if (token.logicalName === 'f') togglePin(state);
         else if (token.logicalName === 'r') {

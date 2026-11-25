@@ -8,8 +8,9 @@ import type { MemoryClass, MemoryScope } from '@goodvibes/engine/platform/platfo
 import { buildPinSuccessText } from '../../renderer/compaction-preview.ts';
 import { templateCommand } from './template-command.ts';
 import { summarizeError } from '@goodvibes/engine/platform/platform/utils/native-error-summary';
-import { undoLastRewind, redoLastRewind } from './rewind-runtime.ts';
-import { dropFileChange, redoLastFileChange, undoLastFileChange } from '@goodvibes/engine/terminal-shell/recovery-commands';
+import { redoLastRewind } from './rewind-runtime.ts';
+import { dropFileChange, redoLastFileChange } from '@goodvibes/engine/terminal-shell/recovery-commands';
+import { sessionCapabilityServices } from './session-capabilities.ts';
 
 export function registerSessionContentCommands(registry: CommandRegistry): void {
   registry.register(contentCommands.titleCommand);
@@ -57,16 +58,8 @@ export const contentCommands = createSessionContentCommands<CommandContext, Reco
 
 /** `/undo` and `/redo` are single-action commands shared with the other terminal app (terminal-shell/everyday-commands.ts). */
 const undoCommands = createUndoCommands<CommandContext>({
-  async undo(values, ctx) {
-    const print = (text: string) => ctx.print(text);
-    if (values.what === 'file') { undoLastFileChange(ctx.workspace.fileUndoManager, print); return; }
-    if (values.what === 'set-aside') { dropFileChange(ctx.workspace.fileUndoManager, 'undo', print); return; }
-    if (values.what === 'rewind')  return (await undoLastRewind(ctx)).message; 
-    refuseWhileTurnRuns(ctx, '/undo');
-    if (!ctx.session.conversationManager.undo()) throw commandRefusal('There is nothing to undo.', 'To take back the last file write or edit: /undo file');
-    ctx.renderRequest();
-    return 'Last turn undone; /redo brings it back.';
-  },
+  // The capability conversation.undo, run on this app's conversation (session-capabilities.ts).
+  undo: sessionCapabilityServices,
   async redo(values, ctx) {
     const print = (text: string) => ctx.print(text);
     if (values.what === 'file') { redoLastFileChange(ctx.workspace.fileUndoManager, print); return; }

@@ -189,7 +189,7 @@ Other notices are never drawn over the conversation: the status bar counts the u
 - Why a message was not sent and what to do, for example when the connected host refuses it because the workspace is not registered. The text stays in the composer.
 - The output of a `!` command: the command, its output and its exit status.
 
-The status bar is the terminal app's (see "Screen layout"): `Permissions:` and the mode in force in words with the `shift+tab` key, the unread notices with `ctrl+n`, `context 34%`, `branch main, changed` (only in a folder registered as a project with `goodvibes-agent workspaces register`; read at start and after each turn), `model <name>` and, in place of the terminal app's `ctrl+p menu`, the `ctrl+g workspace` keycap; a click on a segment opens its view, except the branch (the Agent has no changes view). A provider warning (a model you use stopped being free, a custom provider file that did not load) is said in the conversation, as in the terminal app. The header names the program, its version and the session. A hosted session's mode is its host's: the segment shows it, and `Shift+Tab` sends the change to the host. The status bar keeps one short chip for the power state (`sleep disabled`, `sleep held` or `keep-awake refused`); the full note, and a warning such as the sleep-edge hooks being off, is a notice in `/notifications`, posted when it changes.
+The status bar is the terminal app's (see "Screen layout"): `Permissions:` and the mode in force in words with the `shift+tab` key, the unread notices with `ctrl+n`, `context 34%`, `branch main, changed` (only in a folder registered as a project with `goodvibes-agent workspaces register`; read at start and after each turn), `model <name>` and, as in the terminal app, the `ctrl+g m menu` keycap (the menu of every place); a click on a segment opens its view, except the branch (the Agent has no changes view). A provider warning (a model you use stopped being free, a custom provider file that did not load) is said in the conversation, as in the terminal app. The header names the program, its version and the session. A hosted session's mode is its host's: the segment shows it, and `Shift+Tab` sends the change to the host. The status bar keeps one short chip for the power state (`sleep disabled`, `sleep held` or `keep-awake refused`); the full note, and a warning such as the sleep-edge hooks being off, is a notice in `/notifications`, posted when it changes.
 
 ### Keys
 
@@ -197,16 +197,21 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 
 | Action | Default key | What it does |
 | --- | --- | --- |
-| `copy-selection` | `Ctrl+Shift+C`, `F5` | Copy selected text. |
+| `leader` | `Ctrl+G` | Start a two-key shortcut, as in the terminal app ("The leader and the menu"). |
+| `open-menu` | `Ctrl+G` `m` | Open the menu of every place. |
+| `next-field`, `choose`, `back` | `Tab`, `Enter`, `Esc` | As in the terminal app. |
+| `move-up`, `move-down`, `move-left`, `move-right` | the arrows | Move. |
+| `copy-selection` | `Ctrl+G` `c`, `F5`, `Ctrl+Shift+C` | Copy selected text. |
 | `clear-cancel` | `Ctrl+C` | Clear the composer, cancel generation, twice to exit. |
 | `screen-clear` | `Ctrl+L` | Repaint. |
 | `command-palette` | `Ctrl+P` | Open help: every command and keyboard shortcut in one searchable list (the same as `?` and `/help`). |
-| `workspace-picker` | `Ctrl+G` | Open the Agent workspace. |
+| `workspace-picker` | `Ctrl+G` `w` | Open the Agent workspace. |
 | `workspace-close` | `Ctrl+X` | Close the Agent workspace. |
-| `workspace-close-all` | `Ctrl+Shift+X`, `Ctrl+\` | Close the Agent workspace. |
+| `workspace-close-all` | `Ctrl+G` `x`, `Ctrl+\` | Close the Agent workspace. |
 | `workspace-tab-next` | `Ctrl+]` | Next workspace category. |
 | `workspace-tab-prev` | `Ctrl+[` | Previous workspace category. |
-| `open-agents` | `Ctrl+O` | Open Your agents: what is running, what waits for the owner, what is scheduled, the background services. |
+| `open-agents` | `F2`, `Ctrl+O` | Open Your agents: what is running, what waits for the owner, what is scheduled, the background services. |
+| `scroll-page-up`, `scroll-page-down` | `PageUp`, `Ctrl+PageUp`; `PageDown`, `Ctrl+PageDown` | Scroll the transcript by a page. |
 | `history-search` | `Ctrl+R` | Reverse search of input history. |
 | `search` | `Ctrl+F` | Search the transcript. |
 | `block-copy` | `Ctrl+Y` | Copy the nearest block. |
@@ -217,23 +222,24 @@ The Agent's rebindable keys differ from the terminal app's. Its file is `~/.good
 | `next-error-line-end` | `Ctrl+E` | End of line, or the next error on an empty composer. |
 | `kill-line` | `Ctrl+K` | Kill to the end of the line. |
 | `clear-prompt` | `Ctrl+U` | Clear the composer. |
-| `undo`, `redo` | `Ctrl+Z`; `Ctrl+Shift+Z`, `Ctrl+^` | Undo or redo a composer edit. |
+| `undo`, `redo` | `Ctrl+Z`; `Ctrl+G` `z`, `Ctrl+^` | Undo or redo a composer edit. |
 | `paste` | `Ctrl+V` | Paste. |
-| `focus-work-tree` | `Alt+Up`, `Ctrl+Up` | Move onto the work tree. |
+| `focus-work-tree` | `Ctrl+G` `Up`, `Ctrl+Up` | Move onto the work tree. |
 | `cycle-permission-mode` | `Shift+Tab` | Cycle this session's permission mode, as in the terminal app. |
 | `open-notifications` | `Ctrl+N` | Open the notifications; the status bar counts the unread ones. |
-| `failure-other-model` | `Alt+O`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
-| `failure-details` | `Alt+I`, `F3` | On the newest failed turn: show what the provider said. |
-| `failure-retry` | `Alt+R`, `F12` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
-| `failure-sign-in` | `Alt+S`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
-| `next-session` | `Alt+N`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
-| `previous-session` | `Alt+P`, `Ctrl+_` | While the session chips show: the previous session. |
+| `failure-other-model` | `Ctrl+G` `o`, `F9` | On the newest failed turn: choose another model and send the prompt again. |
+| `failure-details` | `Ctrl+G` `i`, `F3` | On the newest failed turn: show what the provider said. |
+| `failure-retry` | `Ctrl+G` `r`, `F12` | On the newest failed turn: send the prompt again (a turn that already ran tools continues from their results). |
+| `failure-sign-in` | `Ctrl+G` `s`, `F4` | On the newest failed turn whose provider refused its key: open the provider sign-ins (`/auth`). |
+| `next-session` | `Ctrl+G` `n`, `Ctrl+Q` | While the session chips show: the next session (agent or process). |
+| `previous-session` | `Ctrl+G` `p`, `Ctrl+_` | While the session chips show: the previous session. |
+| `contract-question-ordinary` | `Ctrl+G` `q` | While a contract's question is on offer: send the next message as an ordinary one. |
+| `model-picker-group` | `Ctrl+G` `g` | In the model list: group it another way. |
 
-As in the terminal app, every Alt and Ctrl+Shift chord has a second default that macOS Terminal (no Alt by default) and terminals without the extended keyboard protocol still send.
+As in the terminal app, the actions that sat on an `Alt` or `Ctrl+Shift` chord are a leader shortcut by default, beside a second key every terminal sends; a chord can be bound back in `keybindings.json`. The leader is read over every screen, the places' keys are groups of the table (`place.<place>.<action>`), the model changes keys as the Keys place does (`keys.bind`, `keys.reset`, `keys.reset-all`), and rows, tabs and menu rows of a place can be clicked, as in the terminal app.
 
-The Agent has no command palette key, no `Alt` word-movement or kill-ring keys, and no `Alt+C`, `Alt+A`, `Alt+M` or `Alt+V`.
+The Agent has no word-movement or kill-ring keys, and no cancel-tool, keep-awake, memories-used or voice key.
 The old action names `panel-picker`, `panel-close`, `panel-close-all`, `panel-tab-next`, `panel-tab-prev` and `sidebar-toggle` are read as `workspace-picker`, `workspace-close`, `workspace-close-all`, `workspace-tab-next`, `workspace-tab-prev` and `open-agents`.
-`Ctrl+PageUp` and `Ctrl+PageDown` scroll by a page like `PageUp` and `PageDown`.
 
 ### Checkpoints need a registered workspace
 
@@ -477,7 +483,9 @@ To correct a fact, edit the record in place:
 To keep the old fact on record instead, mark it wrong and add the new one: `memory contradict <old-id> "Office moved to Denver"` (or `memory stale <old-id> <reason>` for a fact that is merely out of date), then `memory add fact "Office is in Denver" --scope project` and `memory review <new-id> reviewed --confidence 90` so it is applied. Inside the Agent these are `/memory review <id> contradicted --reason <reason>`, `/memory add fact <summary>`, `/memory review <id> reviewed --confidence 90`, `/memory remove <id>`.
 The model can also change a record's text in place: ask it (for example "correct the memory about my office: it is in Denver now"); its `memory` tool has an `update` action, which needs your request and the permission gate's admission like any change.
 
-#### `goodvibes-agent knowledge` (aliases `know`, `kb`), `ask`, `search` (alias `find`)
+#### `goodvibes-agent knowledge` (aliases `know`, `kb`), `ask`, `search`
+
+(`goodvibes-agent find <need>` is not a knowledge search: it finds the GoodVibes capability that does what you need, see `do` and `find` below.)
 
 Agent Knowledge is the Agent's own knowledge store on the connected host, under `/api/goodvibes-agent/knowledge/*`. It never reads the terminal app's knowledge or any other space.
 
@@ -498,6 +506,10 @@ Agent Knowledge is the Agent's own knowledge store on the connected host, under 
 Options that would target another space (`--space`, `--knowledge-space`, `--knowledge-space-id`, `--include-all-spaces`) are refused.
 Without a token: `Agent Knowledge error auth_required (authorization required)`, the route tried and the repair step; exit `1`.
 Inside the Agent, `/knowledge` is the terminal app's command on Agent Knowledge (a question naming another knowledge space is refused), plus `ingest-file <file>`, `ingest-artifact <artifact>`, `import-browser-history [--browsers <list>] [--sources history|bookmark] [--limit <n>] [--since-days <n>]` (the owner's only), `ingest-connector <connector> [--input ...|--path ...|--content ...]`, `map [words]`, `connectors`, `connector <connector>` and `connector-doctor <connector>`; bare, it opens the workspace's Knowledge section from `open`.
+
+#### `goodvibes-agent find`, `goodvibes-agent do`
+
+`find "<what you need>" [--output json]` names the three to five GoodVibes capabilities that do it (from the function group that serves the need), each with its id, inputs and risk; nothing runs. `do <capability id> [--input key=value ...] [--output json]` runs one by id through the connected daemon. A command you typed is the request, so it runs at once and prints what it did; a capability that acts on a conversation (clear, compact, undo) is refused in one line, since it runs inside the Agent's open chat. Exit `0` done (or found), `1` refused or failed, `2` bad usage. The same two verbs exist in `goodvibes` and `goodvibes-daemon`. `find` is not a knowledge search; that is `search`.
 
 #### `goodvibes-agent delegate` (alias `build`)
 
@@ -613,7 +625,7 @@ With no workspace at the default place: `No OpenClaw workspace found at the defa
 
 The Agent workspace is a full-screen view of categories, each a list of rows grouped by what a person does. It has no forms of its own: a row that does something names a slash command's action (shown in its Command column, such as `/memory add`), and `Enter` closes the workspace and opens that action's guided form, the same one the slash command opens (a row may fill some blanks in, such as the account of `/calendar use-app google`); a row's name is the action's own label. The rows come first; the pane under them says what the selected row will do (the action's sentence, or a setting's own description with its value and default as `/settings get` shows them) and, where the row's command has a report, that report's first lines, read by running it exactly as the command does, then in one sentence what the area is for. Every report is read by itself, in the background: those of Home and Work & Approvals at each start of the Agent (after the first frame), and those of any area as soon as it is shown. The screen is drawn at once, a report not in yet says `<command>: reading…`, and it fills in when it arrives. A reading is shared for 5 minutes, so moving between areas or opening the workspace again does not read it again; an older one is read again on the next opening; nothing runs on a timer. `Ctrl+R` reads every report, the host check and the work list again now. Coming back from a row's guided form that changed something reads that command's report again. An action's result names the time it arrived (`Action Result: Opened Research · 14:05`). A report that reaches past this computer (questions waiting on you, host tasks and processes, a mailbox, a provider) changes on its own, so once its reading is more than 5 minutes old its heading says so in the warning colour: `As /questions list showed it, read at 22:03, may be out of date: ctrl+r to read again:`. It is decided each time the screen is drawn (any key redraws it); nothing ticks. A report that reads only this computer (notes, skills, routines, personas, Agent homes, secrets, settings) lists stored things that change only when you change them, and a change made from the workspace reads it again, so it is never marked. The connected host's setup check runs on each opening (once its last reading is more than 5 minutes old), for a host on this computer or another, and the work list in Work & Approvals is kept live by its subscription from the moment the workspace opens, so it is never marked. The status line under the rows shows only once something has happened in the area. The heading of the rows (`Action  Command`) is in the accent colour while the arrow keys move in them, muted while they move in the area column. The report is in one of three states, each said in its own words: `<command>: reading…`, `As <command> showed it, read at 14:05:` with its lines (or "Nothing to show."), and `<command>: could not read it (tried at 14:05)` in the warning colour. When the connected daemon did not answer, it says `The daemon at <url> did not answer.` (a list that fell back says `Showing only what is held on this computer. Approvals and questions held by that daemon are not included.` and then `On this computer:` or `Nothing is waiting on this computer.`) and `GoodVibes reads this again when that daemon answers.`: the Agent's existing daemon check (every `watchers.heartbeatIntervalMs`, 30 s by default) sees it answer and every failed report is read again. Any other failure gives its reason and `GoodVibes reads this again the next time you open this area; ctrl+r to try now.`: a failed reading is never held as fresh, so it is read again when its area is shown again, when the workspace is opened and at the next start. Work & Approvals also shows the work view `/work open` shows. Nothing else is shown there. A setting row cycles a yes/no or a choice in place and opens the settings screen at that setting for a typed value or a `permissions.*` change; an area whose rows are all settings shows Setting, Default and Current columns, and a setting among action rows shows `now <value>`. A row that opens another area shows `/agent <area>` in its Command column, the command that opens that area; the other rows open a picker or say what to ask in the conversation.
 The title row names the Agent home the session runs in, the model it answers with and its provider, and the daemon it works with (`Agent home default · model rt-1 (rtfake) · daemon on this computer`; `, signed in with a subscription` after the provider for a stored sign-in; `daemon at <host:port>` when `daemon.connectedHost.url` is set). In a home other than the default one, the status bar shows `home <name>` too.
-It opens with `/agent [section]` or `Ctrl+G`; the Agent's status bar ends with the `ctrl+g workspace` keycap (a click opens the workspace), which gives way only after the model when the row is short. `/setup` opens one topic's rows of it at a time (below).
+It opens with `/agent [section]` or `Ctrl+G` `w` (the leader, then `w`); the Agent's status bar ends with the `ctrl+g m menu` keycap, the menu of every place, which the places replace this workspace's rows with as they are built. `/setup` opens one topic's rows of it at a time (below).
 `Ctrl+]` and `Ctrl+[` move between categories; `/` searches actions by name, category, command or detail; `Ctrl+X` or `Esc` closes it. The footer reads `a-z ask the assistant (Esc comes back)`, then move, pane, open, search and refresh.
 Typing a letter closes the workspace and puts the letter in the composer; while it is there, a row above the composer reads `Typing to the assistant · Esc: back to <area> (drops this letter)` (`keeps what you typed` once there is more than one letter).
 

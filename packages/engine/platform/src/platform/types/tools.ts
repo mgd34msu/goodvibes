@@ -128,6 +128,14 @@ export interface ToolOwnerDecisions {
   readonly contractChanges?: readonly string[] | undefined;
   /** For a value whose call sends as the owner, where its recipients sit in the call's arguments (`new-recipient`). */
   readonly recipients?: Readonly<Record<string, readonly ToolArgumentPath[]>> | undefined;
+  /** Values whose call loosens a protection (`loosen-security`): a capability whose own risk is that. */
+  readonly loosens?: readonly string[] | undefined;
+  /**
+   * For a value whose call loosens a protection only with some arguments (a
+   * capability whose chosen input raises its risk: a secret kept as plain
+   * text), the argument and the values that do (`loosen-security`).
+   */
+  readonly loosensWhen?: Readonly<Record<string, readonly { readonly path: ToolArgumentPath; readonly values: readonly string[] }[]>> | undefined;
 }
 
 /** A tool whose changes are recorded where the owner can undo them, except when a listed argument is present. */
@@ -197,8 +205,21 @@ export interface ToolDefinition {
    * is remembered when he chooses; only yolo runs it unasked.
    */
   dangerous?: boolean | undefined;
+  /**
+   * Reached only through other tools' nested calls (the daemon-method runner
+   * `capability_run` and the schedule tools call): never listed in a model
+   * request. Never sent to the model.
+   */
+  nestedOnly?: boolean | undefined;
   /** Calls of this tool that only the owner makes himself; see {@link ToolOwnerActs}. */
   ownerActs?: ToolOwnerActs | undefined;
+  /**
+   * Calls of this tool whose effect the host they are sent to decides itself, under the owner's mode, when the call
+   * arrives (a daemon method it admits natively for the Agent's credential): this gate admits such a call without
+   * deciding it a second time. The owner's own acts, his never-run rules, deny and ask rules, plan mode and a
+   * surface without command authority still apply here first.
+   */
+  hostDecides?: ToolOwnerActs | undefined;
   /** Calls of this tool the owner decides, and where a sending call's recipients sit; see {@link ToolOwnerDecisions}. */
   ownerDecisions?: ToolOwnerDecisions | undefined;
   /**

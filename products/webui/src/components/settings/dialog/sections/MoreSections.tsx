@@ -101,7 +101,8 @@ export function DecisionModelsSection() {
 
 /** The order a person meets the decision model's settings in: which model, then how it is reached, then its rules, then the alerts. */
 function decisionRowRank(key: string): number {
-  const order = ['judgment.model', 'judgment.backend', 'judgment.endpoint', 'judgment.policy', 'judgment.fallbacks', 'judgment.decisionDeadlineMs'];
+  // A decision model set aside (carried from "No Decision Model") is offered back before the choice of model.
+  const order = ['judgment.noDecisionModel', 'judgment.setAside', 'judgment.model', 'judgment.backend', 'judgment.endpoint', 'judgment.policy', 'judgment.fallbacks', 'judgment.decisionDeadlineMs'];
   const at = order.findIndex((prefix) => key === prefix || key.startsWith(`${prefix}.`));
   if (key.startsWith('judgment.volumeMonitor')) return 1000;
   return at === -1 ? 500 : at;

@@ -27,6 +27,7 @@ import { catalogFlagArity, catalogFlagsForCommand, resolveCatalogCommand } from 
 import type { CliCatalog, CliFlagKind, CommandFlagSpec, CommandSpec, EngineParseResult, RejectedFlagSpec } from '@goodvibes/engine/terminal-shell';
 import type { DaemonCliFlags } from './types.ts';
 import { SERVICE_STATUS_QUERY, WEBUI_BINDING_QUERY } from './machine-contracts.ts';
+import { CAPABILITY_CLI_HELP } from '@goodvibes/engine/terminal-shell/capability-cli-help';
 
 /** Every command this binary has. There is no other. */
 export type DaemonCommand =
@@ -39,6 +40,8 @@ export type DaemonCommand =
   | 'stop-service'
   | 'restart-service'
   | 'status'
+  | 'do'
+  | 'find'
   | 'pair'
   | 'sessions'
   | 'mcp'
@@ -516,6 +519,40 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     subcommands: [],
   },
   {
+    name: 'do',
+    aliases: [],
+    summary: CAPABILITY_CLI_HELP.do.line,
+    usage: 'goodvibes-daemon do <capability id> [--input key=value ...] [--json] [--host <http(s)://name>] [--port <n>] [--token <t>]',
+    detail: [
+      'Run one capability (an id from goodvibes-daemon find) with its inputs, as the',
+      'running daemon\'s capabilities.run. A command you typed is the request, so it',
+      'runs at once and prints what it did; a secret value is never printed. A',
+      'capability that acts on a conversation (clear, compact, undo) is refused here:',
+      'it runs in the terminal app or the Agent. With --json the answer is one document.',
+      '',
+      'Exit 0 when it was done, 1 when it was refused or failed, 2 for bad usage.',
+    ],
+    flags: [JSON_FLAG, ...REMOTE_TARGET_FLAGS],
+    // One input, key=value; repeatable. Read by the command itself from its arguments.
+    options: [{ tokens: ['--input', '-i'], takesValue: true }],
+    passthrough: false,
+    subcommands: [],
+  },
+  {
+    name: 'find',
+    aliases: [],
+    summary: CAPABILITY_CLI_HELP.find.line,
+    usage: 'goodvibes-daemon find "<what you need>" [--json] [--host <http(s)://name>] [--port <n>] [--token <t>]',
+    detail: [
+      'Say what you need in words: the running daemon\'s capabilities.find picks the',
+      'function group and returns three to five capabilities with their ids, inputs',
+      'and risk. Nothing runs. With --json the answer is one document.',
+    ],
+    flags: [JSON_FLAG, ...REMOTE_TARGET_FLAGS],
+    passthrough: false,
+    subcommands: [],
+  },
+  {
     name: 'pair',
     aliases: ['qr', 'qrcode'],
     summary: 'Print the pairing link and QR code again, or mint one on a remote daemon.',
@@ -594,15 +631,19 @@ export const DAEMON_COMMANDS: readonly DaemonCommandSpec[] = [
     summary: 'Serve the operator surface of a running daemon to an MCP client over stdio.',
     usage: 'goodvibes-daemon mcp serve [--categories <list|all>] [--allow-write] [--allow-destructive] [--host <http(s)://name>] [--port <n>] [--token <t>]',
     detail: [
-      'mcp serve              speak the Model Context Protocol on stdin/stdout, with one tool',
-      '                       per operator method of the daemon it connects to (session',
-      '                       lifecycle first), so an MCP client can drive GoodVibes.',
+      'mcp serve              speak the Model Context Protocol on stdin/stdout, so an MCP',
+      '                       client can drive GoodVibes through the daemon it connects to.',
       '',
-      'By default it serves the agent slice: the sessions, tasks, contracts and approvals',
-      'methods that read, plus creating a session, sending it a message and steering it',
-      '(the exact number is printed at start). --categories picks other operator families (comma separated or',
-      'repeated; `all` for every family), --allow-write adds the methods that change',
-      'state, and --allow-destructive adds the methods the contract marks dangerous.',
+      'By default it serves two tools: capability_find (say what you need; a few',
+      'capabilities come back with their inputs and risk) and capability_run (run one',
+      'by id), which reach every capability of GoodVibes. A run is decided under your',
+      'permission mode by the daemon; an act that loosens a protection or cannot be',
+      'undone is put to you. With --categories, --allow-write or --allow-destructive it',
+      'serves one tool per operator method instead (session lifecycle first): the agent',
+      'slice of sessions, tasks, contracts and approvals reads by default, --categories',
+      'picks other operator families (comma separated or repeated; `all` for every',
+      'family), --allow-write adds the methods that change state, and',
+      '--allow-destructive adds the methods the contract marks dangerous.',
       'The number of tools served is printed on stderr at start.',
       '',
       'A client that cancels a tool call (notifications/cancelled) stops the request to',

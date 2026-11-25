@@ -33,6 +33,7 @@ export {
   type McpToolDefinition,
   type OperatorMcpToolSet,
 } from './tool-definitions.js';
+export { CAPABILITY_MCP_INSTRUCTIONS, CAPABILITY_MCP_TOOLS, CAPABILITY_MCP_TOOL_SET } from './capability-tools.js';
 export {
   SESSION_LIFECYCLE_TOOLS,
   SESSION_LIFECYCLE_METHOD_IDS,

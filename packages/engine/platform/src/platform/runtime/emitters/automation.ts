@@ -32,6 +32,14 @@ export function emitAutomationJobUpdated(
   bus.emit('automation', automationEvent('AUTOMATION_JOB_UPDATED', data, ctx));
 }
 
+export function emitAutomationJobRemoved(
+  bus: RuntimeEventBus,
+  ctx: EmitterContext,
+  data: { jobId: string; reason: string },
+): void {
+  bus.emit('automation', automationEvent('AUTOMATION_JOB_REMOVED', data, ctx));
+}
+
 export function emitAutomationJobEnabled(
   bus: RuntimeEventBus,
   ctx: EmitterContext,

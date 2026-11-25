@@ -574,7 +574,13 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
     workingDirectory,
     homeDirectory,
     credentials: {
-      resolveRef: (ref) => resolveSecretInput(ref, { resolveLocalSecret: (key) => secretsManager.get(key), homeDirectory: secretsManager.getGlobalHome(), providers: secretsManager.getSecretProviderHostConfig() }, 'dispatch'),
+      // A secret absent because the store could not be read throws (getStored), so a backend says "could not read"
+      // (REMOTE_BACKEND_CREDENTIAL_FAILED) instead of "missing".
+      resolveRef: (ref) => resolveSecretInput(ref, { resolveLocalSecret: async (key) => {
+        const value = await secretsManager.get(key);
+        if (value === null) await secretsManager.getStored(key);
+        return value;
+      }, homeDirectory: secretsManager.getGlobalHome(), providers: secretsManager.getSecretProviderHostConfig() }, 'dispatch'),
     },
     logger,
     isPairedPeer: (peerId) => distributedRuntime.getPeer(peerId) !== null,
@@ -726,7 +732,8 @@ export function buildRuntimeGraph<X extends object>(product: ProductComposition<
   scope.registry.add('repository hooks file trust', hookWorkbench.bindTrustGate(repositoryGate));
   scope.registry.add('repository MCP file trust', mcpRegistry.bindRepositoryTrust(repositoryGate));
   const permissionManager = createBrokeredPermissionManager({
-    workspaceTrust: workspaceTrustManager ?? null,
+    // A product with no workspace trust gate still honours a headless run's refusal (WorkspaceTrustManager.refuseForThisRun).
+    workspaceTrust: workspaceTrustManager ?? repositoryTrust.runRefusalConstraint(),
     requestApproval,
     configManager,
     policyRuntimeState,

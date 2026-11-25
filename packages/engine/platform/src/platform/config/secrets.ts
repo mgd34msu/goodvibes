@@ -1,6 +1,7 @@
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { assertSecurityReadSource } from '../security/read-source.js';
 import { Secret } from '../security/secret.js';
+import { noteProcessSecretStore } from './secret-store-unreadable.js';
 /**
  * SecretsManager, hierarchy-aware secret resolution and persistence.
  *
@@ -946,6 +947,8 @@ export class SecretsManager {
   }
 
   constructor(options: SecretsManagerOptions) {
+    // Known to readers with no store of their own, so a store that cannot be read is never taken for "no key".
+    noteProcessSecretStore(this);
     this.surfaceRoot = requireSurfaceRoot(options.surfaceRoot, 'SecretsManager surfaceRoot');
     const globalHome = requireAbsoluteOwnedPath(options.globalHome, 'globalHome', 'SecretsManager');
     this.options = {
@@ -1085,7 +1088,7 @@ export class SecretsManager {
     for (const path of this.getReadOrder()) {
       const result = path.secure ? this.readEncryptedStore(path.path) : this.readPlaintextStore(path.path);
       if (result.status === 'unreadable') {
-        throw new SecretStoreUnreadableError(`The secrets store at ${path.path} exists but cannot be read (${result.reason}).`);
+        throw new SecretStoreUnreadableError(`The secrets store at ${path.path} exists but cannot be read (${result.reason}).`, result.reason);
       }
       if (result.status !== 'ok' || !Object.hasOwn(result.secrets, key) || !this.#usable(path, key, result.secrets[key])) continue;
       const stored = result.secrets[key];

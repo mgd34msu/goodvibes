@@ -52,7 +52,10 @@ export const COMMAND_ALIASES: Readonly<Record<string, GoodVibesCliCommand>> = {
   kb: 'knowledge',
   ask: 'ask',
   search: 'search',
-  find: 'search',
+  // A capability by id, and the capabilities that serve a need (terminal-shell capability-cli.ts); `find` was a
+  // second spelling of `search` before it named capability find.
+  do: 'do',
+  find: 'find',
   delegate: 'delegate',
   build: 'delegate',
   subscription: 'subscription',
@@ -341,6 +344,7 @@ const COMMAND_OPTIONS: Partial<Record<GoodVibesCliCommand, readonly CommandOptio
   delegate: KNOWLEDGE_OPTIONS,
   secrets: options('user', 'project', 'secure', 'plaintext', 'stdin'),
   pair: valued('name'),
+  do: [{ tokens: ['--input', '-i'], takesValue: true }],
   import: options('apply', 'apply-permissions'),
   // `bundle import <path> --yes [--include-security]` (the shared support-bundle command).
   bundle: options('yes', 'include-security'),

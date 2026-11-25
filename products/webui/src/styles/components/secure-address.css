@@ -57,3 +57,10 @@
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
+
+/* "Issue a new certificate now", its line and its outcome, as one group apart from "Switch https off". */
+.secure-address__reissue {
+  margin-bottom: var(--space-4);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--line);
+}

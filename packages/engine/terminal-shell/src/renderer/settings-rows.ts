@@ -148,6 +148,12 @@ export function settingsNavigationHints(
     readonly onList: boolean;
     /** True when the selected setting's value can be nudged in place (a number or a choice). */
     readonly adjustable: boolean;
+    /**
+     * In an open list whose rows are not settings: what Enter does on the selected
+     * row ("issue a new certificate"), or null when Enter does nothing there.
+     * Undefined keeps the list's own word.
+     */
+    readonly listEnter?: string | null | undefined;
   },
 ): KitHint[] {
   if (policy.resetPending)
@@ -187,6 +193,7 @@ export function settingsNavigationHints(
             : 'change',
     ];
     const nudge: KitHint[] = state.currentCategory === 'mcp' || state.currentCategory === 'flags' ? [['shift+←→', 'adjust']] : [];
+    if (policy.listEnter !== undefined) return [['↑↓', 'move'], ...(policy.listEnter === null ? [] : [['⏎', policy.listEnter] as KitHint]), ['←', 'back']];
     return [['↑↓', 'move'], enter, ...nudge, ['←', 'back']];
   }
   return [['↑↓', 'move'], ['⏎', policy.onList ? 'open' : 'change'], ...adjust, ...reset, ['←', 'topics']];

@@ -535,7 +535,11 @@ export const runtimeSecondaryConfigSettings: ConfigSettingDefinition[] = [
     label: 'Run the daemon as a service',
     appliesWhen: 'now',
     type: 'boolean',
-    description: 'Whether this machine runs the daemon as a service. On, a daemon started by hand installs the service at its first idle moment and doctor reports a missing or stopped service; off (the installers\' --no-service, or goodvibes-daemon uninstall-service), nothing installs one and doctor does not ask for one. goodvibes-daemon install-service turns it on. A daemon setting: one value every program and installer reads, in the daemon\'s settings file.',
+    // The same words as the "Run the daemon as a service" row of both terminal programs (runtime/feature-flags/flags.ts).
+    description: 'On: GoodVibes runs its daemon as a service of this computer. It is set up the first time a daemon you started is idle, '
+      + 'and from then on it keeps running after you close the window you started it from, so your sessions and whatever it serves stay available. '
+      + 'Turn on Start the daemon at login as well and it also starts by itself when you sign in. '
+      + 'Off: nothing sets up a service, and the daemon runs only while you keep it running.',
   },
   {
     key: 'service.autostart',

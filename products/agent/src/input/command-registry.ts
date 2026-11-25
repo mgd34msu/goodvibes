@@ -119,7 +119,7 @@ export interface CommandShellUiOpeners extends TerminalCommandShellUiOpeners<imp
   /** Open the menu of every place (Ctrl+G then m; terminal-shell/places). */
   openPlaceMenu?: () => void;
   /** Open one place by id (`automation`, `waiting`, `keys`). */
-  openPlace?: (placeId: string) => void;
+  openPlace?: (placeId: string, start?: { readonly list?: string | undefined }) => void;
   /** Run what a place's key read in the composer names (`place.conversation-composer.<control>`: This conversation's controls). */
   runPlaceKey?: (action: string) => void;
   /** A contract's open question on offer: the next message is sent as an ordinary one (contract-question-composer.ts). */

@@ -185,7 +185,9 @@ export function wireViewOpeners(options: WireViewOpenersOptions): void {
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const redirect = (name: string): string | undefined => views.modalSurfaces.getModalRedirect(name);
+  // The notice history is the System place's Notices list (terminal-shell places/system-place.ts); Ctrl+N opens it there.
   commandContext.openNotifications = () => {
+    if (commandContext.openPlace) { commandContext.openPlace('system', { list: 'notices' }); return; }
     show(findOpen(NotificationsModal) ?? new NotificationsModal({
       feed: getSharedNotificationFeed(),
       resolveSubject: (subject) => (resolveViewName(subject, redirect) ? () => { openView(subject); } : null),

@@ -133,10 +133,8 @@ export class AgentWorkspace {
   open(context: CommandContext, dispatchCommand: AgentWorkspaceCommandDispatcher, categoryId?: string, onlyGroup?: AgentWorkspaceCategoryGroup, requestRender?: () => void): void {
     this.requestRender = requestRender ?? null;
     this.typedAwayFrom = null;
-    this.context?.nativeWorkLedger?.close();
     this.context = context;
     this.workContextScroll = 0;
-    context.nativeWorkLedger?.open();
     this.dispatchCommand = dispatchCommand;
     this.keepFreshReports(context);
     this.lastShownArea = null;
@@ -206,7 +204,7 @@ export class AgentWorkspace {
   /**
    * The connected daemon answers again (the adoption edge, runtime/daemon-attach-signal.ts):
    * every report that failed or fell back because it did not answer is read again, with the
-   * host check and the work list while the workspace is open. No key press, no timer.
+   * host check while the workspace is open. No key press, no timer.
    */
   daemonAnswered(): void {
     // Every failed reading goes too: a report that reads a mailbox or a provider through the daemon
@@ -216,8 +214,6 @@ export class AgentWorkspace {
       if (reading.daemonUnanswered !== undefined || reading.failed !== undefined) { this.reports.delete(command); any = true; }
     }
     if (!this.active || !this.context) return;
-    // A work list that could not be read (its discovery failed) is opened again; a live one is left as it is.
-    if (this.nativeWorkLedgerState.status !== 'ready') this.context.nativeWorkLedger?.open();
     this.readHostSetup(true);
     if (any) this.readShownAreaReports();
     this.requestRender?.();
@@ -247,18 +243,16 @@ export class AgentWorkspace {
   private lastShownArea: string | null = null;
 
   /**
-   * Read the reports of Home and Work & Approvals at the Agent's start, so what
-   * is waiting is already read when the workspace is first opened. Nothing is
-   * drawn; the readings are held for the opening that follows.
+   * Read the reports of Home at the Agent's start, so what is waiting is
+   * already read when the workspace is first opened. Nothing is drawn; the
+   * readings are held for the opening that follows.
    */
   readAtStart(context: CommandContext, requestRender: () => void): void {
     this.keepFreshReports(context);
-    for (const id of ['home', 'work']) {
-      const category = AGENT_WORKSPACE_CATEGORIES.find((candidate) => candidate.id === id);
-      for (const action of category?.actions ?? []) {
-        const command = this.reportCommandFor(action);
-        if (command) this.commandReport(command, requestRender, context);
-      }
+    const category = AGENT_WORKSPACE_CATEGORIES.find((candidate) => candidate.id === 'home');
+    for (const action of category?.actions ?? []) {
+      const command = this.reportCommandFor(action);
+      if (command) this.commandReport(command, requestRender, context);
     }
   }
 
@@ -287,14 +281,12 @@ export class AgentWorkspace {
     // Back from a form that changed something: those commands' reports are read again at the next draw.
     for (const command of this.actedOn) this.reports.delete(command);
     this.actedOn.clear();
-    this.context?.nativeWorkLedger?.open();
     this.active = true;
     this.clampSelection();
   }
 
   close(): void {
     this.active = false;
-    this.context?.nativeWorkLedger?.close();
     this.actionSearchActive = false;
     this.actionSearchQuery = '';
     this._onlyGroup = null;
@@ -364,11 +356,6 @@ export class AgentWorkspace {
     this.focusPane = back.focusPane;
     this.clampSelection();
     return true;
-  }
-
-  get nativeWorkLedgerState(): import('../runtime/native-work-ledger.ts').NativeWorkLedgerState {
-    this.context?.nativeWorkLedger?.sync();
-    return this.context?.nativeWorkLedger?.state ?? { status: 'unavailable', reason: 'No authenticated daemon work ledger binding is installed.' };
   }
 
   get categories(): readonly AgentWorkspaceCategory[] {
@@ -489,7 +476,6 @@ export class AgentWorkspace {
   jumpEnd(): void { jumpAgentWorkspaceSelection(this, 'end'); }
 
   refreshRuntimeSnapshot(): void {
-    if (this.selectedActionCategory.id === 'work') this.context?.nativeWorkLedger?.open();
     if (!this.context) {
       this.status = 'Runtime context is unavailable.';
       this.lastActionResult = {

@@ -63,6 +63,8 @@ export interface SystemSessionServices {
         readonly body: string | undefined; readonly timestamp: number; readonly collapsedCount: number;
       }[];
       subscribe(onChange: () => void): () => void;
+      /** Every notice shown is seen: the status bar's unread count goes. */
+      markSeen(): void;
     } | undefined;
     /** The goodvibes://open link of each of this program's views. */
     readonly viewLinks?: (() => readonly string[]) | undefined;

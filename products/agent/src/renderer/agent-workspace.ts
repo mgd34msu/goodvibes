@@ -413,7 +413,7 @@ function footerText(workspace: AgentWorkspace): string {
   // would be dropped from the hint row) and comes first in every area. The row
   // stays short enough for two lines at 80 columns, so the area column keeps its rows.
   const typing = '[a-z] ask the assistant (Esc comes back)';
-  return workspace.selectedActionCategory.id === 'work' ? (workspace.lastActionResult ? `${typing} · PgUp/PgDn result · Ctrl+PgUp/PgDn history · Enter open · Ctrl+R refresh` : `${typing} · PgUp/PgDn history · Up/Down move · Enter open · Ctrl+R refresh`) : `${typing} · Up/Down move · Left/Right pane · Enter open · / search · Ctrl+R refresh`;
+  return `${typing} · Up/Down move · Left/Right pane · Enter open · / search · Ctrl+R refresh`;
 }
 
 export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, height: number): SurfaceLayer {
@@ -444,7 +444,7 @@ export function renderAgentWorkspace(workspace: AgentWorkspace, width: number, h
     workspace.workContextScroll = 0;
     workspace.workContextScrollFor = category.id;
   }
-  if (category.id !== 'work' && contextRows.length <= metrics.contextRows) workspace.workContextScroll = 0;
+  if (contextRows.length <= metrics.contextRows) workspace.workContextScroll = 0;
   else {
     const count = Math.max(1, metrics.contextRows - 2);
     // PgUp/PgDn move the pane by what it shows, so a short pane skips nothing.

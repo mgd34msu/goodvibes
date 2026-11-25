@@ -64,7 +64,6 @@ export const AGENT_WORKSPACE_CATEGORY_IDS = [
   'personas',
   'skills',
   'routines',
-  'work',
   'host',
   'automation',
   'delegate',

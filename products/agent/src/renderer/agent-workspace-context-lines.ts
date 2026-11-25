@@ -5,11 +5,9 @@
  * running that report exactly as the command does, so the pane and the
  * command cannot disagree; it is read by itself in the background when its
  * area is shown, and Ctrl+R reads it again), a setting's value as
- * `/settings get` reads it, and in Work & Approvals the work view `/work open`
- * shows, kept live by its subscription.
+ * `/settings get` reads it.
  */
 import { AGENT_WORKSPACE_REPORT_FRESH_MS, type AgentWorkspace, type AgentWorkspaceAction, type AgentWorkspaceCategory } from '../input/agent-workspace.ts';
-import { nativeWorkLedgerLines } from './native-work-ledger.ts';
 import { WORKSPACE_PALETTE as PALETTE } from './fullscreen-workspace.ts';
 import type { AgentWorkspaceContextLine as ContextLine } from './agent-workspace-style.ts';
 import { formatDigestTime } from '../core/away-digest.ts';
@@ -89,9 +87,5 @@ export function workspacePaneLines(workspace: AgentWorkspace, category: AgentWor
     { text: category.label, fg: PALETTE.title, bold: true },
     { text: category.summary, fg: PALETTE.subtitle },
   );
-  if (category.id === 'work') {
-    lines.push({ text: '', fg: PALETTE.muted }, { text: 'Your work (/work open)', fg: PALETTE.title, bold: true });
-    for (const text of nativeWorkLedgerLines(workspace.nativeWorkLedgerState)) lines.push({ text, fg: PALETTE.info });
-  }
   return lines;
 }

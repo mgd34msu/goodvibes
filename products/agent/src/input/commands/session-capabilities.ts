@@ -120,6 +120,9 @@ export function sessionCapabilityServices(ctx: CommandContext): SessionCapabilit
     ...secretsSessionServices(),
     // Work and agents (builtin/agents.ts `work.brief`): the Agent's briefing of its own state.
     briefing: { read: () => formatAgentOperatorBriefing(ctx) },
+    // Work and agents (builtin/research.ts): a question or a page sent to this conversation as the owner's own message
+    // (given only for the owner's own press: the model researches in its own turn).
+    ...(ctx.invokedByModel !== true && ctx.submitTurn ? { researchConversation: { send: (prompt: string) => { ctx.submitTurn!(prompt); } } } : {}),
     // Devices and network (builtin/devices-session.ts): pairing on the Agent's screen, and its own credential for its host.
     pairing: pairingServices(AGENT_PAIRING, ctx),
   };
@@ -158,7 +161,10 @@ export function systemSessionOf(ctx: CommandContext): NonNullable<SessionCapabil
     health: healthServicesOf(healthPolicy, ctx),
     help: helpServicesOf(ctx),
     // The notices and notifications this Agent collected: the System place's Notices list.
-    notices: { list: () => getSharedNotificationFeed().list(), subscribe: (onChange) => getSharedNotificationFeed().subscribe(onChange) },
+    notices: {
+      list: () => getSharedNotificationFeed().list(), subscribe: (onChange) => getSharedNotificationFeed().subscribe(onChange),
+      markSeen: () => { getSharedNotificationFeed().markAllSeen(); },
+    },
   };
 }
 

@@ -649,7 +649,7 @@ export class PlaceModal implements SurfaceModal {
       { cap: keycapOf(this.host.keys, `${this.context}.${READ_AGAIN_ACTION}`, READ_AGAIN_KEY), label: 'read again', run: () => { this.message = undefined; this.readAll(); } },
       // Every other tab by name (some may be cut from the tab row): choosing one opens it.
       ...this.place.lists.flatMap((list, index): KeyListEntry[] => index === this.active ? [] : [{
-        cap: '', label: `open the tab ${list.label}`, run: () => { this.active = index; this.choosing = undefined; },
+        cap: '→', label: `open the tab ${list.label}`, run: () => { this.active = index; this.choosing = undefined; },
       }]),
     ];
   }

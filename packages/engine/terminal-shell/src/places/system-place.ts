@@ -300,7 +300,10 @@ export function systemNoticesSource(read: SystemSessionReader): { read(): unknow
     read: () => {
       const notices = read()?.notices;
       if (!notices) return [];
-      return [...notices.list()].sort((a, b) => b.timestamp - a.timestamp).map((entry): StateItem => ({
+      const entries = [...notices.list()];
+      // Shown here is seen: the status bar's unread count goes, as the old history view did.
+      notices.markSeen();
+      return entries.sort((a, b) => b.timestamp - a.timestamp).map((entry): StateItem => ({
         kind: 'state', id: entry.key, state: entry.level ?? 'info', title: plain(entry.title),
         right: `${entry.collapsedCount > 1 ? `×${entry.collapsedCount} · ` : ''}${new Date(entry.timestamp).toLocaleTimeString()}`,
         mark: entry.level === 'critical' || entry.level === 'warning' ? 'attention' : 'ok',

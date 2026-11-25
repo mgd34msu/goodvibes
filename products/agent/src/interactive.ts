@@ -1014,7 +1014,7 @@ async function main(prepared: PreparedShellCliRuntime) {
   });
   unsubs.push(() => places.stop());
   commandContext.openPlaceMenu = places.openMenu;
-  commandContext.openPlace = (id) => { places.openPlace(id); };
+  commandContext.openPlace = (id, start) => { places.openPlace(id, start); };
   // This conversation's controls a person bound to a key in the composer (Keys place, "This conversation, while writing a message").
   commandContext.runPlaceKey = (action) => { places.runKey(action); };
   // Key-table actions that act on a screen of this program (keybinding-catalog.ts).

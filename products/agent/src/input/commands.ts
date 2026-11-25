@@ -34,7 +34,6 @@ import { registerPaymentCardCommands } from './commands/payment-card-intake.ts';
 import { commandVerbPolicy, declareCommandVerbs, SHARED_COMMAND_VERBS } from './commands/command-verbs.ts';
 import { registerPermissionsRuntimeCommands } from './commands/permissions-runtime.ts';
 import { registerCompareRuntimeCommands } from './commands/compare-runtime.ts';
-import { registerResearchRuntimeCommands } from './commands/research-runtime.ts';
 import { registerHooksCommand } from '@goodvibes/engine/terminal-shell/hooks-command';
 import { capabilityBinding } from './commands/capability-binding.ts';
 import type { RememberedRuleStore } from '@goodvibes/engine/platform/platform/gate/policy';
@@ -58,7 +57,8 @@ export function registerBuiltinCommands(
   // review packet reports, which read the Agent workspace's own view.
   registerReviewPacketReportCommand(registry);
   registerCompareRuntimeCommands(registry);
-  registerResearchRuntimeCommands(registry);
+  // `/research` is gone: research runs, the research queue and reports are the daemon's (capabilities/builtin/research.ts),
+  // asking a question or looking at a page goes to this conversation; each a control in the Work place's Research.
   // `/brief` is gone: the briefing is a capability (`work.brief`) with its control in the Work place.
   registerSupportBundleRuntimeCommands(registry);
   registerConnectedHostAdminCommands(registry);

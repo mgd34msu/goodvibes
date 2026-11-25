@@ -1,6 +1,4 @@
 import type { ContextInspectionPolicy } from '@goodvibes/engine/terminal-shell/context-inspection-command';
-import { systemSessionOf } from './session-capabilities.ts';
-import { registerInteractionModeCommand } from '@goodvibes/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import { defineCommand } from '@goodvibes/engine/terminal-shell/command-actions';
 import { settingsCommandDescription } from '@goodvibes/engine/terminal-shell/settings-command';
@@ -161,8 +159,7 @@ export function registerOperatorRuntimeCommands(registry: CommandRegistry): void
   }));
   nativeSettingsCommands.set(settingsCommand, settingsCommand.handler);
   registry.register(settingsCommand);
-
-  registerInteractionModeCommand<CommandContext>(registry, (ctx) => ({ systemSession: systemSessionOf(ctx) }));
+  // How much the Agent prints is in the System place, This session (capabilities/builtin/system-session.ts verbosity.*).
 }
 
 

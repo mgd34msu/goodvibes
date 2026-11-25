@@ -22,7 +22,9 @@ export interface NotificationSurfaceOptions {
 export function wireNotificationSurfaces(options: NotificationSurfaceOptions): void {
   const { commandContext, input, render } = options;
 
+  // The notice history is the System place's Notices list (terminal-shell places/system-place.ts); Ctrl+N opens it there.
   commandContext.openNotifications = () => {
+    if (commandContext.openPlace) { commandContext.openPlace('system', { list: 'notices' }); return; }
     const open = input.surfaceModals.modals().find((modal) => modal instanceof NotificationsModal);
     input.surfaceModals.push(open ?? new NotificationsModal({
       feed: getSharedNotificationFeed(),

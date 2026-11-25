@@ -222,7 +222,10 @@ export function systemSessionOf(ctx: CommandContext): NonNullable<SessionCapabil
     startup: startupOf(ctx),
     viewLinks: () => DEEP_LINK_SURFACES.map((surface) => buildDeepLink(surface)),
     // The notices and notifications this app collected: the System place's Notices list.
-    notices: { list: () => getSharedNotificationFeed().list(), subscribe: (onChange) => getSharedNotificationFeed().subscribe(onChange) },
+    notices: {
+      list: () => getSharedNotificationFeed().list(), subscribe: (onChange) => getSharedNotificationFeed().subscribe(onChange),
+      markSeen: () => { getSharedNotificationFeed().markAllSeen(); },
+    },
     help: helpServicesOf(ctx),
   };
 }

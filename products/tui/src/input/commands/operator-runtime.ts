@@ -3,8 +3,6 @@ import { settingsCommandDescription } from '@goodvibes/engine/terminal-shell/set
 import { commandRefusal } from '@goodvibes/engine/terminal-shell/command-confirmation';
 import type { ConfigSetting } from '@goodvibes/engine/platform/platform/config';
 import type { ContextInspectionPolicy } from '@goodvibes/engine/terminal-shell/context-inspection-command';
-import { systemSessionOf } from './session-capabilities.ts';
-import { registerInteractionModeCommand } from '@goodvibes/engine/terminal-shell/interaction-mode-command';
 import { settingsTargetNotFoundMessage } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import type { CommandContext, CommandRegistry } from '../command-registry.ts';
 import { estimateConversationTokens } from '@goodvibes/engine/platform/platform/core';
@@ -13,7 +11,7 @@ import { setSettingValue } from './setting-write.ts';
 export function registerOperatorRuntimeCommands(registry: CommandRegistry): void {
   registry.register(SETTINGS_COMMAND);
 
-  registerInteractionModeCommand<CommandContext>(registry, (ctx) => ({ systemSession: systemSessionOf(ctx) }));
+  // How much the app prints is in the System place, This session (capabilities/builtin/system-session.ts verbosity.*).
 
 }
 

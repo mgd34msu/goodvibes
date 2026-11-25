@@ -11,9 +11,8 @@ the setup requirements apply.
 Install with the [release installer](../../../docs/installation.md)
 (`curl -fsSL https://goodvibes.sh/install.sh | sh`, Linux or macOS), or build from
 a GoodVibes checkout with `scripts/install-from-checkout.sh` (Linux x64/arm64
-with glibc). Either installs Agent with the daemon, TUI and WebUI. Source
-development requires Bun **1.3.14** and Node **22 or later**. Upstream npm
-installation commands do not install this workspace.
+with glibc). Either installs Agent with the daemon, TUI and WebUI. npm installation
+commands do not install it.
 
 ```sh
 goodvibes-agent --help
@@ -32,20 +31,6 @@ conversation and work routes require their own [native readiness](setup-explicit
 and [explicit pairing](setup-explicit-pairing.md). An onboarding marker does not
 grant authority. Configure the conversation provider separately from Jev.
 
-## Run from source
-
-From the monorepo root:
-
-```sh
-bun install
-bun run build
-bun run --cwd products/agent dev
-```
-
-The daemon lives in `products/daemon` in this same checkout. Agent consumes the
-engine and daemon through workspace dependencies. See [connected-host setup](connected-host.md)
-for endpoint configuration and diagnostics.
-
 ## First run
 
 When the model a session would use is not ready, `goodvibes-agent` opens first
@@ -57,6 +42,10 @@ run, which is three steps and the same as in the terminal app:
 2. Sign in, or paste a key. A key the provider refuses is not kept.
 3. Start: the conversation opens with one sentence saying when GoodVibes asks
    before acting.
+
+Then type a question, for example `What can you help me with?`, and press
+Enter, and the answer streams in. When a key in your environment already makes a
+provider usable, first run uses it and you start here.
 
 Leaving part way and starting again resumes from where you were. After first
 run the splash names the model in use. Everything else is set up later with
@@ -277,7 +266,7 @@ Use `/artifacts` for saved images, source files, generated media and exported se
 
 ## Connected host
 
-Connect Agent to a GoodVibes daemon before using daemon-backed features. Agent expects:
+Connect Agent to a GoodVibes daemon before using daemon-backed features (endpoint setup and diagnostics in full: [Connected host](connected-host.md)). Agent expects:
 
 ```text
 http://127.0.0.1:3421

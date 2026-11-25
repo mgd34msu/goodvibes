@@ -429,6 +429,47 @@ policies, allowlists, route bindings, and delivery inspection. The generated
 [Operator API reference](./reference-operator.md) is the exact method/schema
 inventory.
 
+## Inbox sources
+
+The daemon mirrors the Slack, Discord and email inboxes you configure so the
+owner inbox (`channels.inbox.list`) can show them. A provider you have not
+configured is listed as `unconfigured`: nothing is polled and nothing is stored
+for it. A credential store that cannot be read is reported as such, never as a
+fresh install.
+
+- **Screening.** A configured Slack or Discord inbox runs only with an
+  established trusted screening host (the local service that screens message
+  content before a model reads it). An email inbox whose screening consent or
+  credentials are missing runs without screening: its rows carry
+  `screening: not-screened` with the reason, and triage and label write-back stay
+  off for it.
+- **Discord.** The inbox reads the one-to-one DMs you list:
+  `surfaces.discord.inboxBotUserId` names the bot, and
+  `surfaces.discord.inboxChannelIds` is a comma-separated list of 1 to 200 DM
+  channel ids the bot can read. The token must prove it is that bot, and every
+  listed channel must check out, before any history is read; replacing the account
+  or the list ends the source, even if the old setting is restored later. Group DMs
+  are not supported. The account and its screening scope are recorded under
+  stable ids in `.goodvibes/tui/operator/discord-inbox-identities.json` in the
+  workspace: keep that file with the inbox database files when you back up or move
+  a workspace. When it is missing or damaged while mirrors exist, the daemon holds
+  the inbox instead of starting an empty one; restore the matching file.
+- **Email.** An email inbox is fed by the daemon's one mailbox reader (IMAP over
+  TLS, or plain IMAP to a loopback host only). The first poll records where
+  history starts and reads content from the next poll on; history left out and
+  backlog still pending are reported apart from provider failures.
+- **Retention.** While the daemon runs it expires message previews in inactive
+  mirrors by each mirror's recorded retention policy (the native default is 30 days
+  and 5,000 rows; a custom policy it does not recognise is left for you to
+  inspect, never replaced). This contacts no provider and no decision model. The
+  mirror databases live in an owner-only folder with owner-only file permissions.
+- **Machine groups.** In a group, each inbox is polled by one machine at a time,
+  chosen by election. Each machine keeps its own mirror: a machine that comes back
+  resumes from its own, and a new one starts from the provider's bounded first
+  read. The cursor is not handed between machines, the feed is not guaranteed
+  identical on every machine, and a message may be read more than once across a
+  hand-over.
+
 ## Inbox triage
 
 Each inbox account whose privacy screening is admitted also triages its mail:

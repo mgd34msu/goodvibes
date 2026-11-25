@@ -5,22 +5,16 @@
 > orchestrates those on your behalf. If you need to call a provider directly, use their official
 > SDK instead. If you don't have a daemon yet, see [Daemon embedding](./daemon-embedding.md).
 
-This platform has two surfaces. Read the [Published Surface Matrix](./surfaces.md) (the consumer surface map; the internal runtime-boundary model lives in [Runtime Surfaces](./runtime-surfaces.md)) to understand which applies to you:
+This platform has two surfaces. Read the [Published Surface Matrix](./surfaces.md) to understand which applies to you:
 - **Full surface.** Bun consumers (TUI, daemon, CLI).
 - **Companion surface.** Hermes (React Native or Expo), browser, or Cloudflare Workers consumers.
 
 ## Install
 
-```bash
-# From the goodvibes repository root:
-bun install
-bun run build
-```
-
-The platform is a subpath of the `@goodvibes/engine` workspace package. Products
-declare `"@goodvibes/engine": "workspace:*"` and import the entry points
-shown below. For the application and a local daemon, use the
-[suite installer](../../../docs/installation.md).
+The platform is a subpath of the `@goodvibes/engine` package, which is not on
+any package registry: how to get it, and what a client needs without it, is in
+[Getting it](../README.md#getting-it). For the application and a local daemon,
+use the [suite installer](../../../docs/installation.md).
 
 ## Bun quickstart (full surface)
 

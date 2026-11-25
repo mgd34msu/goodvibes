@@ -60,3 +60,8 @@ export { defaultDownloadBaseUrl } from './auto-updater.js';
 export { forgetLanAuthority, lanAuthorityCertificate, lanServerNames, LAN_AUTHORITY_SECRET_KEY } from './lan-https/authority.js';
 export { LAN_HTTPS_CA_PATH, LAN_HTTPS_INSTALL_WORDS, LAN_HTTPS_PAGE_PATH, lanAuthorityFingerprint } from './lan-https/page.js';
 export type { LanHttpsState } from './lan-https/listener.js';
+/** The secure address: which certificate the https listener serves, and a group's share of it. */
+export { secureAddressGroupAccess, type SecureAddressGroupAccess } from './lan-https/group-share.js';
+export { httpsCertificateSource, SECURE_ADDRESS_SECRET_KEYS, type HttpsCertificateSource } from './lan-https/secure-address.js';
+export { readOwnCertificate, type OwnCertificateCheck } from './lan-https/own-certificate.js';
+export { SECURE_ADDRESS_CHOICES, SECURE_ADDRESS_INTRO, SECURE_ADDRESS_GROUP_LINE, SECURE_ADDRESS_LEAD_LINE, secureAddressNodeLine, type SecureAddressChoiceWords } from './lan-https/secure-address-words.js';

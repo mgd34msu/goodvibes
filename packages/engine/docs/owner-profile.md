@@ -1310,34 +1310,3 @@ bar. The profile's `contact.email` serves ordinary consumers; the taint
 exemption keeps reading configuration only. Recorded here as a decision, not an
 oversight.
 
----
-
-## 14. Test plan
-
-Each test is verified to fail without its fix, and both counts are reported.
-
-| # | Test | Asserts |
-|---|---|---|
-| 1 | untrusted authority refused | `profile.set`/`append` with `web-page`, `email`, `channel-message`, `document` authority is refused; the file is byte-identical after |
-| 2 | untrusted derivation refused | a page is ingested into the ledger, then an `owner-direct`-claimed write whose value appears in that page is refused, naming the origin and excerpt |
-| 3 | no propose path | no exported API stages a proposal for later approval; the only non-`owner-direct` write authority is `autonomous`, and it is refused unless the invocation carries a runtime-recorded delegation |
-| 4 | provenance recorded | a written line round-trips surface, date and verbatim through the file |
-| 5 | provenance retrievable | `profile.provenance` returns the suffix plus every `<!-- was: -->` predecessor |
-| 6 | disclosure fires | an autonomous write returns a non-empty one-line disclosure naming the field |
-| 7 | deletion deletes | after `profile.forget` the value is absent from memory **and** from the file bytes, including its `<!-- was: -->` comments |
-| 8 | supersede keeps history | after a correction the old value is present as a `<!-- was: -->` comment and `profile.undo` restores it |
-| 9 | not in logs | a captured logger across read/write/delete contains no profile value |
-| 10 | not in exports | a session export containing a profile value redacts it |
-| 11 | not in diagnostics | `profile.status` returns counts, names and invalid-field reasons, no values |
-| 12 | not injected outbound | an outbound composition with no named accessor call contains no closed-tier value |
-| 13 | unreadable degrades loudly | a non-UTF-8 file yields "profile unavailable" with the reason; an empty profile is never returned in its place |
-| 14 | odd content preserved | unknown headings, unknown `key:` lines, tables, code fences and nested lists survive a write to another section byte-for-byte |
-| 15 | hand edit authoritative | an externally edited/deleted line is served as edited and never restored |
-| 16 | hand edit picked up | an external modification is reflected without a restart |
-| 17 | atomic write | an interrupted write leaves the previous complete file |
-| 18 | invalid mechanical value | `timezone: Mars/Olympus` is preserved, reported invalid with a reason, and its consumer falls back |
-| 19 | third-party containment | `People` content is absent from context, exports and logs; `profile.person` requires a name; and no exported store method other than `read()` returns the whole `People` section, `section('People')` refuses |
-| 20 | consumer fallback direction | an explicitly configured `checkin.quietHours` beats the profile; an unset one reads from the profile |
-| 21 | cached reads | no additional filesystem/parsing work; measured nanoseconds advisory |
-| 22 | removal is gated | `forget` and `undo` from each untrusted authority are refused and the file is byte-identical after |
-| 23 | watcher survives rename | after two atomic writes, an external edit is still observed (fails against a file-level `fs.watch`) |

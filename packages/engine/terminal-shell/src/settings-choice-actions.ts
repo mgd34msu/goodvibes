@@ -34,9 +34,8 @@ const PROVIDERS = [
   { id: 'laya', label: 'Laya', detail: 'A local Laya decision service using its declared protocol.' },
 ] as const;
 const POLICY_DETAILS: Readonly<Record<string, string>> = {
-  Hybrid: 'Use the set decision model; when none is set, or it fails, continue without it. A failure is shown once with the model, what failed and the next step.',
-  'Decision Model Only': 'Use the set decision model; when it fails, stop the operation and report the model, what failed and the next step. With none set, work still continues without one.',
-  'No Decision Model': 'Make no decision-model requests. Ordinary chat and tools remain available with the chosen execution permissions.',
+  Hybrid: 'In Jev decides and Just vibes, a call Jev would decide comes to you while the decision model fails (in Just vibes it is held to the end of the run). The failure is shown once with the model, what failed and the next step.',
+  'Decision Model Only': 'In Jev decides and Just vibes, a call Jev would decide is refused with the reason while the decision model fails, and the turn goes on.',
   'ask-me': 'With a working decision model, ordinary work runs automatically and dangerous actions and owner-only decisions ask you; without one, every action asks you except a read inside the workspace and a change to files inside it that can be undone.',
   'jev-decides': 'A decision model decides every action the permission rules do not settle, critical ones included; owner-only decisions ask you. With no working decision model it behaves as Ask me.',
   'just-vibes': 'Does as much as it can without interrupting you; anything that needs you is held and listed at the end.',
@@ -163,10 +162,13 @@ export function openSettingsChoice(
   }
   if (action === 'decision-policy' || action === 'permission-mode') {
     const key = action === 'decision-policy' ? 'judgment.policy' : 'permissions.mode';
-    const values = CONFIG_SCHEMA.find(setting => setting.key === key)?.enumValues ?? [];
-    open(action === 'decision-policy' ? 'Decision models' : 'When GoodVibes asks',
-      // The default policy reads "Hybrid (default)"; only the bare value is stored. A mode's row says what it does.
-      values.map(value => ({ id: value, label: key === 'permissions.mode' ? gatePresetLabel(value) : value === 'Hybrid' ? 'Hybrid (default)' : value, detail: key === 'permissions.mode' ? presetForMode(value).short : POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
+    const setting = CONFIG_SCHEMA.find(entry => entry.key === key);
+    const values = setting?.enumValues ?? [];
+    open(action === 'decision-policy' ? 'If Jev can\'t answer' : 'When GoodVibes asks',
+      // The schema's word for each stored value; the default carries "(default)", which is never stored. A mode's row says what it does.
+      values.map(value => ({ id: value, label: key === 'permissions.mode' ? gatePresetLabel(value)
+        : `${setting?.enumLabels?.[value] ?? value}${value === setting?.default ? ' (default)' : ''}`,
+      detail: key === 'permissions.mode' ? presetForMode(value).short : POLICY_DETAILS[value] ?? '', primaryAction: 'select' })),
       { preSelectId: String(config.get(key)), allowSearch: true },
       result => { if (!result) return;
         if (key === 'permissions.mode' && setExecutionMode) { if (current()) { setExecutionMode(result.item.id); changed(); } }

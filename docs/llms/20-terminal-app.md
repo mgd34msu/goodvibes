@@ -176,7 +176,7 @@ Provider:
   sign-in: no subscription and no OPENROUTER_API_KEY in the environment. If you saved a key with /secrets, the app uses it (this report does not read stored keys); otherwise sign in with: export OPENROUTER_API_KEY=<key>, or /secrets in the app
   ...
 Decision model:
-  when it is missing or fails: Hybrid (default)
+  if Jev can't answer: Ask me (default)
   No decision model is in use: none is set, so decisions take their fallbacks. To use one, choose a Decision model in /settings open.
 
 Auth:
@@ -2357,7 +2357,7 @@ A hook fires for the tool called, whether the model called it or another tool ra
 | `terminal` | Agent | `command`, a tracked background process |
 | `process` | Agent | `command` for `action: "start"`, and `data` written to a running process's standard input with `action: "write"` |
 | `agent_harness` | Agent | modes such as `run_background_process` and `run_workspace_action` |
-| `agent_operator_method` | Agent | daemon methods, including running a command on a paired peer or registered backend |
+| `agent_operator_method` | Agent and terminal app | daemon methods by id, including running a command on a paired peer or registered backend; each call admitted by the gate under the mode in force, the owner's own acts refused |
 
 1. Save this script as `<project>/.goodvibes/hooks/block-git-push.sh` and make it executable (`chmod +x`). It needs `jq` 1.6 or later.
 
@@ -2556,7 +2556,12 @@ Every stream frame is one JSON object whose first two keys are `schemaVersion` (
 | --- | --- | --- | --- |
 | `SESSION` | `sessionId`, `model`, `provider` | string | The first frame of every run that reached a session, written before the first request (after a resume, the resumed session): the session and the model that answers. |
 | | `workingDirectory` | string | The working folder of the run. |
+| | `version` | string | The GoodVibes version running the turn. |
 | | `permissionMode` | string | The permission mode in force: `ask-me`, `jev-decides`, `just-vibes`, `yolo` or `plan`. |
+| | `chosenMode` | string | The mode chosen in settings (`permissions.mode`); the same as `permissionMode` unless something holds it back. |
+| | `modeReason` | string, optional | Present only when `permissionMode` differs from `chosenMode`: why, in one sentence (for example, Jev decides was chosen but no decision model is set, so every call Jev would decide asks you). |
+| `PERMISSION_MODE_CHANGED` | `permissionMode`, `previousMode`, `chosenMode` | string | The mode in force changed during the run: a setting changed, or the decision model stopped answering or answered again. With "If Jev can't answer" on Ask me the turn asks the failed model nothing more, so the change back comes in a later run; on Refuse the action it comes as soon as the model answers. |
+| | `modeReason` | string, optional | Present when the new mode in force is not the chosen one: why. |
 | `STREAM_DELTA` | `content` | string | The new text of this chunk. |
 | | `accumulated` | string | The whole answer streamed so far in this model response. Left out with `--omit-accumulated`. |
 | `DRAFT_WITHDRAWN` | `reason` | string | The streamed answer was withdrawn (the turn moved to another model after it had begun). Discard the text received so far; the replacement streams from empty. |
@@ -2578,6 +2583,7 @@ Every stream frame is one JSON object whose first two keys are `schemaVersion` (
 | | `source` | string | Who decided: `boundary`, `stakes_preset`, `config_policy`, `managed_policy`, `safety_check`, `runtime_mode`, `invocation_admission`, `session_override`, `user_rule`, `user_prompt` (the owner answered), `jev_decision` (the decision model). |
 | | `ownerPrompt` | boolean | `true` when the owner was asked. |
 | | `reasonCode` | string, optional | The exact reason: `boundary_judgment_input`, `boundary_catastrophic`, `boundary_surface_authority`, `boundary_card_details`, `boundary_outward_effect`, `owner_act`, `preset_allow`, `preset_deny`, `owner_approved_outward`, `config_allow`, `config_deny`, `managed_policy_allow`, `managed_policy_deny`, `safety_guardrail`, `mode_allow_all`, `mode_queued_for_owner` (held by `just-vibes`), `invocation_already_admitted`, `mode_denied`, `plan_mode`, `session_cached_allow`, `session_cached_deny`, `user_rule_allow`, `user_rule_deny`, `user_approved`, `user_denied`, `jev_act`, `jev_revise`, `jev_defer`, `jev_reject`. |
+| | `reason` | string, optional | Why: when Jev decided the call (`source` `jev_decision`), its reason (`Jev allowed it: the safety reading put its stakes at low.`); on a refusal, the refusal's explanation. Masked and cut at 1000 characters. |
 | `PERMISSION_PROMPT` | `callId`, `tool`, `category` | string | With `--answer-permissions` only: the owner is asked, and the run waits for an answer on standard input. |
 | | `riskLevel` | string | As above. |
 | | `summary` | string | As above. |
@@ -2641,7 +2647,7 @@ For each tool call the gate decides first, so `PERMISSION_REQUESTED` and `PERMIS
 | `native` | for native intake | object | `status` (`pending`, `recorded`, `unknown`, `invalid`, `unavailable`), `message`, `cause`, `request` (`requestId`, `inputId`), `result` (the host's record, whose `kind` is for example `captured`, `processing`, `turn`, `work`, `blocked`, `refused`, `cancelled`), `execution`, `nextStep` (`retry`, `resume`, `cancel` or `inspect`; run `--intake-<nextStep>`, where `inspect` means `--intake-status`), `notSent: true` (this run's own text was not sent because an earlier input must move first), `hostedTurn` (the daemon-hosted reply: `state`, `sessionId`, and on failure `failure` with `summary` and `retryable`). |
 | `refusal` | when refused before starting | object | `code` (`SESSION_OPEN_ELSEWHERE`), `state`, `reason`, `next` (array of steps). |
 | `recovery` | when restored from a crash snapshot | object | `sessionId`, `applied` (boolean), `refusal` (when not applied: `no-snapshot`, `unusable-snapshot`, `apply-failed`), `snapshotAt` (ISO time), `snapshotKept` (boolean), `messages` (number), `turns` (number), `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults` number, `interruptedToolCalls` as `{ callId, tool }`, `partialReply` boolean), `lost` (array of sentences). |
-| `diagnostics` | when no decision model was in use | object | `decisionModel`: `inUse: false`, `policy` (`Hybrid`, `Decision Model Only` or `No Decision Model`), `reason` (`not-set`, `selected`, `unavailable`), `line`, and `failure` (`model`, `what`, `nextStep`) when the set model was failing. |
+| `diagnostics` | when no decision model was in use | object | `decisionModel`: `inUse: false`, `policy` (the stored "If Jev can't answer" value: `Hybrid` for Ask me, `Decision Model Only` for Refuse the action), `reason` (`not-set`, `unavailable`), `line`, and `failure` (`model`, `what`, `nextStep`) when the set model was failing. |
 
 `stopReason` values:
 
@@ -2680,7 +2686,7 @@ $ goodvibes run --output stream-json "how many TypeScript files are in src?"
 {"schemaVersion":1,"type":"STREAM_DELTA","content":"I'll count them.","accumulated":"I'll count them."}
 {"schemaVersion":1,"type":"USAGE","turnId":"turn-1","provider":"openai","model":"gpt-5.4","inputTokens":5120,"outputTokens":48,"cacheReadTokens":0,"cacheWriteTokens":0,"costUsdCents":1.3,"signIn":{"route":"subscription"}}
 {"schemaVersion":1,"type":"PERMISSION_REQUESTED","callId":"call-1","tool":"exec","category":"execute","riskLevel":"high","summary":"Execute shell command","ownerPrompt":false}
-{"schemaVersion":1,"type":"PERMISSION_DECIDED","callId":"call-1","tool":"exec","category":"execute","approved":true,"source":"jev_decision","ownerPrompt":false,"reasonCode":"jev_act"}
+{"schemaVersion":1,"type":"PERMISSION_DECIDED","callId":"call-1","tool":"exec","category":"execute","approved":true,"source":"jev_decision","ownerPrompt":false,"reasonCode":"jev_act","reason":"Jev allowed it: the safety reading put its stakes at low."}
 {"schemaVersion":1,"type":"TOOL_EXECUTING","turnId":"turn-1","callId":"call-1","tool":"exec"}
 {"schemaVersion":1,"type":"TOOL_SUCCEEDED","turnId":"turn-1","callId":"call-1","tool":"exec","durationMs":41}
 {"schemaVersion":1,"type":"STREAM_DELTA","content":"There are 212 ","accumulated":"There are 212 "}

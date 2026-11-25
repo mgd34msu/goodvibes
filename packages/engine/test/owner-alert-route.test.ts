@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 test('an owner alert is offered only to the owner\'s own private chat, never to a group, a channel, a webhook route or a friend\'s chat', async () => {
-  const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   const daemon = await surfaceDaemon({
     settings: {
       'surfaces.webhook.enabled': true, 'surfaces.webhook.secret': 'hook-secret',

@@ -25,6 +25,8 @@ export interface ConfigSettingFields {
   /** Retained for saved-config compatibility, excluded from current settings controls. */
   deprecated?: boolean;
   enumValues?: string[] | undefined;
+  /** What a person reads for a stored enum value, where it differs from the value (schema-types.ts `ConfigSetting.enumLabels`). */
+  enumLabels?: Readonly<Record<string, string>> | undefined;
   validate?: ((value: unknown) => boolean) | undefined;
   /**
    * Optional hint appended to the validation-failure message when `validate`

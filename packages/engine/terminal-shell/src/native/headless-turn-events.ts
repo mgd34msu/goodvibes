@@ -33,6 +33,8 @@ export interface HeadlessTurnObserverOptions {
   readonly maxTurns?: number | undefined;
   /** Cancels the turn; called once when `maxTurns` is reached. */
   readonly stop?: (() => void) | undefined;
+  /** The chosen mode, and why the mode now in force is not it (absent when it is). Read when the mode in force changes. */
+  readonly chosenMode?: ((modeInForce: string) => { readonly chosen: string; readonly reason?: string }) | undefined;
 }
 
 type Payload<U, K> = Extract<U, { type: K }>;
@@ -150,7 +152,15 @@ export function observeHeadlessTurn(bus: Pick<RuntimeEventBus, 'on'>, format: st
           ...(request['summary'] === undefined && payload.summary !== undefined ? { summary: forwardedText(payload.summary) } : {}), ownerPrompt });
       }
       emit({ type: 'PERMISSION_DECIDED', callId: payload.callId, tool: payload.tool, category: payload.category, approved: payload.approved,
-        source: payload.source, ownerPrompt, ...(payload.reasonCode === undefined ? {} : { reasonCode: payload.reasonCode }) });
+        source: payload.source, ownerPrompt, ...(payload.reasonCode === undefined ? {} : { reasonCode: payload.reasonCode }),
+        ...(payload.reason === undefined ? {} : { reason: forwardedText(payload.reason) }) });
+    }),
+    // The mode in force changed during the run (a setting, or the decision model failing or answering again).
+    bus.on<Payload<GateEvent, 'PRESET_CHANGED'>>('PRESET_CHANGED', ({ payload }) => {
+      state.events++;
+      const chosen = options.chosenMode?.(payload.mode);
+      emit({ type: 'PERMISSION_MODE_CHANGED', permissionMode: payload.mode, previousMode: payload.previousMode,
+        ...(chosen === undefined ? {} : { chosenMode: chosen.chosen }), ...(chosen?.reason === undefined ? {} : { modeReason: chosen.reason }) });
     }),
     // Delegated agents and contracts. Identifiers, states and outcomes only: the task text, the ask and agent
     // output can hold file contents or credentials, as tool arguments can.

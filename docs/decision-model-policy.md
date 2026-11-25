@@ -1,13 +1,9 @@
-# Decision-model policies
+# Decision models
 
-The `judgment.policy` setting controls decision-model use independently of tool
-permissions. Every `judgment.*` setting is in one advanced section, **Models and
+Every `judgment.*` setting is in one advanced section, **Models and
 providers, Decision models (advanced)**, in both terminal programs (`/settings`,
 or `/settings decision-models`) and in the web UI's Settings; search finds each
-by its name or key. Choose **Hybrid (default)**, **Decision Model Only** or
-**No Decision Model** there, and `goodvibes-daemon config set judgment.policy <value>`
-sets the daemon's own copy. The stored values are `Hybrid`, `Decision Model Only`
-and `No Decision Model`; "(default)" is only how the default is shown.
+by its name or key.
 
 Choose **Decision provider** and **Decision model** in that category to configure
 Jev, Clef, Clef-flash, DiffusionGemma Jev, Kev-9B, Laya, or a compatible custom
@@ -25,18 +21,20 @@ decision takes its stated fallback, such as asking you; a target that misses the
 deadline three times in a row is skipped for a minute. A target whose address
 refuses the connection is not asked a second time for the same decision.
 
-Execution permissions are in **Permissions → Execution permissions**, including
-**YOLO**. Choose the decision policy and execution permissions independently.
+**If Jev can't answer** (`judgment.policy`, in the same section) matters only in
+Jev decides and Just vibes: while a set decision model gives no usable answer, a
+call Jev would decide comes to you (**Ask me**, the default; held to the end of
+the run in Just vibes) or is refused with the reason (**Refuse the action**).
 
-| Policy | Behavior |
-| --- | --- |
-| Hybrid (default) | Use the set decision model. When it gives no usable answer, for any reason (unreachable, too slow, a request too large for it, an HTTP error, a refused or missing key, a malformed answer, a closed connection), the operation continues without it: each decision takes its fallback, and you are told once per outage, naming the model, what failed and the next step. |
-| Decision Model Only | Use the set decision model and keep asking it. While it fails, a tool call it cannot decide is refused with its error and every other decision takes its fallback; the turn goes on. |
-| No Decision Model | Make no decision-model requests. |
+When the set decision model gives no usable answer, for any reason (unreachable,
+too slow, a request too large for it, an HTTP error, a refused or missing key, a
+malformed answer, a closed connection), every other decision takes its own
+fallback and the work goes on; you are told once per outage, naming the model,
+what failed and the next step.
 
 **With no decision model set** (no `judgment.endpoint`, `judgment.model`,
 `judgment.fallbacks`, credential choice, `TYPESAFE_API_KEY`, `TYPESAFE_BASE_URL`
-or `TYPESAFE_DEFAULT_MODEL`), every policy works without one: no decision model
+or `TYPESAFE_DEFAULT_MODEL`), GoodVibes works without one: no decision model
 is asked, nothing waits and nothing reports an error.
 
 ## What one decision request sends
@@ -105,8 +103,8 @@ having given no answer.
 
 ## How much you are asked
 
-The policy and the permission mode (`permissions.mode`, below) decide together
-how often a person is in the loop. In every combination, code settles what it
+The permission mode (`permissions.mode`) decides how often a person is in the
+loop. In every mode, code settles what it
 already knows first: reads, edits inside the workspace, and calls a saved rule
 or your `permissions.tools.*` setting allows run at once, and a deny rule
 refuses. In every mode but `yolo`, the owner-only items (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) always come to you, whether or not a decision model is set:
@@ -124,30 +122,25 @@ limits and payment steps are put to you by the payment windows in every mode,
 call.
 
 **One setting decides who answers a judgment call: When GoodVibes asks**
-(`permissions.mode`):
+(`permissions.mode`), one of five modes:
 
-- **Ask me:** you answer the risky ones. With a working decision model, Jev
-  reads each call and you are asked only about what it reads as critical,
-  irreversible or weakening a safety setting; without one, you are asked about
-  every judgment call your tool settings do not allow.
-- **Jev decides** (the default): Jev answers them. Without a working decision
-  model (or, while Jev decides is only the default and not your choice, on a
-  decision model the shipped calibration did not measure) you are asked, as in
-  Ask me.
-- **Just vibes:** nothing interrupts you. Jev answers what it can; anything that
-  needs you (with no working decision model, every judgment call your tool
-  settings do not allow) is held and listed at the end of the run.
-- **YOLO:** nothing asks you, except a change asked for from a channel;
-  purchases outside your limits still come to you, and an act only you perform
-  is refused to the model. No decision model is consulted.
-
-**The decision policy** (`judgment.policy`, "When the decision model is missing
-or fails") changes only what happens while a set decision model is failing:
-under **Hybrid** (the default) the call comes to you as if no model were set
-(held in Just vibes); under **Decision Model Only** it is refused with the
-model's error and the turn goes on. **No Decision Model** is the same as having
-none set. YOLO asks no decision model, so the policy does not change it. Most
-people never change the policy.
+- **Ask me** (`ask-me`): you answer the risky ones. With a working decision
+  model, Jev reads each call and you are asked only about what it reads as
+  critical, irreversible or weakening a safety setting; without one, you are
+  asked about every judgment call your tool settings do not allow.
+- **Jev decides** (`jev-decides`, the default): Jev answers them; owner-only
+  items ask you. Without a working decision model (or, while Jev decides is only
+  the default and not your choice, on a decision model the shipped calibration
+  did not measure) you are asked, as in Ask me.
+- **Just vibes** (`just-vibes`): nothing interrupts you. Jev answers what it
+  can; anything that needs you (with no working decision model, every judgment
+  call your tool settings do not allow) is held and listed at the end of the run.
+- **YOLO** (`yolo`): nothing asks you, except a change asked for from a
+  channel; purchases outside your limits still come to you, and an act only you
+  perform is refused to the model. Authentication, workspace containment, secret
+  storage and spending limits still apply. No decision model is consulted.
+- **Plan** (`plan`): read-only. Read-only tools run, and every mutating or exec
+  call is refused; `/plan` toggles it.
 
 The shipped calibration record covers the hosted endpoint and `jev-latest`
 (answered by `jev-1.14.0`). While `jev-decides` is only the default, Jev decides
@@ -160,10 +153,10 @@ lets Jev decide on any working decision model. `/held` lists, approves or sets a
 spending limits.
 
 **You can always tell when no decision model is in use.** The conversation says
-so once (none set, or No Decision Model chosen), says once when a set model
+so once (none set), says once when a set model
 starts failing and once when it answers again, and never repeats a failure every
-turn. `goodvibes status` and `goodvibes-agent status` show the policy and a
-"Decision model" line; a headless run prints the line on stderr and adds
+turn. `goodvibes status` and `goodvibes-agent status` show a "Decision model"
+block; a headless run prints the line on stderr and adds
 `diagnostics.decisionModel` to its JSON result without changing the exit code;
 WebUI shows it in the mode chip in its header, and the terminal programs' status bar shows it after `Permissions:`, in the same words: what is in force first, then the choice and when it takes effect (for example "Permissions: asking you, for now · Jev decides once a decision model is set").
 
@@ -176,7 +169,7 @@ boundaries, secret handling, spending limits, cancellation and
 duplicate-execution protection stay in force, and results say no decision
 model checked them rather than claiming model verification.
 
-Link validation in every policy requires HTTPS, no embedded user credentials,
+Link validation always requires HTTPS, no embedded user credentials,
 a named host on the standard HTTPS port, and a matching authorized registrable
 domain. Redirect following applies these checks at every hop. Domain mismatches
 refuse locally without a decision-model request. With a decision model, matching
@@ -184,8 +177,8 @@ hosts are also checked for lookalikes and shortening services; without one,
 accepted links are marked as not checked for those, and internationalized
 domain names are not refused solely because they use punycode.
 
-Hybrid keeps conversation history and completed work without replaying actions.
-An answer the model gave (including an abstention or a privacy rejection), a
+Continuing without the decision model keeps conversation history and completed
+work without replaying actions. An answer the model gave (including an abstention or a privacy rejection), a
 cancellation or stale authority does not trigger the fallback. An action already
 refused stays refused.
 
@@ -195,24 +188,12 @@ decision model. Autonomous contract execution, independent semantic knowledge
 verification, merchant/checkout interpretation and semantic recommendations or
 grading need a decision model and say so when none is in use.
 
-Installation does not require a decision-model connection. A settings file that
-holds a value this version does not know is reported by name with the three
-valid values, and the product runs on Hybrid.
+Installation does not require a decision-model connection.
 
 ## Permission modes
 
-`permissions.mode` chooses who answers a judgment call. The default is
-`jev-decides`.
+The five modes are listed under "How much you are asked" above.
 
-| Mode | Behavior |
-| --- | --- |
-| `ask-me` | Jev reads each judgment call's risk. Calls it reads as critical, irreversible or security-weakening ask you, with owner-only items; the rest run. With no working decision model, every judgment call your tool settings do not allow asks you. |
-| `jev-decides` (default) | Jev decides judgment calls; owner-only items ask you. With no working decision model it behaves as `ask-me`. |
-| `just-vibes` | Nothing interrupts you: Jev decides what it can, and anything that needs you is held and listed at the end of the run. |
-| `yolo` | No approval prompts from the permission gate, except for a change asked for from a channel. Authentication, workspace containment, secret storage and spending limits still apply, and an act only you perform is refused to the model. |
-
-- **`plan`** is a separate read-only posture: read-only tools run, and every
-  mutating or exec call is refused. `/plan` toggles it.
 - **For one session:** `Shift+Tab` in `goodvibes` or `goodvibes-agent` cycles the mode of the
   current session only and asks once before switching to `yolo`; the key is
   the rebindable `cycle-permission-mode`.

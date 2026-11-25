@@ -90,7 +90,17 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry, SettingsCat
           rows: connectionRows(modal, focused),
           selected: modal.connectionEntries.length > 0 ? clampIndex(modal.connectionEntries.length) : -1,
         }
-      : undefined,
+      : modal.currentCategory === 'secure-address-now'
+        ? {
+            rows: modal.secureAddressRows.map((row, index) => ({
+              label: row.label,
+              right: row.state,
+              selected: focused && index === clampIndex(modal.secureAddressRows.length),
+              current: !focused && index === clampIndex(modal.secureAddressRows.length),
+            })),
+            selected: clampIndex(modal.secureAddressRows.length),
+          }
+        : undefined,
 });
 
 /** A number or a choice is nudged in place with shift+arrows; a picker's setting is not. */

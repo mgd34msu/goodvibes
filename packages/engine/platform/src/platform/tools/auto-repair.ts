@@ -67,15 +67,47 @@ async function repairOwnedToolCall(
 ): Promise<RepairResult> {
   assertRepairActive(signal);
   let fixed: Record<string, unknown>;
-  const repairs: string[] = [];
-  const booleanStrings: Array<{ key: string; value: string }> = [];
+  let repairs: string[];
+  let booleanStrings: Array<{ key: string; value: string }>;
   const params = schema.parameters as JsonSchemaNode | undefined;
   const declared = params?.properties;
   const properties = (declared !== null && typeof declared === 'object' ? declared : {}) as Record<string, Record<string, unknown>>;
   const required = (Array.isArray(params?.required) ? params.required : []).filter((key): key is string => typeof key === 'string');
 
   try {
-    fixed = structuredClone(args);
+    ({ fixed, repairs, booleanStrings } = formatRepairs(toolName, args, schema));
+  } catch (err) {
+    // Cancellation is not a format failure and must not become a warning.
+    assertRepairActive(signal);
+    // Never let repair logic crash the caller
+    const warning = `Auto-repair skipped for tool '${toolName}': ${summarizeError(err)}`;
+    logger.warn('repairToolCall: unexpected error produced warning result', {
+      toolName,
+      error: summarizeError(err),
+    });
+    return { repaired: false, original: args, fixed: args, repairs: [], warnings: [warning] };
+  }
+  return readValues(toolName, args, schema, fixed, repairs, booleanStrings, properties, required, params, signal, scopedPort);
+}
+
+/**
+ * The repairs that need no reading: case and alias renames, obvious shapes, decimal text
+ * for numbers, the literal booleans and enum spellings, on a copy of `args`. Pure and
+ * synchronous, so a caller can ask whether a call fits its schema once these are made.
+ * Throws only on a malformed schema; `repairToolCall` turns that into a warning.
+ */
+export function formatRepairs(
+  toolName: string,
+  args: Record<string, unknown>,
+  schema: ToolDefinition,
+): { fixed: Record<string, unknown>; repairs: string[]; booleanStrings: Array<{ key: string; value: string }> } {
+  const repairs: string[] = [];
+  const booleanStrings: Array<{ key: string; value: string }> = [];
+  const params = schema.parameters as JsonSchemaNode | undefined;
+  const declared = params?.properties;
+  const properties = (declared !== null && typeof declared === 'object' ? declared : {}) as Record<string, Record<string, unknown>>;
+  {
+    const fixed = structuredClone(args);
 
     // --- Rule 1: Missing `mode` on agent tool ---
     if (toolName === 'agent' && fixed['mode'] === undefined) {
@@ -152,19 +184,17 @@ async function repairOwnedToolCall(
         }
       }
     }
-
-  } catch (err) {
-    // Cancellation is not a format failure and must not become a warning.
-    assertRepairActive(signal);
-    // Never let repair logic crash the caller
-    const warning = `Auto-repair skipped for tool '${toolName}': ${summarizeError(err)}`;
-    logger.warn('repairToolCall: unexpected error produced warning result', {
-      toolName,
-      error: summarizeError(err),
-    });
-    return { repaired: false, original: args, fixed: args, repairs: [], warnings: [warning] };
+    return { fixed, repairs, booleanStrings };
   }
+}
 
+/** The readings phase of `repairToolCall`: boolean words and missing required strings, then the unknown-parameter notes. */
+async function readValues(
+  toolName: string, args: Record<string, unknown>, schema: ToolDefinition,
+  fixed: Record<string, unknown>, repairs: string[], booleanStrings: Array<{ key: string; value: string }>,
+  properties: Record<string, Record<string, unknown>>, required: string[], params: JsonSchemaNode | undefined,
+  signal?: AbortSignal, scopedPort?: JudgmentPort,
+): Promise<RepairResult> {
   const warnings: string[] = [];
   // Without a decision model the format repairs above stand, and the values only a reading could settle
   // are left as sent: the call goes on to schema validation, whose error names what to supply.

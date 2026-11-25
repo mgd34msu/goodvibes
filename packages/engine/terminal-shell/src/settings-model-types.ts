@@ -24,6 +24,7 @@ export type CommonSettingsCategory =
   | 'web'
   | 'network'
   | 'relay'
+  | 'secureAddress'
   | 'surfaces'
   | 'device'
   | 'conversationGate'

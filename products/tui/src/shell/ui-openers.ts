@@ -164,7 +164,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
       // While the question is open the turn waits on the owner, not the model (the throbber says so).
       trustPromptRef.awaitingOwner = true;
       // It opens by itself (on opening, or when the folder gained hooks or MCP files): typing in flight stays in the composer.
-      commandContext.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose', unprompted: true }, (result) => {
+      // The cursor starts on "Keep restricted": Enter pressed straight away trusts nothing.
+      commandContext.openSelection(title, items, { allowSearch: false, primaryVerbLabel: 'Choose', unprompted: true, preSelectId: 'restricted' }, (result) => {
         trustPromptRef.awaitingOwner = false;
         const level = decodeFirstOpenChoice(result?.item.id ?? null);
         if (level === null) {

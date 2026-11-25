@@ -55,6 +55,7 @@ import type { ConfigSetting } from './schema.js';
 import { listDaemonOwnedConfigPaths } from './config-ownership.js';
 import { deleteRawDotPath, writeRawDotPath } from './settings-io.js';
 import { readDotPath } from './shared-config-tier.js';
+import { RETIRED_NO_DECISION_MODEL_POLICIES } from './settings-carry-forward.js';
 import { isSecretBearingConfigKey, SECRET_BEARING_CONFIG_PATHS } from './secret-bearing-config-keys.js';
 import { isStructuredCredentialReferenceConfigKey } from './structured-credential-config.js';
 import { describeMalformedSecretRef, looksLikeSecretRef } from './secret-ref-refusal.js';
@@ -202,11 +203,13 @@ export function closedPostureOf(key: string): ClosedPosture | undefined {
     case 'policy.requireSignedBundles': return { writes: [[key, true]], means: `${key} is on` };
     case 'policy.bundleSource':
     case 'policy.bundlePath': return { writes: [ASK_ME], means: 'no policy bundle loads and you are asked as in Ask me' };
+    // No decision model key is sent anywhere: a decision the model cannot answer takes its fallback (a permission call comes to you).
     case 'judgment.fallbacks':
     case 'judgment.backend':
     case 'judgment.keyName':
+      return { writes: [['judgment.keySource', 'none'], ['judgment.fallbacks', []]], means: 'no key is sent to a decision model, and a decision it cannot answer comes to you' };
     case 'provider.decisionRouter':
-      return { writes: [['judgment.policy', 'No Decision Model']], means: 'no decision model is asked anything, and GoodVibes asks you instead' };
+      return { writes: [ASK_ME], means: 'you are asked as in Ask me' };
     case 'relay.requireStepUpForMutations': return { writes: [[key, true]], means: 'every change made through the relay needs a passkey confirmation' };
     case 'fetch.blockedHosts': return { writes: [[key, '**']], means: 'fetch refuses every website' };
     case 'conversationGate.mode': return { writes: [[key, 'confirm-all']], means: 'every conversation step is confirmed with you' };
@@ -408,12 +411,12 @@ function adaptStoredTerminalTheme(raw: Record<string, unknown>): Record<string, 
 /**
  * The decision-model policy names 3.2.0 saved, one to one with today's. 3.3.1
  * read them without rewriting the file, so a home that set the policy under
- * 3.2.0 still holds one. Read here under the current name (someone who chose
- * no decision model keeps none); the daemon writes the current name into its
- * file once at boot (daemon/facade-boot-guarantees.ts).
+ * 3.2.0 still holds one. Read here under the current name; the daemon writes
+ * the current name into its file once at boot (daemon/facade-boot-guarantees.ts).
+ * `Classic - Off` (no decision model) is carried to the mode Ask me before the
+ * file is read (ConfigManager, decision models off).
  */
 const DECISION_POLICIES_SAVED_BY_3_2: Readonly<Record<string, string>> = Object.freeze({
-  'Classic - Off': 'No Decision Model',
   'Default - On': 'Decision Model Only',
   Preferred: 'Hybrid',
 });
@@ -444,6 +447,9 @@ function screenSchemaValues(
       }
     }
     if (setting.key === 'judgment.policy' && typeof hit.value === 'string' && isPlainObject(raw.judgment)) {
+      // No Decision Model (3.5.0 and earlier) is carried to the mode Ask me by the settings manager, which says so
+      // once; until the daemon has taken it out of its file it reads as the default, with no second notice.
+      if (RETIRED_NO_DECISION_MODEL_POLICIES.includes(hit.value)) { deleteRawDotPath(raw, 'judgment.policy'); continue; }
       const current = DECISION_POLICIES_SAVED_BY_3_2[hit.value];
       if (current !== undefined) {
         raw.judgment.policy = current;

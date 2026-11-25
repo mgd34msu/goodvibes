@@ -104,10 +104,22 @@ Foreground shutdown handles SIGINT/SIGTERM, fences new work and awaits owned dra
 the default shutdown deadline is 15 seconds. Startup/cleanup failure or deadline expiry
 exits 1, rather than reporting a successful drain.
 
+On its first start the daemon creates its operator token in
+`<daemon home>/operator-tokens.json` (mode 0600) and keeps the same token across
+restarts. `GOODVIBES_DAEMON_TOKEN` replaces it for this process only: it is never
+saved, and a client must send that same value. A token file that cannot be read is
+set aside (kept beside the new one when possible) and a new token is made; the start
+says so, says whether the old file was kept, and says that paired devices must pair
+again, without printing either token. Copies of the operator token that older
+releases left in a workspace are removed at start. Once the listener is up, the
+pairing block (QR code and link) is printed only to an interactive terminal; a
+service journal, redirected output and the logs never carry the token, and `pair`
+prints it again when you ask.
+
 Overrides apply in this order: repeated `--config` values, feature toggles,
 provider/model flags, then endpoint flags. Explicit `--provider` wins over the
 provider inferred from `provider:model`, regardless of argv order.
-These overlays are not persisted. See [CLI dispatch and overrides](cli-and-package-contracts.md#command-grammar-and-dispatch).
+These overlays are not persisted, and a feature override the daemon refuses is reported, never silently ignored.
 
 ### `install-service`
 
@@ -195,6 +207,11 @@ dispatching a call that was always going to fail. A start or restart that leaves
 service not running exits `3`, the same "installed, not running" answer `service-status`
 gives; a stop that leaves it running exits `1`. `restart-service` is the usual way to
 pick up a settings change that only applies at boot (an endpoint binding, for example).
+With a moved home (`GOODVIBES_HOME`, `--daemon-home`/`GOODVIBES_DAEMON_HOME`) or an
+explicit `--working-dir`, the installed systemd definition must name this same
+executable and all three directories, or the start or restart is refused without
+touching the service; on other platforms a start or restart with a moved home is
+refused. Unit files stay under the login home.
 
 ### `status`
 
@@ -275,7 +292,7 @@ goodvibes-daemon sessions list|kill <id> [--json] [--all] [--host <name>] [--por
 
 `--all` includes sessions that have already ended; they are kept, with the reason they
 ended, until the retention window retires them. These are the daemon's own hosted
-sessions (see [hosted session commands](cli-and-package-contracts.md#status-sessions-and-config)), not sessions a terminal runs
+sessions (see [Hosted sessions](hosted-sessions.md)), not sessions a terminal runs
 locally on this machine. `kill` with no id is a usage refusal (exit 2), never "kill
 everything."
 
@@ -333,9 +350,9 @@ Values are read and written on this machine's settings files directly, so every 
 works whether or not a daemon is running. A running daemon picks up most changes live,
 including a changed control-plane host or port; the write receipt says a key that is only read at startup applies the next time the daemon starts. It does not enumerate per-key reload behavior or the destination tier. Anything that reads like a
 credential (a token, a password, an API key) prints as `<redacted>` in every read
-path. See
-[config output and sensitivity](cli-and-package-contracts.md#recursive-config-output)
-for recursive rendering and reader-failure behavior.
+path. A setting whose value is an object is redacted field by field the same way
+in the plain and the `--json` output; a `goodvibes://secrets/` reference prints as
+the reference.
 
 ### `update`
 
@@ -363,8 +380,11 @@ Send a message through any configured channel. The message is an argument or
 stdin, so it composes with other tooling. The thirteen supported IDs come from the product surface catalog and canonical
 channel delivery router. Listing is configuration inspection, not credential or provider verification. Each row below names the id `--channel` takes, what `--to`
 means in that channel's own vocabulary, and what has to be configured before the
-channel is usable. See [standalone send](cli-and-package-contracts.md#standalone-send)
-for channel selection and credential ownership.
+channel is usable. Credentials come from the channel's configured references (the
+service registry first); a configured credential that cannot be resolved is refused
+rather than replaced by an environment variable, and the command creates no
+credentials. A credential setting that failed to load holds the send instead of
+falling back to another account.
 
 | `--channel` | Channel | `--to` names | Needs configured |
 | --- | --- | --- | --- |
@@ -401,6 +421,11 @@ channel, destination or title options. No channel argument requires exactly one
 enabled channel with a configured destination. Required capability gates still apply.
 The Discord row describes outbound delivery, not a qualified configured Discord inbox/DM catalog.
 
+The message is sent as written, within each channel's length limit: Telegram gets
+plain text (no Markdown or HTML parsing), and Discord and Slack markup and mentions
+are escaped so the text cannot ping or format. Sending the same message again, also
+after a failed attempt, reaches ntfy again rather than being dropped as a duplicate.
+
 Only stdin input has its trailing line-feed bytes removed (`/\n+$/`). Interior
 newlines, spaces and carriage returns are preserved. Explicit argument bytes
 are unchanged; this is not general whitespace trimming.
@@ -415,8 +440,8 @@ The default-selection receipt retains its preamble and unique-destination reason
 Unconfirmed delivery retains a nonzero structural status diagnostic. Borrowed
 provider prose, token URLs and unvalidated identifiers are not republished. This
 is the explicit send diagnostic projection, not a content-classification or
-secret-detection heuristic. The [standalone-send contract](cli-and-package-contracts.md#standalone-send)
-retains credential/fetch/body drainage, explicit-repeat and no-hidden-retry rules.
+secret-detection heuristic. Errors while loading settings for a send are shown
+the same way, so a malformed setting cannot echo a credential to the terminal.
 
 ### `cluster`
 
@@ -485,6 +510,11 @@ and says the web UI was left off; otherwise it runs `enable --json`.
 serving to this machine only. `--lan` binds every interface and turns
 `controlPlane.enabled` on, since the listener answers other devices only with that
 setting on; `--loopback` takes the binding back. Both are stated in the receipt.
+The bundle, the binding and the serving switches are checked together, against
+every value and any managed-policy lock, and written in one save: a refused lock
+changes nothing, so the web UI is never opened to the network before a narrowing
+it asked for is known to hold. An IPv6 address is written in brackets in every
+link and receipt.
 
 ### `provision-wake-model`
 

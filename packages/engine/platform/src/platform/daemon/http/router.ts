@@ -474,7 +474,7 @@ export class DaemonHttpRouter {
         code: 'DECISION_MODELS_DISABLED',
         category: 'bad_request',
         state: 'no decision model is in use (none is chosen, or decision models are turned off)',
-        next: ['Choose a Decision model in settings, with "When the decision model is missing or fails" set to Hybrid or Decision Model Only, to use this; or use the alternative the message names'],
+        next: ['Choose a Decision model in settings to use this; or use the alternative the message names'],
       }, { status: 409 });
     }
     logger.error('[daemon-http] request handler failed', { method: req.method, path: new URL(req.url).pathname, error: summarizeError(error) });

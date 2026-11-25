@@ -19,6 +19,7 @@ export interface ConfigSchemaEntry {
   readonly default: unknown;
   readonly description: string;
   readonly enumValues?: readonly string[];
+  readonly enumLabels?: Readonly<Record<string, string>>;
   readonly validationHint?: string;
   readonly unit?: 'money';
 }
@@ -1167,6 +1168,58 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
     "type": "string",
     "default": "dist/web",
     "description": "Static asset directory for the embedded web surface (index.html + assets), served when controlPlane.webui.serve is true. Used when controlPlane.webui.bundleDir is empty; that more specific key wins when it names a directory."
+  },
+  {
+    "key": "secureAddress.certificate",
+    "label": "Certificate the https address uses",
+    "type": "enum",
+    "default": "local-authority",
+    "description": "A phone that opens GoodVibes over plain http on your network gets the chat and little else: browsers keep the microphone, push notifications, installing the app, the camera and passkeys for https addresses. Pick one way to give GoodVibes an https address. The plain http address keeps working exactly as it does now, whichever you pick. The https address is switched on by controlPlane.lanHttps.enabled (\"Serve the web UI over https on your network\"); this setting says which certificate it serves. lets-encrypt: A certificate for a domain you own (Let's Encrypt): GoodVibes gets a free certificate from Let's Encrypt for a name under a domain you own (for example gv.example.com, and every name under it for the machines of your group) and renews it by itself about a month before it ends. It writes two kinds of DNS record through your DNS provider's API: a short-lived proof record (_acme-challenge.<name>, removed once Let's Encrypt has checked it) and an address record pointing the name at this computer's address on your network, corrected when that address changes. Phones then open https://<name>:<port>. Needs: The name, and an API token from your DNS provider (Cloudflare: a token with the permission Zone, DNS, Edit on the zone that holds the name), unless one is already stored. Nothing else: no account to make, no email, nothing to install on any phone. Choosing it agrees to Let's Encrypt's subscriber agreement. The phone gains: Every phone, tablet and computer trusts the address at once: microphone, push notifications, installing the app, camera and passkeys all work, with nothing installed on the phone. Sent: To Let's Encrypt: the name and the public half of keys made on this computer (the private keys never leave it). To your DNS provider: the name, the proof value (a digest, no secret) and this computer's local network address, which becomes readable by anyone who looks the name up. Nothing goes to GoodVibes. Before you choose: Let's Encrypt publishes the name of every certificate it issues in public logs (Certificate Transparency) that anyone can search, so pick a name that says nothing about you or your home. Some home routers refuse DNS answers that point at a local address (DNS rebinding protection); GoodVibes looks the name up from this computer after writing it and tells you if that happens, and what to change on the router. own-files: A certificate you made: GoodVibes serves https with a certificate and key you already have (from your own certificate authority, a company one, or another ACME client). It checks them when you give them (the key must belong to the certificate; which names it covers; when it ends), reads the files again when they change, and tells you once, a fortnight before the certificate ends. It never renews it: that stays yours. Needs: The paths of two files on this computer: the certificate (with its chain) and its private key, unencrypted. The names it covers must be the names phones open. The phone gains: The same as any https address, on every device that trusts whoever signed your certificate. A device that does not trust the signer shows a certificate warning. Sent: Nothing leaves this computer: the files are read here and used here. local-authority (the default, as in 3.5.0): GoodVibes' own certificate (no domain needed): GoodVibes makes a certificate authority on this computer that can only vouch for this computer's own names and private network addresses, and serves https with a certificate it signs. It is made again at each start for the addresses the computer has then. Needs: On each phone, once: open the page /lan-https on this computer's plain address and install the GoodVibes certificate (the page says how on iPhone and Android, and how to remove it). The phone gains: Everything an https address gives, on each phone that installed the certificate; a phone that did not shows a certificate warning. Sent: Nothing leaves this computer. Before you choose: Installing a certificate on a phone is the one step it needs, and it has not been tried yet on a real iPhone or Android phone. The fourth way, Tailscale, is not a certificate this daemon serves: Tailscale: Tailscale serves this computer at its https name on your tailnet (https://<machine>.<tailnet>.ts.net) with a certificate Tailscale obtains, and forwards to GoodVibes. It is set up per machine and is not shared with the machines of a group. Needs: Tailscale installed and signed in on this computer and on each phone, and HTTPS turned on for your tailnet in the Tailscale admin page. The phone gains: Everything an https address gives, on every phone signed in to your tailnet, from anywhere, not only at home. Sent: Tailscale's coordination servers learn this machine's tailnet name (the certificate for it is issued by Let's Encrypt and appears in its public logs under your tailnet's name); your traffic goes between your devices, encrypted by Tailscale. (Settings, Network, Tailscale). In a machine group, the machine that set this up provides it to every machine that joined; a machine that joined shows what it received and has nothing to set.",
+    "enumValues": [
+      "local-authority",
+      "own-files",
+      "lets-encrypt"
+    ]
+  },
+  {
+    "key": "secureAddress.domain",
+    "label": "Your name for the https address (Let's Encrypt)",
+    "type": "string",
+    "default": "",
+    "description": "The name under a domain you own that phones open, for example gv.example.com (used when secureAddress.certificate is lets-encrypt). The certificate covers it and every name directly under it, so the machines of a group each get their own name (<machine>.gv.example.com). Let's Encrypt publishes it in public logs: pick a name that says nothing about you. The DNS provider's token is the Cloudflare API token (cloudflare.apiTokenRef), with Zone, DNS, Edit on the zone that holds the name.",
+    "validationHint": "a DNS name with at least two labels, such as gv.example.com (no scheme, no port, no *)"
+  },
+  {
+    "key": "secureAddress.dnsProvider",
+    "label": "DNS provider the daemon writes records with",
+    "type": "enum",
+    "default": "cloudflare",
+    "description": "The DNS service whose API the daemon uses for the Let's Encrypt proof record and the address record. Cloudflare is the one supported now.",
+    "enumValues": [
+      "cloudflare"
+    ]
+  },
+  {
+    "key": "secureAddress.acmeDirectory",
+    "label": "Certificate authority address (ACME)",
+    "type": "string",
+    "default": "https://acme-v02.api.letsencrypt.org/directory",
+    "description": "Where the certificate is asked for: an ACME directory. Leave it as https://acme-v02.api.letsencrypt.org/directory (Let's Encrypt). Another ACME authority that offers DNS proofs works the same way.",
+    "validationHint": "an http(s) address of an ACME directory"
+  },
+  {
+    "key": "secureAddress.certFile",
+    "label": "Your certificate file",
+    "type": "string",
+    "default": "",
+    "description": "Path of the certificate (PEM, with its chain) served when secureAddress.certificate is own-files. Read on this computer, checked when given and again when the file changes; never sent anywhere."
+  },
+  {
+    "key": "secureAddress.keyFile",
+    "label": "Your certificate's key file",
+    "type": "string",
+    "default": "",
+    "description": "Path of the certificate's private key (PEM, not passphrase-protected) for own-files. The setting holds the path, never the key; the key is read on this computer and never logged or sent, except sealed to the machines of your group when this computer leads one."
   },
   {
     "key": "conversationGate.mode",
@@ -4794,15 +4847,18 @@ export const CONFIG_SCHEMA_ENTRIES: readonly ConfigSchemaEntry[] = [
   },
   {
     "key": "judgment.policy",
-    "label": "When the decision model is missing or fails",
+    "label": "If Jev can't answer",
     "type": "enum",
     "default": "Hybrid",
-    "description": "Who answers is set in one place, When GoodVibes asks (permissions.mode); this setting only says what happens while a set decision model fails, or that none is used. Hybrid (default): while it fails, each decision takes its own fallback (a permission call comes to you instead, or is held to the end of the run in Just vibes), and the failure is shown once with the model, what failed and the next step. Decision Model Only: while it fails, a call it would have decided is refused with its error and the turn goes on. No Decision Model: no decision model is asked, as with none set, and every decision takes its fallback (a permission call comes to you, or is held in Just vibes). YOLO asks no decision model, so this setting does not change it.",
+    "description": "Only for Jev decides and Just vibes: what happens to a call Jev would decide when the decision model fails. Ask me (default): it comes to you (in Just vibes it is held to the end of the run), and the failure is shown once with the model, what failed and the next step. Refuse the action: it is refused with the reason, and the turn goes on.",
     "enumValues": [
       "Hybrid",
-      "Decision Model Only",
-      "No Decision Model"
-    ]
+      "Decision Model Only"
+    ],
+    "enumLabels": {
+      "Hybrid": "Ask me",
+      "Decision Model Only": "Refuse the action"
+    }
   },
   {
     "key": "judgment.endpoint",

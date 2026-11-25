@@ -24,8 +24,8 @@ These are the package-facing docs for the GoodVibes Agent `3.3.x` release line.
 ## Baseline
 
 - Package executable: `goodvibes-agent`.
-- Install/runtime: Bun `1.3.14` or newer.
-- Agent version source: exact `package.json` semver, kept in sync with `CHANGELOG.md` and `src/version.ts` during release.
+- Install: the [suite installer](../../../docs/installation.md); the installed program needs no Bun or Node.
+- Version: `goodvibes-agent --version`; the suite shares one version.
 - Connected-host compatibility: public Agent routes report readiness through the `compat` and `status` CLI commands plus `host action:"status"`.
 - Connected host: owned outside Agent; Agent reports and uses it and does not manage its lifecycle, with two exceptions: the boot-time start of an installed but stopped host, and the daemon repair the person chooses in a question at start (see [Connected host](connected-host.md)).
 - Agent Knowledge: only `/api/goodvibes-agent/knowledge/*`; no default knowledge fallback.

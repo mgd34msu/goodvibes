@@ -494,10 +494,9 @@ tasks as blocked-and-retriable on the next run for that space.
 ## Without a decision model
 
 Every knowledge and Home Graph verb works when no decision model is in use
-(none is set, `judgment.policy` is No Decision Model, or under Hybrid the set
-model failed during the operation). Each result says that nothing in it was read
-or checked by a decision model. Under Decision Model Only a failing model's
-error stands.
+(none is set, or the set model failed during the operation and "If Jev can't
+answer" is Ask me). Each result says that nothing in it was read or checked by
+a decision model. Under Refuse the action a failing model's error stands.
 
 - Ask (knowledge and Home Graph): the records that share the most words with
   the question, each with the passages of its stored text that mention them,
@@ -513,7 +512,7 @@ error stands.
   `semanticAssessment: not-evaluated`. Sharing packets never used a model.
 - Quality issues: declared device fields settle issues in code; a device whose
   questions need a reading keeps its existing issues. When the set model fails
-  during a pass under Hybrid, the pass runs again that way instead of holding.
+  during a pass under Ask me, the pass runs again that way instead of holding.
 - Snapshot sync: links, quality and the automatic device passports and room
   pages all run; a model failure partway through builds the remaining pages
   unchecked rather than leaving them for later. The sync's `quality` is

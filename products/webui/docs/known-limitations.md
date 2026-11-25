@@ -7,12 +7,20 @@ mistaken for hidden contracts.
 
 - Chat sessions are daemon-owned. Browser local storage is only a cache for the
   active/recent session list while daemon state loads.
-- Edit-with-branching keeps superseded turns viewable, but branches are linear
-  alternatives on one conversation. There is no tree browser across branches.
+- An edited message or a regenerated reply keeps every version: the turn shows
+  "‹ 2 of 3 ›", and Previous and Next put that version on the conversation in
+  the daemon (`companion.chat.branches.switch`), so it is what every device
+  shows, what is still shown after leaving the chat and coming back, and what
+  the model continues from. Versions are switched one turn at a time; there is
+  no tree of every version and no side-by-side comparison of two.
 - Attachments upload as daemon artifacts before send; large outputs open in the
   artifacts slide-over, and the chat header's Files button lists every file
-  attached to or made in the chat. A file cannot be removed from a chat once
-  it is sent.
+  attached to or made in the chat. A file can be taken off in the composer
+  before sending, or removed from a sent message with the × on its row: after
+  one confirm (it cannot be put back) the file is deleted from the daemon, the
+  message shows "<name> was removed" in its place, and the model no longer
+  gets the file. A file cannot be removed while a reply is being written or
+  sends are queued; stop the reply or let it finish first.
 
 ## Voice
 
@@ -37,9 +45,12 @@ mistaken for hidden contracts.
 - The Calendar view shows what the daemon's calendar reads: a CalDAV server
   when one is set, otherwise the machine's one Google connection (the account
   connected with the Agent's `/calendar connect google`, `/google connect` or
-  the model's `google` tool; they are the same connection). A Microsoft
-  account connected with `/calendar connect outlook` is read by the Agent's
-  `/calendar` only, not by the daemon's calendar. With nothing usable the
+  the model's `google` tool; they are the same connection), and beside either
+  a Microsoft Outlook account connected with the Agent's `/calendar connect
+  outlook` (the same connection the Agent's `/calendar` uses). Outlook's
+  calendars are listed as "<name> (Outlook)" in the calendar choice; with no
+  calendar chosen the view shows the events of both. An `.ics` import into an
+  Outlook calendar is refused: import it in Outlook. With nothing usable the
   daemon's answer names the accounts that exist and why none can be read, and
   a daemon build with no calendar handler at all says the capability is
   missing. The CalDAV keys:
@@ -101,7 +112,8 @@ mistaken for hidden contracts.
 ## Sessions and realtime
 
 - The daemon sends the session list a page at a time; Work's "Show older
-  sessions" loads the next page, back to the first. Chat's history search
+  sessions" adds the next older page below the ones already shown, and the
+  button goes away once the oldest session is on screen. Chat's history search
   looks in two places at once: session titles over the full history
   (`sessions.search`) and the text of messages (`chat.messages.search`).
 - The lists that have no event of their own (mail, calendar, occasions,
@@ -124,19 +136,10 @@ mistaken for hidden contracts.
   conversation), or an active channel session the daemon keeps no context
   figure for, shows an honest unavailable state.
 
-## Route shims
-
-- Hand-written per-route shims stay retired. The method-to-route table is
-  generated from `@goodvibes/engine/contracts/generated/webui-facade`
-  (refreshed with the operator contract by `bun run refresh:contracts`, which
-  `contracts:check` holds to the contract), so there is no hand-written row to
-  drift. Method types remain contract-derived (`src/lib/contract-bridge-types.ts`).
-
 ## Screenshots
 
-- Documentation screenshots are captured against the end-to-end suite's seeded
-  mock daemon. They prove layout, not authenticated daemon data, provider
-  catalog content, or operator chat history.
+- Documentation screenshots show a sample daemon with sample data: they show the
+  layout, not a real account, provider catalog or chat history.
 
 ## Native work and verification
 
@@ -144,7 +147,3 @@ mistaken for hidden contracts.
   readings do not become human approval requests or manual winner selection.
 - Legacy approval and attempt-comparison records remain separate compatibility
   views. Their controls do not authorize native work.
-- Unit and synthetic browser tests exercise bounded behavior with fixtures.
-  Connected-daemon tests and genuine provider calibration require separate
-  receipts. The connected-browser smoke covers status, configuration and session
-  lifecycle without model calls; it does not establish chat, account or relay parity.

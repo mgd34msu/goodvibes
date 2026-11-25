@@ -49,6 +49,13 @@ interface PreparedOperatorRoute {
   readonly httpMethod: string;
   readonly path: string;
   readonly payload: JsonRecord;
+  /** The method has no REST route of its own: sent to the generic invoke endpoint, its input wrapped as `{ body }`. */
+  readonly invokeEndpoint?: true | undefined;
+}
+
+/** Where a method with no REST route of its own is invoked over HTTP (the same endpoint every client uses). */
+function genericInvokePath(methodId: string): string {
+  return `/api/control-plane/methods/${encodeURIComponent(methodId)}/invoke`;
 }
 
 type WatcherMethodId =
@@ -116,10 +123,9 @@ function cloneInput(input: unknown): JsonRecord {
 function prepareOperatorRoute(method: OperatorContractMethod, input: unknown): PreparedOperatorRoute {
   const httpMethod = method.http?.method?.toUpperCase();
   const pathTemplate = method.http?.path;
-  if (!httpMethod || !pathTemplate) {
-    throw new Error(`operator method '${method.id}' is not invokable over HTTP.`);
-  }
   const payload = cloneInput(input);
+  // A method served only through the gateway (no REST route) is reached at the generic invoke endpoint.
+  if (!httpMethod || !pathTemplate) return { method, httpMethod: 'POST', path: genericInvokePath(method.id), payload, invokeEndpoint: true };
   // The one path builder: it also refuses '', '.' and '..' as a path value, which URL parsing
   // would collapse into another route than the one admitted.
   const path = substituteOperatorPath(pathTemplate, payload);
@@ -502,7 +508,7 @@ export function createAgentOperatorMethodTool(
             ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { 'content-type': 'application/json' }),
             ...(ownerRequest ? { 'x-goodvibes-explicit-user-request': 'true' } : {}),
           },
-          ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(wirePayload) }),
+          ...(READ_ONLY_HTTP_METHODS.has(route.httpMethod) ? {} : { body: JSON.stringify(route.invokeEndpoint ? { body: wirePayload } : wirePayload) }),
         });
         stage = 'answered'; httpStatus = response.status;
         // A delegated credential the host no longer accepts is forgotten; the next call makes a new one.

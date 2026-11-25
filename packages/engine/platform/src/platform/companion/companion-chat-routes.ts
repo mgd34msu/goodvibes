@@ -14,9 +14,11 @@
  *   GET    /api/companion/chat/sessions/:sessionId/messages   (?limit=&before= for one page)
  *   POST   /api/companion/chat/sessions/:sessionId/turns/cancel (stop the in-flight turn)
  *   POST   /api/companion/chat/sessions/:sessionId/messages/steer (interrupt + send now)
+ *   POST   /api/companion/chat/sessions/:sessionId/branches/switch (another version of a turn)
  *   GET    /api/companion/chat/sessions/:sessionId/queued-messages (messages waiting for their turn)
  *   POST   /api/companion/chat/sessions/:sessionId/queued-messages/:messageId (edit one)
  *   DELETE /api/companion/chat/sessions/:sessionId/queued-messages/:messageId (remove one)
+ *   DELETE /api/companion/chat/sessions/:sessionId/messages/:messageId/attachments/:artifactId (remove a sent file for good)
  *   GET    /api/companion/chat/sessions/:sessionId/events  (SSE)
  *   GET    /api/companion/chat/messages/search  (?query=&limit=&cursor=&includeClosed=)
  *
@@ -81,10 +83,12 @@ export const COMPANION_CHAT_ROUTES: readonly { readonly method: string; readonly
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/retry' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/edit' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/messages/steer' },
+  { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/branches/switch' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/turns/cancel' },
   { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/queued-messages' },
   { method: 'POST', path: '/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}' },
   { method: 'DELETE', path: '/api/companion/chat/sessions/{sessionId}/queued-messages/{messageId}' },
+  { method: 'DELETE', path: '/api/companion/chat/sessions/{sessionId}/messages/{messageId}/attachments/{artifactId}' },
   { method: 'GET', path: '/api/companion/chat/sessions/{sessionId}/events' },
   { method: 'GET', path: '/api/companion/chat/messages/search' },
 ];
@@ -163,6 +167,11 @@ export async function dispatchCompanionChatRoutes(
     return handleEditMessage(req, sessionId, context);
   }
 
+  // POST /api/companion/chat/sessions/:sessionId/branches/switch  (another version of a turn)
+  if (sub === 'branches/switch' && req.method === 'POST') {
+    return handleSwitchBranch(req, sessionId, context);
+  }
+
   // POST /api/companion/chat/sessions/:sessionId/turns/cancel
   if (sub === 'turns/cancel' && req.method === 'POST') {
     return handleCancelTurn(req, sessionId, context);
@@ -185,6 +194,12 @@ export async function dispatchCompanionChatRoutes(
     return req.method === 'POST'
       ? handleEditQueuedMessage(req, sessionId, messageId, context)
       : handleDeleteQueuedMessage(sessionId, messageId, context);
+  }
+
+  // DELETE /api/companion/chat/sessions/:sessionId/messages/:messageId/attachments/:artifactId
+  const attachmentMatch = sub.match(/^messages\/([^/]+)\/attachments\/([^/]+)$/);
+  if (attachmentMatch && req.method === 'DELETE') {
+    return handleRemoveAttachment(sessionId, decodeURIComponent(attachmentMatch[1]!), decodeURIComponent(attachmentMatch[2]!), context);
   }
 
   // GET /api/companion/chat/sessions/:sessionId/events
@@ -942,6 +957,32 @@ function handleDeleteQueuedMessage(sessionId: string, messageId: string, context
   return context.chatManager.deleteQueuedMessage(sessionId, messageId)
     ? Response.json({ sessionId, id: messageId, deleted: true })
     : notQueued(messageId);
+}
+
+// ---------------------------------------------------------------------------
+// DELETE /api/companion/chat/sessions/:sessionId/messages/:messageId/attachments/:artifactId
+// ---------------------------------------------------------------------------
+
+/** Put another version of an edited message or a regenerated reply on the conversation. */
+async function handleSwitchBranch(req: Request, sessionId: string, context: CompanionChatRouteContext): Promise<Response> {
+  const bodyOrResponse = await context.parseJsonBody(req);
+  if (bodyOrResponse instanceof Response) return bodyOrResponse;
+  const messageId = typeof bodyOrResponse['messageId'] === 'string' ? bodyOrResponse['messageId'].trim() : '';
+  if (!messageId) return Response.json({ error: 'messageId is required', code: 'INVALID_ARGUMENT' }, { status: 400 });
+  try {
+    return Response.json(context.chatManager.switchBranch(sessionId, messageId));
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
+  }
+}
+
+/** Remove a file from a sent message for good; the message keeps a line in its place. */
+function handleRemoveAttachment(sessionId: string, messageId: string, artifactId: string, context: CompanionChatRouteContext): Response {
+  try {
+    return Response.json(context.chatManager.removeAttachment(sessionId, messageId, artifactId));
+  } catch (err: unknown) {
+    return respondWithManagerError(err);
+  }
 }
 
 // ---------------------------------------------------------------------------

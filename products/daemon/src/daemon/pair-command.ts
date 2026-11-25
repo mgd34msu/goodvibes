@@ -57,7 +57,7 @@ import {
   type PairingReach,
 } from '@goodvibes/engine/platform/platform/pairing';
 import { renderPairingBanner } from '../core/pairing-banner.js';
-import { LAN_HTTPS_PAGE_PATH } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
+import { LAN_HTTPS_PAGE_PATH, httpsCertificateSource } from '@goodvibes/engine/platform/platform/daemon/lan-https/page';
 import {
   callDaemonMethod,
   callDaemonRoute,
@@ -402,7 +402,8 @@ export function thisMachineSignIn(
  * installs the GoodVibes certificate before it opens the https `origin`.
  */
 function lanCertificatePage(config: Pick<ConfigManager, 'get'>, origin: string): string | undefined {
-  if (lanHttpsPort(config) === undefined) return undefined;
+  // Only GoodVibes' own certificate is installed on the phone; Let's Encrypt and a certificate you made are trusted as they are.
+  if (lanHttpsPort(config) === undefined || httpsCertificateSource(config) !== 'local-authority') return undefined;
   let url: URL;
   try { url = new URL(origin); } catch { return undefined; }
   if (url.protocol !== 'https:') return undefined;

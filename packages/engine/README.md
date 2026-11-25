@@ -5,13 +5,50 @@
 
 The engine is the typed TypeScript platform layer behind the GoodVibes products: sessions, provider/model routing, in-process agents, a knowledge and memory store, a control-plane HTTP and realtime API, and the transports that carry it all. The daemon is its own product, built on the engine. Full-surface consumers embed runtime behavior in a Bun process and connect to daemon services as clients. Companion consumers, including the WebUI and mobile clients, use HTTP, SSE and WebSocket. The workspace package `@goodvibes/engine` carries the platform through explicit subpaths such as `@goodvibes/engine/platform`, `@goodvibes/engine/contracts` and `@goodvibes/engine/errors`.
 
-This page is for developers building on the engine. To install and use
-GoodVibes itself, start at the [repository README](../../README.md) and the
-[installation guide](../../docs/installation.md). Current behavior for
+Use it to write your own client for GoodVibes: a script, a service, a browser
+app or a phone companion that talks to a running daemon, or a Bun program that
+hosts the runtime itself. To install and use GoodVibes, start at the
+[repository README](../../README.md) and the
+[installation guide](../../docs/installation.md). How the engine decides some
+things your client will see is described with it:
 [completion verification](docs/runtime-orchestration.md#completion-verification),
 [project review inventory](docs/contract-criteria.md#project-review-inventory) and
-[owner-configured tool access](docs/tool-safety.md#owner-configured-access) lives
-in the engine.
+[owner-configured tool access](docs/tool-safety.md#owner-configured-access).
+
+## Getting it
+
+`@goodvibes/engine` is not published to npm or any other package registry.
+
+- **A client that talks to the daemon over HTTP needs no package.** The daemon's
+  operator API is plain HTTP with a bearer token, plus Server-Sent Events and
+  WebSocket for live updates. Its full description is the OpenAPI 3.1 document
+  [`contracts/artifacts/operator-openapi.json`](./contracts/artifacts/operator-openapi.json)
+  ([what it contains](./docs/openapi-contract.md)); the
+  [daemon and control-plane routes](../../products/tui/docs/channels-remote-and-api.md#daemon-and-control-plane),
+  [signing in](./docs/authentication.md) and
+  [pairing a device](./docs/pairing.md) are described in their own pages, and an
+  agent or script that only needs sessions, tasks, contracts, approvals and events
+  can start from the [agent API index](./docs/agent-api-index.md). Any language
+  that can send an HTTP request can be a client.
+- **A client that wants the engine's typed TypeScript entry points** (the
+  operator and peer clients, the contracts, the platform factories) gets them from
+  a checkout of this repository at the release tag it targets (`git checkout
+  v<version>`, then `bun install` and `bun run build` at the root, which builds
+  the entry points), and depends on the engine as a workspace package:
+  the client's own package sits under `products/` or `packages/` in that checkout
+  (the folders the root `package.json` names as workspaces) and declares
+  `"@goodvibes/engine": "workspace:*"`. Such a
+  client is built against that release and is tied to it: the contract checks in
+  the clients report a daemon of another version by method and field.
+- **The reference clients** in this repository are written that way:
+  [`products/tui/examples/reference-http-client`](../../products/tui/examples/reference-http-client/README.md)
+  (a client of a running daemon) and
+  [`products/tui/examples/reference-operator-client`](../../products/tui/examples/reference-operator-client/README.md)
+  (the same calls against a fixture daemon, no network) import only
+  `@goodvibes/engine/operator-client`, `@goodvibes/engine/peer-client`,
+  `@goodvibes/engine/transport-core` and, for the fixtures,
+  `@goodvibes/engine/contracts`, and resolve them through the terminal app's own
+  workspace dependency (`products/tui/package.json`).
 
 Public contract, config keys, route paths, event shapes, and file layouts follow the semver policy in `docs/semver-policy.md`. Pin exact versions and read `CHANGELOG.md` before upgrading.
 
@@ -21,7 +58,6 @@ flowchart LR
         platform["@goodvibes/engine/platform<br/>facade: platform runtime + daemon + clients"]
         contracts["@goodvibes/engine/contracts"]
         siblings["errors, transport-core/-http/-realtime,<br/>daemon-api, operator-client, peer-client"]
-        toolchain["@goodvibes/engine/toolchain<br/>CI/CD tools"]
     end
     platform --> contracts
     platform --> siblings
@@ -40,25 +76,15 @@ flowchart LR
     agent -. HTTP/SSE/WebSocket .-> daemon
     webui -. HTTP/SSE/WebSocket .-> daemon
     ha -. HTTP/SSE/WebSocket .-> daemon
-    toolchain -. workspace tooling .-> tui
-    toolchain -. workspace tooling .-> agent
 ```
 
 ---
 
-## Install
+## Talking to a daemon
 
-Prepare the engine through the monorepo workspace:
-
-```bash
-# From the repository root:
-bun install
-bun run build
-```
-
-Products depend on `@goodvibes/engine` through `workspace:*`; import only
-declared entry points. For a Bun host (terminal app, agent, CLI, daemon), the platform
-client factory talks to a reachable GoodVibes daemon:
+Import only the declared entry points. For a Bun program (a CLI, a service, a
+host of your own), the platform client factory talks to a reachable GoodVibes
+daemon:
 
 ```ts
 import { createGoodVibesPlatform } from '@goodvibes/engine/platform';
@@ -97,7 +123,6 @@ React Native, Expo, and Cloudflare Worker bridges follow the same pattern from t
 | Entry point | What it is |
 | --- | --- |
 | [`@goodvibes/engine/platform`](./platform) | The full platform runtime (sessions, agents, providers, knowledge, control plane, daemon route handlers) plus thin client factories for Bun, browser, React Native, Expo, and Cloudflare Workers. |
-| [`@goodvibes/engine/toolchain`](./toolchain) | The CI/CD toolchain: release cut, npm publish, per-job-green verification, and coverage checks. Invoked as `bunx @goodvibes/engine/toolchain <tool>` from every GoodVibes repo's release workflow. |
 | [`@goodvibes/engine/contracts`](./contracts) | Runtime-neutral operator and peer contract artifacts, generated method IDs, and lookup helpers that the `platform` entry points and every client surface share. |
 
 The same install also carries `errors`, `transport-core`, `transport-http`, `transport-realtime`, `daemon-api`, `operator-client`, `peer-client`, and `terminal-shell`, each imported as `@goodvibes/engine/<name>`; none is a separate install step. The full entry-point matrix is [docs/packages.md](./docs/packages.md).
@@ -134,101 +159,14 @@ Full index: [docs/README.md](./docs/README.md).
 
 ---
 
-## Development
-
-```bash
-git clone https://github.com/mgd34msu/goodvibes.git
-cd goodvibes
-bun install
-bun run build
-```
-
-| Command | Does |
-| --- | --- |
-| `bun run build` | Build judgment, engine and all four products from the monorepo root |
-| `bun run test` | Run every default-suite test file in the repository (engine, judgment, installer, products) from one pool |
-| `bun run validate` | Run the local integration gate: build/types, API/contracts, exports, packaging and runtime checks |
-| `bun run api:extract` / `bun run api:check` | Regenerate / verify the API Extractor reports under `etc/*.api.md` |
-| `bun run refresh:contracts` | Regenerate shared contract artifacts and product snapshots after a contract change |
-| `bun run docs:generate` / `bun run docs:check` | Regenerate / verify API reference docs; the check also verifies required docs and examples exist |
-
-### Running tests
-
-Every test file runs through one runner, `packages/engine/scripts/test.ts`.
-Each file runs in its own `bun test` process with its own home and temp
-directory, provider credentials removed from the environment and the network
-blocked, from one pool of workers (cores minus one; `--jobs <n>` sets it).
-
-The runner sets no time limit of any kind: no test, file or run is stopped or
-fails for how long it takes (bun is started with `--timeout=0`, which turns
-its own per-test timeout off), and a file that never finishes keeps running.
-Before any file starts, the runner
-parses every selected file and refuses the whole run, naming file and line, if
-one sleeps (`Bun.sleep`, a promise resolved by `setTimeout`, a timer from
-`timers/promises`), uses a snapshot, calls `mock.module`, skips a test (`.skip`,
-`.todo`, `.skipIf`, `xit`) or passes a timeout, retry or `setDefaultTimeout`. A
-file that runs no test, skips one at run time, tries the network or leaves a
-process running is a failure. The run ends with the ten slowest files, the
-file-seconds per group and a line of files run, passed, failed and refused.
-
-```bash
-# Every default-suite file in the repository
-bun run test
-
-# One file, or the default-suite files under a folder (relative to the
-# current directory, else to packages/engine; --cwd sets another base)
-bun run test:one test/mailbox-one-reader.test.ts
-bun packages/engine/scripts/test.ts products/agent/src/test
-
-# The files under test/live/ (the sandbox proofs; a host without bubblewrap
-# fails them) and under src/test/e2e/ (the built binaries), with their own totals
-bun packages/engine/scripts/test.ts --live
-bun packages/engine/scripts/test.ts --e2e
-```
-
-`-t <pattern>` runs only the tests whose name matches. Each package's
-`bun run test` runs that package's files. TUI and Agent tests create their
-working directories under `<product>/.test-tmp/run-*`, which is ignored by Git.
-
-Plain `bun test <file>` skips the runner's isolation, limits and admission
-scan, and the tests that start daemon fixture processes refuse to run without
-the runner.
-
-### Continuous integration
-
-`.github/workflows/ci.yml` runs on every push to `main`, every pull request
-against it, and by hand. Each job but the audit and the native builds runs
-`bun run validate --job <job>`, so `bun run validate` locally runs the same
-commands in the same order. One `build` job produces the workspace output and
-the jobs that read it restore it instead of rebuilding.
-
-| Job | Runs |
-| --- | --- |
-| `gates` | The source-only checks: errors, products, credential scope, judgment lint, events, version, flag graduation, internal ids, architecture, platform console, no `any`, the admission scan of the web UI's browser journey files, contracts, the web UI's engine imports, the release asset scripts |
-| `build` | `bun run build` once (the web UI build checks its committed settings-schema snapshot first) |
-| `typecheck` | The test, type-test, installer and product projects against the built declarations; API reports, exports, examples, browser compatibility, package metadata |
-| `proofs` | `bun run test` |
-| `live-sandbox` | `bun run test:live` inside real bubblewrap, where a skip fails |
-| `package` | Pack, publint, install smoke, packaged-artifact conformance and bundle sizes; the three Linux programs built, the built-program smoke files, the web UI's browser journeys against its production build, the daemon inside bubblewrap and the web UI against a real daemon; then no file in the checkout may have changed |
-| `security-audit` | Dependency audit and secret scan |
-| `native` | Pushes to `main` and manual runs, not pull requests: the daemon built and run on Linux ARM, macOS Intel and macOS ARM, and on macOS its launchd service started, restarted and stopped in the logged-in session's domain |
-| `ci-ok` | Fails unless every job succeeded (`native` may be skipped on a pull request); the release requires it on the release commit |
-
-Workflows install the Bun version named by `engines.bun` in the root
-`package.json` through the `.github/actions/bun` action; change the version
-there. Release workflows derive the previous release tag from Git history.
-
----
-
 ## Release and stability
 
-The monorepo owns versioning and release workflows. The root version governs
-the engine, judgment and daemon; the other product manifests retain their own
-versions. The application products are private workspaces; the suite is
-installed from checksum-verified release binaries by the repository installer. Export and compatibility rules are recorded in
-[the semver policy](./docs/semver-policy.md); release machinery and its explicit
-gates are described in release and publishing.
-Update an installed suite with the [repository installer](../../docs/installation.md#automatic-updates-and-rollback).
+The engine carries the suite's version. What counts as a breaking change to
+an entry point, a setting, a route or an event, and how much notice it gets, is in
+[the semver policy](./docs/semver-policy.md); pin an exact version and read the
+[changelog](./CHANGELOG.md) before upgrading. The suite itself is installed and
+updated from checksum-verified release binaries by the
+[repository installer](../../docs/installation.md#automatic-updates-and-rollback).
 
 ## Security
 

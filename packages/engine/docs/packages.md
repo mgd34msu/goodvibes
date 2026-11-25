@@ -7,7 +7,7 @@ Install the `@goodvibes/engine` package. Its explicit import subpaths include
 package, rather than separately installed packages. The entry-point column
 below is an import path; the install column always names the package root.
 
-See the [Published Surface Matrix](./surfaces.md) for the two-tier model: full surface (Bun) vs. companion surface (Hermes / browser / Workers). For the internal runtime-boundary model, see [Runtime Surfaces](./runtime-surfaces.md).
+See the [Published Surface Matrix](./surfaces.md) for the two-tier model: full surface (Bun) vs. companion surface (Hermes / browser / Workers).
 
 ## Consumer decision matrix
 

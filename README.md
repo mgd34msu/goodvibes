@@ -29,6 +29,10 @@ What you will notice:
 - **A second model can make routine calls for you, and it is optional.**
   Everything works without it ([The decision model](#the-decision-model)).
 
+How the four programs fit together, what runs where and why:
+[How GoodVibes works](docs/how-goodvibes-works.md). Every guide and reference
+page, grouped by what you want to do: the [documentation index](docs/README.md).
+
 ## Install
 
 Linux or macOS, x64 or arm64. On Windows, use WSL2 ([notes](docs/windows.md)).
@@ -94,7 +98,8 @@ goodvibes
    asks whether to trust the folder: **Trust this workspace** lets the folder's
    own hooks and MCP servers run and lets GoodVibes change files in it, but
    approves nothing: each action still follows your setting for when
-   GoodVibes asks. **Keep restricted** keeps it read-only. When it asks before running a
+   GoodVibes asks. **Keep restricted** keeps it read-only, and the question
+   opens with the cursor on it, so Enter pressed at once trusts nothing. When it asks before running a
    command, you can allow it once, allow it and remember the rule, or deny it
    with a reason it reads.
 
@@ -197,10 +202,11 @@ around is **Jev**. The setting `permissions.mode` is a dial from "ask me" to
 | `jev-decides` (default) | The decision model settles the in-between actions, and you are asked only what is yours alone. With no working decision model, you are asked as in `ask-me`. |
 | `just-vibes` | Nothing stops to ask you. Anything that needs you is set aside and listed at the end of the run, where `/held` approves or drops it. |
 | `yolo` | No permission questions, except about a change requested from a chat channel. Spending limits, sign-in, the project boundary and secret storage still apply, and the agent can never answer an approval for you. |
+| `plan` | Read-only: reading tools run, and anything that would change something is refused. |
 
 In `goodvibes`, `Shift+Tab` changes the mode for the current session.
 `--just-vibes` or `--yolo` sets it for one launch of either terminal app, and
-`/settings` (When GoodVibes asks) saves it. Plan mode, `/decisions` and the rest:
+`/settings` (When GoodVibes asks) saves it. `/decisions` and the rest:
 [permission modes](docs/decision-model-policy.md#permission-modes).
 
 ## The decision model
@@ -214,18 +220,16 @@ choices. By default, GoodVibes lets a decision model answer for you only when
 its accuracy has been checked, which today means the hosted Jev. To let a
 different one answer, choose the `jev-decides` mode yourself in `/settings`.
 
-The `judgment.policy` setting says what happens when a decision model is set:
-
-- **Hybrid** (default): when it fails, work carries on without it, and you are
-  told once.
-- **Decision Model Only**: when it fails, a tool call it cannot decide is refused and says why; the turn goes on.
-- **No Decision Model**: no decision model is used.
+In Jev decides and Just vibes, **If Jev can't answer** (in the decision model
+settings) says what happens to a call Jev would decide while the decision model
+fails: it comes to you (**Ask me**, the default) or is refused with the reason
+(**Refuse the action**).
 
 You are always told when no decision model is in use: once in the
 conversation, in `goodvibes status` and `goodvibes-agent status`, in headless
 JSON results, and in the permission mode chip in the web app's header. A few features need a decision model
-and say so when none is in use. How much you are asked under each mode and
-policy: [decision model guide](docs/decision-model-policy.md).
+and say so when none is in use. How much you are asked under each mode:
+[decision model guide](docs/decision-model-policy.md).
 
 ## Running on more than one machine
 
@@ -246,10 +250,16 @@ policy: [decision model guide](docs/decision-model-policy.md).
 
 Start here:
 
+- [How GoodVibes works](docs/how-goodvibes-works.md): how the four programs fit
+  together, what the daemon holds, where your conversation runs, and the design
+  decisions behind them
 - [Installation, updates and uninstall](docs/installation.md)
 - [Terminal app](products/tui/README.md) and its [getting started guide](products/tui/docs/getting-started.md)
 - [Personal assistant](products/agent/README.md) and its [getting started guide](products/agent/docs/getting-started.md)
 - [Daemon](products/daemon/README.md) and [web app](products/webui/README.md)
+
+Every other guide and reference page, for all four programs, is listed in the
+[documentation index](docs/README.md).
 
 By topic:
 

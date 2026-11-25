@@ -61,6 +61,8 @@ export interface ConfigSchemaEntrySnapshot {
   readonly default: unknown;
   readonly description: string;
   readonly enumValues?: readonly string[];
+  /** What a person reads for a stored enum value, where it differs from the value (CONFIG_SCHEMA `enumLabels`). */
+  readonly enumLabels?: Readonly<Record<string, string>>;
   readonly validationHint?: string;
   /**
    * What kind of quantity a `number` key holds, when that changes how a value
@@ -106,6 +108,7 @@ export async function loadSchemaSnapshot(): Promise<ConfigSchemaSnapshot> {
     default: s.default,
     description: s.description,
     ...(s.enumValues ? { enumValues: [...s.enumValues] } : {}),
+    ...(s.enumLabels ? { enumLabels: { ...s.enumLabels } } : {}),
     ...(s.validationHint ? { validationHint: s.validationHint } : {}),
     ...(s.unit ? { unit: s.unit } : {}),
   }));
@@ -160,6 +163,7 @@ export function renderTs(snapshot: ConfigSchemaSnapshot): string {
     '  readonly default: unknown;',
     '  readonly description: string;',
     '  readonly enumValues?: readonly string[];',
+    '  readonly enumLabels?: Readonly<Record<string, string>>;',
     '  readonly validationHint?: string;',
     "  readonly unit?: 'money';",
     '}',

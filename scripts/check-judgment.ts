@@ -13,8 +13,8 @@ let model = '';
 try {
   const homeDirectory = resolve(process.argv[2]!);
   const config = new ConfigManager({ homeDir: homeDirectory, workingDir: homeDirectory, surfaceRoot: 'tui', readOnly: true });
-  // The same two facts composeJudgment reads: the policy, and whether any decision model is set.
-  if (config.get('judgment.policy') === 'No Decision Model' || !decisionModelSet(decisionModelSettings(key => config.get(key)), process.env)) {
+  // The same fact composeJudgment reads: whether any decision model is set.
+  if (!decisionModelSet(decisionModelSettings(key => config.get(key)), process.env)) {
     console.log('No decision model selected; no decision-model connection is required or certified.');
   } else {
     model = requestedDecisionModel(config.get('judgment.model'), process.env);

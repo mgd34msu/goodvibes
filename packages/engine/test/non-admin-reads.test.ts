@@ -186,6 +186,7 @@ const OPEN_TO_NON_ADMIN: ReadonlyMap<string, string> = new Map([
   ['remote.node_host.contract', 'the published node host contract; peers need read:remote'],
   ['review.snapshot', 'counts of sessions, tasks, approvals and panels'],
   ['runtime.metrics.get', 'process-wide counters and histograms'],
+  ['secureAddress.get', 'the https address, its names and end date, the local authority\'s public fingerprint; no key or token'],
   ['sessions.contextUsage.get', 'context window token counts'],
   ['sessions.hosted.workspaces', 'folders a hosted session may use'],
   ['sessions.permissionMode.get', 'the effective permission mode'],

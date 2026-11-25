@@ -63,8 +63,8 @@ const OFF: Readonly<Record<'closed' | 'ungranted' | 'revoked' | 'classic', Triag
     next: ['Set up privacy screening for this inbox account; labels then come with new messages'] },
   revoked: { state: 'off', reason: 'The privacy-screening route this account labels mail through was revoked',
     next: ['Reconnect the inbox account to restore its screening route'] },
-  classic: { state: 'off', reason: 'Decision models are turned off, so no model labels mail',
-    next: ['Set "When the decision model is missing or fails" to Hybrid or Decision Model Only in settings to label new mail'] },
+  classic: { state: 'off', reason: 'No decision model is in use, so no model labels mail',
+    next: ['Choose a Decision model in settings to label new mail'] },
 });
 function unavailable(state: InboxTriageState): GatewayVerbError {
   const off = state.state === 'off' ? state : OFF.closed;

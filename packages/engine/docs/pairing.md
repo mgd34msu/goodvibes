@@ -370,6 +370,10 @@ const platformClient = createReactNativeGoodVibesPlatform({
 
 For `createMemoryTokenStore` (non-persistent, suitable only for ephemeral use or development), import from `@goodvibes/engine/platform/auth`.
 
+### When the paired program and the daemon are on different builds
+
+A paired program and the daemon check each other's build on every status read. A program older than the daemon's release line (an open web tab or a terminal program that was running when the daemon updated) says so once and stops taking part in shared work until it restarts: the terminal app and the Agent show `This process is running build 3.4.8; the daemon requires 3.5.0 or newer. It has stopped taking shared-session work, restart it to rejoin.`, and the web app shows **Reload to update** in its header and reloads by itself once nothing would be lost. A daemon older than the program needs (3.3.2 for the terminal app and the Agent, 3.1.2 for the web app), such as one on another machine that has not updated, is not used: `The daemon at http://server.lan:3421 is running build 3.2.0; this client requires 3.3.2 or newer, update the daemon.` (a notice in the terminal app, a warning banner in the web app; the Agent refuses each request with `the GoodVibes host at http://server.lan:3421 is older than this Agent build needs`). Every sentence, and what each program does next: [When a program is older than the daemon requires](../../../docs/installation.md#when-a-program-is-older-than-the-daemon-requires).
+
 ---
 
 ## Legacy shared-token lifecycle

@@ -124,9 +124,8 @@ const configured = (): unknown => configurations.findLast(source => source.activ
 /** Whether the current composition has a decision model set; with no composition, nothing says otherwise. */
 const configuredSet = (): boolean => configurations.findLast(source => source.active)?.isSet?.() ?? true;
 
-/** Why a fresh operation under `policy` runs without a decision model from its start, or null when it asks decision models. */
-function startingReason(policy: DecisionModelPolicy): NoDecisionModelReason | null {
-  if (policy === 'No Decision Model') return 'selected';
+/** Why a fresh operation runs without a decision model from its start, or null when it asks decision models. */
+function startingReason(): NoDecisionModelReason | null {
   // Nothing to ask: every decision takes its fallback at once, with no request and no error.
   return configuredSet() ? null : 'not-set';
 }
@@ -150,7 +149,7 @@ function observe(): DecisionModelPolicyState {
   const scope = scopes.getStore();
   scope?.current();
   const policy = scope?.policy ?? parseDecisionModelPolicy(configured());
-  const reason = scope === undefined ? startingReason(policy) : scope.state.reason;
+  const reason = scope === undefined ? startingReason() : scope.state.reason;
   const failure = episode.failure;
   return Object.freeze({ policy, operation: reason === null ? 'decision' : 'no-decision-model', reason, revision: scope?.state.revision ?? 0,
     ...(failure === undefined ? {} : { failure }) });
@@ -186,7 +185,7 @@ export function withDecisionModelPolicy<T>(read: () => unknown, operation: () =>
   const readPolicy = () => parseDecisionModelPolicy(read() ?? configured());
   const policy = readPolicy();
   const current = () => { if (readPolicy() !== policy) throw new DecisionModelPolicyChangedError(); };
-  return scopes.run({ policy, current, onChange, state: { reason: startingReason(policy), revision: 0, refusals: new Set() } }, () => {
+  return scopes.run({ policy, current, onChange, state: { reason: startingReason(), revision: 0, refusals: new Set() } }, () => {
     current();
     if (scopes.getStore()?.state.reason !== null) onChange?.(observe());
     return operation();

@@ -16,7 +16,7 @@ interface SkeletonProps {
 
 /**
  * Shimmer skeleton placeholder. Uses CSS motion tokens and
- * `prefers-reduced-motion` via the stylesheet.
+ * holds still under Settings > General > Reduce motion via the stylesheet.
  *
  * Import `src/styles/components/toast.css` (or the shared CSS
  * that includes `.skeleton` rules) to activate shimmer.

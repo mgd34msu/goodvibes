@@ -180,10 +180,8 @@
   to   { opacity: 0.35; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .status-strip__segment--wake-live .status-strip__icon {
-    animation: none;
-  }
+:root[data-motion="reduce"] .status-strip__segment--wake-live .status-strip__icon {
+  animation: none;
 }
 
 /* On a phone the header is narrow: a menu chip keeps its icon (its name is in its

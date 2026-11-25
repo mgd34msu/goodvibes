@@ -482,6 +482,23 @@ waits.
   owner after a failed turn (retry or cancel) is not running, so it does not
   count against the limit; a queued contract takes its place. Answering retry
   resumes it at once, even if that briefly puts more than the limit in flight.
+- **Code context.** A contract's agents get code context from an index built
+  for that run from the contract's own input, never from your live code index.
+  A read-only (captured) input is indexed once per run and serves every turn; a
+  changing input is indexed again for each model turn. Every file is checked
+  against the read rules of the person and view that started the contract
+  before it is read, so a file they could not read adds nothing to the index,
+  the embeddings or the model's prompt. It is built only when passive code or
+  knowledge context and its storage are on and the turn has room for it. The
+  index holds at most 20,000 entries, 4,000 files, 32 MiB of source and 4,096
+  chunks; a file over 128 KiB is left out. Past any other limit, or after 120
+  seconds of preparing (15 seconds for each lookup), the run carries on without
+  code context and reports the code source as unavailable ("too large"); any
+  other failure to prepare or read it also leaves that turn without it, and
+  only cancelling fails the turn. A source or permission that changes while a
+  model request is under way fails that attempt. Only embedding providers that
+  admit each attempt themselves are used for it; others are left out of
+  contract runs and work as before everywhere else.
 
 ### Settings
 
@@ -812,7 +829,15 @@ code-aware runtime features.
 ACP manages agent communication protocol envelopes, handshake state,
 connections, and manager lifecycle. When a hosted ACP agent reports a cancelled
 turn, the agent returns to `idle` and accepts further prompts; only an explicit
-stop or a failure ends the hosted agent. A subagent run emits one terminal
+stop or a failure ends the hosted agent. When a hosted ACP agent asks
+permission for an action, the request is decided by the same rules as a native
+tool call, with the original prompt as the goal: an approval selects only the
+agent's own "allow once" option and a refusal its "reject once" option. A
+decision that cannot pick one of those (no such option offered, the decision
+model unavailable, the request cancelled or its authority changed) cancels the
+request, and nothing is ever widened to "allow always". One prompt runs at a
+time per hosted session, and stopping the agent, the prompt ending or a
+settings change retires a pending request so a late answer is never sent. A subagent run emits one terminal
 event: the first of completed, failed or cancelled. Remote runtime support covers runner pools,
 assignment, contracts, artifacts, review, and artifact import. The companion
 surface can use daemon-hosted remote sessions without mutating shared TUI

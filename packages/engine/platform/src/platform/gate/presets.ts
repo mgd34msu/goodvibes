@@ -135,12 +135,12 @@ export type { DecisionModelSettings } from '../config/decision-model-set.js';
 
 /**
  * Whether a decision model is there to answer, from facts the program holds:
- * decision models are not switched off and one is set (config/decision-model-set.ts).
+ * one is set (config/decision-model-set.ts).
  * A key in the secret store is trusted to be there; a failed request then
  * takes the judgment's fallback and is reported.
  */
 export function decisionModelReady(settings: DecisionModelSettings, env: Readonly<Record<string, string | undefined>> = process.env): boolean {
-  return settings.policy !== 'No Decision Model' && decisionModelSet(settings, env);
+  return decisionModelSet(settings, env);
 }
 
 /**

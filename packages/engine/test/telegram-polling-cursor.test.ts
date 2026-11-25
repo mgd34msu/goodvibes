@@ -122,7 +122,7 @@ test('a stop part-way through a batch resumes at the first update that did not s
   const previousToken = process.env.TELEGRAM_BOT_TOKEN;
   process.env.TELEGRAM_BOT_TOKEN = TOKEN;
   cleanups.push(() => { if (previousToken === undefined) delete process.env.TELEGRAM_BOT_TOKEN; else process.env.TELEGRAM_BOT_TOKEN = previousToken; });
-  const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   cleanups.push(retirePolicy);
   const api = await botApi();
   const runtime = { starts: [] as string[], refuseFirst: 'message 2', refused: false };

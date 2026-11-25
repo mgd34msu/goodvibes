@@ -1,5 +1,5 @@
 import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
-import { selectedSettingsCategoryEntry } from '@goodvibes/engine/terminal-shell/settings-navigation';
+import { readSecureAddressRows, runSecureAddressRowAction, selectedSettingsCategoryEntry, SECURE_ADDRESS_CHECKING_ROWS, type SecureAddressRow } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import { cycleSettingChoice, adjustedSettingValue } from '@goodvibes/engine/terminal-shell/settings-behavior';
 import { TerminalSettingsModalState } from '@goodvibes/engine/terminal-shell/settings-modal-state';
 import {
@@ -78,6 +78,7 @@ const TOPIC_LISTS: readonly SettingsTopicList<SettingsCategory>[] = [
   { category: 'mcp', label: 'Tool servers (MCP)', description: 'what each connected tool server may do', topic: 'permissions', sectionId: 'permissions' },
   { category: 'subscriptions', label: 'Provider sign-ins', description: 'subscriptions you signed in to, and signing out', topic: 'models', sectionId: 'credentials' },
   { category: 'flags', label: 'Features', description: 'every feature, on or off, and when a change takes effect', topic: 'general', sectionId: 'all' },
+  { category: 'secure-address-now', label: 'Secure address now', description: 'what the https address serves now, why not when it does not, and each of the four ways explained', topic: 'general', sectionId: 'secure-address' },
 ];
 
 /** One read of managed policy: every lock by key, or why policy could not be read. */
@@ -122,6 +123,9 @@ export class SettingsModal extends TerminalSettingsModalState<
 
   /** Feature entries grouped by settings domain (populated when the features tab is active). */
   public flagEntries: FlagEntry[] = [];
+  /** The Secure address list: the daemon's answer as rows (settings-navigation.ts secureAddressRows). */
+  public secureAddressRows: readonly SecureAddressRow[] = SECURE_ADDRESS_CHECKING_ROWS;
+  private invokeDaemon: ((method: string, input: Record<string, unknown>) => Promise<unknown>) | null = null;
   /** MCP server trust entries (populated when mcp tab is active). */
 
   /** Provider subscription entries (populated when subscriptions tab is active). */
@@ -187,6 +191,7 @@ export class SettingsModal extends TerminalSettingsModalState<
     this.unsubscribeHostSetting = null;
     this.requestHostSettingRender = options?.requestRender ?? null;
     this.reportError = options?.reportError ?? null;
+    this.invokeDaemon = options?.invokeDaemon ?? null;
     this.configManager = configManager;
     this.secretsManager = secretsManager ?? null;
     this.featureFlagManager = featureFlagManager;
@@ -381,7 +386,9 @@ export class SettingsModal extends TerminalSettingsModalState<
             ? this.subscriptionEntries.length
             : this.currentCategory === 'flags'
               ? this.flagEntries.length
-              : 0,
+              : this.currentCategory === 'secure-address-now'
+                ? this.secureAddressRows.length
+                : 0,
       clearSearchConfirmation: true,
     });
   }
@@ -396,7 +403,9 @@ export class SettingsModal extends TerminalSettingsModalState<
             ? this.subscriptionEntries.length
             : this.currentCategory === 'flags'
               ? this.flagEntries.length
-              : 0,
+              : this.currentCategory === 'secure-address-now'
+                ? this.secureAddressRows.length
+                : 0,
       clearSearchConfirmation: true,
     });
   }
@@ -472,6 +481,10 @@ export class SettingsModal extends TerminalSettingsModalState<
     const list = this.getSelectedListRow();
     if (list !== null) {
       this._openList(list);
+      return;
+    }
+    if (!this.searchFocused && this.currentCategory === 'secure-address-now') {
+      this._activateSecureAddressRow();
       return;
     }
     // While a search is shown the highlighted row is a search result (a setting): the
@@ -1020,6 +1033,28 @@ export class SettingsModal extends TerminalSettingsModalState<
     if (category === 'flags') this._loadFlagEntries();
     else if (category === 'mcp') this._loadMcpEntries();
     else if (category === 'subscriptions') this._loadSubscriptionEntries();
+    else if (category === 'secure-address-now') {
+      // Asked of the daemon each time the list opens; the rows say "checking" until it answers.
+      this.secureAddressRows = SECURE_ADDRESS_CHECKING_ROWS;
+      void readSecureAddressRows(this.invokeDaemon).then((rows) => {
+        if (!this.active) return;
+        this.secureAddressRows = rows;
+        this.requestHostSettingRender?.();
+      });
+    }
+  }
+
+  /** Enter on a "Secure address now" row: an action row runs its daemon method (secureAddress.reissue); the others only explain. */
+  private _activateSecureAddressRow(): void {
+    const row = this.secureAddressRows[Math.max(0, Math.min(this.secureAddressRows.length - 1, this.selectedIndex))];
+    if (!row?.action) return;
+    this.secureAddressRows = this.secureAddressRows.map((candidate) => candidate === row ? { ...candidate, state: 'issuing…' } : candidate);
+    this.requestHostSettingRender?.();
+    void runSecureAddressRowAction(this.invokeDaemon, row).then((rows) => {
+      if (!this.active || !rows) return;
+      this.secureAddressRows = rows;
+      this.requestHostSettingRender?.();
+    });
   }
 
   private _refreshAllEntries(): void {

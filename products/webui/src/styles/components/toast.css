@@ -188,16 +188,14 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .toast-presence-wrapper[data-state="entering"],
-  .toast-presence-wrapper[data-state="leaving"] {
-    animation: none;
-    opacity: 1;
-    transform: none;
-  }
+:root[data-motion="reduce"] .toast-presence-wrapper[data-state="entering"],
+:root[data-motion="reduce"] .toast-presence-wrapper[data-state="leaving"] {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
 
-  .toast__action-btn,
-  .toast__dismiss-btn {
-    transition: none;
-  }
+:root[data-motion="reduce"] .toast__action-btn,
+:root[data-motion="reduce"] .toast__dismiss-btn {
+  transition: none;
 }

@@ -1,5 +1,5 @@
 import { SETTINGS_CHOICE_ACTIONS, type SettingsChoiceAction } from '@goodvibes/engine/terminal-shell/settings-choice-actions';
-import { selectedSettingsCategoryEntry } from '@goodvibes/engine/terminal-shell/settings-navigation';
+import { readSecureAddressRows, runSecureAddressRowAction, selectedSettingsCategoryEntry, SECURE_ADDRESS_CHECKING_ROWS, type SecureAddressRow } from '@goodvibes/engine/terminal-shell/settings-navigation';
 import type {
   SettingsModalChange as PlatformSettingsModalChange,
   SettingsModalChangeResult as PlatformSettingsModalChangeResult,
@@ -138,6 +138,7 @@ const TOPIC_LISTS: readonly SettingsTopicList<SettingsCategory>[] = [
   { category: 'mcp', label: 'Tool servers (MCP)', description: 'what each connected tool server may do', topic: 'permissions', sectionId: 'permissions' },
   { category: 'subscriptions', label: 'Provider sign-ins', description: 'subscriptions you signed in to, and signing out', topic: 'models', sectionId: 'credentials' },
   { category: 'connections', label: 'Mail and calendar', description: 'whether your mail and calendar answer right now', topic: 'account', sectionId: 'account' },
+  { category: 'secure-address-now', label: 'Secure address now', description: 'what the https address serves now, why not when it does not, and each of the four ways explained', topic: 'general', sectionId: 'secure-address' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -198,6 +199,8 @@ export class SettingsModal extends TerminalSettingsModalState<
   public gatewayMethods: GatewayMethodCatalog | null = null;
   public requestRender: (() => void) | null = null;
   public connectionsRefreshing = false;
+  /** The Secure address list: the daemon's answer as rows (settings-navigation.ts secureAddressRows). */
+  public secureAddressRows: readonly SecureAddressRow[] = SECURE_ADDRESS_CHECKING_ROWS;
 
   /**
    * Whether the user has entered search mode (pressed / or a printable key
@@ -471,7 +474,9 @@ export class SettingsModal extends TerminalSettingsModalState<
             ? this.subscriptionEntries.length
             : this.currentCategory === 'connections'
               ? this.connectionEntries.length
-              : 0,
+              : this.currentCategory === 'secure-address-now'
+                ? this.secureAddressRows.length
+                : 0,
       clearSearchConfirmation: false,
     });
   }
@@ -486,7 +491,9 @@ export class SettingsModal extends TerminalSettingsModalState<
             ? this.subscriptionEntries.length
             : this.currentCategory === 'connections'
               ? this.connectionEntries.length
-              : 0,
+              : this.currentCategory === 'secure-address-now'
+                ? this.secureAddressRows.length
+                : 0,
       clearSearchConfirmation: false,
     });
   }
@@ -569,6 +576,10 @@ export class SettingsModal extends TerminalSettingsModalState<
     const list = this.getSelectedListRow();
     if (list !== null) {
       this._openList(list);
+      return;
+    }
+    if (!this.searchFocused && this.currentCategory === 'secure-address-now') {
+      this._activateSecureAddressRow();
       return;
     }
     this._refreshPolicyAvailability();
@@ -955,7 +966,30 @@ export class SettingsModal extends TerminalSettingsModalState<
       this.subscriptionEntries = buildSubscriptionEntries(this.subscriptionManager, this.serviceRegistry);
     } else if (this.currentCategory === 'connections') {
       void refreshConnectionEntries(this);
+    } else if (this.currentCategory === 'secure-address-now') {
+      // Asked of the daemon each time the list opens; the rows say "checking" until it answers.
+      this.secureAddressRows = SECURE_ADDRESS_CHECKING_ROWS;
+      const gateway = this.gatewayMethods;
+      void readSecureAddressRows(gateway ? (method, input) => gateway.invoke(method, { context: { clientKind: 'tui' as const }, body: input }) : null).then((rows) => {
+        if (!this.active) return;
+        this.secureAddressRows = rows;
+        this.requestRender?.();
+      });
     }
+  }
+
+  /** Enter on a "Secure address now" row: an action row runs its daemon method (secureAddress.reissue); the others only explain. */
+  private _activateSecureAddressRow(): void {
+    const row = this.secureAddressRows[Math.max(0, Math.min(this.secureAddressRows.length - 1, this.selectedIndex))];
+    if (!row?.action) return;
+    const gateway = this.gatewayMethods;
+    this.secureAddressRows = this.secureAddressRows.map((candidate) => candidate === row ? { ...candidate, state: 'issuing…' } : candidate);
+    this.requestRender?.();
+    void runSecureAddressRowAction(gateway ? (method, input) => gateway.invoke(method, { context: { clientKind: 'tui' as const }, body: input }) : null, row).then((rows) => {
+      if (!this.active || !rows) return;
+      this.secureAddressRows = rows;
+      this.requestRender?.();
+    });
   }
 
   /** The settings of the chosen topic as shown; [] while a list is open (its rows are not settings). */

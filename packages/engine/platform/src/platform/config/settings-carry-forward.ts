@@ -63,6 +63,22 @@ export const RETIRED_SETTING_KEYS: readonly string[] = [
   'tools.contractVerification',
 ];
 
+/**
+ * The `judgment.policy` values 3.5.0 and earlier stored for "no decision model is
+ * used" (`Classic - Off` is its 3.2.0 name). This release does not have it: a
+ * home that holds one is carried once to the mode Ask me (ConfigManager,
+ * decision models off).
+ */
+export const RETIRED_NO_DECISION_MODEL_POLICIES: readonly string[] = ['No Decision Model', 'Classic - Off'];
+
+/**
+ * The settings folders of the programs on this machine (the terminal app's,
+ * which the daemon's own settings also use, and the Agent's), under the
+ * GoodVibes home: where the daemon sets the mode Ask me when it carries
+ * decision models switched off forward.
+ */
+export const PROGRAM_SETTINGS_ROOTS: readonly string[] = ['tui', 'agent'];
+
 /** What carrying one file forward did, for the one line the owner reads. */
 export interface SettingsCarryForward {
   /** Daemon keys written to the daemon's settings file. */

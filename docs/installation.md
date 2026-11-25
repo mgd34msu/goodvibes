@@ -171,7 +171,8 @@ directory named for the installed release, such as `webui/3.3.0`, can hold a new
 release; the installer publishes each release it installs into a new directory and
 never prunes older ones. Programs already running continue their original
 build until restarted. Source and package-managed runs keep their own update
-mechanism.
+mechanism. A program left on an older build than the daemon requires says so:
+see [When a program is older than the daemon requires](#when-a-program-is-older-than-the-daemon-requires).
 
 On macOS, an installed daemon running under launchd prepares a one-shot restart
 helper before replacing files for an automatic update or crash-loop rollback.
@@ -228,6 +229,45 @@ mixed or incompatible previous cohort is refused; retained transaction recovery
 files require inspection. A failed installation restores the previous programs
 as described in [When installation fails](#when-installation-fails).
 
+## When a program is older than the daemon requires
+
+Every program in the suite carries the same version. A daemon accepts programs
+of its own release line (the same major and minor version, such as 3.5) and
+newer. A program that was already running when the daemon updated keeps its
+older build, and the next time it reads the daemon's status it says so once and
+stops taking part in the work the daemon shares between your programs until it
+restarts:
+
+- The terminal app and the Agent show one notice: `This process is running
+  build 3.4.8; the daemon requires 3.5.0 or newer. It has stopped taking
+  shared-session work, restart it to rejoin.`
+- The web app shows **Reload to update** in its header, with the same sentence
+  (`This tab is running build 3.4.8; ... reload the page to pick up the current
+  build.`) as its description, and reloads by itself as soon as nothing would
+  be lost: no unsent text, no reply streaming, nothing open over the page.
+- A program that reports no version reads: `This build does not report a
+  version, so it cannot be checked against the daemon's floor of 3.5.0. Restart
+  it from the current install to be sure it is current.`
+
+The other way round, a program does not use a daemon older than it needs (the
+terminal app and the Agent need 3.3.2 or newer, the web app 3.1.2). This
+happens when it is paired with a daemon on another machine that has not
+updated:
+
+- The terminal app shows `The daemon at http://server.lan:3421 is running build
+  3.2.0; this client requires 3.3.2 or newer, update the daemon.` and does not
+  use that daemon. It reads the daemon again when it comes back online, so an
+  updated daemon is taken up without a restart.
+- The web app shows the same sentence in a warning banner.
+- The Agent refuses each request to it with `the GoodVibes host at
+  http://server.lan:3421 is older than this Agent build needs` and the next step
+  `update GoodVibes on the host (goodvibes-daemon) to this Agent's version, then
+  retry`.
+- A daemon that reports no version is not used either: `The daemon at
+  http://server.lan:3421 did not report a version, so this client is not using
+  it. Check that the address points at a GoodVibes daemon, and update the daemon
+  to 3.3.2 or newer.`
+
 ## Uninstall
 
 ```sh
@@ -254,10 +294,10 @@ PATH or one left in another release of that installation; with neither, it print
 the exact `bun .../scripts/uninstall.ts --prefix DIR` command to run once Bun is installed.
 Without a receipt or a checkout, `uninstall.sh` runs the current installer script; set `GOODVIBES_VERSION=vX.Y.Z` to run that release's script instead.
 
-## Explicit developer source installation
+## Installing from a source checkout
 
-`./scripts/install-from-checkout.sh` is the separate developer build path. It
-requires a clean checkout and the build toolchain. It builds with the Bun version
+`./scripts/install-from-checkout.sh` builds and installs the suite from a clone
+of the repository, as the root README describes. It requires a clean checkout. It builds with the Bun version
 the checkout's `package.json` declares in `engines.bun` (the one CI uses), and
 downloads that version privately when the `bun` on your PATH differs. Its receipt-owned program/data
 layout is distinct from release-binary installations. The curl installer does not

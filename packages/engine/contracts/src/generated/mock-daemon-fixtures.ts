@@ -7535,6 +7535,44 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
       }
     }
   },
+  "companion.chat.attachments.remove": {
+    "methodId": "companion.chat.attachments.remove",
+    "http": {
+      "method": "DELETE",
+      "path": "/api/companion/chat/sessions/{sessionId}/messages/{messageId}/attachments/{artifactId}"
+    },
+    "status": 200,
+    "body": {
+      "sessionId": "sample",
+      "messageId": "sample",
+      "artifactId": "sample",
+      "name": "sample",
+      "removed": false,
+      "alreadyRemoved": false,
+      "messageIds": [
+        "sample"
+      ]
+    }
+  },
+  "companion.chat.branches.switch": {
+    "methodId": "companion.chat.branches.switch",
+    "http": {
+      "method": "POST",
+      "path": "/api/companion/chat/sessions/{sessionId}/branches/switch"
+    },
+    "status": 200,
+    "body": {
+      "sessionId": "sample",
+      "messageId": "sample",
+      "switched": false,
+      "supersededMessageIds": [
+        "sample"
+      ],
+      "restoredMessageIds": [
+        "sample"
+      ]
+    }
+  },
   "companion.chat.events.stream": {
     "methodId": "companion.chat.events.stream",
     "http": {
@@ -7606,6 +7644,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "metadata": {}
             }
           ],
+          "removedAttachments": [
+            {
+              "artifactId": "sample",
+              "name": "sample",
+              "removedAt": 0
+            }
+          ],
           "createdAt": 0,
           "deliveryState": "cancelled",
           "failureReason": {
@@ -7647,6 +7692,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ]
           },
           "inReplyTo": "sample",
+          "supersededAt": 0,
+          "supersededReason": "regenerate",
+          "revisionOf": "sample",
           "clientMessageId": "sample"
         }
       ],
@@ -7851,6 +7899,13 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
               "metadata": {}
             }
           ],
+          "removedAttachments": [
+            {
+              "artifactId": "sample",
+              "name": "sample",
+              "removedAt": 0
+            }
+          ],
           "createdAt": 0,
           "deliveryState": "cancelled",
           "failureReason": {
@@ -7892,6 +7947,9 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
             ]
           },
           "inReplyTo": "sample",
+          "supersededAt": 0,
+          "supersededReason": "regenerate",
+          "revisionOf": "sample",
           "clientMessageId": "sample"
         }
       ]
@@ -26387,6 +26445,340 @@ export const MOCK_DAEMON_FIXTURES: MockDaemonFixtureMap = {
           "metadata": {}
         }
       ]
+    }
+  },
+  "secureAddress.get": {
+    "methodId": "secureAddress.get",
+    "http": null,
+    "status": 200,
+    "body": {
+      "intro": "sample",
+      "choices": [
+        {
+          "id": "lets-encrypt",
+          "title": "sample",
+          "does": "sample",
+          "needs": "sample",
+          "phoneGains": "sample",
+          "sends": "sample",
+          "caution": "sample"
+        }
+      ],
+      "groupLines": [
+        "sample"
+      ],
+      "node": false,
+      "inForce": {
+        "on": false,
+        "certificate": "local-authority",
+        "servedToNetwork": false,
+        "serving": false,
+        "port": 0,
+        "address": "sample",
+        "names": [
+          "sample"
+        ],
+        "notAfter": 0,
+        "problem": "sample",
+        "from": "this-machine",
+        "servedSource": "local-authority"
+      },
+      "letsEncrypt": {
+        "domain": "sample",
+        "tokenStored": false,
+        "issuing": false,
+        "certificate": {
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "issuedAt": 0
+        },
+        "lastAttempt": {
+          "at": 0,
+          "ok": false,
+          "words": "sample"
+        },
+        "addressProblem": "sample",
+        "routerCheck": {
+          "name": "sample",
+          "ok": false,
+          "words": "sample"
+        },
+        "addressRecords": {}
+      },
+      "ownFiles": {
+        "certFile": "sample",
+        "keyFile": "sample",
+        "check": {
+          "ok": false,
+          "problem": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0
+        }
+      },
+      "localAuthority": {
+        "made": false,
+        "fingerprint": "sample",
+        "page": "sample"
+      },
+      "tailscale": {
+        "address": "sample"
+      },
+      "group": {
+        "following": {
+          "nodeId": "sample",
+          "name": "sample"
+        },
+        "received": {
+          "leadName": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "receivedAt": 0,
+          "source": "local-authority"
+        },
+        "followers": [
+          {
+            "name": "sample",
+            "address": "sample",
+            "covered": false,
+            "needs": "sample"
+          }
+        ]
+      },
+      "reissue": {
+        "title": "sample",
+        "line": "sample",
+        "available": false
+      }
+    }
+  },
+  "secureAddress.reissue": {
+    "methodId": "secureAddress.reissue",
+    "http": null,
+    "status": 200,
+    "body": {
+      "ok": false,
+      "words": "sample",
+      "status": {
+        "intro": "sample",
+        "choices": [
+          {
+            "id": "lets-encrypt",
+            "title": "sample",
+            "does": "sample",
+            "needs": "sample",
+            "phoneGains": "sample",
+            "sends": "sample",
+            "caution": "sample"
+          }
+        ],
+        "groupLines": [
+          "sample"
+        ],
+        "node": false,
+        "inForce": {
+          "on": false,
+          "certificate": "local-authority",
+          "servedToNetwork": false,
+          "serving": false,
+          "port": 0,
+          "address": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "problem": "sample",
+          "from": "this-machine",
+          "servedSource": "local-authority"
+        },
+        "letsEncrypt": {
+          "domain": "sample",
+          "tokenStored": false,
+          "issuing": false,
+          "certificate": {
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "issuedAt": 0
+          },
+          "lastAttempt": {
+            "at": 0,
+            "ok": false,
+            "words": "sample"
+          },
+          "addressProblem": "sample",
+          "routerCheck": {
+            "name": "sample",
+            "ok": false,
+            "words": "sample"
+          },
+          "addressRecords": {}
+        },
+        "ownFiles": {
+          "certFile": "sample",
+          "keyFile": "sample",
+          "check": {
+            "ok": false,
+            "problem": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0
+          }
+        },
+        "localAuthority": {
+          "made": false,
+          "fingerprint": "sample",
+          "page": "sample"
+        },
+        "tailscale": {
+          "address": "sample"
+        },
+        "group": {
+          "following": {
+            "nodeId": "sample",
+            "name": "sample"
+          },
+          "received": {
+            "leadName": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "receivedAt": 0,
+            "source": "local-authority"
+          },
+          "followers": [
+            {
+              "name": "sample",
+              "address": "sample",
+              "covered": false,
+              "needs": "sample"
+            }
+          ]
+        },
+        "reissue": {
+          "title": "sample",
+          "line": "sample",
+          "available": false
+        }
+      }
+    }
+  },
+  "secureAddress.set": {
+    "methodId": "secureAddress.set",
+    "http": null,
+    "status": 200,
+    "body": {
+      "intro": "sample",
+      "choices": [
+        {
+          "id": "lets-encrypt",
+          "title": "sample",
+          "does": "sample",
+          "needs": "sample",
+          "phoneGains": "sample",
+          "sends": "sample",
+          "caution": "sample"
+        }
+      ],
+      "groupLines": [
+        "sample"
+      ],
+      "node": false,
+      "inForce": {
+        "on": false,
+        "certificate": "local-authority",
+        "servedToNetwork": false,
+        "serving": false,
+        "port": 0,
+        "address": "sample",
+        "names": [
+          "sample"
+        ],
+        "notAfter": 0,
+        "problem": "sample",
+        "from": "this-machine",
+        "servedSource": "local-authority"
+      },
+      "letsEncrypt": {
+        "domain": "sample",
+        "tokenStored": false,
+        "issuing": false,
+        "certificate": {
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "issuedAt": 0
+        },
+        "lastAttempt": {
+          "at": 0,
+          "ok": false,
+          "words": "sample"
+        },
+        "addressProblem": "sample",
+        "routerCheck": {
+          "name": "sample",
+          "ok": false,
+          "words": "sample"
+        },
+        "addressRecords": {}
+      },
+      "ownFiles": {
+        "certFile": "sample",
+        "keyFile": "sample",
+        "check": {
+          "ok": false,
+          "problem": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0
+        }
+      },
+      "localAuthority": {
+        "made": false,
+        "fingerprint": "sample",
+        "page": "sample"
+      },
+      "tailscale": {
+        "address": "sample"
+      },
+      "group": {
+        "following": {
+          "nodeId": "sample",
+          "name": "sample"
+        },
+        "received": {
+          "leadName": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "receivedAt": 0,
+          "source": "local-authority"
+        },
+        "followers": [
+          {
+            "name": "sample",
+            "address": "sample",
+            "covered": false,
+            "needs": "sample"
+          }
+        ]
+      },
+      "reissue": {
+        "title": "sample",
+        "line": "sample",
+        "available": false
+      }
     }
   },
   "tailscale.get": {

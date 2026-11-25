@@ -632,6 +632,7 @@ export const EVENT_FIELD_RULES: EventFieldRulesTable = {
     classification: { kind: 'string', optional: true },
     riskLevel: { kind: 'string', optional: true },
     summary: { kind: 'string', optional: true },
+    reason: { kind: 'string', optional: true },
   },
   DELIVERY_DEAD_LETTERED: {
     deliveryId: { kind: 'string' },

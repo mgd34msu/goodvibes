@@ -81,9 +81,7 @@
   to { transform: translateY(0); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .glass,
-  .scrim {
-    animation: none !important;
-  }
+:root[data-motion="reduce"] .glass,
+:root[data-motion="reduce"] .scrim {
+  animation: none !important;
 }

@@ -199,7 +199,7 @@ export async function errorFromResponse(
 /** One bearer-authorized request as the clients issue it. */
 export interface AuthedRequestInput {
   readonly url: string;
-  readonly method: 'GET' | 'POST';
+  readonly method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
   readonly token: string;
   readonly operation: CalendarOperation;
   readonly body?: unknown;

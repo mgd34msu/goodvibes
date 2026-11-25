@@ -37,6 +37,17 @@ export interface CompanionChatMessageAttachment extends ArtifactDescriptor {
 }
 
 /**
+ * A file the person removed from a sent message (`companion.chat.attachments.remove`):
+ * the file itself is gone from the artifact store; this is the line kept in its place.
+ */
+export interface CompanionChatRemovedAttachment {
+  readonly artifactId: string;
+  /** The name the file was shown by (its label, else its file name). */
+  readonly name: string;
+  readonly removedAt: number;
+}
+
+/**
  * Why a message was superseded. A superseded message is NEVER deleted, it is
  * retained in the message list and on disk, flagged so a client can tell the
  * active conversation chain from the retained history behind a regenerate or an
@@ -60,6 +71,8 @@ export interface CompanionChatMessage {
   /** Opaque revision issued by the current message owner; reissued on reload or replacement. */
   readonly contentRevision?: string | undefined;
   readonly attachments: readonly CompanionChatMessageAttachment[];
+  /** Files removed from this message after it was sent, each shown as "<name> was removed". */
+  readonly removedAttachments?: readonly CompanionChatRemovedAttachment[] | undefined;
   readonly metadata?: Record<string, unknown> | undefined;
   readonly createdAt: number;
   /**
@@ -299,6 +312,31 @@ export interface EditCompanionChatMessageOutput {
   readonly turnStarted: boolean;
 }
 
+export interface BranchSwitchCompanionChatOutput {
+  readonly sessionId: string;
+  /** The message that heads the version now on the conversation. */
+  readonly messageId: string;
+  /** False when that version was already on the conversation (nothing changed). */
+  readonly switched: boolean;
+  /** The messages of the version left, kept as retained history. */
+  readonly supersededMessageIds: readonly string[];
+  /** The messages of the version returned to, active again. */
+  readonly restoredMessageIds: readonly string[];
+}
+
+export interface RemoveCompanionChatAttachmentOutput {
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly artifactId: string;
+  /** The name the file was shown by. */
+  readonly name: string;
+  readonly removed: true;
+  /** True when this file had already been removed (a repeat is answered the same way). */
+  readonly alreadyRemoved?: true | undefined;
+  /** Every message of the chat that carried the file and now shows the removed line. */
+  readonly messageIds: readonly string[];
+}
+
 export interface CancelCompanionChatTurnInput {
   /**
    * Optional guard: when provided and it is NOT the currently active turn,
@@ -431,6 +469,21 @@ export interface CompanionChatTurnCancelledEvent {
    * path that renders a completed reply.
    */
   readonly envelope?: ConversationMessageEnvelope | undefined;
+}
+
+/**
+ * A chat's transcript changed outside a turn: a file was removed from a sent
+ * message (`companion.chat.attachments.remove`) or another version of a turn
+ * was put on the conversation (`companion.chat.branches.switch`). Sent as
+ * `companion-chat.transcript.changed` to every reader of the chat's event
+ * stream, so another open client reads the transcript again with no action
+ * of its own. `messageIds` are the messages whose stored state changed.
+ */
+export interface CompanionChatTranscriptChangedEvent {
+  readonly type: 'transcript.changed';
+  readonly sessionId: string;
+  readonly change: 'attachment-removed' | 'branch-switched';
+  readonly messageIds: readonly string[];
 }
 
 export type CompanionChatTurnEvent =

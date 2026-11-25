@@ -32,6 +32,7 @@ import { PairingTokensSettings } from '../../PairingTokensSettings';
 import { PowerSettings } from '../../PowerSettings';
 import { TailscaleSettings } from '../../TailscaleSettings';
 import { CloudflareSettings } from '../../CloudflareSettings';
+import { SecureAddressSettings } from '../../SecureAddressSettings';
 import { PrincipalsView } from '../../../../views/principals/PrincipalsView';
 import { ConfigGroupList, useConfigSettings } from '../ConfigSettings';
 import { ReadableValue, SettingRow, SettingsBlock } from '../parts';
@@ -259,6 +260,16 @@ export function NetworkSection() {
       <TailscaleSettings />
       <CloudflareSettings />
       <SectionConfig id="network" />
+    </>
+  );
+}
+
+/** Secure address: an https address for phones, the four ways explained, then this machine's own settings of it. */
+export function SecureAddressSection() {
+  return (
+    <>
+      <SecureAddressSettings />
+      <SectionConfig id="secure-address" />
     </>
   );
 }

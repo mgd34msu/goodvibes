@@ -1019,15 +1019,13 @@ button.gv-row__main::after {
   flex: 0 1 auto;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .gv-popover,
-  .gv-tooltip,
-  .gv-dialog,
-  .gv-sheet,
-  .gv-drawer,
-  .gv-overlay > .scrim {
-    animation: none !important;
-  }
+:root[data-motion="reduce"] .gv-popover,
+:root[data-motion="reduce"] .gv-tooltip,
+:root[data-motion="reduce"] .gv-dialog,
+:root[data-motion="reduce"] .gv-sheet,
+:root[data-motion="reduce"] .gv-drawer,
+:root[data-motion="reduce"] .gv-overlay > .scrim {
+  animation: none !important;
 }
 
 /* ── Checkbox ───────────────────────────────────────────────── */

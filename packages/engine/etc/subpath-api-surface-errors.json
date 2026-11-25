@@ -44,12 +44,17 @@
     {
       "name": "DECISION_MODEL_POLICIES",
       "kind": "const",
-      "text": "DECISION_MODEL_POLICIES: readonly [\"Decision Model Only\", \"Hybrid\", \"No Decision Model\"]"
+      "text": "DECISION_MODEL_POLICIES: readonly [\"Hybrid\", \"Decision Model Only\"]"
     },
     {
       "name": "DECISION_MODEL_POLICY_HEADER",
       "kind": "const",
       "text": "DECISION_MODEL_POLICY_HEADER = \"x-goodvibes-decision-policy\""
+    },
+    {
+      "name": "DECISION_MODEL_POLICY_LABELS",
+      "kind": "const",
+      "text": "DECISION_MODEL_POLICY_LABELS: Readonly<Record<DecisionModelPolicy, string>> ;; via Readonly = type Readonly<T> = { readonly [P in keyof T]: T[P]; }; ;; Record = type Record<K extends keyof any, T> = { [P in K]: T; };"
     },
     {
       "name": "DEFAULT_DECISION_MODEL_POLICY",
@@ -80,7 +85,7 @@
     {
       "name": "DecisionModelPolicy",
       "kind": "type",
-      "text": "export type DecisionModelPolicy = 'Decision Model Only' | 'Hybrid' | 'No Decision Model';"
+      "text": "export type DecisionModelPolicy = 'Decision Model Only' | 'Hybrid';"
     },
     {
       "name": "DecisionModelPolicyState",
@@ -102,7 +107,7 @@
         "policy",
         "reason"
       ],
-      "text": "export interface DecisionModelUse { readonly inUse: boolean; readonly policy: DecisionModelPolicy; readonly reason: 'not-set' | 'selected' | 'unavailable' | null; readonly failure?: DecisionModelFailureState; readonly line: string; }"
+      "text": "export interface DecisionModelUse { readonly inUse: boolean; readonly policy: DecisionModelPolicy; readonly reason: 'not-set' | 'unavailable' | null; readonly failure?: DecisionModelFailureState; readonly line: string; }"
     },
     {
       "name": "DecisionModelsDisabledError",
@@ -325,7 +330,7 @@
     {
       "name": "NoDecisionModelReason",
       "kind": "type",
-      "text": "export type NoDecisionModelReason = 'selected' | 'not-set' | 'unavailable';"
+      "text": "export type NoDecisionModelReason = 'not-set' | 'unavailable';"
     },
     {
       "name": "OPERATION_KEY_RULE",

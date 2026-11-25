@@ -75,6 +75,8 @@ export const CONFIG_DOMAIN_OWNERS: Readonly<Record<ConfigDomain, 'daemon' | 'cli
   controlPlane: 'daemon',
   httpListener: 'daemon',
   web: 'daemon',
+  // The https listener's certificate: the daemon serves and renews it.
+  secureAddress: 'daemon',
   relay: 'daemon',
   // Scheduled and triggered work, devices, delivery, retention.
   watchers: 'daemon',

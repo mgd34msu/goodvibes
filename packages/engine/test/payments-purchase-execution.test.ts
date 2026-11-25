@@ -458,7 +458,7 @@ describe('a purchase reaches the merchant once, with the card, or not at all', (
   });
 
   test('with no decision model in use, a checkout nothing read is put to the owner: silence buys nothing, a yes buys once', async () => {
-    const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+    const retire = configureDecisionModelPolicy(() => 'Hybrid', () => false);
     try {
       // In budget at a recognised retailer, which would otherwise be a veto window where silence buys.
       const silent = await buildHarness({ merchant: alpha, answer: null });

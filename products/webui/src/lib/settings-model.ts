@@ -53,6 +53,8 @@ export interface ConfigFieldModel {
   readonly appliesWhen?: ConfigSchemaEntry['appliesWhen'];
   readonly type: ConfigSchemaEntry['type'];
   readonly enumValues?: readonly string[];
+  /** What a person reads for a stored enum value, where it differs from the value (from the schema). */
+  readonly enumLabels?: ConfigSchemaEntry['enumLabels'];
   readonly default: unknown;
   readonly description: string;
   readonly validationHint?: string;
@@ -186,6 +188,7 @@ function buildField(entry: ConfigSchemaEntry, config: unknown): ConfigFieldModel
     appliesWhen: entry.appliesWhen,
     type: entry.type,
     enumValues: entry.enumValues,
+    enumLabels: entry.enumLabels,
     default: entry.default,
     description: entry.description,
     validationHint: entry.validationHint,

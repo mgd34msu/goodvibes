@@ -40,7 +40,7 @@ import { localOwnerActor } from '@goodvibes/engine/daemon-api/http-policy';
 const OWNER = 'owner@example.test';
 const cleanups: Array<() => void | Promise<void>> = [];
 let retirePolicy: () => void;
-beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model'); });
+beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false); });
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
   retirePolicy();

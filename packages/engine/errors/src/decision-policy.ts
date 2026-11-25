@@ -1,23 +1,34 @@
-/** Runtime-neutral policy facts. The platform owns configuration and operation scopes. */
-export type DecisionModelPolicy = 'Decision Model Only' | 'Hybrid' | 'No Decision Model';
-export const DECISION_MODEL_POLICIES = ['Decision Model Only', 'Hybrid', 'No Decision Model'] as const;
+/**
+ * Runtime-neutral policy facts. The platform owns configuration and operation scopes.
+ * The stored values of `judgment.policy` ("If Jev can't answer", only meaningful in
+ * Jev decides and Just vibes): `Hybrid` is shown as "Ask me" (the default) and
+ * `Decision Model Only` as "Refuse the action".
+ */
+export type DecisionModelPolicy = 'Decision Model Only' | 'Hybrid';
+export const DECISION_MODEL_POLICIES = ['Hybrid', 'Decision Model Only'] as const;
 /** The shipped default: use a decision model when one is set and answers, and continue without it otherwise. */
 export const DEFAULT_DECISION_MODEL_POLICY: DecisionModelPolicy = 'Hybrid';
+/** What a person reads for each stored value. */
+export const DECISION_MODEL_POLICY_LABELS: Readonly<Record<DecisionModelPolicy, string>> = Object.freeze({
+  Hybrid: 'Ask me',
+  'Decision Model Only': 'Refuse the action',
+});
 /** How a policy value is shown to a person; the default carries "(default)", which is never stored. */
 export function decisionModelPolicyLabel(policy: DecisionModelPolicy): string {
-  return policy === DEFAULT_DECISION_MODEL_POLICY ? `${policy} (default)` : policy;
+  const label = DECISION_MODEL_POLICY_LABELS[policy];
+  return policy === DEFAULT_DECISION_MODEL_POLICY ? `${label} (default)` : label;
 }
 export function parseDecisionModelPolicy(value: unknown): DecisionModelPolicy {
   if (value === undefined) return 'Hybrid';
-  if (value === 'Decision Model Only' || value === 'Hybrid' || value === 'No Decision Model') return value;
+  if (value === 'Decision Model Only' || value === 'Hybrid') return value;
   throw new Error('Invalid decision-model policy');
 }
 /**
- * Why an operation runs without a decision model: the owner selected `No Decision Model`; no
- * decision model is set (nothing to ask, so every decision takes its fallback
- * with no error); or `Hybrid` found the set models unavailable.
+ * Why an operation runs without a decision model: no decision model is set
+ * (nothing to ask, so every decision takes its fallback with no error); or
+ * `Hybrid` found the set models unavailable.
  */
-export type NoDecisionModelReason = 'selected' | 'not-set' | 'unavailable';
+export type NoDecisionModelReason = 'not-set' | 'unavailable';
 /** A set decision model that is failing, as the user is told: its name, what failed and the next step. */
 export interface DecisionModelFailureState {
   readonly model: string;
@@ -46,10 +57,9 @@ export function readDecisionModelPolicyHeader(headers: Pick<Headers, 'get'>): De
     const policy = parseDecisionModelPolicy(state.policy);
     if (state.policy === undefined || !Number.isSafeInteger(state.revision) || (state.revision as number) < 0) return undefined;
     const reason = state.reason;
-    if (reason !== null && reason !== 'selected' && reason !== 'not-set' && reason !== 'unavailable') return undefined;
+    if (reason !== null && reason !== 'not-set' && reason !== 'unavailable') return undefined;
     if (state.operation !== (reason === null ? 'decision' : 'no-decision-model')
-      || (policy === 'Decision Model Only' && reason !== null && reason !== 'not-set') || (policy === 'No Decision Model' && reason !== 'selected')
-      || (policy === 'Hybrid' && reason === 'selected')) return undefined;
+      || (policy === 'Decision Model Only' && reason !== null && reason !== 'not-set')) return undefined;
     const failure = readFailure(state.failure);
     return Object.freeze({ policy, operation: reason === null ? 'decision' : 'no-decision-model', reason, revision: state.revision as number,
       ...(failure === undefined ? {} : { failure }) });
@@ -138,7 +148,7 @@ export function runDecisionOrClassic<T>(decision: () => Promise<T>, classic: (fa
  */
 export function decisionModelFailingLine(failure: Pick<DecisionModelFailureState, 'model' | 'what' | 'nextStep'>, policy: DecisionModelPolicy): string {
   const then = policy === 'Decision Model Only'
-    ? 'so a tool call it cannot decide is refused and every other decision takes its fallback until it answers again (you chose Decision Model Only for "When the decision model is missing or fails"; Hybrid would decide such calls without it)'
+    ? 'so a tool call it cannot decide is refused and every other decision takes its fallback until it answers again (you chose Refuse the action for "If Jev can\'t answer"; Ask me would bring such calls to you)'
     : 'so work continues without it until it answers again';
   const step = failure.nextStep.trim().replace(/\.$/, '');
   return `The decision model ${failure.model} is not answering (${failure.what}), ${then}; to fix it, ${step.charAt(0).toLowerCase()}${step.slice(1)}.`;
@@ -149,8 +159,8 @@ export interface DecisionModelUse {
   readonly inUse: boolean;
   /** The stored policy; shown with {@link decisionModelPolicyLabel}. */
   readonly policy: DecisionModelPolicy;
-  /** Why none is in use: none is set, the owner chose No Decision Model, or the set model is unavailable. */
-  readonly reason: 'not-set' | 'selected' | 'unavailable' | null;
+  /** Why none is in use: none is set, or the set model is unavailable. */
+  readonly reason: 'not-set' | 'unavailable' | null;
   readonly failure?: DecisionModelFailureState;
   /** One line for a person. */
   readonly line: string;
@@ -158,14 +168,11 @@ export interface DecisionModelUse {
 
 /** The standing indication, read from the current policy state; costs a few settings reads. */
 export function decisionModelUse(state: DecisionModelPolicyState = decisionModelPolicyState()): DecisionModelUse {
-  const label = decisionModelPolicyLabel(state.policy);
   const failure = state.failure;
-  if (state.reason === 'selected') return { inUse: false, policy: state.policy, reason: 'selected',
-    line: 'No decision model is in use: you turned decision models off (No Decision Model), so decisions take their fallbacks.' };
   if (state.reason === 'not-set') return { inUse: false, policy: state.policy, reason: 'not-set',
     line: 'No decision model is in use: none is set, so decisions take their fallbacks. To use one, choose a Decision model in /settings open.' };
   if (failure !== undefined) return { inUse: false, policy: state.policy, reason: 'unavailable', failure, line: decisionModelFailingLine(failure, state.policy) };
   if (state.reason === 'unavailable') return { inUse: false, policy: state.policy, reason: 'unavailable',
     line: 'The decision model is unavailable; continuing without it.' };
-  return { inUse: true, policy: state.policy, reason: null, line: `A decision model is in use (${label}).` };
+  return { inUse: true, policy: state.policy, reason: null, line: 'A decision model is in use.' };
 }

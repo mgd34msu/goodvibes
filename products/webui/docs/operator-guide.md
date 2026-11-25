@@ -109,10 +109,10 @@ The wake word starts listening again by itself after it stopped, when a
 microphone is plugged in or changed or the tab comes back into focus; its
 indicator offers "Listen again" to start it at once.
 
-Reduce motion (Settings, General) holds the page still in this browser even
-when the system does not ask for it: menus, panels and notices appear without
-moving, the "Thinking…" line does not shimmer and nothing scrolls smoothly. A
-system set to reduce motion always does the same. A screen reader hears "GoodVibes
+Reduce motion (Settings, General) holds the page still in this browser: menus,
+panels and notices appear without moving, the "Thinking…" line does not shimmer
+and nothing scrolls smoothly. It is off until you turn it on and follows nothing
+else, not your system's own motion setting. A screen reader hears "GoodVibes
 is replying…" when a reply starts and "GoodVibes replied." when it ends, not the
 reply word by word as it streams; the finished reply is the newest message.
 
@@ -185,7 +185,8 @@ Supported chat behavior:
 - insert a newline with Shift+Enter
 - stop generation with a server-side cancel; the stopped partial reply stays
   in the transcript with an honest stopped marker
-- attach files through daemon artifact upload
+- attach files through daemon artifact upload, and remove a sent file for good
+  (see Attachments)
 - copy whole messages and individual code blocks; on a phone each message shows
   Copy and a More menu holding Edit and resend, Resend or Regenerate, Read aloud
   and the reply's code and files, each by name
@@ -197,8 +198,12 @@ Supported chat behavior:
   button in the chat header; each one jumps to the message that brought it
 - resend user messages
 - regenerate assistant replies; the superseded reply is retained, not erased
-- edit a user message and branch; the old branch stays viewable inline as
-  retained history
+- edit a user message and branch; the old branch is kept
+- switch between the versions of an edited message or a regenerated reply with
+  the "‹ 2 of 3 ›" switcher under it ("Previous version", "Next version"): the
+  version chosen goes on the conversation, the model continues from it, and it
+  is still the one shown after leaving the chat and coming back, on any device.
+  It waits while a reply is being written
 - search chat history, both session titles across full history (a daemon-side
   search) and message text within recently loaded sessions
 - see queued messages while a turn is active, and dictate or speak replies
@@ -342,6 +347,16 @@ Expected flows:
 
 If upload fails, the optimistic message is marked failed and the error remains
 visible near the composer. Large outputs open in the artifacts slide-over.
+
+A file attached in the composer comes off with the × on its chip before you
+send. A file on a sent message has its own × ("Remove <name>"); it asks once,
+because the file cannot be put back ("Remove notes.txt?", "The file is deleted
+for good and cannot be put back. The message keeps a line saying it was
+removed, and GoodVibes no longer gives the file to the model."). After Remove,
+the file is gone from the daemon, the message shows "notes.txt was removed" in
+its place, and later replies do not see it (the model is told only its name
+and that it was removed). It is refused while a reply is being written or sends
+are queued; stop the reply or let it finish, then remove it.
 
 ## Markdown responses
 
@@ -500,8 +515,9 @@ and a background poll keeps the list fresh while it is down.
 ### Sessions
 
 Open sessions between turns sit behind their own line; the daemon sends them a
-page at a time, and "Show older sessions" at the end of the list loads the next
-page, back to the first. When a page cannot be read, the same line says why
+page at a time, and "Show older sessions" at the end of the list adds the next
+older page below the ones already shown; once the oldest session is on screen
+the line goes away. When a page cannot be read, the same line says why
 ("Older sessions could not be read: ...") and selecting it tries again. In a
 session's detail you can:
 

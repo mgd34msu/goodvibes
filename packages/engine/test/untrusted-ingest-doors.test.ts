@@ -64,7 +64,7 @@ const resolver: HostResolver = async (hostname) => {
 const originalFetch = globalThis.fetch;
 const cleanups: Array<() => void | Promise<void>> = [];
 let retirePolicy: () => void;
-beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model'); });
+beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false); });
 afterEach(async () => {
   globalThis.fetch = originalFetch;
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();

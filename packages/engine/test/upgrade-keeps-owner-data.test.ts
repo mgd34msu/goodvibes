@@ -37,7 +37,7 @@ function home331() {
   roots.push(root);
   const home = join(root, 'home'), workspace = join(root, 'workspace');
   const daemonSettings = join(home, '.goodvibes', 'daemon', 'settings.json');
-  write(daemonSettings, { judgment: { policy: 'Classic - Off' }, payments: { currency: 'EUR' } });
+  write(daemonSettings, { judgment: { policy: 'Default - On' }, payments: { currency: 'EUR' } });
   const config = () => new ConfigManager({ configDir: join(home, '.goodvibes', 'tui'), workingDir: workspace, homeDir: home, surfaceRoot: 'goodvibes',
     daemonTierPath: daemonSettings, ownsDaemonTier: true });
   return { root, home, workspace, daemonSettings, config };
@@ -188,7 +188,7 @@ test('every kind of owner data a 3.3.1 home holds is read by this release, carri
     const again = h.config();
     await boot(again);
     rows['decision policy'] = {
-      kept, newFormHolds: onDisk?.includes('"No Decision Model"') === true, oldFormGone: onDisk?.includes('Classic - Off') === false,
+      kept, newFormHolds: onDisk?.includes('"Decision Model Only"') === true, oldFormGone: onDisk?.includes('Default - On') === false,
       secondOpen: { same: read(h.daemonSettings) === onDisk, kept: again.get('judgment.policy') },
     };
   }
@@ -199,6 +199,6 @@ test('every kind of owner data a 3.3.1 home holds is read by this release, carri
     budget: { stopped: null, kept: ['purchase-1:500:EUR', 'purchase-2:300:EUR'], newFormHolds: 'EUR', secondOpen: { same: true, stopped: null } },
     'admin password': { firstSignIn: { signedIn: true, retired: false }, kept: true, newFormHolds: true, secondOpen: { same: true, retired: false } },
     calendar: { kept: 'google:owner', carried: 'moved', newFormHolds: true, oldFormGone: true, secondOpen: { carried: 'nothing', same: true, kept: 'google:owner' } },
-    'decision policy': { kept: 'No Decision Model', newFormHolds: true, oldFormGone: true, secondOpen: { same: true, kept: 'No Decision Model' } },
+    'decision policy': { kept: 'Decision Model Only', newFormHolds: true, oldFormGone: true, secondOpen: { same: true, kept: 'Decision Model Only' } },
   });
 });

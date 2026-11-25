@@ -73,7 +73,7 @@ The full map of every file every program writes is in "Files and directories Goo
 | --- | --- | --- | --- | --- |
 | Control plane | `controlPlane.port`, `controlPlane.hostMode`, `controlPlane.host` | `127.0.0.1:3421` | TCP, HTTP or HTTPS | The terminal app, Agent, the web UI, scripts, paired devices, reverse proxies. The web UI is served on this same port. |
 | Webhook listener | `httpListener.port`, `httpListener.hostMode`, `httpListener.host` | `127.0.0.1:3422` | TCP, HTTP or HTTPS | External services posting webhooks. It is only opened when `danger.httpListener` is `true`. |
-| Web UI development server | `web.port` | `3423` | HTTP | The web UI's development server (`bun run dev` in `products/webui`), when one runs. The daemon never binds it, and no link, pairing address, `goodvibes web` or `tailscale.serve.run` uses it. |
+| (none) | `web.port` | `3423` | none | Nothing in an installed suite listens on it: the daemon never binds it, and no link, pairing address, `goodvibes web` or `tailscale.serve.run` uses it. |
 | Cluster | `cluster.port`, `cluster.multicastGroup` | UDP `61860`, multicast group `239.255.71.86` | UDP, IPv4 only | Other nodes of a cluster. Only opened when `cluster.enabled` is `true`. |
 | Relay (outbound) | `relay.url` | not set | WebSocket out (`wss://`) | The daemon dials out; nothing listens. |
 
@@ -326,9 +326,9 @@ Offers (each declinable in the web app):
   Passkey, Register a passkey on this device to confirm sensitive actions with a tap. Decline and sensitive actions ask another way.
 
 This device will get:
-  Offline app (installable / background sync), needs https, available via tailscale
-  Push notifications, needs https, available via tailscale
-  Voice input (microphone), needs https, available via tailscale
+  Offline app (installable / background sync), needs https: set up a secure address in Settings, General, Secure address (a domain you own, a certificate you made, Tailscale, or GoodVibes' own certificate)
+  Push notifications, needs https: set up a secure address in Settings, General, Secure address (a domain you own, a certificate you made, Tailscale, or GoodVibes' own certificate)
+  Voice input (microphone), needs https: set up a secure address in Settings, General, Secure address (a domain you own, a certificate you made, Tailscale, or GoodVibes' own certificate)
 
 Connection is unencrypted on your LAN. Everything works except browser-gated features; Tailscale gives encrypted access with the full app.
 
@@ -611,7 +611,7 @@ A change of `controlPlane.hostMode`, `controlPlane.host` or `controlPlane.port` 
 
 A daemon started with `--host` or `--port` keeps that binding for its whole run.
 
-Plain HTTP on a private network is a supported posture. The connection is not encrypted on that network, and browsers withhold three features from a page that is not a secure context (HTTPS, or `localhost`): installing the app and its service worker, push notifications, and the microphone. `pairing.posture.get` (see the next part) reports each of these as available or `needs https, available via tailscale`. The rest of the web app works there; its copy buttons copy without the clipboard API browsers keep from such a page, and when the browser refuses that too they select the text and say `Selected: press Ctrl+C (Cmd+C on a Mac) to copy it.`. A `100.64.0.0/10` address is accepted over HTTP only when a running Tailscale vouches for it or `GOODVIBES_TAILNET_ADDRESSES` lists it, because carrier-grade NAT uses the same range.
+Plain HTTP on a private network is a supported posture. The connection is not encrypted on that network, and browsers withhold three features from a page that is not a secure context (HTTPS, or `localhost`): installing the app and its service worker, push notifications, and the microphone. `pairing.posture.get` (see the next part) reports each of these as available or `needs https: set up a secure address in Settings, General, Secure address (...)` (see "The secure address (Settings, General, Secure address)"). The rest of the web app works there; its copy buttons copy without the clipboard API browsers keep from such a page, and when the browser refuses that too they select the text and say `Selected: press Ctrl+C (Cmd+C on a Mac) to copy it.`. A `100.64.0.0/10` address is accepted over HTTP only when a running Tailscale vouches for it or `GOODVIBES_TAILNET_ADDRESSES` lists it, because carrier-grade NAT uses the same range.
 
 ### TLS
 
@@ -801,7 +801,7 @@ The settings dialog opens from the account menu, or with `?settings=<section>` i
 
 | Page | Sections (`?settings=` id) | What they hold |
 | --- | --- | --- |
-| General | `general` Display, `network` Network, `all` Advanced, `about` About | Theme, density, language; Tailscale, Cloudflare, relay and the listeners; the Triggers screen (supervised triggers, their runs, and the commands they may run) and every other setting; daemon status, this browser's connection, local sign-in. |
+| General | `general` Display, `network` Network, `secure-address` Secure address, `all` Advanced, `about` About | Theme, density, language; Tailscale, Cloudflare, relay and the listeners; the https address for phones (four ways, explained); the Triggers screen (supervised triggers, their runs, and the commands they may run) and every other setting; daemon status, this browser's connection, local sign-in. |
 | Account | `account` Sign-in, `devices` Devices and pairing, `people` People and channels | Sign-in, operator token, step-up verification, owner profile, mail and calendar accounts; paired devices and their tokens, power, this browser as a phone node, Telegram delegated intake; principals and channel profiles. |
 | Models and providers | `models` Model, `credentials` Credentials, `usage` Usage | The current model, providers, sign-in routes, decision models; the credential store and accounts; usage, budgets, payments (cards, purchase windows, repeat purchases). |
 | Voice | `voice` | Dictation, spoken replies, wake word. |
@@ -1009,6 +1009,8 @@ End to end:
 
 The laptop's conversation turns still run in the laptop's terminal app, so model provider credentials are needed on the laptop; the server's channels, schedules, memory and hosted sessions are the server's. The laptop's own `operator-tokens.json` is not touched by any of this.
 
+When the two machines are on different builds, each side says so. A server daemon older than the laptop's terminal app needs (3.3.2) is not used, with the notice `The daemon at http://server.lan:3421 is running build 3.2.0; this client requires 3.3.2 or newer, update the daemon.`; it is read again when it comes back online, so updating the server is enough. A terminal app older than the server's release line, after the server updated, shows `This process is running build 3.4.8; the daemon requires 3.5.0 or newer. It has stopped taking shared-session work, restart it to rejoin.` The same check for a paired phone's web app and for the Agent, with every sentence: "When a program is older than the daemon requires".
+
 ## Remote access
 
 Three ways reach the daemon from outside the local network. None is on by default.
@@ -1040,9 +1042,31 @@ Tailscale gives the daemon an encrypted address and a real `https://` name on th
 
 The daemon also has three API methods for this (Settings, General, Network in the web UI shows them): `tailscale.get` (read-only: is the binary there, logged in, the MagicDNS name, the serve the daemon started), `tailscale.serve.run` (admin: runs `tailscale serve --bg <port>`, records a receipt, and on success sets `web.publicBaseUrl` to the `https://` address, so the web UI signs in there with nothing else to set) and `tailscale.serve.stop` (admin: runs `tailscale serve --https=443 off` and puts `web.publicBaseUrl` back). `tailscale.serve.run` serves the port the web UI is served on, the control-plane port while the daemon serves the bundle; with no web UI served it is refused with `409` `WEB_UI_NOT_SERVED` and runs nothing (serve the bundle first with `goodvibes-daemon webui enable`). When the tailnet has Serve switched off, Tailscale prints a link to switch it on; the receipt carries it as `enableUrl`. After a serve, `tailscale.serve.run` sends one request to the `https://` address and answers `answers: { ok, detail }`; `web.publicBaseUrl` is set only when that address answered.
 
-### https on the local network (a certificate of your own)
+### The secure address (Settings, General, Secure address)
 
-A phone on the same network can open the web UI over plain http, but a browser gives the microphone, notifications and "install as an app" only to an https page. Without Tailscale, the daemon can serve https on the local network with a certificate authority of its own, which each phone installs once.
+A phone on the same network can open the web UI over plain http, but a browser gives the microphone, notifications, "install as an app", the camera and passkeys only to an https page. The Secure address screen (web UI, terminal app and Agent: Settings, General, Secure address; `/settings open secure-address` in the terminal programs) gives the daemon an https address by one of four ways, each with what it does, what it needs from you, what the phone gains and what is sent where. Plain http keeps working exactly as before, whichever you pick.
+
+| Way | You give | The phone | Sent |
+| --- | --- | --- | --- |
+| A certificate for a domain you own (Let's Encrypt) | a name under your domain (`gv.example.com`) and, once, a Cloudflare API token with Zone, DNS, Edit on its zone | trusts it with nothing installed | to Let's Encrypt the name and public keys (the name appears in public Certificate Transparency logs); to Cloudflare the name, a proof digest and this computer's local address |
+| A certificate you made | the certificate (with its chain) and key files on this computer | trusts it when it trusts the signer | nothing |
+| Tailscale | Tailscale signed in here and on the phone, HTTPS on for the tailnet | trusts it, from anywhere on the tailnet | per Tailscale |
+| GoodVibes' own certificate | nothing here; on each phone, install the certificate once from `/lan-https` | trusts it once installed; not yet tried on a real iPhone or Android phone | nothing |
+
+- `controlPlane.lanHttps.enabled` switches the https listener on or off (port `controlPlane.lanHttps.port`, 3443); `secureAddress.certificate` (`local-authority`, the default, `own-files` or `lets-encrypt`) is the one setting that says which certificate it serves. The other settings: `secureAddress.domain`, `secureAddress.certFile`, `secureAddress.keyFile`, `secureAddress.dnsProvider` (`cloudflare`), `secureAddress.acmeDirectory` (Let's Encrypt's address; another ACME authority with DNS proofs works the same way).
+- Let's Encrypt: the daemon speaks ACME itself. Its account key (`secureAddress.acmeAccount`) and the certificate's key (`secureAddress.certificate`) are kept in the daemon's secret store and never shown, logged or answered. The certificate covers the name and every name directly under it (`*.gv.example.com`), proved by DNS records it writes through Cloudflare (`_acme-challenge.<name>`, removed afterwards). It writes the name's address record pointing at this computer's local address (192.168, then 10, then 172.16-31), and corrects it at the next start or listener bind when the address changed. It then looks the name up from this computer: a router that refuses answers pointing at local addresses (DNS rebinding protection) is named on the screen with what to allow on it. It renews by itself when under 30 days remain, checked at each start and listener bind, at each request the https listener serves, and at each daemon heartbeat (`watchers.heartbeatIntervalMs`); a refusal by the authority waits an hour before the daemon tries again by itself (a change on the screen tries at once). A renewal that fails within a week of the end is put in front of you. A record under the name that GoodVibes did not write is never changed.
+- A certificate you made: checked when given (the key must belong to the certificate; the names it covers; when it ends; a pair that is not in force is refused and nothing is written). The files are read again at each start and listener bind when they changed, and once the certificate in use has ended. You are told once, a fortnight before it ends.
+- `goodvibes-daemon webui enable --lan --https --certificate local-authority|own-files|lets-encrypt [--domain <name>] [--cert-file <path> --key-file <path>]` does the same from a script (a token is never taken on the command line: the daemon uses `cloudflare.apiTokenRef`, `CLOUDFLARE_API_TOKEN` or the stored secret). Over the API: `secureAddress.get`, `secureAddress.set` (admin) and `secureAddress.reissue` (admin).
+- "Issue a new certificate now" (on a machine of its own or a group's lead, while https is on with Let's Encrypt or GoodVibes' own certificate): a new certificate with a new key at once, served and sent to the machines that follow. Let's Encrypt allows only five for the same name a week, so it is meant for a key that may have been seen by someone else; renewal needs nothing. It is the screen's button in all three programs (in the terminal programs, its row in "Secure address now"), the method `secureAddress.reissue` for a client or script, and for the model inside GoodVibes the same method through `agent_operator_method`, admitted by the permission gate under the mode in force. A certificate you made is renewed by you.
+- Pairing carries the https address the listener serves (at the certificate's own name for Let's Encrypt and a certificate you made), and the pairing posture reports the microphone, push and install as available there; the certificate-page step appears only for GoodVibes' own certificate.
+
+**A machine group shares one secure address.** The machine that set one up leads (of the members whose https is on, the one that joined the group first); the machines that joined it follow and set nothing up themselves: their screen says "This machine is a node of <lead>: its secure address comes from there.", with what it holds. The lead obtains one certificate for the whole group (the name and every name under it for Let's Encrypt; for GoodVibes' own certificate, one server certificate covering every machine's names and addresses, so a phone installs one certificate and trusts every machine; a certificate you made is shared with each machine it covers, and the lead's screen names what it would also need to cover), and sends it to each machine sealed to that machine's own key over the group's signed channel; each keeps it in its secret store (`secureAddress.groupCertificate`). Each machine is opened at its own name (`<host name>.gv.example.com`, whose address record the lead writes from what the machine reports when it binds). The lead renews once for all and sends the new certificate the same way. A machine that leaves or is forgotten drops its copy at once, and the lead obtains a new certificate with a new key for the machines that remain. Rotating the group's key (`/cluster rotate`) does not touch the certificate. For a new certificate for any other reason, the lead's Secure address screen has "Issue a new certificate now" (daemon method `secureAddress.reissue`). Tailscale stays per machine. A machine joined to a lead with no secure address keeps its own settings, plain http as before.
+
+A 3.5.0 daemon reading a home with these settings ignores the `secureAddress` section without a notice and, with https on, serves its own certificate on the same port, as 3.5.0 always did.
+
+### GoodVibes' own certificate (the local authority)
+
+Without a domain or Tailscale, the daemon serves https on the local network with a certificate authority of its own, which each phone installs once.
 
 - `goodvibes-daemon webui enable --lan --https` serves the web UI to the network and turns https on: `controlPlane.lanHttps.enabled` `true`, on `controlPlane.lanHttps.port` (default `3443`), beside the plain listener, which stays as it is. Both settings are off and 3443 by default and appear in every program's settings under Network.
 - At its first https start the daemon makes the certificate authority (ECDSA P-256, three years) and keeps its key in the secret store (`controlPlane.lanHttps.authority`); the key is never printed, logged or answered. The authority is limited by name constraints to this machine's own names (`localhost`, the host name, names under `.local`, `.home.arpa` and `.internal`) and to private, loopback, link-local and tailnet addresses, so it cannot vouch for any public site, and the daemon refuses to issue for any other name.
@@ -1060,6 +1084,8 @@ When a pairing code is asked for and the daemon is reachable only from this comp
 ### Model lists at every start
 
 At every start of the daemon, the terminal app and the Agent, each provider's model list and the shared model catalog are read again in the background, whatever the age of the stored list. Start-up does not wait. A list that changed is announced (`PROVIDERS_CHANGED`) when it arrives, and the check for a model that stopped being free runs on the fresh catalog. A provider that cannot be reached keeps the list it had, and its row in the model lists says why (`error`, `listedAt`). On a machine with no network, turn `provider.refreshListsAtStart` off ("Read model lists again at every start", default on; read at start): a start then reads a list or the catalog only when its saved copy is missing or a day old. Refreshing a list on request is unchanged.
+
+The daemon also looks for model servers on its own machine as it starts. Before it listens it loads the custom providers and the model servers found earlier (`.goodvibes/tui/discovered-providers.json` in its home); a custom provider wins over a found server of the same name, and a missing or empty file clears nothing. It then scans this computer's well-known model-server ports once in the background (never another machine), without holding up the listener or changing the chosen model, and saves what it found to the same file. Each new hosted session starts from the providers known at that moment and does not scan on its own.
 
 ### The relay
 

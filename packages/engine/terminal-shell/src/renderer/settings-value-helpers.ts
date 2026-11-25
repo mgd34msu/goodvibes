@@ -6,6 +6,7 @@ export interface SettingsValueEntry {
     readonly label?: string | undefined;
     readonly type?: string | undefined;
     readonly enumValues?: readonly string[] | undefined;
+    readonly enumLabels?: Readonly<Record<string, string>> | undefined;
     readonly default?: unknown;
   };
   readonly currentValue: unknown;
@@ -23,6 +24,8 @@ export interface SettingWordsFacts {
   readonly label?: string | undefined;
   readonly type?: string | undefined;
   readonly enumValues?: readonly string[] | undefined;
+  /** The schema's words for stored values that read differently (`judgment.policy`'s Hybrid reads "Ask me"). */
+  readonly enumLabels?: Readonly<Record<string, string>> | undefined;
 }
 
 /** Text settings that hold one of a set of named levels ("medium"), read as a choice. */
@@ -64,6 +67,7 @@ export function settingChoiceWords(key: string, value: string): string {
 export function settingValueWords(setting: SettingWordsFacts, value: unknown): string {
   if (value === null || value === undefined || value === '') return 'Not set';
   if (typeof value === 'boolean') return value ? 'On' : 'Off';
+  if (typeof value === 'string' && setting.enumLabels !== undefined && Object.hasOwn(setting.enumLabels, value)) return setting.enumLabels[value]!;
   if (typeof value === 'string' && (setting.type === 'enum' || setting.enumValues || LEVEL_KEYS.test(setting.key))) return settingChoiceWords(setting.key, value);
   if (typeof value === 'number') {
     const { unit, zero } = namedNumber(setting.label);

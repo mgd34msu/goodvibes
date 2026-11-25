@@ -47,6 +47,10 @@ interface MessageListProps {
   onRegenerateFrom: (messageId: string) => void;
   /** Called when the user submits an edited version of a user message; resolves true once it was accepted. */
   onEditMessage?: (messageId: string, newText: string) => Promise<boolean>;
+  /** Remove a file from a sent message (asks first: it cannot be put back). */
+  onRemoveAttachment?: (message: ChatMessage, artifactId: string, name: string) => void;
+  /** Put another version of a turn on the conversation (by its first message's id). */
+  onSwitchBranch?: (messageId: string) => void;
   /** Called when the user clicks the Stop button during an active stream. */
   onStop?: () => void;
   /** Tool calls currently running for the active turn (useChatStream's ActiveToolCall). */
@@ -125,6 +129,8 @@ export function MessageList({
   onResendMessage,
   onRegenerateFrom,
   onEditMessage,
+  onRemoveAttachment,
+  onSwitchBranch,
   onStop,
   activeToolCalls = [],
   onCancelToolCall,
@@ -197,6 +203,10 @@ export function MessageList({
                     onResendMessage={onResendMessage}
                     onRegenerateFrom={onRegenerateFrom}
                     onEditMessage={onEditMessage && messageTone(node.message) === 'user' ? editMessage : undefined}
+                    onRemoveAttachment={onRemoveAttachment}
+                    branches={node.branches}
+                    onSwitchBranch={onSwitchBranch}
+                    isStreaming={isStreaming}
                     latestFailure={index === lastReply && !isStreaming}
                     onUseAnotherModel={onUseAnotherModel}
                   />

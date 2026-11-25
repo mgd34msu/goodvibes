@@ -5,13 +5,13 @@ This directory contains the current product documentation for `goodvibes-tui`.
 ## Guides
 
 - [Getting started](getting-started.md)
-  Installation, first-run setup, provider configuration, common paths, and basic run/build flows.
+  Installation, first-run setup, provider configuration and common paths.
 
 - [Configuration reference](configuration.md)
   The layered settings model, a curated key-settings table, permission modes and the policy/trust system, plus the TUI-owned namespaces you add by hand to settings.json, covering the checkpoint root guard, the scriptable statusline, session behavior, notification alert classes, and launch-time self-update.
 
 - [Deployment and services](deployment-and-services.md)
-  TUI-only mode, compiled binary behavior, adopting or autostarting the daemon, the in-process HTTP listener, inbound TLS, outbound trust configuration, control-plane entrypoints, the service registry and secret references, profiles and setup transfer, and integration helpers.
+  TUI-only mode, adopting or autostarting the daemon, the in-process HTTP listener, inbound TLS, outbound trust configuration, control-plane entrypoints, the service registry and secret references, profiles and setup transfer, and integration helpers.
 
 - [Remote access: a home server setup](remote-access.md)
   Step-by-step continuity setup covering the daemon on an always-on box, webui from any browser, TUI over SSH, Tailscale for reachability and TLS, and validation with `goodvibes doctor`.
@@ -49,7 +49,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
 - [Commands reference](commands-reference.md)
   The generated, categorized list of every slash command, its arguments, and its description. It is the same list `?` renders in the product.
 
-- [Windows support](windows.md)
+- [Windows support](../../../docs/windows.md)
   Running GoodVibes on Windows through WSL2; native Windows binaries are not provided.
 
 - [Screen readers and accessibility](accessibility.md)
@@ -62,10 +62,7 @@ This directory contains the current product documentation for `goodvibes-tui`.
   The per-command exec sandbox, its writable-path and egress lists, REPL evaluations running through it, and `sandbox.mcpIsolation` (MCP servers as host processes, or each inside its own bubblewrap boundary).
 
 - [Changelog](../CHANGELOG.md)
-  Current release history. Older per-version release-note files remain under `docs/releases/` for historical releases, but `CHANGELOG.md` is the canonical current stream.
-
-- [Foundation artifacts](foundation-artifacts/README.md)
-  Checked-in operator and peer contract manifests plus canonical knowledge GraphQL and SQL artifacts for release-gate and platform extraction work.
+  The terminal app's release history, including the releases before the suite (0.18 to 0.24). Suite releases are in the [release notes](../../../docs/releases/).
 
 - [GitHub Action](github-action.md)
   The `run-goodvibes` composite action, which installs a pinned, checksum-verified release in CI and runs a non-interactive command or prompt against a workspace.

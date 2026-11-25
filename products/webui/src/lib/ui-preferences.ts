@@ -22,10 +22,9 @@ export interface WebUiPreferences {
    */
   codeBlockWrapChosen: boolean;
   /**
-   * Hold still in this browser even when the system does not ask for reduced
-   * motion: menus, panels and toasts appear without moving, the "Thinking…" line
-   * does not shimmer, nothing scrolls smoothly. The system's own setting always
-   * applies too.
+   * Hold still in this browser: menus, panels and toasts appear without moving,
+   * the "Thinking…" line does not shimmer, nothing scrolls smoothly. Off unless
+   * the person turns it on; it follows nothing else (not the system's preference).
    */
   reduceMotion: boolean;
   /** Setup checklist steps the person chose "Skip for now" on, in this browser (SetupChecklist). */
@@ -48,17 +47,14 @@ export const DEFAULT_WEBUI_PREFERENCES: WebUiPreferences = {
   browserDictation: false,
 };
 
-const SYSTEM_REDUCED_MOTION = '(prefers-reduced-motion: reduce)';
-
-/** Whether motion is reduced right now: this browser's setting, or the system's. */
+/** Whether motion is reduced right now: this browser's Reduce motion setting, and nothing else. */
 export function motionReduced(): boolean {
-  if (readWebUiPreferences().reduceMotion) return true;
-  return typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia(SYSTEM_REDUCED_MOTION).matches;
+  return readWebUiPreferences().reduceMotion;
 }
 
 /**
- * Keep the setting on the page root (`data-motion="reduce"`), which the
- * stylesheets read like the system query: set at boot, and again whenever the
+ * Keep the setting on the page root (`data-motion="reduce"`), the only thing
+ * the stylesheets read for reduced motion: set at boot, and again whenever the
  * preference changes in this tab or another.
  */
 export function applyMotionPreference(): void {

@@ -167,11 +167,9 @@
   height: 1em;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .feedback-skeleton {
-    animation: none;
-    opacity: 0.6;
-  }
+:root[data-motion="reduce"] .feedback-skeleton {
+  animation: none;
+  opacity: 0.6;
 }
 
 /* ── DataBlock: a titled value, JSON in a code frame or markdown prose ── */

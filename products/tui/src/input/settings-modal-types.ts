@@ -2,7 +2,7 @@ import type { CommonSettingsCategory, CommonSettingEntryState } from '@goodvibes
 import type { ConfigSetting, HostBooleanSetting } from '@goodvibes/engine/platform/platform/config';
 import type { FeatureFlag, FeatureSetting, FlagState } from '@/runtime/index.ts';
 
-export type SettingsCategory = CommonSettingsCategory | 'wrfc' | 'connections';
+export type SettingsCategory = CommonSettingsCategory | 'wrfc' | 'connections' | 'secure-address-now';
 
 export type { SettingsFocusRegion } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
@@ -12,7 +12,7 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
 }> = [
   { label: 'Interface', categories: ['display', 'ui', 'behavior', 'notifications', 'permissions', 'policy', 'security'] },
   { label: 'AI Routing', categories: ['provider', 'pricing', 'subscriptions', 'judgment', 'helper', 'tools', 'tts', 'voice'] },
-  { label: 'Service & Network', categories: ['service', 'daemon', 'network', 'controlPlane', 'httpListener', 'web', 'relay'] },
+  { label: 'Service & Network', categories: ['service', 'daemon', 'network', 'controlPlane', 'httpListener', 'web', 'relay', 'secureAddress', 'secure-address-now'] },
   // 'hostedSessions' sits beside 'surfaces' and 'conversationGate': all three
   // answer "where does this conversation actually run, and who can reach it",
   // the detach policy is a fact about the daemon holding a session open, not

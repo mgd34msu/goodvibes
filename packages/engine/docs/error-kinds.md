@@ -1,6 +1,6 @@
 # platform error kinds
 
-> Consumer reference. For handling patterns see [Error Handling](./error-handling.md); for internals see [Error Architecture](./errors.md).
+> Consumer reference. For handling patterns see [Error Handling](./error-handling.md).
 
 Every error thrown by the platform's public surface is an instance of `GoodVibesError`. The `kind` field is the primary discriminant. Use it in `switch` statements or `if` chains instead of parsing `message` strings or using `instanceof` on subclasses.
 

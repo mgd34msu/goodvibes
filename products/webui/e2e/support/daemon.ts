@@ -138,7 +138,6 @@ export async function startRealDaemon(options: {
   const ports = { controlPlane: await freePort(), http: await freePort(), web: await freePort() };
   const publicUrl = options.publicHost ? `http://${options.publicHost}:${ports.controlPlane}` : undefined;
   writeFileSync(join(daemonHome, 'settings.json'), JSON.stringify({
-    judgment: { policy: 'No Decision Model' },
     controlPlane: { host: '127.0.0.1', port: ports.controlPlane, webui: { serve: true, bundleDir: E2E_DIST_DIR } },
     httpListener: { host: '127.0.0.1', port: ports.http },
     web: { host: '127.0.0.1', port: ports.web, ...(publicUrl ? { publicBaseUrl: publicUrl } : {}) },

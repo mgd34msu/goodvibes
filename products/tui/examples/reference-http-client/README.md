@@ -1,6 +1,6 @@
 # Reference HTTP client
 
-The smallest remote client of a running GoodVibes daemon. It imports only the published client packages, `@goodvibes/engine/operator-client` and `@goodvibes/engine/peer-client`, so `index.ts` can be copied into any Bun or Node project that depends on `@goodvibes/engine`.
+The smallest remote client of a running GoodVibes daemon. It imports only public engine entry points, `@goodvibes/engine/operator-client`, `@goodvibes/engine/peer-client` and `@goodvibes/engine/transport-core`, resolved here through the terminal app's workspace dependency, so `index.ts` works in any package that depends on `@goodvibes/engine` ([how to get it](../../../../packages/engine/README.md#getting-it)).
 
 It demonstrates:
 
@@ -26,4 +26,4 @@ bun examples/reference-http-client/index.ts
 
 It prints a JSON summary: `providerCount`, `activeClients`, `peerContractBasePath`, `peerContractTransport`, `pendingPairRequests` and `pairedPeers`. A missing variable or a failed request is printed on stderr and the exit code is 1.
 
-`bun run test` in `products/tui` runs it once against the fixture daemon from [`reference-operator-client`](../reference-operator-client/README.md).
+To try the same calls with no daemon, use [`reference-operator-client`](../reference-operator-client/README.md).

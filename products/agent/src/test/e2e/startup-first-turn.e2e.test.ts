@@ -1,5 +1,5 @@
 // Proves: The shipped goodvibes-agent binary starts and completes a first turn on both of its routes (through a paired daemon, and in its own process when there is none).
-// Red when: The daemon cannot start or pair, the compiled Agent does not reach its main screen or writes to stderr, or a first turn (through the daemon or in its own process) is not answered, creates work, or asks a decision model under No Decision Model.
+// Red when: The daemon cannot start or pair, the compiled Agent does not reach its main screen or writes to stderr, or a first turn (through the daemon or in its own process) is not answered or creates work.
 /**
  * The built `goodvibes-agent` binary in a real terminal, against a real daemon
  * and a scripted model at the HTTP wire:
@@ -9,9 +9,9 @@
  *                the model, the host asks its scripted decision model about
  *                that turn, and the reply is drawn, with no contract or agent
  *                created for a plain turn.
- *   no host      under No Decision Model, a home with no connected host runs
- *                the prompt in this process (as its notice says): the reply is
- *                drawn, no decision model is asked and nothing is submitted.
+ *   no host      a home with no connected host runs the prompt in this
+ *                process (as its notice says): the reply is drawn and nothing
+ *                is submitted.
  *
  * Each journey is split into steps, one test each, so every step stays inside the
  * per-test limit; a failed step fails the ones after it.
@@ -80,19 +80,17 @@ describe('no paired host', () => {
 
   test('the binary starts without a host', async () => {
     home = await makeHome(model);
-    home.setDaemonOwnedSetting('judgment.policy', 'No Decision Model');
     agent = launchAgent(home, { cols: 100, rows: 30 });
     await agent.waitForScreen('the main screen', inputAreaVisible);
     await answerWorkspaceQuestion(agent, 'decline');
   });
 
-  test('the first prompt runs in this process: its reply is drawn, no decision model is asked and nothing is submitted', async () => {
+  test('the first prompt runs in this process: its reply is drawn and nothing is submitted', async () => {
     const before = model.requests.length;
     agent!.type(PROMPT); agent!.key('Enter');
     // With no connected host, messages run in this process; the outcome waited on is the turn itself.
     await agent!.waitForScreen('the scripted reply', (s) => screenText(s).includes(REPLY));
     expect(model.requests.slice(before).some((request) => lastUserText(request).includes(PROMPT))).toBe(true);
-    expect(home!.judgments.requests).toHaveLength(0);
     expect(existsSync(join(home!.home, '.goodvibes/agent/native-work-submission.json.intake'))).toBe(false);
     expect(agent!.alive()).toBe(true);
   });

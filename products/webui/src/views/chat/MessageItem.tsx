@@ -1,8 +1,8 @@
 import { Check, Clock, Copy, Layers, MoreHorizontal, Paperclip, Pencil, RotateCcw, X } from 'lucide-react';
 import { memo, useCallback, useRef, useState } from 'react';
 import type { ChatMessage } from './types';
-import type { SupersededReason } from './lineage';
-import { MessageLineage, messageIsEdited } from './MessageLineage';
+import type { BranchChoice, SupersededReason } from './lineage';
+import { BranchSwitcher, MessageLineage, messageIsEdited } from './MessageLineage';
 import { useArtifactsPanel } from './ArtifactsPanel';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { SpeakButton, SpeakMenuItem } from '../../components/voice/SpeakButton';
@@ -20,6 +20,8 @@ import {
   attachmentMeta,
   deliveryState,
   messageAttachments,
+  removedAttachmentNames,
+  storedAttachmentId,
   messageText,
   messageTone,
   messageTimeMs,
@@ -56,6 +58,14 @@ interface MessageItemProps {
   latestFailure?: boolean;
   /** "Use another model" on a failed reply: open the model menu, then try the same prompt with the model chosen. */
   onUseAnotherModel?: (messageId: string) => void;
+  /** Remove a file from this sent message (the caller asks first: it cannot be put back). */
+  onRemoveAttachment?: (message: ChatMessage, artifactId: string, name: string) => void;
+  /** When this message's turn has other versions: which one this is, of how many. */
+  branches?: BranchChoice;
+  /** Put another version of this turn on the conversation (by its first message's id). */
+  onSwitchBranch?: (messageId: string) => void;
+  /** A reply is being written: versions cannot be switched until it ends. */
+  isStreaming?: boolean;
 }
 
 /** Memoised: a keystroke in the composer or a streamed token re-renders a message only when its own props change. */
@@ -75,6 +85,10 @@ export const MessageItem = memo(function MessageItem({
   onEditMessage,
   latestFailure = false,
   onUseAnotherModel,
+  onRemoveAttachment,
+  branches,
+  onSwitchBranch,
+  isStreaming = false,
 }: MessageItemProps) {
   const id = bestId(message) || `${index}`;
   const tone = messageTone(message);
@@ -91,6 +105,9 @@ export const MessageItem = memo(function MessageItem({
   const timeMs = messageTimeMs(message);
   const timeIso = timeMs === null ? undefined : new Date(timeMs).toISOString();
   const attachments = messageAttachments(message);
+  const removedNames = removedAttachmentNames(message);
+  // A file of a message the daemon has (not one still sending or never sent) can be removed.
+  const canRemoveFiles = tone === 'user' && onRemoveAttachment !== undefined && state !== 'local' && state !== 'failed';
   const isEdited = messageIsEdited(reason, revisionOf);
   const [{ memoryProvenanceChipEnabled }] = useWebUiPreferences();
   const memoryProvenanceIds = readMemoryProvenanceIds(message.metadata);
@@ -193,16 +210,36 @@ export const MessageItem = memo(function MessageItem({
       ) : (
         text && <MarkdownMessage content={text} />
       )}
-      {attachments.length > 0 && (
+      {(attachments.length > 0 || removedNames.length > 0) && (
         <div className="message-attachments">
-          {attachments.map((attachment, attachmentIndex) => (
-            <div key={`${id}-attachment-${attachmentIndex}`} className="message-attachment">
-              <Paperclip size={14} aria-hidden="true" />
-              <div>
-                <strong>{attachmentLabel(attachment)}</strong>
-                {attachmentMeta(attachment) && <span>{attachmentMeta(attachment)}</span>}
+          {attachments.map((attachment, attachmentIndex) => {
+            const label = attachmentLabel(attachment);
+            const storedId = canRemoveFiles ? storedAttachmentId(attachment) : '';
+            return (
+              <div key={`${id}-attachment-${attachmentIndex}`} className="message-attachment">
+                <Paperclip size={14} aria-hidden="true" />
+                <div>
+                  <strong>{label}</strong>
+                  {attachmentMeta(attachment) && <span>{attachmentMeta(attachment)}</span>}
+                </div>
+                {storedId && (
+                  <IconButton
+                    size="sm"
+                    label={`Remove ${label}`}
+                    icon={<X />}
+                    tooltipPlacement="top"
+                    className="message-attachment__remove"
+                    onClick={() => onRemoveAttachment?.(message, storedId, label)}
+                  />
+                )}
               </div>
-            </div>
+            );
+          })}
+          {removedNames.map((name, removedIndex) => (
+            <p key={`${id}-removed-${removedIndex}`} className="message-attachment message-attachment--removed">
+              <Paperclip size={14} aria-hidden="true" />
+              <span>{name} was removed</span>
+            </p>
           ))}
         </div>
       )}
@@ -215,7 +252,7 @@ export const MessageItem = memo(function MessageItem({
         />
       )}
       {/* A turn that only ran tools says what it did in the tool fold above. */}
-      {!text && attachments.length === 0 && !failedReply && !(message.toolActivity && message.toolActivity.length > 0) && (
+      {!text && attachments.length === 0 && removedNames.length === 0 && !failedReply && !(message.toolActivity && message.toolActivity.length > 0) && (
         <p className="message-empty">{isAssistant ? 'This reply has no text.' : 'This message has no text.'}</p>
       )}
     </div>
@@ -354,9 +391,13 @@ export const MessageItem = memo(function MessageItem({
       <div className="message-body">
         {/* Honest-lineage disclosure: when this message heads a fork, reveal the retained
             (superseded) history rather than pretending it is gone. */}
-        <MessageLineage priorMessages={priorMessages} reason={reason} revisionOf={revisionOf} />
+        {/* A turn with versions has its switcher instead of the "Edited" mark here. */}
+        <MessageLineage priorMessages={priorMessages} reason={reason} revisionOf={branches ? undefined : revisionOf} />
         {toolActivity && <ToolActivityGroup toolActivity={toolActivity} />}
         {content}
+        {branches && onSwitchBranch && !isEditing && (
+          <BranchSwitcher choice={branches} disabled={isSendPending || isStreaming} onSwitch={onSwitchBranch} />
+        )}
         {footer}
         {/* Memory provenance. Owner-ruled, default OFF (see ui-preferences.ts). Renders
             nothing when the preference is off or this turn used no memories. */}

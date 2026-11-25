@@ -266,7 +266,7 @@ async function explain(options: DoctorSubcommandOptions): Promise<CliCommandOutp
     } catch (error) {
       // Under Decision Model Only a decision the model could not answer stops the call: say so instead of a stack.
       if (!(error instanceof JudgmentError)) throw error;
-      const stopped = `not consulted: ${error.message} "When the decision model is missing or fails" is Decision Model Only, so the call stops with this reason and nothing is asked.`;
+      const stopped = `not consulted: ${error.message} "If Jev can't answer" is Refuse the action, so the call stops with this reason and nothing is asked.`;
       if (json) {
         return { output: JSON.stringify({ subject: args.join(' '), tool: target.tool, category, args: target.args, mode: inForce.mode, savedMode,
           ...(inForce.reason !== undefined ? { modeReason: inForce.reason } : {}), decisionModel: stopped, decisionModelConsulted: false,

@@ -350,8 +350,12 @@ export function SettingsField({ field, onCommit, onCommitMany, onReset, persiste
           placement="bottom-end"
           options={[
             ...(field.enumValues.includes(value) ? [] : [{ value, label: value || "(unset)" }]),
-            // The default decision policy reads "Hybrid (default)"; only the bare value is stored.
-            ...field.enumValues.map((opt) => ({ value: opt, label: field.key === "judgment.policy" && opt === "Hybrid" ? "Hybrid (default)" : opt })),
+            // The schema's word for each stored value where it has one ("Ask me" for Hybrid); a labelled
+            // setting's default carries "(default)". Only the bare value is stored.
+            ...field.enumValues.map((opt) => {
+              const label = field.enumLabels?.[opt];
+              return { value: opt, label: label === undefined ? opt : opt === field.default ? `${label} (default)` : label };
+            }),
           ]}
           onChange={(next) => void commit(next)}
         />

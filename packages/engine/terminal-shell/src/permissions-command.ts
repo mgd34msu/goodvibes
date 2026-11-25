@@ -43,7 +43,6 @@ const RULES = defineList<unknown>({
 function causeFix(words: ModeInForceWords): { readonly sentence: string; readonly label: string; readonly line: string } | undefined {
   const because = words.because ?? '';
   if (because === 'no decision model set') return { sentence: 'No decision model is set up, so GoodVibes asks you itself.', label: 'Choose a decision model', line: '/settings open judgment.model' };
-  if (because === 'decision models switched off') return { sentence: 'Decision models are switched off, so GoodVibes asks you itself.', label: 'Turn decision models on', line: '/settings open judgment.policy' };
   if (because === 'not measured yet') return { sentence: `${words.chosen} is only the default here and has not been measured on your decision model.`, label: `Choose ${words.chosen} yourself, or another mode`, line: '/settings open permissions.mode' };
   if (because === 'an old auto-approve setting is on') return { sentence: 'An old auto-approve setting runs everything without asking.', label: 'Choose a mode (this clears it)', line: '/settings open permissions.mode' };
   if (because.startsWith('decision model')) return { sentence: 'The decision model is not answering, so GoodVibes asks you itself.', label: 'Choose another decision model', line: '/settings open judgment.model' };

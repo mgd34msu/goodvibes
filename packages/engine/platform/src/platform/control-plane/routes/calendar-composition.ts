@@ -14,11 +14,15 @@
  * Returns `null` when the composition is too narrow to reach a real store, so
  * the verbs simply stay unregistered rather than half-wired.
  *
- * Two backends can answer, and this is where one is chosen: a CalDAV server
- * when `surfaces.calendar.caldavUrl`/`caldavUser` are set, a connected Google
- * account otherwise. The verbs behave identically either way, that is the
- * point of the `CalendarGatewayService` slice, so the choice is invisible
- * above this line.
+ * Two backends can answer the default calendar, and this is where one is
+ * chosen: a CalDAV server when `surfaces.calendar.caldavUrl`/`caldavUser` are
+ * set, a connected Google account otherwise. A Microsoft Outlook account
+ * connected with `/calendar connect outlook` is served beside either: its
+ * events and calendars carry ids that start with `outlook:`, a read of the
+ * default calendars returns both, and a call that names an Outlook id goes to
+ * Outlook. With Outlook the only account, it is the calendar. The verbs behave
+ * identically whichever answers, that is the point of the
+ * `CalendarGatewayService` slice, so the choice is invisible above this line.
  */
 import {
   createGoogleCalendarGatewayService,
@@ -35,6 +39,8 @@ import {
 } from '../../calendar/caldav-gateway-config.js';
 import { createCalDavCalendarGatewayService } from '../../calendar/caldav-gateway-service.js';
 import { readCalendarAccountsOnRecord } from '../../calendar/oauth-token-store.js';
+import { createMicrosoftCalendarGatewayService, isOutlookId } from '../../calendar/microsoft-gateway-service.js';
+import { fetchAdapter } from '../../calendar/http-fetch-adapter.js';
 import { GOOGLE_CONFIG_KEYS } from '../../google/setup-plan.js';
 import type { CalendarUntrustedIngestRecorder } from '../../calendar/untrusted-events.js';
 import {
@@ -48,7 +54,16 @@ import { noteListChanged } from '../../runtime/list-changes.js';
 /** The slice of the verb-group deps this composition needs. */
 export interface CalendarCompositionDeps {
   readonly configManager: { get(key: never): unknown };
-  readonly secretsManager: { get(key: string): Promise<Secret | null> };
+  /**
+   * The daemon's secret store. `set` and `delete` let the Outlook account's
+   * token record be written back when Microsoft rotates it on a refresh; a
+   * composition without them serves no Outlook account.
+   */
+  readonly secretsManager: {
+    get(key: string): Promise<Secret | null>;
+    set?(key: string, value: string): Promise<void>;
+    delete?(key: string): Promise<void>;
+  };
   /** Absent in narrow compositions; the adoption probe needs a real home. */
   readonly homeDirectory?: string | undefined;
   /** Test seam: overrides the whole service, so no real store is touched. */
@@ -91,7 +106,6 @@ async function noUsableCalendar(deps: CalendarCompositionDeps): Promise<string> 
     accounts = [];
   }
   const google = accounts.find((account) => account.provider === 'google');
-  const microsoft = accounts.find((account) => account.provider === 'microsoft');
   const noHome = deps.homeDirectory === undefined;
   const noClientId = configString(deps, GOOGLE_CONFIG_KEYS.oauthClientId).length === 0;
   const sentences = ['No calendar this daemon can read.'];
@@ -99,15 +113,17 @@ async function noUsableCalendar(deps: CalendarCompositionDeps): Promise<string> 
   else if (noHome) sentences.push(`Google: ${google.label} is connected, but this daemon runs without a home folder and reads only a CalDAV server.`);
   else if (noClientId) sentences.push(`Google: ${google.label} is connected, but the client id of the OAuth app it signed in with is not set (calendar.google.clientId), so it cannot be used.`);
   else sentences.push(`Google: ${google.label} is connected.`);
-  if (microsoft !== undefined) {
-    sentences.push(`Microsoft Outlook: ${microsoft.label} is connected for the Agent's /calendar commands; this daemon's calendar reads a CalDAV server or a Google account, not Microsoft.`);
-  }
+  // A Microsoft account on record is served beside the others; only a composition with no secret writes cannot.
+  const microsoft = accounts.find((account) => account.provider === 'microsoft');
+  sentences.push(microsoft === undefined
+    ? 'Microsoft Outlook: no account is connected.'
+    : `Microsoft Outlook: ${microsoft.label} is connected, but this daemon was started without a secret store it can write, so it cannot keep that sign-in fresh.`);
   sentences.push('CalDAV: not set (surfaces.calendar.caldavUrl and surfaces.calendar.caldavUser).');
   sentences.push(noHome
     ? 'Set the two CalDAV settings.'
     : google === undefined
-      ? 'Connect Google with /calendar connect google in the Agent, or set the two CalDAV settings.'
-      : 'Set calendar.google.clientId to the client id of your Google OAuth app, or set the two CalDAV settings.');
+      ? 'Connect Google with /calendar connect google or Outlook with /calendar connect outlook in the Agent, or set the two CalDAV settings.'
+      : 'Set calendar.google.clientId to the client id of your Google OAuth app, connect Outlook with /calendar connect outlook in the Agent, or set the two CalDAV settings.');
   return sentences.join(' ');
 }
 
@@ -179,9 +195,45 @@ export function createDaemonCalendarGatewayService(
     recordUntrustedIngest,
   });
 
-  // A composition with no home directory and no CalDAV server has no calendar
-  // to answer with; leaving the verbs unregistered says so honestly.
-  if (homeDirectory === undefined && !caldavConfigured()) return null;
+  // The Outlook account connected with /calendar connect outlook: served
+  // beside the CalDAV server or the Google account, by the same one token
+  // record the Agent's /calendar reads (calendar/microsoft-gateway-service.ts).
+  const secretsManager = deps.secretsManager;
+  const calendarFetch = deps.calendarFetch;
+  const writeSecret = secretsManager.set?.bind(secretsManager);
+  const deleteSecret = secretsManager.delete?.bind(secretsManager);
+  let outlook: CalendarGatewayService | undefined;
+  const outlookService = (): CalendarGatewayService | null => {
+    if (writeSecret === undefined || deleteSecret === undefined) return null;
+    return (outlook ??= createMicrosoftCalendarGatewayService({
+      secrets: {
+        get: async (key) => revealOrNull(await secretsManager.get(key), 'dispatch'),
+        set: (key, value) => writeSecret(key, value),
+        delete: (key) => deleteSecret(key),
+      },
+      config: { get: (key) => deps.configManager.get(key as never) },
+      fetchImpl: fetchAdapter(calendarFetch === undefined ? undefined : (url, init) => calendarFetch.fetch(url, init ?? {})),
+      ownerZone: () => configString(deps, 'daemon.timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+      recordUntrustedIngest,
+    }));
+  };
+  /** Which accounts are on record: two secret reads, no request to a provider. */
+  const onRecord = async (): Promise<{ readonly google: boolean; readonly outlook: boolean }> => {
+    let accounts: Awaited<ReturnType<typeof readCalendarAccountsOnRecord>> = [];
+    try {
+      accounts = await readCalendarAccountsOnRecord(async (key) => revealOrNull(await secretsManager.get(key), 'owner-screen'));
+    } catch {
+      accounts = [];
+    }
+    return {
+      google: accounts.some((account) => account.provider === 'google'),
+      outlook: outlookService() !== null && accounts.some((account) => account.provider === 'microsoft'),
+    };
+  };
+
+  // A composition with no home directory, no CalDAV server and no way to serve
+  // Outlook has no calendar to answer with; leaving the verbs unregistered says so honestly.
+  if (homeDirectory === undefined && !caldavConfigured() && outlookService() === null) return null;
 
   // The backend is chosen on each call, not once here: a CalDAV server entered
   // in settings after the daemon started is used by the next verb call, and
@@ -204,7 +256,8 @@ export function createDaemonCalendarGatewayService(
     try {
       return await run();
     } catch (error) {
-      if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_CONFIGURED' && !caldavConfigured()) {
+      // With an Outlook account on record the refusal is that account's own (or the one backend named), and stands.
+      if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_CONFIGURED' && !caldavConfigured() && !(await onRecord()).outlook) {
         throw new GatewayVerbError(await noUsableCalendar(deps), 'CALENDAR_NOT_CONFIGURED', error.status);
       }
       throw error;
@@ -216,28 +269,85 @@ export function createDaemonCalendarGatewayService(
     noteListChanged({ list: 'calendar', change });
     return result;
   };
+  /**
+   * The backend a call goes to. An id that starts with `outlook:` (an Outlook
+   * event or calendar) goes to the Outlook account; another id to the CalDAV
+   * server or Google account. With no id (a new event on the default calendar)
+   * it is the CalDAV server or Google account, or the Outlook account when it is
+   * the only one there is.
+   */
+  const route = async (id: string | undefined): Promise<CalendarGatewayService> => {
+    const outlookBackend = outlookService();
+    if (isOutlookId(id) && outlookBackend !== null) return outlookBackend;
+    if (id === undefined && outlookBackend !== null && !caldavConfigured()) {
+      const accounts = await onRecord();
+      if (accounts.outlook && (!accounts.google || homeDirectory === undefined)) return outlookBackend;
+    }
+    return select();
+  };
+  /** A read over the default calendars: the CalDAV server or Google account, and the Outlook account when one is connected. */
+  const both = async <T>(
+    read: (backend: CalendarGatewayService) => Promise<T>,
+    merge: (first: T, second: T) => T,
+  ): Promise<T> => {
+    const outlookBackend = outlookService();
+    const accounts = outlookBackend === null ? { google: false, outlook: false } : await onRecord();
+    if (outlookBackend === null || !accounts.outlook) return read(select());
+    const primaryConfigured = caldavConfigured() || (accounts.google && homeDirectory !== undefined);
+    if (!primaryConfigured) return read(outlookBackend);
+    const [first, second] = await Promise.all([
+      // A Google account that cannot be used (its client id not set) leaves the Outlook account's answer.
+      read(select()).catch((error: unknown) => {
+        if (error instanceof GatewayVerbError && error.code === 'CALENDAR_NOT_CONFIGURED' && !caldavConfigured()) return null;
+        throw error;
+      }),
+      read(outlookBackend),
+    ]);
+    return first === null ? second : merge(first, second);
+  };
+  const byStart = (left: { readonly start: string }, right: { readonly start: string }): number =>
+    (Date.parse(left.start) || 0) - (Date.parse(right.start) || 0);
   return {
     // async, so a refusal from `select` reaches the caller as a rejection like
     // every other failure of these verbs rather than as a synchronous throw.
-    listEvents: (input) => explained(async () => select().listEvents(input)),
-    getEvent: (eventId, calendarId) => explained(async () => select().getEvent(eventId, calendarId)),
-    createEvent: (input) => written('created', async () => select().createEvent(input)),
+    listEvents: (input) => explained(async () => (input.calendarId === undefined
+      ? both((backend) => backend.listEvents(input), (first, second) => {
+        const events = [...first.events, ...second.events].sort(byStart);
+        const limit = input.limit ?? events.length;
+        return { events: events.slice(0, limit), more: first.more || second.more || events.length > limit };
+      })
+      : (await route(input.calendarId)).listEvents(input))),
+    getEvent: (eventId, calendarId) => explained(async () => (await route(isOutlookId(eventId) ? eventId : calendarId ?? '')).getEvent(eventId, calendarId)),
+    createEvent: (input) => written('created', async () => (await route(input.calendarId)).createEvent(input)),
     updateEvent: (eventId, changes, calendarId) => written('changed', async () => {
-      const backend = select();
+      const backend = await route(isOutlookId(eventId) ? eventId : calendarId ?? '');
       if (!backend.updateEvent) throw unsupported('update events');
       return backend.updateEvent(eventId, changes, calendarId);
     }),
     deleteEvent: (eventId, calendarId) => written('deleted', async () => {
-      const backend = select();
+      const backend = await route(isOutlookId(eventId) ? eventId : calendarId ?? '');
       if (!backend.deleteEvent) throw unsupported('delete events');
       return backend.deleteEvent(eventId, calendarId);
     }),
-    listCalendars: () => explained(async () => {
-      const backend = select();
+    listCalendars: () => explained(async () => both((backend) => {
       if (!backend.listCalendars) throw unsupported('list its calendars; set surfaces.calendar.defaultCalendarId to the calendar to use');
       return backend.listCalendars();
-    }),
-    exportIcs: (input) => explained(async () => select().exportIcs(input)),
-    importIcs: (icsContent, calendarId, options) => written('changed', async () => select().importIcs(icsContent, calendarId, options)),
+    }, (first, second) => [...first, ...second])),
+    exportIcs: (input) => explained(async () => (input.calendarId === undefined
+      ? both((backend) => backend.exportIcs(input), (first, second) => ({
+        icsContent: joinIcs(first.icsContent, second.icsContent),
+        eventCount: first.eventCount + second.eventCount,
+        ...(first.more === true || second.more === true ? { more: true } : {}),
+      }))
+      : (await route(input.calendarId)).exportIcs(input))),
+    importIcs: (icsContent, calendarId, options) => written('changed', async () => (await route(calendarId)).importIcs(icsContent, calendarId, options)),
   };
+}
+
+/** Two exported calendars as one file: the second file's events placed before the first's end. */
+function joinIcs(first: string, second: string): string {
+  const events = second.match(/BEGIN:VEVENT[\s\S]*?END:VEVENT\r?\n/g) ?? [];
+  if (events.length === 0) return first;
+  const end = first.lastIndexOf('END:VCALENDAR');
+  return end === -1 ? first : `${first.slice(0, end)}${events.join('')}${first.slice(end)}`;
 }

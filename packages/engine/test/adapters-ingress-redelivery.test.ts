@@ -54,7 +54,7 @@ afterAll(async () => {
   rmSync(daemon.root, { recursive: true, force: true });
 });
 beforeEach(() => {
-  retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   before = daemon.spawns.length;
   busy = () => false;
 });

@@ -3,7 +3,7 @@
   "info": {
     "title": "GoodVibes Operator API",
     "version": "3.5.0",
-    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 656 cataloged methods: 536 with dedicated REST bindings, 120 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
+    "description": "Generated from the operator contract (packages/contracts/artifacts/operator-contract.json). 661 cataloged methods: 538 with dedicated REST bindings, 123 reachable only through the generic invoke endpoint. Regenerate with `bun run openapi:generate`; drift fails `contracts:check`."
   },
   "servers": [
     {
@@ -37505,11 +37505,207 @@
         }
       }
     },
+    "/api/companion/chat/sessions/{sessionId}/messages/{messageId}/attachments/{artifactId}": {
+      "delete": {
+        "operationId": "companion.chat.attachments.remove",
+        "summary": "Remove a File From a Sent Companion Chat Message",
+        "description": "Remove a file attached to a sent companion-chat message, for good: the file is deleted from the artifact store and cannot be put back. Every message of the chat that carried it keeps a line in its place (`removedAttachments`: `artifactId`, `name`, `removedAt`; clients show \"<name> was removed\"), and the model no longer receives the file on later turns (it is told the file's name and that it was removed). Works on a closed chat too. Repeating it answers the same way with `alreadyRemoved: true`. An unknown chat is 404 SESSION_NOT_FOUND, an unknown message 404 MESSAGE_NOT_FOUND, a file the message never carried 404 ATTACHMENT_NOT_FOUND; while a reply is streaming, a message is being prepared or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes (stop the reply or let it finish, then remove); a daemon with no file store is 501 ATTACHMENTS_UNAVAILABLE.",
+        "tags": [
+          "companion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "messageId": {
+                      "type": "string"
+                    },
+                    "artifactId": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": "string"
+                    },
+                    "removed": {
+                      "type": "boolean"
+                    },
+                    "alreadyRemoved": {
+                      "type": "boolean"
+                    },
+                    "messageIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "sessionId",
+                    "messageId",
+                    "artifactId",
+                    "name",
+                    "removed",
+                    "messageIds"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:sessions"
+        ],
+        "x-effect": "write",
+        "x-irreversible": true,
+        "x-idempotent": true,
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "messageId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "artifactId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/companion/chat/sessions/{sessionId}/branches/switch": {
+      "post": {
+        "operationId": "companion.chat.branches.switch",
+        "summary": "Switch Companion Chat Branch",
+        "description": "Put another version of a turn on the conversation. A turn has versions when a user message was edited (the message and its edits, linked by `revisionOf`) or a reply was regenerated (the replies to one user message, linked by `inReplyTo`); each version heads the run of messages one fork marked superseded. `messageId` is the first message of the version wanted. The version on the conversation now (that turn's active message and everything after it, except a reply to an earlier message) is marked superseded, kept as history, and the chosen version is active again, so the chat shows it on every device and the model continues from it; nothing is deleted and no turn starts. Switching back is the same call with the other version's first message. A `messageId` already on the conversation answers `switched: false` and changes nothing. Works on a closed chat. An unknown chat is 404 SESSION_NOT_FOUND, an unknown message 404 MESSAGE_NOT_FOUND; a message that does not start a version, or whose turn is not on the conversation now, is 409 NOT_A_BRANCH; while a reply is streaming, a message is being prepared or sends are queued it is 409 CHAT_TURN_BUSY and nothing changes.",
+        "tags": [
+          "companion"
+        ],
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "sessionId": {
+                      "type": "string"
+                    },
+                    "messageId": {
+                      "type": "string"
+                    },
+                    "switched": {
+                      "type": "boolean"
+                    },
+                    "supersededMessageIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "restoredMessageIds": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "sessionId",
+                    "messageId",
+                    "switched",
+                    "supersededMessageIds",
+                    "restoredMessageIds"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "x-access": "authenticated",
+        "x-transport": [
+          "http",
+          "ws"
+        ],
+        "x-scopes": [
+          "write:sessions"
+        ],
+        "x-effect": "write",
+        "x-idempotent": true,
+        "parameters": [
+          {
+            "name": "sessionId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "messageId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sessionId",
+                  "messageId"
+                ],
+                "additionalProperties": true
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/companion/chat/sessions/{sessionId}/events": {
       "get": {
         "operationId": "companion.chat.events.stream",
         "summary": "Stream Companion Chat Events",
-        "description": "Server-Sent Events stream of turn and agent events scoped to a single companion-chat session.",
+        "description": "Server-Sent Events stream of turn and agent events scoped to a single companion-chat session. Besides the turn frames (`companion-chat.turn.*`), `companion-chat.transcript.changed` (`{ type: \"transcript.changed\", sessionId, change: \"attachment-removed\" | \"branch-switched\", messageIds }`) says the transcript changed outside a turn (companion.chat.attachments.remove, companion.chat.branches.switch): read the messages again.",
         "tags": [
           "companion"
         ],
@@ -37852,6 +38048,29 @@
                               "additionalProperties": true
                             }
                           },
+                          "removedAttachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "artifactId": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "removedAt": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "artifactId",
+                                "name",
+                                "removedAt"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
                           "createdAt": {
                             "type": "number"
                           },
@@ -38007,6 +38226,19 @@
                             "additionalProperties": false
                           },
                           "inReplyTo": {
+                            "type": "string"
+                          },
+                          "supersededAt": {
+                            "type": "number"
+                          },
+                          "supersededReason": {
+                            "type": "string",
+                            "enum": [
+                              "regenerate",
+                              "edit"
+                            ]
+                          },
+                          "revisionOf": {
                             "type": "string"
                           },
                           "clientMessageId": {
@@ -39718,6 +39950,29 @@
                               "additionalProperties": true
                             }
                           },
+                          "removedAttachments": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "artifactId": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "removedAt": {
+                                  "type": "number"
+                                }
+                              },
+                              "required": [
+                                "artifactId",
+                                "name",
+                                "removedAt"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
                           "createdAt": {
                             "type": "number"
                           },
@@ -39873,6 +40128,19 @@
                             "additionalProperties": false
                           },
                           "inReplyTo": {
+                            "type": "string"
+                          },
+                          "supersededAt": {
+                            "type": "number"
+                          },
+                          "supersededReason": {
+                            "type": "string",
+                            "enum": [
+                              "regenerate",
+                              "edit"
+                            ]
+                          },
+                          "revisionOf": {
                             "type": "string"
                           },
                           "clientMessageId": {
@@ -172846,6 +173114,9 @@
           "rewind.conversation.requests.take",
           "rewind.plan",
           "rewind.undo",
+          "secureAddress.get",
+          "secureAddress.reissue",
+          "secureAddress.set",
           "sessions.changes.get",
           "sessions.checkpoints.changed",
           "sessions.hosted.attach",
@@ -173007,6 +173278,9 @@
               "REMOTE_PAIR_REQUEST_SETTLED",
               "REMOTE_PEER_NOT_PAIRED",
               "REMOTE_PEER_REVOKED",
+              "SECURE_ADDRESS_INVALID",
+              "SECURE_ADDRESS_NODE",
+              "SECURE_ADDRESS_UNAVAILABLE",
               "SERVICE_UNAVAILABLE",
               "SESSION_ACTIVE",
               "SESSION_AGENT_BIND_FAILED",
@@ -174502,6 +174776,22 @@
       "category": "cloudflare",
       "access": "admin",
       "rest": "POST /api/cloudflare/verify",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "companion.chat.attachments.remove",
+      "category": "companion",
+      "access": "authenticated",
+      "rest": "DELETE /api/companion/chat/sessions/{sessionId}/messages/{messageId}/attachments/{artifactId}",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "companion.chat.branches.switch",
+      "category": "companion",
+      "access": "authenticated",
+      "rest": "POST /api/companion/chat/sessions/{sessionId}/branches/switch",
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
     },
@@ -177334,6 +177624,30 @@
       "category": "remote",
       "access": "authenticated",
       "rest": "GET /api/remote/work",
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "secureAddress.get",
+      "category": "remote-access",
+      "access": "authenticated",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "secureAddress.reissue",
+      "category": "remote-access",
+      "access": "admin",
+      "rest": null,
+      "inputSchemaCoverage": "typed",
+      "outputSchemaCoverage": "typed"
+    },
+    {
+      "id": "secureAddress.set",
+      "category": "remote-access",
+      "access": "admin",
+      "rest": null,
       "inputSchemaCoverage": "typed",
       "outputSchemaCoverage": "typed"
     },

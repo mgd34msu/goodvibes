@@ -43,6 +43,7 @@ import { motionReduced } from '../lib/ui-preferences';
 import { holdReload } from '../lib/reload-guard';
 import { draftFilesInMemory, NEW_CHAT_DRAFT, readDraftText, restoreDraftFiles, writeDraftFiles, writeDraftText } from '../lib/chat-drafts';
 import { useToast } from '../lib/toast';
+import { useConfirm } from '../components/ui/ConfirmDialog';
 import { useWakeTranscriptSink } from '../lib/voice/useWake';
 import { useChatStream } from './chat/useChatStream';
 import { createLiveReplyStore } from './chat/live-reply-store';
@@ -872,12 +873,42 @@ export function ChatView({
     sendRegenerateFrom(messageId, renderedMessageItems);
   }
 
+  // Remove a file from a sent message. It cannot be put back, so this one asks first.
+  const removeFileConfirm = useConfirm();
+  async function removeAttachment(message: ChatMessage, artifactId: string, name: string) {
+    const sessionId = activeSessionId;
+    const messageId = bestId(message);
+    if (!sessionId || !messageId) return;
+    const confirmed = await removeFileConfirm.ask({
+      title: `Remove ${name}?`,
+      description: 'The file is deleted for good and cannot be put back. The message keeps a line saying it was removed, and GoodVibes no longer gives the file to the model.',
+      confirmLabel: 'Remove',
+      tone: 'danger',
+    });
+    if (!confirmed) return;
+    try {
+      await platformClient.chat.attachments.remove(sessionId, messageId, artifactId);
+      await invalidateChatState(sessionId);
+    } catch (error) {
+      toast({ title: `${name} was not removed`, description: formatError(error), tone: 'danger' });
+    }
+  }
+
   // Stable identities for the message handlers, so each memoised message
   // re-renders only when its own data changes.
   const onCopyMessage = useStableCallback((message: ChatMessage) => { void copyMessage(message); });
   const onResendMessage = useStableCallback(resendMessage);
   const onRegenerateFrom = useStableCallback(regenerateFrom);
   const onEditMessage = useStableCallback(editAndResend);
+  // Another version of a turn: the daemon puts it on the conversation, so it stays when the chat is left and opened again.
+  const onSwitchBranch = useStableCallback((messageId: string) => {
+    const sessionId = activeSessionId;
+    if (!sessionId) return;
+    void platformClient.chat.branches.switch(sessionId, messageId)
+      .then(() => invalidateChatState(sessionId))
+      .catch((error: unknown) => toast({ title: 'Could not show that version', description: formatError(error), tone: 'danger' }));
+  });
+  const onRemoveAttachment = useStableCallback((message: ChatMessage, artifactId: string, name: string) => { void removeAttachment(message, artifactId, name); });
   // Opens the composer's model menu; choosing a model there tries the failed reply again with it.
   const onUseAnotherModel = useStableCallback((messageId: string) => {
     retryAfterModelRef.current = messageId;
@@ -1028,6 +1059,7 @@ export function ChatView({
 
   return (
     <section className="chat-main" data-state={isNewChat ? 'new' : 'conversation'}>
+      {removeFileConfirm.element}
       {headerSlots?.titleSlot && createPortal(
         <ChatTitle
           activeSessionId={activeSessionId}
@@ -1099,6 +1131,8 @@ export function ChatView({
         onResendMessage={onResendMessage}
         onRegenerateFrom={onRegenerateFrom}
         onEditMessage={onEditMessage}
+        onRemoveAttachment={activeSessionId ? onRemoveAttachment : undefined}
+        onSwitchBranch={activeSessionId ? onSwitchBranch : undefined}
         onStop={stop}
         activeToolCalls={activeToolCalls}
         onCancelToolCall={(callId) => void cancelToolCall(callId)}

@@ -49,16 +49,12 @@ If you are using session cookies:
 If you are cross-origin:
 - prefer bearer-token auth
 
-## Contract drift concerns
+## Client and daemon on different releases
 
-Run:
-
-```bash
-bun run refresh:contracts
-bun run validate
-```
-
-The validation pipeline checks contract, transport, error, daemon, and docs sync.
+The operator and peer clients check every response against the contract of the
+release they were built from, so a daemon of another release is reported by
+method and field rather than misread. Build the client at the daemon's release
+tag ([getting the engine](../README.md#getting-it)), or update the daemon.
 
 ## Realtime reconnect loops
 

@@ -1,8 +1,6 @@
 # Error handling
 
-> Consumer guidance. For internal error architecture see [Error Architecture](./errors.md).
-
-All public client packages normalize transport failures into structured platform errors.
+All public client packages normalize transport failures into structured platform errors. Every error type, code and helper is imported from `@goodvibes/engine/errors` (or `@goodvibes/engine/platform/errors`); there is one taxonomy, so an extension should not define its own.
 
 ## Typed error discrimination
 
@@ -100,6 +98,22 @@ try {
 Every error exposes the full set of 18 structured fields. See the canonical [Useful fields on every `GoodVibesError`](./error-kinds.md#useful-fields-on-every-goodvibeserror) table for the complete list and types.
 
 Do not parse `message` strings when the structured fields are available.
+
+## Refusals
+
+A daemon that will not carry out a request says three things: the `state` things are in, the reason (`error`) and the `next` steps that would get past it, with `hint` set to the first step for clients that read only `hint`. A terminal shows `<reason>. <first next step>`. The same shape is `Refusal` in the errors package; `RefusalError` throws it, and a command returns `{ ok: true, lines }` or `{ ok: false, refusal }`. `formatRefusal(r)` gives the one line, and `readRefusal` reads it back from a caught error (its own refusal, or the daemon error body it carries).
+
+## Not found, and a verb the daemon does not serve
+
+A 404 whose body carries `code: 'MEMORY_RECORD_NOT_FOUND'` means the memory record you asked for does not exist. Any other 404 (a route the daemon does not have, or a bare 404 with no code) means the daemon does not serve that call, usually because it is older than your client: treat it as unsupported, not as an empty result.
+
+## Building, serializing and checking errors
+
+- `createHttpStatusError(status, url, method, body, fallbackHint?)` builds an `HttpStatusError` from a response. When the body is a structured daemon error body its fields win; the `code` comes from the body's `code`, then from its `category`, then from the status.
+- `toJSON()` gives the structured fields with `undefined` entries left out; the `cause` chain is kept (through `cause`, `originalError` and `error`, up to 32 levels, safe against cycles).
+- `instanceof` works across realms and after a serialize and parse round trip: an error carrying the matching `code` (or, for `HttpStatusError`, its own mark) passes the check for its class. Compare `Object.getPrototypeOf(err)` with `<Class>.prototype` when you need strict prototype identity.
+- An unknown thrown value is normalized into a `GoodVibesError` without losing the original as its `cause`.
+- Whether a failure is retried, and which statuses count, is in [Retries and reconnect](./retries-and-reconnect.md).
 
 ## Core error classes
 

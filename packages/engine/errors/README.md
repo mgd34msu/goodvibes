@@ -84,5 +84,4 @@ The exported fields are intended to replace fragile message parsing in client an
 ## Documentation
 
 - [platform Error Kinds](../docs/error-kinds.md): per-kind consumer reference
-- [Error Handling](../docs/error-handling.md): handling patterns
-- [Error Architecture](../docs/errors.md): internal source map
+- [Error Handling](../docs/error-handling.md): handling patterns, refusals, serializing and checking errors

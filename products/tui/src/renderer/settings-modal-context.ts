@@ -1,6 +1,6 @@
 import { SHARED_SETTING_ENUM_DESCRIPTIONS } from '@goodvibes/engine/terminal-shell/renderer/settings-metadata';
 import { buildMcpHelp } from '@goodvibes/engine/terminal-shell/renderer/mcp-trust-context';
-import { helpText, helpWarning, type HelpLine } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
+import { helpFact, helpText, helpWarning, type HelpLine } from '@goodvibes/engine/terminal-shell/renderer/settings-documentation';
 import { asSentence, firstSentence, settingStateWarnings } from '@goodvibes/engine/terminal-shell/renderer/settings-context';
 /**
  * settings-modal-context.ts, the few sentences the settings screen shows under
@@ -135,6 +135,11 @@ export function settingContextLines(modal: SettingsModal): HelpLine[] {
   if (category === 'mcp') return buildMcpHelp(modal, modal.getSelectedMcp());
   if (category === 'subscriptions') return buildSubscriptionHelp(modal, modal.getSelectedSubscription());
   if (category === 'connections') return buildConnectionHelp(modal);
+  if (category === 'secure-address-now') {
+    // The selected row's own words: what is served, why not, and each way's four parts, as the daemon gives them.
+    const row = modal.secureAddressRows[Math.max(0, Math.min(modal.secureAddressRows.length - 1, modal.selectedIndex))];
+    return row ? [helpText(row.label), ...(row.state ? [helpFact('State', row.state)] : []), ...row.detail.map((line) => helpText(line))] : [];
+  }
   const list = modal.getSelectedListRow();
   if (list !== null) {
     const row = modal.visibleRows().find((candidate) => candidate.kind === 'list' && candidate.list.category === list);
@@ -151,6 +156,7 @@ export function listItemCount(modal: SettingsModal, category: SettingsCategory):
   const count = category === 'mcp' ? modal.mcpEntries.length
     : category === 'subscriptions' ? modal.subscriptionEntries.length
     : category === 'connections' ? modal.connectionEntries.length
+    : category === 'secure-address-now' ? 0
     : modal.groups.get(category)?.length ?? 0;
   return count > 0 ? String(count) : undefined;
 }

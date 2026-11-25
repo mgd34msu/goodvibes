@@ -51,6 +51,9 @@ import type {
   EditCompanionChatMessageOutput,
   RegenerateCompanionChatMessageInput,
   RegenerateCompanionChatMessageOutput,
+  RemoveCompanionChatAttachmentOutput,
+  BranchSwitchCompanionChatOutput,
+  CompanionChatTranscriptChangedEvent,
   ReopenCompanionChatSessionOutput,
   UpdateCompanionChatSessionInput,
 } from './companion-chat-types.js';
@@ -60,11 +63,13 @@ import {
 } from './companion-chat-persistence.js';
 import {
   buildProviderUserContent,
+  formatRemovedAttachmentNote,
   resolveAttachments,
   type CompanionChatArtifactStore,
 } from './companion-chat-attachments.js';
 import {
   applyEditBranch,
+  planBranchSwitch,
   planRegenerate,
 } from './companion-chat-branching.js';
 import {
@@ -1260,6 +1265,68 @@ export class CompanionChatManager {
     return true;
   }
 
+  /**
+   * Remove a file from a sent message for good (`companion.chat.attachments.remove`).
+   * Every message of the chat that carried it keeps a line in its place
+   * (`removedAttachments`), saved before the file is deleted from the artifact
+   * store; the model-facing history is dropped, so the next turn is rebuilt from
+   * the transcript without the file (the model is told its name and that it is
+   * gone). A closed chat may remove a file too. Refused while a reply, a message
+   * being prepared or queued sends are in flight (they carry the file already).
+   * Removing a file already removed answers the same way, with `alreadyRemoved`.
+   */
+  removeAttachment(sessionId: string, messageId: string, artifactId: string): RemoveCompanionChatAttachmentOutput {
+    this.assertAvailable();
+    const session = this.sessions.get(sessionId);
+    if (!session) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
+    const messages = this.transcript(session);
+    const target = messages.find((message) => message.id === messageId);
+    if (!target) throw Object.assign(new Error(`Message not found: ${messageId}`), { code: 'MESSAGE_NOT_FOUND', status: 404 });
+    const attachment = target.attachments.find((entry) => entry.artifactId === artifactId);
+    if (!attachment) {
+      const earlier = target.removedAttachments?.find((entry) => entry.artifactId === artifactId);
+      if (earlier) return { sessionId, messageId, artifactId, name: earlier.name, removed: true, alreadyRemoved: true, messageIds: [messageId] };
+      throw Object.assign(new Error(`Message ${messageId} has no attached file ${artifactId}.`), { code: 'ATTACHMENT_NOT_FOUND', status: 404 });
+    }
+    this._assertNoTurnInFlight(session, 'remove a file');
+    const store = this.artifactStore;
+    if (!store?.delete) {
+      throw Object.assign(new Error('This daemon has no file store to remove the file from.'), { code: 'ATTACHMENTS_UNAVAILABLE', status: 501 });
+    }
+    const name = attachment.label ?? attachment.filename ?? artifactId;
+    const removedAt = Date.now();
+    const changed: Array<{ readonly index: number; readonly message: CompanionChatMessage }> = [];
+    for (const [index, message] of messages.entries()) {
+      if (!message.attachments.some((entry) => entry.artifactId === artifactId)) continue;
+      changed.push({
+        index,
+        message: this.normalizeMessage({
+          ...message,
+          attachments: message.attachments.filter((entry) => entry.artifactId !== artifactId),
+          removedAttachments: [...(message.removedAttachments ?? []), { artifactId, name, removedAt }],
+        }),
+      });
+    }
+    // Saved first: a save that fails refuses the request with the file still in place.
+    this.saveForRequest(session, changed.map((entry) => entry.message), undefined);
+    for (const { index, message } of changed) messages[index] = message;
+    store.delete(artifactId);
+    session.conversation = null;
+    const messageIds = changed.map((entry) => entry.message.id);
+    this.publishTranscriptChanged(sessionId, 'attachment-removed', messageIds);
+    return { sessionId, messageId, artifactId, name, removed: true, messageIds };
+  }
+
+  /**
+   * Tell every reader of the chat's event stream that its transcript changed
+   * outside a turn (`companion-chat.transcript.changed`), so another open
+   * client reads it again by itself. Same audience as the turn frames.
+   */
+  private publishTranscriptChanged(sessionId: string, change: CompanionChatTranscriptChangedEvent['change'], messageIds: readonly string[]): void {
+    const event: CompanionChatTranscriptChangedEvent = { type: 'transcript.changed', sessionId, change, messageIds };
+    this.eventPublisher.publishEvent(`companion-chat.${event.type}`, event, { clientIdPrefix: `companion-chat:${sessionId}:` });
+  }
+
   // ---------------------------------------------------------------------------
   // Turn execution
   // ---------------------------------------------------------------------------
@@ -1836,6 +1903,35 @@ export class CompanionChatManager {
   }
 
   /**
+   * Put another version of a turn on the conversation (`companion.chat.branches.switch`):
+   * an edited message's other version, or a regenerated reply's. The version left
+   * is kept as retained history and the chosen one is active again, saved before
+   * it takes effect; the model-facing history is dropped so the next turn is
+   * rebuilt from the version now on the conversation. No turn starts. A closed
+   * chat may switch too; refused while a reply, a message being prepared or
+   * queued sends are in flight.
+   */
+  switchBranch(sessionId: string, messageId: string): BranchSwitchCompanionChatOutput {
+    this.assertAvailable();
+    const session = this.sessions.get(sessionId);
+    if (!session) throw Object.assign(new Error(`Session not found: ${sessionId}`), { code: 'SESSION_NOT_FOUND', status: 404 });
+    this._assertNoTurnInFlight(session, 'switch to another version');
+    const now = Date.now();
+    const branch = { messages: [...this.transcript(session)], lastActivityAt: session.lastActivityAt };
+    const plan = planBranchSwitch(branch, messageId, now);
+    if (plan.switched) {
+      const before = new Set(this.transcript(session));
+      const messages = branch.messages.map((message) => this.normalizeMessage(message));
+      this.saveForRequest(session, messages.filter((message) => !before.has(message)), undefined);
+      session.messages = messages;
+      session.lastActivityAt = branch.lastActivityAt;
+      session.conversation = null;
+      this.publishTranscriptChanged(sessionId, 'branch-switched', [...plan.supersededMessageIds, ...plan.restoredMessageIds]);
+    }
+    return { sessionId, ...plan };
+  }
+
+  /**
    * Regenerate and edit replace the conversation and start a turn of their
    * own, so they cannot run beside a reply, a message being prepared or saved,
    * or queued sends: the older turn would keep streaming into the new branch,
@@ -1891,7 +1987,7 @@ export class CompanionChatManager {
     // untrusted-content window; a caller that cannot attest ownership does not.
     this.launchTurn(session, ownerDirect, () => this._runTurn(session, anchorUserMessageId, undefined, route, async () => {
       const conversation = await this.ensureConversation(session, anchorUserMessageId);
-      if (anchor) conversation.addUserMessage(await buildProviderUserContent(anchor.content, anchor.attachments ?? [], this.artifactStore));
+      if (anchor) conversation.addUserMessage(await buildProviderUserContent(anchor.content + formatRemovedAttachmentNote(anchor), anchor.attachments ?? [], this.artifactStore));
       return conversation;
     }));
   }

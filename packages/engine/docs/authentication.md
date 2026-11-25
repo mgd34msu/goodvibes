@@ -1,8 +1,22 @@
 # Authentication
 
-> Consumer guidance. For internal auth architecture see [Auth Architecture](./auth.md).
-
 Auth is available on both full and companion surfaces. See [Runtime Surfaces](./surfaces.md).
+
+## Which entry point
+
+- `@goodvibes/engine/platform/auth`: token stores, the auth flows and the `GoodVibesTokenStore` interface. Most applications need only this. It also re-exports the OAuth payload types (`OAuthStartState`, `OAuthTokenPayload`).
+- `@goodvibes/engine/platform/client-auth`: the low-level pieces, for when you need control over refresh timing, permission resolution or the session lifecycle yourself. Secure token stores for a device are not here: they come from `@goodvibes/engine/platform/expo` (`createExpoSecureTokenStore`) and `@goodvibes/engine/platform/react-native` (`createIOSKeychainTokenStore`, `createAndroidKeystoreTokenStore`).
+
+Each low-level piece owns one part of signing in:
+
+| Piece | What it does |
+| --- | --- |
+| `TokenStore` | Keeps the token: `getToken`, `setToken`, `clearToken` |
+| `SessionManager` | Signs in, reads who is signed in, and signs out, against the daemon's auth routes |
+| `PermissionResolver` | Reads the control plane's auth snapshot: the principal id and its granted scopes |
+| `AutoRefreshCoordinator` | Refreshes the token ahead of its expiry, with a configurable margin (see [Automatic token refresh](#automatic-token-refresh)) |
+
+The transport helpers read no process-wide settings or environment of their own: you give them the token, the token store or the resolver. Which credentials the daemon accepts, and what each may do, is in [Security best practices](./security.md).
 
 GoodVibes currently exposes two auth modes through the operator contract:
 - `shared-bearer`

@@ -140,6 +140,30 @@ price" vs "catalog price, as of <date>". Cost actuals (`costUsdCents` +
 `costSource` on `LLM_RESPONSE_RECEIVED`), the cost-attribution verbs, and
 orchestration dollar budgets all compute from this same resolver.
 
+## Which model answered (response identity)
+
+A chat response may carry `responseIdentity`, which says what was asked for and
+what the provider reported about who answered. Gemini fills it for every
+successful request; other providers may leave it out. It is for diagnosis: it
+does not decide routing or policy and does not prove which host served a call.
+
+- `requested` holds the provider, adapter kind and model of the actual request,
+  as asked for (not a claim about which model served it). A synthetic model
+  passes its backend's identity through unchanged.
+- `modelVersion` and `responseId` are each `missing`, `observed` with a
+  `value`, or `rejected` with the reason `invalid` and/or `conflicting`, and are
+  labelled `source: 'provider-reported'`. A missing model version is never
+  filled in from the request, and a response id alone says nothing about the
+  model.
+- An accepted value is 1 to 512 printable ASCII characters with no spaces,
+  kept exactly as sent. Every streamed chunk is read; the same value repeated is
+  fine, two different values mark the field `conflicting`, and a later value
+  never repairs a rejected field.
+- `hasUnparsedDataChunks` is true when a streamed chunk could not be parsed: the
+  observed fields still stand, but whether they held across the gap is unknown.
+- Each retry starts a fresh identity; it changes nothing about the content,
+  usage, retries or model choice.
+
 ## Related
 
 - [Provider & Model API Reference](./provider-model-api.md)

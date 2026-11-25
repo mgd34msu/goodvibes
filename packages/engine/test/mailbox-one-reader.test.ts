@@ -64,7 +64,7 @@ const cleanups: Array<() => void | Promise<void>> = [];
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gv-one-reader-'));
   previousPort = installJudgmentPort(imapFixturePort().port);
-  retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false);
 });
 afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup();

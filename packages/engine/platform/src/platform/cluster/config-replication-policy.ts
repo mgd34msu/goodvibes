@@ -145,6 +145,10 @@ export const NODE_LOCAL_CONFIG_DOMAINS: readonly string[] = [
   'httpListener.',
   // Where this machine's web UI is served from and reachable at.
   'web.',
+  // Which certificate this machine's https listener serves. A group's secure
+  // address reaches its nodes from the machine that set it up, over the
+  // group's sealed channel (daemon/lan-https/group-share.ts), not as settings.
+  'secureAddress.',
   // This machine's relay identity and its registration with one.
   'relay.',
   // Cluster transport identity and participation: whether THIS machine takes

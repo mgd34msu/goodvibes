@@ -244,11 +244,9 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .cmd-palette,
-  .cmd-palette--sheet {
-    animation: none !important;
-  }
+:root[data-motion="reduce"] .cmd-palette,
+:root[data-motion="reduce"] .cmd-palette--sheet {
+  animation: none !important;
 }
 
 /* ─── Shortcut cheatsheet (a kit Dialog) ──────────────────────────── */

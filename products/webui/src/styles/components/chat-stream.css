@@ -26,10 +26,8 @@
   opacity: 1;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .stream-caret {
-    animation: none;
-  }
+:root[data-motion="reduce"] .stream-caret {
+  animation: none;
 }
 
 .stream-stop-btn {

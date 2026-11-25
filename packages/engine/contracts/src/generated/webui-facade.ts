@@ -10,7 +10,7 @@ import type { OperatorMethodId } from './operator-method-ids.js';
  * call sites) hand-written on top of these generated primitives.
  *
  * Contract product version: 3.5.0
- * Methods: 656 total, 536 REST-routed, 120 ws-only invoke.
+ * Methods: 661 total, 538 REST-routed, 123 ws-only invoke.
  */
 
 export type WebuiHttpMethod = 'GET' | 'POST' | 'PATCH' | 'DELETE';
@@ -595,6 +595,14 @@ export const WEBUI_METHOD_ROUTES: Readonly<Record<string, WebuiRouteDefinition>>
   "cloudflare.worker.verify": {
     "method": "POST",
     "path": "/api/cloudflare/verify"
+  },
+  "companion.chat.attachments.remove": {
+    "method": "DELETE",
+    "path": "/api/companion/chat/sessions/{sessionId}/messages/{messageId}/attachments/{artifactId}"
+  },
+  "companion.chat.branches.switch": {
+    "method": "POST",
+    "path": "/api/companion/chat/sessions/{sessionId}/branches/switch"
   },
   "companion.chat.events.stream": {
     "method": "GET",
@@ -2274,6 +2282,9 @@ export const WEBUI_WS_INVOKE_METHOD_IDS: readonly string[] = [
   "push.vapid.get",
   "quota.fanout.get",
   "quota.snapshot.get",
+  "secureAddress.get",
+  "secureAddress.reissue",
+  "secureAddress.set",
   "tailscale.get",
   "tailscale.serve.run",
   "tailscale.serve.stop",
@@ -2469,6 +2480,8 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "cloudflare.token.create": "rest",
   "cloudflare.token.requirements.get": "rest",
   "cloudflare.worker.verify": "rest",
+  "companion.chat.attachments.remove": "rest",
+  "companion.chat.branches.switch": "rest",
   "companion.chat.events.stream": "rest",
   "companion.chat.messages.create": "rest",
   "companion.chat.messages.edit": "rest",
@@ -2823,6 +2836,9 @@ export const WEBUI_METHOD_DISPOSITION: Readonly<Record<string, WebuiMethodDispos
   "remote.snapshot": "rest",
   "remote.work.cancel": "rest",
   "remote.work.list": "rest",
+  "secureAddress.get": "ws-invoke",
+  "secureAddress.reissue": "ws-invoke",
+  "secureAddress.set": "ws-invoke",
   "tailscale.get": "ws-invoke",
   "tailscale.serve.run": "ws-invoke",
   "tailscale.serve.stop": "ws-invoke",
@@ -10683,6 +10699,41 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
       }
     }
   },
+  "companion.chat.attachments.remove": {
+    "input": {
+      "sessionId": "sample",
+      "messageId": "sample",
+      "artifactId": "sample"
+    },
+    "output": {
+      "sessionId": "sample",
+      "messageId": "sample",
+      "artifactId": "sample",
+      "name": "sample",
+      "removed": false,
+      "alreadyRemoved": false,
+      "messageIds": [
+        "sample"
+      ]
+    }
+  },
+  "companion.chat.branches.switch": {
+    "input": {
+      "sessionId": "sample",
+      "messageId": "sample"
+    },
+    "output": {
+      "sessionId": "sample",
+      "messageId": "sample",
+      "switched": false,
+      "supersededMessageIds": [
+        "sample"
+      ],
+      "restoredMessageIds": [
+        "sample"
+      ]
+    }
+  },
   "companion.chat.events.stream": {
     "input": {
       "sessionId": "sample"
@@ -10744,6 +10795,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "metadata": {}
             }
           ],
+          "removedAttachments": [
+            {
+              "artifactId": "sample",
+              "name": "sample",
+              "removedAt": 0
+            }
+          ],
           "createdAt": 0,
           "deliveryState": "cancelled",
           "failureReason": {
@@ -10785,6 +10843,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             ]
           },
           "inReplyTo": "sample",
+          "supersededAt": 0,
+          "supersededReason": "regenerate",
+          "revisionOf": "sample",
           "clientMessageId": "sample"
         }
       ],
@@ -10970,6 +11031,13 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
               "metadata": {}
             }
           ],
+          "removedAttachments": [
+            {
+              "artifactId": "sample",
+              "name": "sample",
+              "removedAt": 0
+            }
+          ],
           "createdAt": 0,
           "deliveryState": "cancelled",
           "failureReason": {
@@ -11011,6 +11079,9 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
             ]
           },
           "inReplyTo": "sample",
+          "supersededAt": 0,
+          "supersededReason": "regenerate",
+          "revisionOf": "sample",
           "clientMessageId": "sample"
         }
       ]
@@ -29756,6 +29827,340 @@ export const WEBUI_METHOD_SAMPLES: Readonly<Record<string, WebuiMethodSample>> =
           "metadata": {}
         }
       ]
+    }
+  },
+  "secureAddress.get": {
+    "input": {},
+    "output": {
+      "intro": "sample",
+      "choices": [
+        {
+          "id": "lets-encrypt",
+          "title": "sample",
+          "does": "sample",
+          "needs": "sample",
+          "phoneGains": "sample",
+          "sends": "sample",
+          "caution": "sample"
+        }
+      ],
+      "groupLines": [
+        "sample"
+      ],
+      "node": false,
+      "inForce": {
+        "on": false,
+        "certificate": "local-authority",
+        "servedToNetwork": false,
+        "serving": false,
+        "port": 0,
+        "address": "sample",
+        "names": [
+          "sample"
+        ],
+        "notAfter": 0,
+        "problem": "sample",
+        "from": "this-machine",
+        "servedSource": "local-authority"
+      },
+      "letsEncrypt": {
+        "domain": "sample",
+        "tokenStored": false,
+        "issuing": false,
+        "certificate": {
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "issuedAt": 0
+        },
+        "lastAttempt": {
+          "at": 0,
+          "ok": false,
+          "words": "sample"
+        },
+        "addressProblem": "sample",
+        "routerCheck": {
+          "name": "sample",
+          "ok": false,
+          "words": "sample"
+        },
+        "addressRecords": {}
+      },
+      "ownFiles": {
+        "certFile": "sample",
+        "keyFile": "sample",
+        "check": {
+          "ok": false,
+          "problem": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0
+        }
+      },
+      "localAuthority": {
+        "made": false,
+        "fingerprint": "sample",
+        "page": "sample"
+      },
+      "tailscale": {
+        "address": "sample"
+      },
+      "group": {
+        "following": {
+          "nodeId": "sample",
+          "name": "sample"
+        },
+        "received": {
+          "leadName": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "receivedAt": 0,
+          "source": "local-authority"
+        },
+        "followers": [
+          {
+            "name": "sample",
+            "address": "sample",
+            "covered": false,
+            "needs": "sample"
+          }
+        ]
+      },
+      "reissue": {
+        "title": "sample",
+        "line": "sample",
+        "available": false
+      }
+    }
+  },
+  "secureAddress.reissue": {
+    "input": {},
+    "output": {
+      "ok": false,
+      "words": "sample",
+      "status": {
+        "intro": "sample",
+        "choices": [
+          {
+            "id": "lets-encrypt",
+            "title": "sample",
+            "does": "sample",
+            "needs": "sample",
+            "phoneGains": "sample",
+            "sends": "sample",
+            "caution": "sample"
+          }
+        ],
+        "groupLines": [
+          "sample"
+        ],
+        "node": false,
+        "inForce": {
+          "on": false,
+          "certificate": "local-authority",
+          "servedToNetwork": false,
+          "serving": false,
+          "port": 0,
+          "address": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "problem": "sample",
+          "from": "this-machine",
+          "servedSource": "local-authority"
+        },
+        "letsEncrypt": {
+          "domain": "sample",
+          "tokenStored": false,
+          "issuing": false,
+          "certificate": {
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "issuedAt": 0
+          },
+          "lastAttempt": {
+            "at": 0,
+            "ok": false,
+            "words": "sample"
+          },
+          "addressProblem": "sample",
+          "routerCheck": {
+            "name": "sample",
+            "ok": false,
+            "words": "sample"
+          },
+          "addressRecords": {}
+        },
+        "ownFiles": {
+          "certFile": "sample",
+          "keyFile": "sample",
+          "check": {
+            "ok": false,
+            "problem": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0
+          }
+        },
+        "localAuthority": {
+          "made": false,
+          "fingerprint": "sample",
+          "page": "sample"
+        },
+        "tailscale": {
+          "address": "sample"
+        },
+        "group": {
+          "following": {
+            "nodeId": "sample",
+            "name": "sample"
+          },
+          "received": {
+            "leadName": "sample",
+            "names": [
+              "sample"
+            ],
+            "notAfter": 0,
+            "receivedAt": 0,
+            "source": "local-authority"
+          },
+          "followers": [
+            {
+              "name": "sample",
+              "address": "sample",
+              "covered": false,
+              "needs": "sample"
+            }
+          ]
+        },
+        "reissue": {
+          "title": "sample",
+          "line": "sample",
+          "available": false
+        }
+      }
+    }
+  },
+  "secureAddress.set": {
+    "input": {
+      "certificate": "lets-encrypt",
+      "domain": "sample",
+      "cloudflareToken": "sample",
+      "certFile": "sample",
+      "keyFile": "sample"
+    },
+    "output": {
+      "intro": "sample",
+      "choices": [
+        {
+          "id": "lets-encrypt",
+          "title": "sample",
+          "does": "sample",
+          "needs": "sample",
+          "phoneGains": "sample",
+          "sends": "sample",
+          "caution": "sample"
+        }
+      ],
+      "groupLines": [
+        "sample"
+      ],
+      "node": false,
+      "inForce": {
+        "on": false,
+        "certificate": "local-authority",
+        "servedToNetwork": false,
+        "serving": false,
+        "port": 0,
+        "address": "sample",
+        "names": [
+          "sample"
+        ],
+        "notAfter": 0,
+        "problem": "sample",
+        "from": "this-machine",
+        "servedSource": "local-authority"
+      },
+      "letsEncrypt": {
+        "domain": "sample",
+        "tokenStored": false,
+        "issuing": false,
+        "certificate": {
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "issuedAt": 0
+        },
+        "lastAttempt": {
+          "at": 0,
+          "ok": false,
+          "words": "sample"
+        },
+        "addressProblem": "sample",
+        "routerCheck": {
+          "name": "sample",
+          "ok": false,
+          "words": "sample"
+        },
+        "addressRecords": {}
+      },
+      "ownFiles": {
+        "certFile": "sample",
+        "keyFile": "sample",
+        "check": {
+          "ok": false,
+          "problem": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0
+        }
+      },
+      "localAuthority": {
+        "made": false,
+        "fingerprint": "sample",
+        "page": "sample"
+      },
+      "tailscale": {
+        "address": "sample"
+      },
+      "group": {
+        "following": {
+          "nodeId": "sample",
+          "name": "sample"
+        },
+        "received": {
+          "leadName": "sample",
+          "names": [
+            "sample"
+          ],
+          "notAfter": 0,
+          "receivedAt": 0,
+          "source": "local-authority"
+        },
+        "followers": [
+          {
+            "name": "sample",
+            "address": "sample",
+            "covered": false,
+            "needs": "sample"
+          }
+        ]
+      },
+      "reissue": {
+        "title": "sample",
+        "line": "sample",
+        "available": false
+      }
     }
   },
   "tailscale.get": {

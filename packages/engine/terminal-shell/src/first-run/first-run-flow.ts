@@ -121,8 +121,8 @@ function pushWhoDecides(deps: FirstRunDeps, push: (modal: SurfaceModal) => void)
 export interface FirstRunDecisionModel {
   /**
    * Whether "Who decides" is asked: the mode lets the decision model decide
-   * (Jev decides, Just vibes) and none can be asked now. A usable key, Ask me
-   * chosen already, or "No Decision Model" chosen in settings asks nothing.
+   * (Jev decides, Just vibes) and none can be asked now. A usable key, or Ask
+   * me chosen already, asks nothing.
    */
   readonly needsChoice: () => Promise<boolean>;
   /** Whether a decision model is usable now; with `check`, one request to it. */
@@ -150,7 +150,7 @@ export function firstRunDecisionModel(
       const mode = String(config.get('permissions.mode') ?? '');
       if (mode !== 'jev-decides' && mode !== 'just-vibes') return false;
       const readiness = await decisionModelReadiness(source);
-      return !readiness.usable && readiness.missing !== 'policy';
+      return !readiness.usable;
     },
     readiness: (check) => decisionModelReadiness(source, check),
     storeKey: (pasted) => storeDecisionModelKey({ secrets, config }, pasted),

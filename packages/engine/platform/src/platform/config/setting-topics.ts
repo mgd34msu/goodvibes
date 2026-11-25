@@ -19,6 +19,12 @@ export interface SettingSection {
   readonly description: string;
   /** Config namespaces shown in this section, in order. */
   readonly namespaces: readonly string[];
+  /**
+   * Settings of other namespaces this section shows as well, after its own
+   * (they stay in their own section too): the switch and token a screen needs
+   * beside its own settings.
+   */
+  readonly alsoShows?: readonly string[];
 }
 
 export interface SettingTopic {
@@ -50,6 +56,13 @@ export const SETTING_TOPICS: readonly SettingTopic[] = [
         label: 'Network',
         description: 'How devices reach your daemon: Tailscale, Cloudflare, the relay and the listeners.',
         namespaces: ['network', 'relay', 'httpListener', 'controlPlane', 'web', 'cloudflare', 'service'],
+      },
+      {
+        id: 'secure-address',
+        label: 'Secure address',
+        description: 'An https address for phones, so the microphone, push, installing the app, the camera and passkeys work: a domain you own (Let\'s Encrypt), a certificate you made, Tailscale, or GoodVibes\' own certificate. Plain http keeps working either way.',
+        namespaces: ['secureAddress'],
+        alsoShows: ['controlPlane.lanHttps.enabled', 'controlPlane.lanHttps.port', 'cloudflare.apiTokenRef'],
       },
       {
         id: 'about',

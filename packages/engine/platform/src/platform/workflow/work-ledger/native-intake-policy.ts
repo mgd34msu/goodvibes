@@ -3,7 +3,10 @@ import { enum as enumSchema, literal, strictObject } from 'zod/v4';
 export interface NativeClassicConversationAdmission {
   readonly provenance: 'owner';
   readonly policy: 'Hybrid' | 'Decision Model Only' | 'No Decision Model';
-  /** `selected`: No Decision Model; `not-set`: none is set; `unavailable`: Hybrid found the set model failing. */
+  /**
+   * `selected`: No Decision Model (records written up to 3.5.0, which had that value; read as written);
+   * `not-set`: none is set; `unavailable`: Hybrid found the set model failing.
+   */
   readonly reason: 'selected' | 'not-set' | 'unavailable';
 }
 export const nativeClassicConversationAdmissionSchema = strictObject({ provenance: literal('owner'),

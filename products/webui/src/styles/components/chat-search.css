@@ -79,10 +79,8 @@
   to { transform: rotate(360deg); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .chat-search__spinner {
-    animation: none;
-  }
+:root[data-motion="reduce"] .chat-search__spinner {
+  animation: none;
 }
 
 .chat-search__section {

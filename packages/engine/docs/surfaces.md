@@ -1,9 +1,12 @@
 # Published surface matrix
 
-> Consumer surface map. For internal runtime boundary details see [Runtime Boundary Model](./runtime-surfaces.md).
-
 The `@goodvibes/engine/platform` package has companion-safe client surfaces and
-Bun-only daemon/platform surfaces.
+Bun-only daemon/platform surfaces. No capability is removed to make a client
+bundle smaller; each is placed behind an entry point that states what its
+runtime needs. Code that may run in a browser, a Worker or on a phone imports
+only the companion entry points and stays free of filesystem, process, native
+database, language-server and tool-execution dependencies; a daemon host, a CLI,
+local automation, knowledge ingestion or tool execution uses the full surface.
 
 See also: [Public surface reference](./public-surface.md), the canonical list of every
 stable subpath, and [Channel surfaces](./channel-surfaces.md) for the channel runtime.

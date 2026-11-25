@@ -8,7 +8,7 @@ import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/d
 
 // Without a decision model the compaction asks nothing; with one, its waits are model requests. The race is the same.
 let retirePolicy: () => void = () => undefined;
-beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model'); });
+beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false); });
 afterEach(() => retirePolicy());
 
 /** Plain compaction of a conversation without contracts asks no model; any use of the registry fails the case. */

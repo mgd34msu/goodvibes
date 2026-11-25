@@ -21,7 +21,7 @@
  * attached retained history inline.
  */
 
-import { messageCreatedAt } from './message-utils';
+import { messageCreatedAt, messageTone } from './message-utils';
 import { asRecord, bestId, firstString } from '../../lib/object';
 import type { ChatMessage } from './types';
 
@@ -49,6 +49,17 @@ export function revisionOf(message: unknown): string {
 }
 
 /**
+ * Where a turn that has versions stands: this version's place among them (1-based),
+ * how many there are, and the first message of the version before and after it.
+ */
+export interface BranchChoice {
+  readonly position: number;
+  readonly count: number;
+  readonly previousId?: string;
+  readonly nextId?: string;
+}
+
+/**
  * One rendered node of the active conversation: an active message plus any retained
  * history attached to it (the superseded run immediately preceding it in the list).
  */
@@ -61,6 +72,90 @@ export interface LineageNode {
   readonly reason?: SupersededReason;
   /** The original message id when this node's message replaced an edited one. */
   readonly revisionOf?: string;
+  /** When this message's turn has other versions (edits, or regenerated replies): the switcher's place. */
+  readonly branches?: BranchChoice;
+}
+
+/** The fork time a superseded message carries, as a key ('' for an active message). */
+function forkKey(message: ChatMessage): string {
+  const value = asRecord(message).supersededAt;
+  return typeof value === 'number' || typeof value === 'string' ? String(value) : '';
+}
+
+/**
+ * The versions of each turn, read from the whole list the daemon returned (the same
+ * rule as companion.chat.branches.switch). A version is the run one fork marked
+ * superseded at one time, headed by its first message; the versions of a turn are
+ * a user message and its edits (linked by `revisionOf`), or the replies to one user
+ * message (`inReplyTo`). Returns each active message's choice, and the fork times
+ * of every run that is a version of some turn: those are reached by switching
+ * (the turn's switcher, or an earlier one's first), never shown as retained history.
+ */
+function branchChoices(messages: readonly ChatMessage[]): { choices: Map<string, BranchChoice>; linked: Set<string> } {
+  const firstOfRun = new Map<string, ChatMessage>();
+  for (const message of messages) {
+    const key = forkKey(message);
+    if (key && !firstOfRun.has(key)) firstOfRun.set(key, message);
+  }
+  const heads = messages.filter((message) => {
+    const key = forkKey(message);
+    return bestId(message) !== '' && (!key || firstOfRun.get(key) === message);
+  });
+
+  // Edits: user messages joined through revisionOf.
+  const parent = new Map<string, string>();
+  const find = (id: string): string => {
+    let root = id;
+    while (parent.has(root) && parent.get(root) !== root) root = parent.get(root)!;
+    return root;
+  };
+  for (const message of messages) {
+    if (messageTone(message) !== 'user') continue;
+    const id = bestId(message);
+    const from = revisionOf(message);
+    if (!id) continue;
+    if (!parent.has(id)) parent.set(id, id);
+    if (from) {
+      if (!parent.has(from)) parent.set(from, from);
+      parent.set(find(id), find(from));
+    }
+  }
+  const families = new Map<string, ChatMessage[]>();
+  for (const message of heads) {
+    const tone = messageTone(message);
+    const group = tone === 'user'
+      ? `user:${find(bestId(message))}`
+      : tone === 'assistant' && firstString(message, ['inReplyTo'])
+        ? `reply:${firstString(message, ['inReplyTo'])}`
+        : '';
+    if (!group) continue;
+    const list = families.get(group) ?? [];
+    list.push(message);
+    families.set(group, list);
+  }
+
+  // A run headed by a user message or a reply that names the message it answers is a version of some
+  // turn: reached by that turn's switcher, or, when the turn sits inside another version, by
+  // switching to that version first. Only a run with neither link is shown as retained history.
+  const linked = new Set<string>();
+  for (const [key, head] of firstOfRun) {
+    const tone = messageTone(head);
+    if (tone === 'user' || (tone === 'assistant' && firstString(head, ['inReplyTo']))) linked.add(key);
+  }
+  const choices = new Map<string, BranchChoice>();
+  for (const family of families.values()) {
+    if (family.length < 2) continue;
+    const ordered = sortByCreatedAt(family);
+    const at = ordered.findIndex((message) => !isSuperseded(message));
+    if (at === -1) continue; // this turn is inside another version, not on the conversation now
+    choices.set(bestId(ordered[at]!), {
+      position: at + 1,
+      count: ordered.length,
+      ...(at > 0 ? { previousId: bestId(ordered[at - 1]!) } : {}),
+      ...(at < ordered.length - 1 ? { nextId: bestId(ordered[at + 1]!) } : {}),
+    });
+  }
+  return { choices, linked };
 }
 
 /**
@@ -77,20 +172,25 @@ export function buildLineage(messages: readonly ChatMessage[]): LineageNode[] {
   const nodes: LineageNode[] = [];
   let pending: ChatMessage[] = [];
   let pendingReason: SupersededReason | undefined;
+  const { choices, linked } = branchChoices(messages);
 
   for (const message of messages) {
     if (isSuperseded(message)) {
+      // A version of a turn is reached with that turn's switcher, not shown as retained history.
+      if (linked.has(forkKey(message))) continue;
       pending.push(message);
       // The reason of the run is taken from its members (they share one fork reason).
       const reason = supersededReason(message);
       if (reason !== 'unknown') pendingReason = reason;
       continue;
     }
+    const branches = choices.get(bestId(message));
     nodes.push({
       message,
       priorMessages: pending,
       reason: pending.length ? (pendingReason ?? 'unknown') : undefined,
       revisionOf: revisionOf(message) || undefined,
+      ...(branches ? { branches } : {}),
     });
     pending = [];
     pendingReason = undefined;

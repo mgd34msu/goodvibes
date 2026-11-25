@@ -680,11 +680,15 @@ async function executeToolCallsInMode(
         throw error;
       }
       if (deps.runtimeBus) {
+        // Why, for a decision Jev made and for a refusal the gate explained (headless PERMISSION_DECIDED reads it).
+        const gateDecision = toolDecisionOf(checkResult, call.name);
+        const explained = gateDecision.decidedBy === 'jev' || (!checkResult.approved && (checkResult.detail !== undefined || checkResult.userReason !== undefined));
         emitGateDecision(deps.runtimeBus, deps.emitterContext(turnId), {
           callId: call.id, tool: call.name, category: checkResult.category ?? requestedCategory,
           approved: checkResult.approved, source: checkResult.sourceLayer, sourceLayer: checkResult.sourceLayer,
           persisted: checkResult.persisted, reasonCode: checkResult.reasonCode,
           classification: checkResult.analysis.classification, riskLevel: checkResult.analysis.riskLevel, summary: checkResult.analysis.summary,
+          ...(explained ? { reason: checkResult.approved ? checkResult.detail ?? gateDecision.reason : gateDecision.reason } : {}),
         });
       }
       assertTurnActive();

@@ -323,7 +323,7 @@ export async function decideDelegation(owner: object, proposal: DelegationPropos
   const why = failure ?? 'it was unsure';
   if (decisionModelPolicyState().policy === 'Decision Model Only') {
     return refuse({ decidedBy: 'mode', accepted: 'the owner asks for agents in a message (that starts them without the decision model), or the decision model answers again.',
-      what: `Not started: nothing the owner said in this conversation settles whether to start ${agentsWord(count)}, the decision model could not read it (${why}), and the owner chose Decision Model Only for when the decision model fails.` });
+      what: `Not started: nothing the owner said in this conversation settles whether to start ${agentsWord(count)}, the decision model could not read it (${why}), and the owner chose Refuse the action for "If Jev can't answer".` });
   }
   const mode = currentExecutionMode();
   if (mode === 'yolo' || mode === 'just-vibes' || options.ask === undefined) return { start: true, basis: `the decision model could not answer (${why}); ${mode ?? 'this'} mode starts agents without asking` };

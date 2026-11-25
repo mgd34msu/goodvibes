@@ -15,6 +15,7 @@
 import type { ConfigManager } from '../config/manager.js';
 import { resolveHostBinding, resolveWebPort } from '../daemon/host-resolver.js';
 import { describePairingReach, isLoopbackHost, type PairingReach } from './origin-posture.js';
+import { servedHttps } from '../daemon/lan-https/served-https.js';
 import { isWildcardBindHost, probeStableHostInputs, stableUrlHostForBindHost, type ResolvedStableHost, type StableHostInputs } from './stable-host.js';
 
 export interface PairingWebOrigin {
@@ -271,9 +272,16 @@ function derivedPairingWebOrigin(
 ): PairingWebOrigin {
   if (configManager.get('controlPlane.webui.serve') === true) {
     const served = resolveControlPlaneOrigin(configManager, probe, boundControlPlane);
-    // With the daemon's own LAN certificate on (webui https), another device opens the https listener beside the plain one.
-    const lan = lanHttpsPort(configManager);
-    const secure = (origin: string): string => (lan !== undefined ? lanHttpsOriginOf(origin, lan) ?? origin : origin);
+    // With https on (the Secure address), another device opens the https listener beside the plain one:
+    // at the certificate's own name when it is for a name (Let's Encrypt, your own, a group's), else at the same host.
+    const secure = (origin: string): string => {
+      const serving = servedHttps();
+      if (serving) return serving.hostName ? `https://${serving.hostName}:${serving.port}` : lanHttpsOriginOf(origin, serving.port) ?? origin;
+      const lan = lanHttpsPort(configManager);
+      if (lan === undefined) return origin;
+      const domain = configManager.get('secureAddress.certificate') === 'lets-encrypt' ? String(configManager.get('secureAddress.domain') ?? '').trim() : '';
+      return domain && lanHttpsOriginOf(origin, lan) ? `https://${domain}:${lan}` : lanHttpsOriginOf(origin, lan) ?? origin;
+    };
     const origin = secure(served.origin);
     return {
       origin,

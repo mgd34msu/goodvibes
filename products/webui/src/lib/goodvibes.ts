@@ -969,6 +969,30 @@ export type CompanionRegenerateResult = OperatorMethodOutput<'companion.chat.mes
 export type CompanionEditResult = OperatorMethodOutput<'companion.chat.messages.edit'>;
 
 /**
+ * Another version of a turn put on the conversation (companion.chat.branches.switch). Written
+ * by hand until the regenerated contract carries the method; its declaration is in the
+ * daemon's method catalog (method-catalog-control-companion.ts).
+ */
+export interface CompanionBranchSwitched {
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly switched: boolean;
+  readonly supersededMessageIds: readonly string[];
+  readonly restoredMessageIds: readonly string[];
+}
+
+/** A file removed from a sent message (companion.chat.attachments.remove); written by hand the same way. */
+export interface CompanionAttachmentRemoved {
+  readonly sessionId: string;
+  readonly messageId: string;
+  readonly artifactId: string;
+  readonly name: string;
+  readonly removed: boolean;
+  readonly alreadyRemoved?: boolean;
+  readonly messageIds: readonly string[];
+}
+
+/**
  * One hit of `chat.messages.search` (companion.chat.messages.search): the chat, the
  * message, a snippet around the match and when it was written. The daemon matches
  * message text across every chat in one scan, newest first, paged by `nextCursor`.
@@ -2094,6 +2118,25 @@ export const client = {
         invokeOperator('companion.chat.queuedMessages.edit', { sessionId, messageId, text }),
       delete: (sessionId: string, messageId: string) =>
         invokeOperator('companion.chat.queuedMessages.delete', { sessionId, messageId }),
+    },
+    // Another version of an edited message or a regenerated reply, put on the conversation
+    // (companion.chat.branches.switch). Called by its route until the regenerated contract names it.
+    branches: {
+      switch: (sessionId: string, messageId: string): Promise<CompanionBranchSwitched> =>
+        requestJson<CompanionBranchSwitched>(
+          `/api/companion/chat/sessions/${encodeURIComponent(sessionId)}/branches/switch`,
+          { method: 'POST', body: { messageId }, explicitUserRequest: true },
+        ),
+    },
+    // A file attached to a sent message, removed for good (companion.chat.attachments.remove):
+    // the daemon deletes it from its store, keeps "<name> was removed" in the message and
+    // stops giving it to the model. Called by its route until the regenerated contract names it.
+    attachments: {
+      remove: (sessionId: string, messageId: string, artifactId: string): Promise<CompanionAttachmentRemoved> =>
+        requestJson<CompanionAttachmentRemoved>(
+          `/api/companion/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(artifactId)}`,
+          { method: 'DELETE', explicitUserRequest: true },
+        ),
     },
     events: scopedPlatform.chat.events,
   },

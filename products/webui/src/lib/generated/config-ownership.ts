@@ -16,6 +16,7 @@ export const DAEMON_OWNED_CONFIG_PREFIXES: readonly string[] = [
   "controlPlane.",
   "httpListener.",
   "web.",
+  "secureAddress.",
   "relay.",
   "watchers.",
   "device.",

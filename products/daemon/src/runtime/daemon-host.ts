@@ -1,5 +1,5 @@
 /** Owned configured daemon host; native lifecycle requires an installed caller. */
-import { DaemonServer, HttpListener, createSafeHostServeFactory, type DaemonUpdateArtifact } from '@goodvibes/engine/platform/platform/daemon';
+import { DaemonServer, HttpListener, createSafeHostServeFactory, secureAddressGroupAccess, type DaemonUpdateArtifact } from '@goodvibes/engine/platform/platform/daemon';
 import { createAsyncDisposalScope } from '@goodvibes/engine/platform/platform/runtime/disposal';
 import { createDaemonProviderDiscovery, type DaemonProviderDiscoveryDependencies } from './provider-discovery.js';
 import { createDaemonBootOperations } from './boot-composition.js';
@@ -7,6 +7,7 @@ import type { DaemonBootSnapshot } from './boot-tasks.js';
 import { createHostedSessionOptions } from './hosted-session-composition.js';
 import { createRuntimeServices, type RuntimeServices, type RuntimeServicesOptions } from './services.js';
 import { observeNativeStartupPhase } from './startup-observation.js';
+import { serveDaemonToNetwork } from './serve-to-network.js';
 import { createNativeDataWriteOwner, createInstalledReaderCohort } from '@goodvibes/engine/platform/platform/runtime/self-update';
 import { assertSynchronousJudgmentGuard } from '@goodvibes/judgment/decisions';
 import { defineLifecycle, logger, summarizeError } from '@goodvibes/engine/platform/platform/utils';
@@ -316,6 +317,9 @@ export function createDaemonHost(options: DaemonHostOptions, factories: DaemonHo
         deferNativeActivationUntilHostReady: true,
         serveFactory: createSafeHostServeFactory('Configured daemon', binding?.serveFactory),
         clusterCoordinator: runtime.clusterCoordinator, clusterGroupVerbs: runtime.clusterGroup.verbs,
+        // The group's one secure address reaches its machines over the group's own channel.
+        secureAddressGroup: secureAddressGroupAccess(runtime.clusterGroup.runtime),
+        serveToNetwork: () => serveDaemonToNetwork(runtime.configManager, runtime.runtimeBus),
         paymentReplies: runtime.daemonHandlers.paymentReplies,
         // Channel profile assignments apply to the agents started for channel messages.
         resolveChannelProfileId: (surfaceKind, routeId) => runtime.daemonHandlers.routing.resolveProfileId(surfaceKind, routeId),

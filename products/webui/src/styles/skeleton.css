@@ -28,8 +28,6 @@
   to   { transform: translateX(100%); }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .skeleton::after {
-    animation: none;
-  }
+:root[data-motion="reduce"] .skeleton::after {
+  animation: none;
 }

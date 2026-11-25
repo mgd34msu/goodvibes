@@ -90,7 +90,7 @@ pause, resume and delete the daemon's own schedules through the daemon's own req
 judged as in the Agent's own process. Its `agent_knowledge` and `agent_knowledge_ingest` tools read
 and add to the Agent's own knowledge store (`/api/goodvibes-agent/knowledge/*`) the same way, its
 `agent_research_report` tool saves sourced reports under the Agent's own screening consent
-(`tools.hostedResearchScreening` in the Agent's settings, or No Decision Model) with the screening keys
+(`tools.hostedResearchScreening` in the Agent's settings, or no decision model set) with the screening keys
 (`ABACUSAI_API_KEY`, `TYPESAFE_API_KEY`) read from the environment or the Agent's own credential stores, and its `agent_model_compare` tool
 blind-compares this session's models and, on apply, sets the Agent's own `provider.model`. Its `agent_operator_briefing`,
 `agent_operator_action` and `agent_operator_method` tools read and act on this daemon through the same

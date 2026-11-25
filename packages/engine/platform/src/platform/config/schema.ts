@@ -32,6 +32,7 @@ import { pricingConfigDefaults, pricingConfigSettings } from './schema-domain-pr
 import { paymentsConfigDefaults, paymentsConfigSettings } from './schema-domain-payments.js';
 import { daemonLocationConfigSettings } from './schema-domain-daemon-location.js';
 import { listConfigSettings } from './schema-domain-lists.js';
+import { secureAddressConfigDefaults, secureAddressConfigSettings } from './schema-domain-secure-address.js';
 import { defineSettingsDomain, type ConfigKey, type ConfigSetting, type GoodVibesConfig, type SurfacesConfig } from './schema-types.js';
 
 export * from './schema-types.js';
@@ -53,6 +54,7 @@ export const DEFAULT_CONFIG = {
   controlPlane: runtimeConfigDefaults.controlPlane,
   httpListener: runtimeConfigDefaults.httpListener,
   web: runtimeConfigDefaults.web,
+  secureAddress: secureAddressConfigDefaults.secureAddress,
   surfaces: surfaceConfigDefaults as SurfacesConfig,
   watchers: { ...runtimeConfigDefaults.watchers, ...triggersConfigDefaults },
   service: runtimeConfigDefaults.service,
@@ -102,6 +104,7 @@ export const DEFAULT_CONFIG = {
 export const CONFIG_SCHEMA: ConfigSetting[] = defineSettingsDomain(DEFAULT_CONFIG, [
   ...coreHeadConfigSettings,
   ...runtimePrimaryConfigSettings,
+  ...secureAddressConfigSettings,
   ...conversationGateConfigSettings,
   ...hostedSessionsConfigSettings,
   ...atRestConfigSettings,

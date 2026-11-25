@@ -559,6 +559,8 @@ export interface CloudflareApiClient {
         readonly type?: string | undefined;
         readonly name?: { readonly exact?: string } | string | undefined;
       }): AsyncIterable<CloudflareDnsRecordLike>;
+      /** Remove one record (the secure address's proof and address records, daemon/lan-https/cloudflare-dns.ts). */
+      delete?(dnsRecordId: string, params: { readonly zone_id: string }): Promise<unknown>;
     };
   };
   readonly queues: {

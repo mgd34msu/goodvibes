@@ -39,6 +39,7 @@ import { syncServiceSettingToPlatform } from './service-settings-sync.ts';
 import { wireNotificationSurfaces } from './notification-surfaces.ts';
 import { confirmThrough } from '../input/confirm-dialog.ts';
 import { takeAppliedThemeMessage } from '../renderer/theme-mode-config.ts';
+import { createAgentDaemonVerbCaller } from '../runtime/client/daemon-verbs.ts';
 
 type WireShellUiOpenersOptions = {
   commandContext: CommandContext;
@@ -337,6 +338,8 @@ export function wireShellUiOpeners(options: WireShellUiOpenersOptions): void {
           commandContext.print?.(message);
           render();
         },
+        // The Secure address list reads what the daemon's https address serves.
+        invokeDaemon: (method, methodInput) => createAgentDaemonVerbCaller({ configManager, homeDirectory }).invoke(method, methodInput),
         onSettingApplied: (change) => {
           // A theme change was applied by the start-up theme subscription
           // (startup-theme-probe.ts); this only reports what it did.

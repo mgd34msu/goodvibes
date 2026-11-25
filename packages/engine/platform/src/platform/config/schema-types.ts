@@ -20,6 +20,7 @@ import type { OwnerProfileConfig } from './schema-types-owner-profile.js';
 import type { PowerConfig } from './schema-domain-power.js';
 import type { BrowserConfig } from './schema-domain-browser.js';
 import type { PushConfig } from './schema-domain-push.js';
+import type { SecureAddressConfig } from './schema-domain-secure-address.js';
 import type { CheckinConfig, WorktreeConfig } from './schema-domain-runtime.js';
 import type { UpdateConfig } from './schema-domain-update.js';
 import type { VoiceLocalConfig } from './schema-domain-voice-local.js';
@@ -174,6 +175,7 @@ export interface GoodVibesConfig {
   controlPlane: ControlPlaneConfig;
   httpListener: HttpListenerRuntimeConfig;
   web: WebConfig;
+  secureAddress: SecureAddressConfig;
   surfaces: SurfacesConfig;
   watchers: WatchersConfig;
   service: ServiceConfig;
@@ -286,6 +288,13 @@ export interface ConfigSetting {
   /** Retained for saved-config compatibility, excluded from current settings controls. */
   deprecated?: boolean;
   enumValues?: string[] | undefined;
+  /**
+   * What a person reads for a stored enum value, where it differs from the
+   * value: every settings screen (the terminal programs' and the web UI's)
+   * shows this word and stores the value, so a value can keep its stored
+   * spelling while the words change.
+   */
+  enumLabels?: Readonly<Record<string, string>> | undefined;
   validate?: ((value: unknown) => boolean) | undefined;
   /** Hint appended to the validation-failure message when `validate` returns false, e.g. `'finite number in [0.25, 4.0]'`. */
   validationHint?: string | undefined;

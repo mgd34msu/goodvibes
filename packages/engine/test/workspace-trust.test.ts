@@ -71,8 +71,8 @@ test('a shipped trust.json is not honoured; answered restricted, writes and comm
       (error: unknown) => { if (error instanceof WorkspaceRestrictedError) return false; throw error; });
     const write = { files: [{ path: join(project, 'src.ts'), content: 'export {};\n' }] };
     const command = { commands: [{ cmd: 'npm install left-pad --save' }] };
-    // Undecided, decision models off: the first write raises the one trust question; answered restricted, it does not run.
-    const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+    // Undecided, no decision model set: the first write raises the one trust question; answered restricted, it does not run.
+    const retire = configureDecisionModelPolicy(() => 'Hybrid', () => false);
     try { expect(await runs('write', write)).toBe(false); } finally { retire(); }
     expect(trust.getLevel()).toBe('restricted');
     expect(trust.isDecided()).toBe(true);

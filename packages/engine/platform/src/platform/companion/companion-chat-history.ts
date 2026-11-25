@@ -17,7 +17,7 @@ import { turnFailureText } from '../core/turn-failure.js';
 import { ConversationManager } from '../core/conversation.js';
 import type { ToolCall, ToolResult } from '../types/tools.js';
 import type { ToolActivityWords } from '@goodvibes/engine/contracts';
-import { buildProviderUserContent, type CompanionChatArtifactStore } from './companion-chat-attachments.js';
+import { buildProviderUserContent, formatRemovedAttachmentNote, type CompanionChatArtifactStore } from './companion-chat-attachments.js';
 import { activeMessages } from './companion-chat-branching.js';
 import { TURN_INTERRUPTION_NOTE } from './companion-chat-turn-control.js';
 import type {
@@ -154,7 +154,8 @@ export async function rebuildConversation(
       continue;
     }
     if (message.id === exclude || message.deliveryState === 'queued' || message.deliveryState === 'unanswered') continue;
-    conversation.addUserMessage(await buildProviderUserContent(message.content, message.attachments ?? [], artifactStore));
+    // A file the person removed after sending is not read in again; the model is told its name and that it is gone.
+    conversation.addUserMessage(await buildProviderUserContent(message.content + formatRemovedAttachmentNote(message), message.attachments ?? [], artifactStore));
     for (const reply of replies.get(message.id) ?? []) replayReply(conversation, reply);
   }
   return conversation;

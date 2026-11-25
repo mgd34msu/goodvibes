@@ -629,14 +629,12 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .dv-skeleton__bar {
-    animation: none;
-  }
+:root[data-motion="reduce"] .dv-skeleton__bar {
+  animation: none;
+}
 
-  .dv-disclosure__summary::before {
-    transition: none;
-  }
+:root[data-motion="reduce"] .dv-disclosure__summary::before {
+  transition: none;
 }
 
 /* Touch floor: the section and kind switches in data views are primary

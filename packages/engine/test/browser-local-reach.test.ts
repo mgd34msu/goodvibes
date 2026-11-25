@@ -37,7 +37,7 @@ let dir: string;
 let retirePolicy: () => void;
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'gv-browser-reach-'));
-  retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false);
 });
 afterEach(() => {
   retirePolicy();

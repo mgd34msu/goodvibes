@@ -25,6 +25,22 @@ export function messageAttachments(message: unknown): unknown[] {
   return [];
 }
 
+/** The names of the files removed from a sent message, each shown as "<name> was removed". */
+export function removedAttachmentNames(message: unknown): string[] {
+  const removed = asRecord(message).removedAttachments;
+  if (!Array.isArray(removed)) return [];
+  return removed.map((entry) => firstString(entry, ['name', 'artifactId']) || 'A file');
+}
+
+/**
+ * The stored id of an attachment the daemon holds (one a sent message carries), or ''
+ * for a file still on its way up (the optimistic `local-…` id) or a shape without one.
+ */
+export function storedAttachmentId(attachment: unknown): string {
+  const id = firstString(attachment, ['artifactId']);
+  return id && !id.startsWith('local-') ? id : '';
+}
+
 export function attachmentLabel(attachment: unknown): string {
   return firstString(attachment, ['label', 'filename', 'name', 'artifactId', 'id']) || 'Attachment';
 }

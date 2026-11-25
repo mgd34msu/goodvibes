@@ -71,6 +71,7 @@ import {
   NotificationsSection,
   PeopleSection,
   PermissionsSection,
+  SecureAddressSection,
   UsageSection,
   VoiceSection,
 } from './sections/MoreSections';
@@ -393,6 +394,7 @@ function SectionContent({
     case 'memory': return <MemorySection />;
     case 'permissions': return <PermissionsSection />;
     case 'network': return <NetworkSection />;
+    case 'secure-address': return <SecureAddressSection />;
     case 'all': return <AllSettingsSection />;
     case 'about': return <AboutSection realtimeError={realtimeError} />;
     case 'checkins': return <CheckinsSection />;

@@ -33,41 +33,6 @@ opened. On a slow connection that takes a moment once; after that they open at
 once. A page older than the daemon's current one reloads itself once when it
 fails to load a view.
 
-## For developers: the dev server is not reachable
-
-Check the Vite bind address:
-
-```bash
-sed -n '1,120p' /tmp/goodvibes-webui-vite.log
-ss -ltnp | rg ':3423'
-```
-
-The expected bind depends on the web listener's host mode. In network mode it
-is all interfaces:
-
-```text
-0.0.0.0:3423
-```
-
-In local mode (the default when no network host mode is set) the bind is
-`127.0.0.1:3423` and the page is reachable only from this machine; that is
-correct, not a fault. To see which binding Vite resolved, ask the daemon first:
-
-```bash
-goodvibes-daemon webui status --json
-```
-
-When the daemon does not answer, Vite binds `127.0.0.1:3423`.
-
-For one-off development, override the bind:
-
-```bash
-GOODVIBES_WEB_HOST=0.0.0.0 GOODVIBES_WEB_PORT=3423 bun run dev
-```
-
-If the page is reachable locally but not from another LAN device, check firewall
-rules and confirm traffic to `3423/tcp` is allowed from the local network.
-
 ## Page loads but API calls fail
 
 Check daemon status:
@@ -83,8 +48,8 @@ daemon/control-plane listener:
 ss -ltnp | rg ':3421'
 ```
 
-If the daemon binds to `0.0.0.0`, the Vite proxy should still connect to
-`127.0.0.1`. Do not use `0.0.0.0` as a browser or proxy target URL.
+When the daemon binds `0.0.0.0` (every interface), open it at `127.0.0.1` or the
+machine's own address, never at `0.0.0.0`.
 
 ## Auth fails
 
@@ -144,20 +109,11 @@ microphone.
 
 ## Chat does not show new messages immediately
 
-The expected send behavior is:
-
-1. Composer clears.
-2. A local optimistic user message appears immediately.
-3. The message transitions to sent or failed.
-4. Assistant output streams or appears after daemon message refresh.
-
-If messages only appear after the next send:
-
-- confirm the served app is on the latest cache-bust version
-- clear Vite optimized deps and restart the dev server
-- check browser console errors
-- verify `platform.chat.messages.create` returns successfully
-- verify companion chat events are connected for the active session
+When you send, the composer clears, your message appears at once and then shows
+as sent or failed, and the reply streams in. If messages only appear after the
+next send, reload the page (a page older than the daemon's build reloads itself
+when nothing would be lost) and check that the daemon is answering
+(`goodvibes-daemon status`).
 
 ## `SESSION_NOT_FOUND`
 
@@ -174,32 +130,7 @@ localStorage.removeItem('goodvibes.webui.companionSessions')
 
 Then refresh the page.
 
-## Chat stores user message but no assistant reply
-
-Plain WebUI chat must use companion chat:
-
-- `platform.chat.sessions.create`
-- `platform.chat.messages.create`
-- `platform.chat.events.stream`
-
-Do not send plain chat through:
-
-- `sessions.followUp`
-- `sessions.messages.create` as a storage-only fallback
-
-If a user message persists without a reply, check whether the send path used the
-wrong session API or whether companion chat SSE returned `turn.error`.
-
 ## Provider or model is rejected
-
-Provider/model routing must use daemon-valid provider/model semantics.
-
-Expected behavior:
-
-- provider selection is separate from model selection
-- model options update based on selected provider
-- current daemon model is selected through model APIs
-- chat message sends do not include provider/model
 
 If the daemon returns "No provider available" or a provider-qualified registry
 key error, inspect:
@@ -214,51 +145,13 @@ subscription provider id.
 
 ## Attachments fail
 
-Attachment send flow:
-
-1. `platform.artifacts.create`
-2. `platform.chat.messages.create(sessionId, { body, attachments })`
-
-Common causes:
-
-- artifact upload failed
-- daemon rejected an unknown artifact id
-- message payload put attachments in `metadata` instead of `attachments`
-- provider/model was incorrectly attached to `messages.create`
-
-Unknown artifacts should surface as daemon errors instead of silently dropping
-the attachment.
+A file is uploaded first and then sent with the message. When the upload fails,
+or the daemon no longer has the file, the message shows the daemon's error; an
+attachment is never dropped silently. Attach the file again.
 
 ## Knowledge shows Home Assistant or Home Graph records
 
-Regular Knowledge/Wiki should use regular Knowledge routes only. WebUI should
-not call Home Graph routes and should not add client-side Home Graph filters.
-
-If Home Graph records appear in regular Knowledge by default:
-
-1. Keep WebUI payloads unchanged.
-2. Record the endpoint, payload, and returned ids/titles.
-3. Report it as an platform/daemon scoping issue.
-
-Do not "fix" this by filtering text, tags, or ids in WebUI.
-
-## Vite still serves old code
-
-Clear optimized deps and restart:
-
-```bash
-rm -rf node_modules/.vite
-setsid node ./node_modules/.bin/vite --force > /tmp/goodvibes-webui-vite.log 2>&1 < /dev/null &
-```
-
-Verify the served app version (match the version in `package.json`):
-
-```bash
-curl -sS --max-time 3 http://127.0.0.1:3423/ | rg "$(node -p "require('./package.json').version")"
-```
-
-Verify the engine version the dev server runs against (the workspace link to `packages/engine`):
-
-```bash
-node -p "require('./node_modules/@goodvibes/engine/package.json').version"
-```
+Regular Knowledge shows only regular knowledge; Home Graph records belong to the
+Home Assistant views. If they appear in Knowledge, note what you opened and the
+records shown, and report it: it is a daemon-side scoping fault, not something
+to filter in the page.

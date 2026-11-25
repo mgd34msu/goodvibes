@@ -47,6 +47,8 @@ export interface ChatMessage {
   }[];
   /** Some server shapes use 'artifacts' instead of 'attachments'. */
   artifacts?: readonly Record<string, unknown>[];
+  /** Files the person removed after sending (companion.chat.attachments.remove): each shows "<name> was removed". */
+  removedAttachments?: readonly { artifactId?: string; name?: string; removedAt?: number; [key: string]: unknown }[];
   /** Delivery state: optimistic on local messages; the daemon's honesty marker on stored ones. */
   deliveryState?: string;
   /**

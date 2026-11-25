@@ -51,6 +51,10 @@ const { listRows } = createSettingsRows<SettingsModal, SettingEntry, SettingsCat
   focused: (modal) => modal.searchFocused || (modal.focusPane ?? 'settings') === 'settings',
   routeLabel: formatProviderAuthRouteId,
   specialList(modal, _width, focused, clampIndex) {
+    if (modal.currentCategory === 'secure-address-now') {
+      const sel = clampIndex(modal.secureAddressRows.length);
+      return { rows: modal.secureAddressRows.map((row, i) => ({ label: row.label, right: row.state, selected: focused && i === sel, current: !focused && i === sel })), selected: sel };
+    }
     if (modal.currentCategory !== 'flags') return undefined;
     const items = modal.flagEntries;
     if (items.length === 0) return { rows: [{ label: 'No features registered.', muted: true }], selected: -1 };

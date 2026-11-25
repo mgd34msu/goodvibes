@@ -344,12 +344,10 @@
   to { background-position: -100% 0; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .chat-working__label {
-    color: var(--text-2);
-    background: none;
-    animation: none;
-  }
+:root[data-motion="reduce"] .chat-working__label {
+  color: var(--text-2);
+  background: none;
+  animation: none;
 }
 
 /* ── Search jump-to-message highlight ──────────────────────── */

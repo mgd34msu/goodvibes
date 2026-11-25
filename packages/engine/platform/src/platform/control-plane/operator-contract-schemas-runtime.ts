@@ -196,6 +196,13 @@ export const COMPANION_CHAT_MESSAGE_SCHEMA = objectSchema({
   content: STRING_SCHEMA,
   contentRevision: { ...STRING_SCHEMA, minLength: 1, maxLength: 256 },
   attachments: arraySchema(COMPANION_CHAT_ATTACHMENT_SCHEMA),
+  // Files removed from this message after it was sent (companion.chat.attachments.remove):
+  // the line kept in each one's place, "<name> was removed".
+  removedAttachments: arraySchema(objectSchema({
+    artifactId: STRING_SCHEMA,
+    name: STRING_SCHEMA,
+    removedAt: NUMBER_SCHEMA,
+  }, ['artifactId', 'name', 'removedAt'])),
   createdAt: NUMBER_SCHEMA,
   // Delivery honesty marker: 'cancelled' = an assistant partial whose turn
   // was stopped mid-generation; 'queued' = a user message whose turn has not
@@ -210,6 +217,15 @@ export const COMPANION_CHAT_MESSAGE_SCHEMA = objectSchema({
   // On assistant messages: the user message this reply answers (the
   // transcript is append-ordered, so pairing needs an explicit link).
   inReplyTo: STRING_SCHEMA,
+  // Retained history behind a fork: when and why this message left the
+  // conversation (an edit, a regenerate, or a switch to another version, which
+  // keeps the reason of the fork it switches). Every message one fork marked
+  // carries the same time, so the run is one version of its turn
+  // (companion.chat.branches.switch).
+  supersededAt: NUMBER_SCHEMA,
+  supersededReason: enumSchema(['regenerate', 'edit']),
+  // On a user message made by an edit: the message it was edited from.
+  revisionOf: STRING_SCHEMA,
   // On a user message posted with a clientMessageId: that key, echoed, so
   // the sender matches its own pending send by identity, never by text.
   clientMessageId: STRING_SCHEMA,

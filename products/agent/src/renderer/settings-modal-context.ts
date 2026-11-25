@@ -86,6 +86,7 @@ export function listItemCount(modal: SettingsModal, category: SettingsCategory):
   const count = category === 'flags' ? modal.flagEntries.length
     : category === 'mcp' ? modal.mcpEntries.length
     : category === 'subscriptions' ? modal.subscriptionEntries.length
+    : category === 'secure-address-now' ? 0
     : modal.groups.get(category)?.length ?? 0;
   return count > 0 ? String(count) : undefined;
 }
@@ -101,6 +102,11 @@ export function settingContextLines(modal: SettingsModal): HelpLine[] {
   }
   const category = modal.currentCategory;
   if (category === 'flags') return buildFlagHelp(modal.getSelectedFlag());
+  if (category === 'secure-address-now') {
+    // The selected row's own words: what is served, why not, and each way's four parts, as the daemon gives them.
+    const row = modal.secureAddressRows[Math.max(0, Math.min(modal.secureAddressRows.length - 1, modal.selectedIndex))];
+    return row ? [helpText(row.label), ...(row.state ? [helpText(`State: ${row.state}`)] : []), ...row.detail.map((line) => helpText(line))] : [];
+  }
   if (category === 'mcp') return buildMcpHelp(modal, modal.getSelectedMcp());
   if (category === 'subscriptions') return buildSubscriptionHelp(modal, modal.getSelectedSubscription());
   const list = modal.getSelectedListRow();

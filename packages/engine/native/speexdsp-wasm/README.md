@@ -1,8 +1,7 @@
 # `speexdsp` noise suppression, compiled to WebAssembly
 
 `voice.wake.noiseSuppression: "speex"` runs SpeexDSP's preprocessor over every
-captured frame. This directory holds everything needed to rebuild the module the
-platform ships, and `scripts/build-speexdsp-wasm.ts` is the build.
+captured frame, using the WebAssembly module described here.
 
 ## Why WebAssembly and not a native binding
 
@@ -36,33 +35,8 @@ moves upstream cannot silently change what the setting does. Denoise is the only
 stage enabled, at SpeexDSP's own `-15 dB` suppression floor, which the module can
 be asked to read back (`gv_speex_noise_suppress_db`) rather than restating it.
 
-## Toolchain, pinned
-
-| Component | Version |
-| --- | --- |
-| Upstream source | SpeexDSP 1.2.1, sha256 `d17ca363654556a4ff1d02cc13d9eb1fc5a8642c90b40bd54ce266c3807b91a7` |
-| Compiler | clang 22.1.8 (`--target=wasm32-wasip1`) |
-| Linker | LLD 22.1.8 (`wasm-ld`) |
-| Sysroot | wasi-libc `1:0+592+161b3195-1` at `/usr/share/wasi-sysroot` |
-| Builtins | wasi-compiler-rt `22.1.0-2` |
-
-On Arch the two sysroot packages are `pacman -S wasi-libc wasi-compiler-rt`;
-elsewhere point `--wasi-sysroot` at a WASI sysroot of your own.
-
-## Rebuilding
-
-```sh
-bun packages/engine/scripts/build-speexdsp-wasm.ts            # downloads, verifies, builds, regenerates
-bun packages/engine/scripts/build-speexdsp-wasm.ts --check    # verifies the committed artifact, no toolchain needed
-```
-
-The build downloads the pinned tarball, refuses to continue unless its sha256
-matches, compiles, and rewrites
-`packages/engine/platform/src/platform/voice/capture/vendor/speexdsp-wasm.ts`, writing the
-base64 of the module, its byte count, and the pins above. `--check` validates the
-base64 encoding, recorded byte count and WebAssembly format without a compiler.
-The noise-suppression tests run the embedded filter and measure its effect on
-audio; a checksum stored beside the same blob does not establish that behavior.
+It is built from SpeexDSP 1.2.1 (sha256
+`d17ca363654556a4ff1d02cc13d9eb1fc5a8642c90b40bd54ce266c3807b91a7`).
 
 The module is embedded in the source rather than downloaded at runtime like the
 wake models. At 53 kB it is small enough that provisioning it would cost more

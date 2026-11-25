@@ -315,28 +315,10 @@
 }
 
 /* ─────────────────────────────────────────
-   REDUCED MOTION: every transition becomes instant
+   REDUCED MOTION: every transition becomes instant. Only when the person
+   turns on Settings > General > Reduce motion (this browser); it follows
+   nothing else, not the operating system's preference.
 ───────────────────────────────────────── */
-@media (prefers-reduced-motion: reduce) {
-  :root {
-    --motion-fast: 0ms;
-    --motion-menu: 0ms;
-    --motion-base: 0ms;
-    --motion-rail: 0ms;
-    --motion-slow: 0ms;
-  }
-
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* The same, from Settings > General > Reduce motion (this browser), when the system does not ask for it. */
 :root[data-motion="reduce"] {
   --motion-fast: 0ms;
   --motion-menu: 0ms;

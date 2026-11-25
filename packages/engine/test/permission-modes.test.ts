@@ -14,7 +14,7 @@
  *
  * Real settings manager, permission manager, tool registry, executor and
  * held-call ledger over a temp directory; the two tools only count their runs.
- * Decision models are off except where the case is about one working; Jev's
+ * No decision model is set except where the case is about one working; Jev's
  * port counts every question and answers none. Under Hybrid, one case stands
  * in for a decision model that refuses a call and then goes down: the same call
  * stays refused within that operation, and a different call is settled by the
@@ -99,8 +99,8 @@ async function outcome(mode: GatePresetName, call: typeof TRUST | typeof PUSH) {
   return { ran: g.ran.length, state: result.decision?.state, decidedBy: result.decision?.decidedBy, held: g.held.list().length, ...g.asked() };
 }
 
-test('with decision models off: who is asked about an owner-only item and a judgment call, in each mode', async () => {
-  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+test('with no decision model set: who is asked about an owner-only item and a judgment call, in each mode', async () => {
+  const retire = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   try {
     expect(await outcome('ask-me', TRUST)).toMatchObject({ ran: 0, decidedBy: 'owner', owner: 1, jev: 0, held: 0 });
     expect(await outcome('jev-decides', TRUST)).toMatchObject({ ran: 0, decidedBy: 'owner', owner: 1, jev: 0, held: 0 });
@@ -115,13 +115,13 @@ test('with decision models off: who is asked about an owner-only item and a judg
   } finally { retire(); }
 });
 
-test('with decision models on but none set up, just-vibes holds a judgment call without asking anyone', async () => {
+test('with no decision model in the settings, just-vibes holds a judgment call without asking anyone', async () => {
   expect(await outcome('just-vibes', PUSH)).toMatchObject({ ran: 0, state: 'queued-for-owner', owner: 0, jev: 0, held: 1 });
   expect(gate('jev-decides').manager.getMode()).toBe('ask-me');
 });
 
 test('jev-decides chosen by a hosted session is ask-me while no decision model works', async () => {
-  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retire = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   try {
     // The settings say yolo; the session's own choice is what holds inside it.
     const g = gate('yolo');
@@ -149,7 +149,7 @@ test('jev-decides with a working decision model asks Jev, not the owner, on a ju
 });
 
 test('just-vibes reports what it held, and the owner\'s approval at the end lets that same call run', async () => {
-  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retire = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   try {
     const g = gate('just-vibes');
     const first = await g.check(TRUST);

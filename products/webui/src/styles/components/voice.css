@@ -32,10 +32,8 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .voice-mic-btn.is-recording {
-    animation: none;
-  }
+:root[data-motion="reduce"] .voice-mic-btn.is-recording {
+  animation: none;
 }
 
 /* An honest floating note above the mic (secure-context pointer, permission denied,
@@ -195,10 +193,8 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .voice-spin {
-    animation: none;
-  }
+:root[data-motion="reduce"] .voice-spin {
+  animation: none;
 }
 
 /* ─── Wake word ──────────────────────────────────────────────────────────────
@@ -249,10 +245,8 @@
   to   { opacity: 0.3; }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .wake-banner.is-live .wake-banner__label::before {
-    animation: none;
-  }
+:root[data-motion="reduce"] .wake-banner.is-live .wake-banner__label::before {
+  animation: none;
 }
 
 /* The wake-word block inside the voice popover. */

@@ -448,7 +448,7 @@ export function renderCliStatus(options: CliStatusOptions, snapshot: CliStatusSn
     ] : []),
     '',
     'Decision model',
-    `  when it is missing or fails: ${snapshot.decisionModel.policyLabel}`,
+    `  if Jev can't answer: ${snapshot.decisionModel.policyLabel}`,
     `  ${snapshot.decisionModel.line}`,
     '',
     'Auth',

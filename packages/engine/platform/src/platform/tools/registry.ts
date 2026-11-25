@@ -38,7 +38,7 @@ import type { ToolActivity } from '@goodvibes/engine/contracts';
 import { ToolInputError, UnknownPreparedToolError } from './preparation-error.js';
 import { createToolSchemaTool, deferredToolRefusal, oneLineDefinition, TOOL_SCHEMA_TOOL_NAME } from './tool-schema.js';
 import { ToolError } from '../types/errors.js';
-import { repairToolCall } from './auto-repair.js';
+import { formatRepairs, repairToolCall } from './auto-repair.js';
 import { checkToolSchema, ToolContractVerifier } from '../runtime/tools/contract-verifier.js';
 import type { ContractVerificationResult, ContractVerifierOptions } from '../runtime/tools/contract-verifier.js';
 import { summarizeError } from '../utils/error-display.js';
@@ -525,12 +525,14 @@ export class ToolRegistry {
   /**
    * The answer to a call of a tool the request listed in one line and that is
    * not loaded yet. Its arguments are checked against the full definition: a
-   * call that already fits it runs as usual (the tool is loaded from now on),
-   * so a model that knew the parameters is not made to send the same call
-   * twice. One that does not fit is not run, and is refused with the tool's
-   * full definition so the model can send it again with real parameters.
-   * Undefined for any call that runs as usual. A lookup and a schema check;
-   * no model request.
+   * call that already fits it, or fits it once the repairs that need no
+   * reading are made (a camelCase or alias name, JSON text for an object),
+   * runs as usual (the tool is loaded from now on) and its result names the
+   * repair, so a model that knew the parameters is not made to send the same
+   * call twice. One that does not fit is not run, and is refused with the
+   * tool's full definition so the model can send it again with real
+   * parameters. Undefined for any call that runs as usual. A lookup, the
+   * format repairs and a schema check; no model request.
    */
   deferredCallRefusal(callId: string, name: string, args?: Record<string, unknown>): ToolResult | undefined {
     const away = this.tools.has(name) ? undefined : this.elsewhere.get(name);
@@ -546,7 +548,7 @@ export class ToolRegistry {
     if (!definition || name === TOOL_SCHEMA_TOOL_NAME || this.sentInFull(definition)) return undefined;
     this.loadedTools.add(name);
     const full = this.fullDefinitionOf?.(name) ?? definition;
-    if (args !== undefined && firstJsonSchemaFailure(full.parameters, args) === undefined) return undefined;
+    if (args !== undefined && fitsOnceFormatRepaired(name, args, full)) return undefined;
     return deferredToolRefusal(callId, full);
   }
 
@@ -1671,6 +1673,20 @@ function valueAtSchemaPath(args: Record<string, unknown>, path: string): string 
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (typeof value !== 'string') return undefined;
   return JSON.stringify(value.length > 60 ? `${value.slice(0, 60)}…` : value);
+}
+
+/**
+ * Whether a call fits the tool's full schema as sent or once the format repairs are made.
+ * The execution path makes the same repairs again and notes them in the result.
+ */
+function fitsOnceFormatRepaired(name: string, args: Record<string, unknown>, full: ToolDefinition): boolean {
+  if (firstJsonSchemaFailure(full.parameters, args) === undefined) return true;
+  try {
+    const { fixed, repairs } = formatRepairs(name, args, full);
+    return repairs.length > 0 && firstJsonSchemaFailure(full.parameters, fixed) === undefined;
+  } catch {
+    return false;
+  }
 }
 
 /**

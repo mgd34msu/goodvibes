@@ -124,9 +124,8 @@ write outcome with a redacted value.
 
 JSON `list` includes `data.settingsFile`, the global surface settings path. That
 field is not the destination of every key. Current CLI receipts do not enumerate
-per-key origins, destination tiers, or completed runtime reloads.
-See [config commands](../src/daemon/config-command.ts) and
-[recursive output](cli-and-package-contracts.md#recursive-config-output).
+per-key origins, destination tiers, or completed runtime reloads. How values are
+redacted in the output: [`config`](commands-reference.md#config).
 
 The runtime watches its settings files, but a successful write does not prove a
 listener has rebound or a provider is usable. Inspect `status` for the actual

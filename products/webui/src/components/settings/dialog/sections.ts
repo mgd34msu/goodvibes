@@ -43,6 +43,7 @@ export type SettingsSectionId =
   | 'memory'
   | 'permissions'
   | 'network'
+  | 'secure-address'
   | 'all'
   | 'about'
   | 'checkins';
@@ -137,6 +138,10 @@ const SECTION_SEARCH: Readonly<Record<SettingsSectionId, { keywords: readonly st
     keywords: ['tailscale', 'cloudflare', 'tunnel', 'worker', 'https', 'serve', 'lan', 'relay', 'port', 'listener'],
     items: ['Tailscale', 'Cloudflare'],
   },
+  'secure-address': {
+    keywords: ['https', 'certificate', 'tls', 'ssl', 'lets encrypt', 'letsencrypt', 'acme', 'domain', 'dns', 'cloudflare', 'tailscale', 'phone', 'microphone', 'push', 'install', 'passkey', 'secure'],
+    items: ['Secure address', 'In force now', 'A certificate for a domain you own (Let\'s Encrypt)', 'A certificate you made', 'Tailscale', 'GoodVibes\' own certificate'],
+  },
   all: {
     keywords: ['triggers', 'supervision', 'all settings', 'config', 'key', 'schema'],
     items: ['Supervised triggers'],
@@ -196,6 +201,7 @@ const SECTION_ALIASES: Readonly<Record<string, SettingsSectionId>> = {
   pairing: 'devices',
   advanced: 'all',
   checkin: 'checkins',
+  https: 'secure-address',
 };
 
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionId = 'general';

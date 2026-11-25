@@ -114,10 +114,10 @@ export async function runNativeHeadlessCommand(runtime: HeadlessCommandRuntime, 
                 if (refused) return refused;
                 throw error;
               }
-              announceHeadlessSession(ctx, workingDirectory, cli.flags.outputFormat);
+              announceHeadlessSession(ctx, workingDirectory, cli.flags.outputFormat, configManager);
               const recovery = recovered ? announceHeadlessRecovery(recovered, cli.flags.outputFormat) : undefined;
               sessionReady = true;
-              const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, limits);
+              const result = await executeAdmittedHeadlessTurn(ctx, state, signal, cli.flags.outputFormat, { ...limits, settings: configManager });
               return recovery ? { ...result, recovery } : result;
             }, {
               shutdown: async () => {

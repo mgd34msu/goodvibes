@@ -200,7 +200,7 @@ test('with a user and a group listed, only that user in that group is taken', as
 });
 
 test('a guest on the owner\'s channel answers no purchase window, presses no approval, cancels no run; the owner does, from the conversation that started it', async () => {
-  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retire = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   const root = scratch();
   const policy = await ownedSlack();
   await policy.upsertPolicy('telegram', { allowlistUserIds: ['U-OWNER', 'U-FRIEND'], ownerId: 'U-OWNER' });
@@ -322,7 +322,7 @@ test('a stranger in a chat set up for delegated review is never offered ownershi
 });
 
 test('a post in a Telegram channel, which names no person, is held as that channel\'s claim on an unowned surface and starts no turn', async () => {
-  const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   // Whose turn each spawn request runs in: a guest's channel, or none for an owner's.
   const turns: Array<string | null> = [];
   const daemon = await surfaceDaemon({
@@ -350,7 +350,7 @@ test('a post in a Telegram channel, which names no person, is held as that chann
 });
 
 test('with direct messages turned off, the owner\'s direct message is refused on Slack, Discord, Google Chat, Matrix and Teams; the owner\'s channel message is still taken', async () => {
-  const retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   const off = { dmPolicy: 'deny' as const, requireMention: false };
   const daemon = await surfaceDaemon({
     settings: { 'surfaces.googleChat.verificationToken': 'gchat-token', 'surfaces.matrix.webhookSecret': 'matrix-secret', 'surfaces.msteams.webhookSecret': 'teams-secret' },

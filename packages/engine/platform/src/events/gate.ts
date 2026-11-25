@@ -42,6 +42,8 @@ export type GateEvent =
       classification?: string | undefined;
       riskLevel?: string | undefined;
       summary?: string | undefined;
+      /** Why: when Jev decided the call, its reason; on a refusal the gate explained, that explanation. */
+      reason?: string | undefined;
     };
 
 /** All gate event type literals as a union. */

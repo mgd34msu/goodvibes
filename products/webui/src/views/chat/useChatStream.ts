@@ -377,6 +377,12 @@ export function useChatStream({
         if (!eventName.startsWith('companion-chat.')) return;
         if (firstString(payload, ['sessionId']) !== activeSessionId) return;
         const type = companionEventType(eventName, payload);
+        // A file removed or another version shown, from this or another device: the transcript
+        // is read again (the shown messages stay until the new answer replaces them in place).
+        if (type === 'transcript.changed') {
+          void invalidateChatState(activeSessionId);
+          return;
+        }
         // Frames apply only to the turn being shown: one that names another turn is dropped.
         const frameTurnId = firstString(payload, ['turnId']);
         if (type === 'turn.started') {

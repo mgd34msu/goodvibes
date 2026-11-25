@@ -1,8 +1,9 @@
 /**
  * microsoft-graph-api.ts, the Microsoft Graph client over an access token and the
  * injected HttpFetch. Lists calendars (me/calendars), lists events over a window
- * (me/calendars/{id}/calendarView, which returns expanded instances), and creates
- * events (me/calendars/{id}/events). A Prefer: outlook.timezone="UTC" header makes
+ * (me/calendars/{id}/calendarView, which returns expanded instances), creates
+ * events (me/calendars/{id}/events), and reads, changes and removes one event by
+ * id (me/events/{id}), for the daemon's calendar (microsoft-gateway-service.ts). A Prefer: outlook.timezone="UTC" header makes
  * Graph return UTC wall times so normalization is honest. Paging follows
  * @odata.nextLink; failures are named degraded states via CalendarApiError.
  */
@@ -76,6 +77,7 @@ export async function listGraphCalendars(fetchImpl: HttpFetch, token: string, op
 }
 
 export interface GraphEventsQuery {
+  /** The calendar to read; empty reads the account's default calendar (me/calendar). */
   readonly calendarId: string;
   readonly calendarLabel: string;
   /** ISO lower bound, e.g. '2026-07-01T00:00:00Z'. */
@@ -93,7 +95,8 @@ export async function listGraphEvents(
   options: CalendarRequestOptions = {},
 ): Promise<MergedCalendarEvent[]> {
   const out: MergedCalendarEvent[] = [];
-  const first = new URL(`${BASE}/me/calendars/${encodeURIComponent(query.calendarId)}/calendarView`);
+  const calendarPath = query.calendarId ? `me/calendars/${encodeURIComponent(query.calendarId)}` : 'me/calendar';
+  const first = new URL(`${BASE}/${calendarPath}/calendarView`);
   first.searchParams.set('startDateTime', query.start);
   first.searchParams.set('endDateTime', query.end);
   first.searchParams.set('$select', 'id,iCalUId,subject,bodyPreview,location,start,end,isAllDay,organizer,isOrganizer,isCancelled');
@@ -132,6 +135,8 @@ export async function createGraphEvent(
   event: NewCalendarEvent,
   ownerZone: string,
   options: CalendarRequestOptions = {},
+  /** Addresses to invite; Outlook sends them the invitation. */
+  guests: readonly string[] = [],
 ): Promise<CalendarCreateResult> {
   const times = resolveNewEventTimes(event, ownerZone);
   const allDayZone = ownerZone.trim().length > 0 ? ownerZone.trim() : 'UTC';
@@ -142,8 +147,10 @@ export async function createGraphEvent(
     end: times.allDay ? { dateTime: `${times.endDate}T00:00:00`, timeZone: allDayZone } : times.end,
     ...(event.location ? { location: { displayName: event.location } } : {}),
     ...(event.description ? { body: { contentType: 'text', content: event.description } } : {}),
+    ...(guests.length > 0 ? { attendees: graphAttendees(guests) } : {}),
   };
-  const url = `${BASE}/me/calendars/${encodeURIComponent(calendarId)}/events`;
+  // An empty calendar id is the account's default calendar.
+  const url = calendarId ? `${BASE}/me/calendars/${encodeURIComponent(calendarId)}/events` : `${BASE}/me/calendar/events`;
   const created = await authedWrite(fetchImpl, 'microsoft', {
     url,
     method: 'POST',
@@ -161,4 +168,118 @@ export async function createGraphEvent(
     ...(providerEventId ? { providerEventId } : {}),
     detail: 'Microsoft Graph accepted the event but its answer could not be read. The event exists; check the calendar instead of creating it again.',
   };
+}
+
+/** Graph's attendee list for a set of addresses: each one a required guest. */
+function graphAttendees(addresses: readonly string[]): unknown[] {
+  return addresses.map((address) => ({ emailAddress: { address }, type: 'required' }));
+}
+
+/** One event as Graph holds it, read by id: the normalized event and what a change needs. */
+export interface GraphEventRead {
+  /** Null when Graph returns it cancelled (the event is no longer on the calendar). */
+  readonly event: MergedCalendarEvent | null;
+  /** Graph's version of the event (`changeKey`), compared before a change. */
+  readonly changeKey?: string;
+  /** The HTTP ETag Graph gave the event, sent back as If-Match on a change. */
+  readonly etag?: string;
+  /** `singleInstance`, `occurrence`, `exception` or `seriesMaster`. */
+  readonly type?: string;
+  /** The guests' addresses. */
+  readonly attendees: readonly string[];
+}
+
+/** Read one event by its Graph id (me/events/{id}). An unknown id is a CalendarApiError with status 404. */
+export async function getGraphEvent(
+  fetchImpl: HttpFetch,
+  token: string,
+  eventId: string,
+  calendarLabel: string,
+  options: CalendarRequestOptions = {},
+): Promise<GraphEventRead> {
+  const url = new URL(`${BASE}/me/events/${encodeURIComponent(eventId)}`);
+  url.searchParams.set('$select', 'id,iCalUId,subject,bodyPreview,location,start,end,isAllDay,organizer,isOrganizer,isCancelled,attendees,changeKey,type,calendar');
+  const raw = (await authedRequest(fetchImpl, 'microsoft', {
+    url: url.toString(),
+    method: 'GET',
+    token,
+    operation: 'list-events',
+    extraHeaders: UTC_PREFER,
+  }, options)) as { changeKey?: unknown; '@odata.etag'?: unknown; type?: unknown; attendees?: unknown };
+  const attendees = Array.isArray(raw.attendees)
+    ? raw.attendees.flatMap((entry) => {
+      const address = (entry as { emailAddress?: { address?: unknown } } | null)?.emailAddress?.address;
+      return typeof address === 'string' && address.length > 0 ? [address] : [];
+    })
+    : [];
+  return {
+    event: normalizeGraphEvent(raw, '', calendarLabel),
+    ...(typeof raw.changeKey === 'string' ? { changeKey: raw.changeKey } : {}),
+    ...(typeof raw['@odata.etag'] === 'string' ? { etag: raw['@odata.etag'] } : {}),
+    ...(typeof raw.type === 'string' ? { type: raw.type } : {}),
+    attendees,
+  };
+}
+
+/** The fields of an event change, in Graph's shape (UTC times, or an all-day pair of dates). */
+export interface GraphEventChange {
+  readonly subject?: string;
+  readonly start?: string;
+  readonly end?: string;
+  readonly location?: string;
+  readonly description?: string;
+  readonly attendees?: readonly string[];
+}
+
+/** A Graph date-time or date (all day) from an ISO value. */
+function graphTime(value: string, allDayZone: string): { readonly dateTime: string; readonly timeZone: string } {
+  if (!value.includes('T')) return { dateTime: `${value}T00:00:00`, timeZone: allDayZone };
+  return { dateTime: new Date(Date.parse(value)).toISOString().replace(/Z$/, ''), timeZone: 'UTC' };
+}
+
+/** Change an event (PATCH me/events/{id}); `ifMatch` makes Graph refuse it (412) when the event changed since it was read. */
+export async function updateGraphEvent(
+  fetchImpl: HttpFetch,
+  token: string,
+  eventId: string,
+  change: GraphEventChange,
+  ownerZone: string,
+  ifMatch: string | undefined,
+  options: CalendarRequestOptions = {},
+): Promise<void> {
+  const allDayZone = ownerZone.trim().length > 0 ? ownerZone.trim() : 'UTC';
+  const allDay = change.start !== undefined && !change.start.includes('T');
+  const payload: Record<string, unknown> = {
+    ...(change.subject === undefined ? {} : { subject: change.subject }),
+    ...(change.start === undefined ? {} : { start: graphTime(change.start, allDayZone), isAllDay: allDay }),
+    ...(change.end === undefined ? {} : { end: graphTime(change.end, allDayZone) }),
+    ...(change.location === undefined ? {} : { location: { displayName: change.location } }),
+    ...(change.description === undefined ? {} : { body: { contentType: 'text', content: change.description } }),
+    ...(change.attendees === undefined ? {} : { attendees: graphAttendees(change.attendees) }),
+  };
+  await authedWrite(fetchImpl, 'microsoft', {
+    url: `${BASE}/me/events/${encodeURIComponent(eventId)}`,
+    method: 'PATCH',
+    token,
+    operation: 'create-event',
+    body: payload,
+    extraHeaders: { ...UTC_PREFER, ...(ifMatch === undefined ? {} : { 'If-Match': ifMatch }) },
+  }, options);
+}
+
+/** Remove an event (DELETE me/events/{id}); `ifMatch` as in {@link updateGraphEvent}. */
+export async function deleteGraphEvent(
+  fetchImpl: HttpFetch,
+  token: string,
+  eventId: string,
+  ifMatch: string | undefined,
+  options: CalendarRequestOptions = {},
+): Promise<void> {
+  await authedWrite(fetchImpl, 'microsoft', {
+    url: `${BASE}/me/events/${encodeURIComponent(eventId)}`,
+    method: 'DELETE',
+    token,
+    operation: 'create-event',
+    ...(ifMatch === undefined ? {} : { extraHeaders: { 'If-Match': ifMatch } }),
+  }, options);
 }

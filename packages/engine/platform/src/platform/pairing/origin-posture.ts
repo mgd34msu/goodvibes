@@ -10,12 +10,14 @@
  *  - Browsers gate some capabilities on a secure context (https, or the
  *    localhost loopback). Rather than a surface showing a dead button, the
  *    daemon labels each gated capability with WHY it is unavailable and the
- *    supported way to get it (tailscale ⇒ https without minting certificates,
- *    the daemon NEVER provisions a CA or mints certificates).
+ *    supported way to get it: a secure address (Settings, General, Secure
+ *    address: Let's Encrypt for a domain the owner has, his own certificate,
+ *    Tailscale, or the daemon's own local authority, daemon/lan-https).
  */
 import { isPrivateNetworkHost, isTailnetHost } from '@goodvibes/engine/transport-http/paths';
 import { isLoopbackHost } from '../utils/reachable-base-url.js';
 import type { PairingStep } from './offer-copy.js';
+import { servedHttps } from '../daemon/lan-https/served-https.js';
 
 /** The browser-gated capabilities a surface renders availability for. */
 export type BrowserGatedCapability = 'service-worker' | 'push' | 'microphone';
@@ -129,7 +131,7 @@ export const LAN_PLAIN_HTTP_NOTICE =
 export const TAILNET_PLAIN_HTTP_NOTICE =
   'Connection is encrypted by Tailscale. Everything works except browser-gated features, which need https: serve this machine over Tailscale https to get them.';
 
-const NEEDS_HTTPS_REASON = 'needs https: goodvibes-daemon webui enable --lan --https, or Tailscale';
+const NEEDS_HTTPS_REASON = 'needs https: set up a secure address in Settings, General, Secure address (a domain you own, a certificate you made, Tailscale, or GoodVibes\' own certificate)';
 
 /**
  * The line for https on a private address: the daemon's own LAN certificate
@@ -174,8 +176,11 @@ export function describeOriginPosture(origin: string): OriginPosture {
       : { capability, available: false, reason: NEEDS_HTTPS_REASON }
   ));
   const plainHttpLan = scheme === 'http' && privateNetwork && !secureContext;
-  // https on a private address that is not a tailnet name is the daemon's own LAN certificate.
-  const ownCertificate = scheme === 'https' && privateNetwork && !isTailnetHost(parsed.hostname) && !isLoopbackHost(parsed.hostname);
+  // https on a private address that is not a tailnet name is the daemon's own LAN certificate, unless the
+  // listener on that port serves another one (a certificate you made, Let's Encrypt, a group's): then nothing is installed on the phone.
+  const serving = servedHttps();
+  const otherCertificate = serving !== null && serving.source !== 'local-authority' && Number(parsed.port || 443) === serving.port;
+  const ownCertificate = scheme === 'https' && privateNetwork && !isTailnetHost(parsed.hostname) && !isLoopbackHost(parsed.hostname) && !otherCertificate;
   return {
     origin: parsed.origin,
     scheme,

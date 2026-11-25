@@ -10,7 +10,6 @@ import { useWebUiPreferences } from '../../../../lib/ui-preferences';
 import type { Theme } from '../../../../lib/theme';
 import { Segmented } from '../../../ui/Segmented';
 import { Toggle } from '../../../ui/Toggle';
-import { useMediaQuery } from '../../../ui/overlay';
 import { ConfigGroupList, useConfigSettings } from '../ConfigSettings';
 import { SettingRow, SettingsBlock } from '../parts';
 import { groupsForSection } from '../sections';
@@ -29,7 +28,6 @@ const THEME_OPTIONS: readonly { value: BaseTheme; label: string }[] = [
 export function GeneralSection() {
   const { theme, setTheme, density, setDensity } = useTheme();
   const [preferences, setPreference] = useWebUiPreferences();
-  const systemReduced = useMediaQuery('(prefers-reduced-motion: reduce)');
   const { groups } = useConfigSettings();
   const neon = theme === 'neon';
 
@@ -77,13 +75,10 @@ export function GeneralSection() {
           />
           <SettingRow
             label="Reduce motion"
-            description={systemReduced
-              ? 'Your system already asks for less motion, so nothing here moves; this keeps it so in this browser either way.'
-              : 'Menus, panels and notices appear without moving, and the "Thinking…" line holds still.'}
+            description='Menus, panels and notices appear without moving, and the "Thinking…" line holds still.'
             control={(
               <Toggle
-                checked={preferences.reduceMotion || systemReduced}
-                disabled={systemReduced}
+                checked={preferences.reduceMotion}
                 aria-label="Reduce motion"
                 onChange={(on) => setPreference('reduceMotion', on)}
               />

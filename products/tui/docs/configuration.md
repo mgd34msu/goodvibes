@@ -110,7 +110,7 @@ for it to read when it starts.
 | Value | Behavior |
 | --- | --- |
 | `ask-me` | Reads, edits inside the workspace and calls a saved rule or `permissions.tools.*` allows run without asking. Jev reads each other call's risk: calls it reads as critical, irreversible or security-weakening, and owner-only decisions, wait for your reply, bound to the exact action, and the rest run. With no decision model in use, every such call your tool settings do not allow asks you |
-| `jev-decides` (default) | Jev, the decision model, decides judgment calls: it permits ordinary work and justified risk and refuses genuinely harmful actions; owner-only decisions (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) still ask you, and Jev never answers them. With no working decision model (none set, or `judgment.policy` is `No Decision Model`) it behaves as `ask-me`. While `jev-decides` is only the default (you have not chosen a mode), it also behaves as `ask-me` unless the endpoint, the model and every fallback target a decision can reach match the shipped calibration record (the hosted endpoint and `jev-latest`); choosing `jev-decides` yourself, in `/settings`, with Shift+Tab, for a hosted session or in a channel profile, applies it on any working decision model |
+| `jev-decides` (default) | Jev, the decision model, decides judgment calls: it permits ordinary work and justified risk and refuses genuinely harmful actions; owner-only decisions (granting access, loosening a security, judgment or payment setting, a call your own "always ask me" rule covers, a change asked for from a channel, a deletion nothing keeps a copy of, sending to a new recipient, sending content derived from untrusted text, and changing what a contract requires) still ask you, and Jev never answers them. With no working decision model it behaves as `ask-me`. While `jev-decides` is only the default (you have not chosen a mode), it also behaves as `ask-me` unless the endpoint, the model and every fallback target a decision can reach match the shipped calibration record (the hosted endpoint and `jev-latest`); choosing `jev-decides` yourself, in `/settings`, with Shift+Tab, for a hosted session or in a channel profile, applies it on any working decision model |
 | `just-vibes` | Does as much as it can without interrupting you: Jev decides judgment calls when a decision model works; an owner-only decision, or a judgment with no decision model, is not run and is held, and the end of each run lists what was held (a headless run reports it as `heldForOwner`); `/held approve <id>` approves one for the session and the work carries on with it when you ask; a call held in a daemon-hosted session (web UI) is also posted to the owner inbox, answerable with `approve` or `dismiss` in `/questions` or the web UI |
 | `yolo` | Runs actions without safety decisions or prompts, except that a change asked for from a channel still goes to you and an act only you perform (answering an approval, granting access) is refused to the model; host containment, secret storage and payment limits still apply |
 | `plan` | Allows read-only tools and refuses every mutating or exec tool with a structured plan-mode denial |
@@ -119,8 +119,12 @@ Older settings files keep working: `safe-owner`, `prompt`, `normal`,
 `accept-edits` and `custom` are read as `ask-me`, `safe-jev` and `auto` as
 `jev-decides`, `just-work` as `just-vibes` and `allow-all` as `yolo`; the file
 is not rewritten, and `prompt`, `normal`, `accept-edits` and `custom` print a
-one-line notice. How the mode combines with `judgment.policy` is in
-[decision-model policies](../../../docs/decision-model-policy.md#how-much-you-are-asked).
+one-line notice. How much each mode asks is in
+[decision models](../../../docs/decision-model-policy.md#how-much-you-are-asked).
+In `jev-decides` and `just-vibes`, "If Jev can't answer" (`judgment.policy`, in
+the decision model settings) says whether a call Jev would decide comes to you
+(Ask me, the default) or is refused (Refuse the action) while the decision model
+fails.
 `--just-vibes` and `--yolo` select those modes for one launch. `behavior.autoApprove` is a deprecated alias for `yolo`;
 selecting an execution mode clears it. Per-tool overrides are the separate
 `permissions.tools.<name>` keys, each `allow`, `prompt` or `deny`; an explicit

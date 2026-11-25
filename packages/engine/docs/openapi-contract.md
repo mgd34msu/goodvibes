@@ -1,7 +1,8 @@
 # Published OpenAPI operator contract
 
 The operator contract is published as a real OpenAPI 3.1 document, generated
-from the committed contract artifact and kept honest by a drift gate.
+from the contract every client and the daemon share, so it always matches the
+daemon of the same release.
 
 ## Where to fetch it
 
@@ -14,15 +15,14 @@ from the committed contract artifact and kept honest by a drift gate.
 
 ## What it contains
 
-- Every cataloged operator method. The paragraph between the markers is written
-  by `scripts/generate-openapi-contract.ts` from the contract, so its counts
-  cannot drift from the document.
+- Every cataloged operator method. The counts below are taken from the contract
+  itself.
   <!-- openapi-counts:start -->
-  Methods with a dedicated REST binding appear as path operations (536 operations, one per
+  Methods with a dedicated REST binding appear as path operations (538 operations, one per
   method's declared HTTP verb and path); methods without one are reachable only through the
-  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 537,
-  120 methods) and are listed on it under `x-invoke-only-methods`.
-  `x-operator-methods` is a flat index of all 656 cataloged methods, REST-bound
+  generic invoke endpoint (`POST /api/control-plane/methods/{methodId}/invoke`, operation 539,
+  123 methods) and are listed on it under `x-invoke-only-methods`.
+  `x-operator-methods` is a flat index of all 661 cataloged methods, REST-bound
   or invoke-only, each with its category, access level, resolved REST route (or
   `null` for invoke-only), and schema coverage.
   <!-- openapi-counts:end -->
@@ -32,9 +32,9 @@ from the committed contract artifact and kept honest by a drift gate.
   A method whose contract schema is absent or a bare object with no declared
   properties is marked `x-schema-coverage: schema-less` instead of being given
   an invented schema.
-- Typed client IO for every method: `contracts:check` fails when a cataloged
-  method has no rendered `OperatorMethodInputMap`/`OperatorMethodOutputMap`
-  entry, so no operation is untyped in the typed client.
+- Typed client input and output for every method: every cataloged method has its
+  `OperatorMethodInputMap`/`OperatorMethodOutputMap` entry, so no operation is
+  untyped in the typed client.
 - One error body, `components.schemas.ErrorBody`, with the fields every daemon
   route answers with (`error`, `state`, `next`, `hint`, `code`, `category`,
   `requestId`, `retryAfterMs` and the rest of `StructuredDaemonErrorBody`). Its
@@ -48,18 +48,6 @@ from the committed contract artifact and kept honest by a drift gate.
   opting out via an empty `security` array on their own operation (the document
   level still requires one of `bearerAuth`/`sessionCookie` by default). The full
   contract auth block rides along as `x-auth-contract`.
-
-## Regeneration and drift (the generated-artifact idiom)
-
-```
-bun run openapi:generate   # regenerate the document and the counts above
-bun run openapi:check      # exit 1 on drift
-```
-
-`contracts:check` (part of `validate`) runs the drift check, so a change to the
-operator contract that is not reflected in the committed OpenAPI document, or a
-hand-edit to the document, fails gates. The generator's inputs are themselves
-committed artifact `operator-contract.json`, so generation is deterministic.
 
 ## Streams and replay
 
@@ -86,12 +74,4 @@ tasks, contracts, approvals and the event stream there is a generated slice:
   key, what it does), the event ids and domains, the replay keys, and the error
   codes with their status.
 
-```
-bun run agent-spec:generate   # write both files from the committed contract
-bun run agent-spec:check      # exit 1 when they are stale
-```
-
-No build, test or gate writes these files; run the generate command after a
-change to the sessions, tasks, contracts or approvals methods (or their events)
-and commit the result. They are derived from the same
-`contracts/artifacts/operator-contract.json` as the full document.
+Both are derived from the same contract as the full document.

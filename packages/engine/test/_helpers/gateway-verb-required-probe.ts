@@ -94,6 +94,7 @@ import { registerHostedSessionGatewayMethods } from '../../platform/src/platform
 import { registerSkillsGatewayMethods } from '../../platform/src/platform/control-plane/routes/skills.js';
 import { registerStepUpGatewayMethods } from '../../platform/src/platform/control-plane/routes/stepup.js';
 import { registerTailscaleGatewayMethods } from '../../platform/src/platform/control-plane/routes/tailscale.js';
+import { registerSecureAddressGatewayMethods } from '../../platform/src/platform/control-plane/routes/secure-address.js';
 import { registerVoiceSetupGatewayMethods } from '../../platform/src/platform/control-plane/routes/voice-setup.js';
 import { registerWorkspacesGatewayMethods } from '../../platform/src/platform/control-plane/routes/workspaces.js';
 import { registerWorktreeSetupGatewayMethods } from '../../platform/src/platform/control-plane/routes/worktree-setup.js';
@@ -131,6 +132,13 @@ function registeredRelayStub(): never {
   return new Proxy(inner, {
     get(target, property) { return property === 'status' ? 'registered' : Reflect.get(target, property); },
   }) as never;
+}
+
+/** Secure address deps whose service follows no group lead (a stub's answer would read as one). */
+function ownMachineSecureAddressStub(): never {
+  const service = new Proxy(stubDeps() as object, { get: (target, property) => property === 'groupFollowing' ? () => null : Reflect.get(target, property) });
+  const listener = new Proxy(stubDeps() as object, { get: (target, property) => property === 'secureAddress' ? service : Reflect.get(target, property) });
+  return new Proxy(stubDeps() as object, { get: (target, property) => property === 'listener' ? listener : Reflect.get(target, property) }) as never;
 }
 
 /**
@@ -194,6 +202,8 @@ const ROUTE_REGISTRARS: ReadonlyArray<readonly [string, (catalog: GatewayMethodC
   ['skills', (catalog) => registerSkillsGatewayMethods(catalog, stubDeps())],
   ['stepup', (catalog) => registerStepUpGatewayMethods(catalog, stubDeps())],
   ['tailscale', (catalog) => registerTailscaleGatewayMethods(catalog, stubDeps())],
+  // A machine of its own (no group lead to follow), so the handlers reach their input checks.
+  ['secure-address', (catalog) => registerSecureAddressGatewayMethods(catalog, ownMachineSecureAddressStub())],
   ['trigger-supervisor', (catalog) => registerTriggerSupervisorGatewayMethods(catalog, {
     inspectRecords: () => [], executionOwnership: 'unclaimed',
   })],
@@ -267,6 +277,7 @@ export const EXPECTED_ROUTE_REGISTRARS: readonly string[] = [
   'registerRewindGatewayMethods',
   'registerRuntimeMetricsGatewayMethods',
   'registerRuntimeStateGatewayMethods',
+  'registerSecureAddressGatewayMethods',
   'registerSessionRuntimeGatewayMethods',
   'registerSkillsGatewayMethods',
   'registerStepUpGatewayMethods',
@@ -308,6 +319,8 @@ const SAMPLE_OVERRIDES: Readonly<Record<string, unknown>> = {
   'push.subscriptions.create.keys': PROBE_PUSH_KEYS,
   'push.subscriptions.reconcile.endpoint': 'https://example.invalid/push/probe',
   'push.subscriptions.reconcile.keys': PROBE_PUSH_KEYS,
+  // The choice that needs nothing more: lets-encrypt also needs a name unless one is stored, own-files the two paths.
+  'secureAddress.set.certificate': 'local-authority',
 };
 
 function sampleForSchema(schema: unknown): unknown {

@@ -2607,50 +2607,6 @@ payments setting (§3.2).
 
 ---
 
-## 11. Test plan (adversarial, mandatory)
-
-These are requirements on the capability's remaining wire work (§10), not
-suggestions:
-
-1. A purchase whose **merchant** derives from injected content is refused.
-2. A purchase whose **amount** derives from injected content is refused.
-3. A purchase whose **item** derives from injected content is refused.
-4. A tainted purchase is still refused **with a valid `OwnerApproval` present**.
-5. An approval message **cannot be influenced by page text**, byte-identical
-   rendering across every injected page field.
-6. An above-budget purchase with an **undeliverable notification does not
-   happen**.
-7. An in-budget purchase with an **undeliverable notification does happen**.
-8. Silence on an above-budget approval **denies**; silence on an in-budget veto
-   **proceeds**; and the two constants are asserted never to agree.
-9. The **shipping ladder steps down one tier at a time**, stops at the cheapest,
-   and records the step-down in the audit record and the veto message.
-10. **No filler item is ever added**, cart lines match the request at payment
-    time, and no free-shipping-threshold logic exists in the module.
-11. **The day boundary behaves as ruled**, including the midnight split: $100 at
-    23:59 and $100 at 00:00 both go through, in the configured zone and in UTC
-    when unset.
-12. Changing the timezone **does not refill** a spent pool.
-13. Two concurrent in-budget purchases cannot both draw the same remaining
-    budget.
-14. A checkout URL with userinfo, a homograph host, a shortener, or a redirect
-    off the authorized registrable domain is refused, each by name.
-15. A serialized audit record contains **no card material**.
-16. A challenge pause never retries payment and never completes an order.
-17. A payment approval whose deadline passes **while the daemon is down**
-    resolves denied, not pending (§8.6.1).
-18. A veto window that elapsed entirely while the daemon was down proceeds
-    only when it is resumed on Telegram with every reply up to the deadline
-    proven received and none of them an objection; an uncovered recipient gets
-    the notice again. Any window that cannot be resumed ends unbought and the
-    owner is told (§8.6.1).
-19. `'email'` never parses into `CommandAuthorityChannel`, and no payment prompt
-    reaches an email path.
-20. Card material entered at a surface never appears in input history, the
-    transcript, a log line, or any operator response.
-
----
-
 ## 12. Rulings taken here, and what remains open
 
 ### 12.1 Ruled

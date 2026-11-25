@@ -21,8 +21,7 @@ Jev credentials and conversation-provider credentials serve different purposes.
 Use `goodvibes --version` and `goodvibes-daemon --version` to inspect the installed
 products. Updates and data-preserving uninstall use the installer you installed with.
 
-For source development, use Bun **1.3.14** and Node **22 or later**. Go is
-optional for Go language-server support. A missing `rust-analyzer` or `gopls`
+A missing `rust-analyzer` or `gopls`
 is never installed behind your back: a code lookup says which server is missing
 and how to install it, and `/intelligence install <file|language>` installs it
 into your GoodVibes bin directory when you ask.
@@ -38,6 +37,11 @@ which is three steps and the same in the Agent:
 2. Sign in, or paste a key. A key the provider refuses is not kept.
 3. Start: the conversation opens with one sentence saying when GoodVibes asks
    before acting.
+
+Then type a question about the project, for example `What does this project do,
+and how do I run its tests?`, and press Enter: it reads the files it needs and
+answers. When a key in your environment already makes a provider usable, first
+run uses it and you start here.
 
 Leaving part way and starting again resumes from where you were: a provider
 chosen but not signed in opens step 2. After first run the splash names the
@@ -125,34 +129,6 @@ provider-backed secret reference:
 Use `/secrets providers` for supported provider shapes and `/secrets test <secret-ref>` to validate a ref without printing its value.
 
 Environment variables take precedence over stored secrets when both are present.
-
-## Run from source
-
-From the monorepo root:
-
-```sh
-bun install
-bun run build
-bun run --cwd products/tui dev
-```
-
-The TUI runs from `products/tui/src/main.ts` and connects to the daemon as the
-compiled binary does. It can adopt a running daemon or start an installed,
-stopped daemon service. It does not construct a daemon itself. The daemon
-source and build live in `products/daemon` in this same repository; see its
-[CLI and composition requirements](../../daemon/README.md).
-
-## Build and run the compiled binary
-
-```sh
-bun run --cwd products/tui build:linux-x64
-./products/tui/dist/goodvibes-linux-x64
-```
-
-This example targets Linux x64 and runs from the monorepo root after the engine
-is built. Use `build:linux-arm64` and `dist/goodvibes-linux-arm64` for Linux ARM64;
-other declared targets are listed in `products/tui/package.json`. The control
-plane, optional HTTP listener and WebUI are hosted by the daemon.
 
 ## Tool access and completion
 

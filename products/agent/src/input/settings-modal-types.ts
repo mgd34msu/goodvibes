@@ -20,9 +20,11 @@ export interface SettingsModalOpenOptions {
   readonly requestRender?: () => void;
   /** Prints a failed credential save where it is still seen after the modal closes. */
   readonly reportError?: (message: string) => void;
+  /** Calls one of the daemon's methods (the Secure address list reads `secureAddress.get`). */
+  readonly invokeDaemon?: (method: string, input: Record<string, unknown>) => Promise<unknown>;
 }
 
-export type SettingsCategory = CommonSettingsCategory | 'flags' | 'fleet' | 'cluster';
+export type SettingsCategory = CommonSettingsCategory | 'flags' | 'fleet' | 'cluster' | 'secure-address-now';
 
 export type { SettingsFocusRegion as SettingsFocusPane } from '@goodvibes/engine/terminal-shell/settings-model-types';
 
@@ -142,7 +144,7 @@ export const SETTINGS_CATEGORY_GROUPS: ReadonlyArray<{
   // retired host-owned lock made.
   {
     label: 'Daemon Runtime',
-    categories: ['daemon', 'service', 'controlPlane', 'httpListener', 'danger', 'web', 'watchers', 'network', 'relay', 'cluster', 'update'],
+    categories: ['daemon', 'service', 'controlPlane', 'httpListener', 'danger', 'web', 'watchers', 'network', 'relay', 'cluster', 'update', 'secureAddress', 'secure-address-now'],
   },
   {
     label: 'Advanced Runtime',

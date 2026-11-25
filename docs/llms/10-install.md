@@ -234,8 +234,9 @@ Options:
   --service             Install the daemon as a service (the default), even when GOODVIBES_DAEMON_SERVICE=0.
   --no-auto-update      Keep the daemon, the terminal app and the Agent from updating themselves, from their
                         first launch (also GOODVIBES_AUTO_UPDATE=0). Update later by running this installer.
-  --decision-policy POLICY  Save the decision model policy: Hybrid, "Decision Model Only" or
-                        "No Decision Model" (sets judgment.policy).
+  --decision-policy POLICY  Save the decision model policy (the judgment.policy setting; the daemon refuses
+                        a value it does not accept and names the allowed ones; see the current one with
+                        goodvibes-daemon config get judgment.policy).
   --uninstall           Remove the installed programs and services; settings and data in ~/.goodvibes are kept.
   --help|-h             Print this help and exit.
 ```
@@ -316,12 +317,6 @@ Install only the terminal app and the daemon, without the Agent, the web UI or t
 
 ```sh
 curl -fsSL https://goodvibes.sh/install.sh | GOODVIBES_AGENT=0 GOODVIBES_WEBUI=0 GOODVIBES_WAKE_MODEL=0 sh
-```
-
-Install with no decision model at all:
-
-```sh
-curl -fsSL https://goodvibes.sh/install.sh | sh -s -- --decision-policy 'No Decision Model'
 ```
 
 Install unattended (CI, a provisioning script, no terminal). Older copies on `PATH` are then removed only when `GOODVIBES_SHADOW_REMOVE=1`; with the default, an unanswerable question leaves them in place and the install still succeeds:
@@ -601,7 +596,7 @@ All of these run as the owner, with no `sudo`. They act on the user's own servic
 
 The global options `--daemon-home <dir>` and `-C <dir>` (`--working-dir`, `--cd`) also apply to these commands. The complete daemon command reference is in the daemon part of this file.
 
-`install-service`, `refresh-service`, `start-service` and `restart-service` work only with an installed (compiled) daemon. Run from a source checkout (for example `bun products/daemon/bin/goodvibes-daemon start-service`, which runs a built `dist/` copy when one exists, see [Running from source without installing](#running-from-source-without-installing)), each refuses with exit `2` and prints `Serving requires an explicit production inbox composition. Configured providers require trusted local account admission. Service activation requires an explicitly composed executable.` `service-status`, `stop-service` and `uninstall-service` also run from source. Serving itself (`goodvibes-daemon` or `serve`) runs from source too, but such a daemon never updates itself and never promotes itself to a service.
+`install-service`, `refresh-service`, `start-service` and `restart-service` work only with an installed (compiled) daemon; any other copy refuses them with exit `2`.
 
 Example: check the service from a script.
 
@@ -874,7 +869,7 @@ Only a release ("binary") installation updates itself. A program run from source
 
 1. The first check runs `update.firstCheckSeconds` (default 30) seconds after start, never later than one interval. Later checks run every `update.intervalMinutes` (default 60) minutes.
 2. A check asks the release feed named by `update.releasesUrl` for the latest tag. When it is newer than the running daemon, the daemon downloads and checksum-verifies the release.
-3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback. From that last idle check until it restarts, the daemon takes no new work: a request that would start or change something (any method other than `GET` or `HEAD`, and over the WebSocket any call whose method is not a read) is answered `503` with code `DAEMON_ADMISSION_CLOSED` and `Retry-After: 5`, and reads and status still answer. A channel message that arrives meanwhile (Telegram, Slack, Discord, Mattermost, ntfy including its remote-chat topic, Home Assistant chat, the generic webhook and the other chat channels) is accepted and saved but neither read nor started, and no notice is sent: it is answered once, after the restart (a Home Assistant reply arrives as its event). A message in a delegated Telegram review chat is not taken: it stays with Telegram and is read after the restart. A GitHub webhook event is answered `202` with `outcome: waiting-for-restart`, saved, and its agent started once after the restart. A "yes" to a work proposal is kept the same way, with any direction added to it, and its work starts after the restart. Scheduled automation jobs and check-ins, watcher runs, knowledge schedules, trigger actions, memory consolidation, the daily store snapshot and the timed retention sweeps start nothing either. What fell due runs after the restart: an automation occurrence once (within `automation.catchUpWindowMinutes`), a trigger's owed action once (a condition still true fires again), consolidation at its next idle or scheduled pass, and the store snapshot at the first hourly check. When the files are not replaced after all, or the service manager refuses the handover before the daemon stops, it takes work again at once and starts what it held.
+3. The daemon waits until no work is in flight, then replaces the files. Each replaced file is kept as `<file>.previous` for rollback. One previous version is kept for going back, about 830 MB for a linux-x64 suite with the web UI: the programs and their companion files as `<file>.previous` beside them in the install directory (`~/.local/bin` by default), the browser driver as `playwright-core.previous` there, and the web UI as `<webui directory>.previous` (for example `~/.local/bin/webui/3.5.0.previous`). The next update replaces that copy; nothing else it downloaded or unpacked is left behind. From that last idle check until it restarts, the daemon takes no new work: a request that would start or change something (any method other than `GET` or `HEAD`, and over the WebSocket any call whose method is not a read) is answered `503` with code `DAEMON_ADMISSION_CLOSED` and `Retry-After: 5`, and reads and status still answer. A channel message that arrives meanwhile (Telegram, Slack, Discord, Mattermost, ntfy including its remote-chat topic, Home Assistant chat, the generic webhook and the other chat channels) is accepted and saved but neither read nor started, and no notice is sent: it is answered once, after the restart (a Home Assistant reply arrives as its event). A message in a delegated Telegram review chat is not taken: it stays with Telegram and is read after the restart. A GitHub webhook event is answered `202` with `outcome: waiting-for-restart`, saved, and its agent started once after the restart. A "yes" to a work proposal is kept the same way, with any direction added to it, and its work starts after the restart. Scheduled automation jobs and check-ins, watcher runs, knowledge schedules, trigger actions, memory consolidation, the daily store snapshot and the timed retention sweeps start nothing either. What fell due runs after the restart: an automation occurrence once (within `automation.catchUpWindowMinutes`), a trigger's owed action once (a condition still true fires again), consolidation at its next idle or scheduled pass, and the store snapshot at the first hourly check. When the files are not replaced after all, or the service manager refuses the handover before the daemon stops, it takes work again at once and starts what it held.
 4. The daemon stops in order, then the service manager starts the new version. Under systemd it asks for a service restart. When it was started by hand on Linux, it installs the systemd user unit and hands over to it. On macOS a one-time launchd helper restarts it after the old process exits; a daemon on macOS that launchd does not supervise is not updated this way, so update it with the installer or `/update apply`.
 5. The daemon logs and records a receipt that begins `updated from 3.4.8 to 3.5.0 at <YYYY-MM-DD HH:MM>` and names the programs and directories it replaced. The time is in `daemon.timezone`, else the owner profile's zone, else the machine's own zone; the zone is named after the time (`<YYYY-MM-DD HH:MM> <zone>`) only when it is not the machine's.
 
@@ -1148,6 +1143,25 @@ Programs keep running the version they started with until they restart:
 
 When a newly updated daemon fails to finish starting `update.rollbackAfterFailedStarts` times (default 3) within ten minutes, the daemon restores the kept previous release and restarts onto it. It then records the rejected version, so the update loop never installs that version again and resumes with the next newer release. Setting `update.rollbackAfterFailedStarts` to `0` turns this off. It does not roll back a build that has already started successfully on the same machine, because repeated failures of such a build come from the machine (an occupied port, for example). It refuses to restore a kept copy that is not older than the running build or is a release an earlier rollback rejected; each refusal is written to the daemon's output and receipts. It never rolls back twice in a row: after one automatic rollback, the next one waits until a start has completed. With no kept previous copy on disk it restores nothing and keeps starting the current build. `goodvibes-daemon update` shows a rejected release on its `rejected:` line.
 
+### When a program is older than the daemon requires
+
+Every program in the suite carries the same version. A daemon accepts programs of its own release line (the same major and minor version, such as 3.5) and newer; it announces that line on its status answer, and each program compares itself every time it reads the status. A program that was already running when the daemon updated keeps its older build; it says so once and stops taking part in the work the daemon shares between your programs until it restarts:
+
+| Program | What the person sees |
+| --- | --- |
+| The terminal app and the Agent | One notice: `This process is running build 3.4.8; the daemon requires 3.5.0 or newer. It has stopped taking shared-session work, restart it to rejoin.` |
+| The web app | **Reload to update** in the header, described by `This tab is running build 3.4.8; the daemon requires 3.5.0 or newer. It has stopped taking shared-session work, reload the page to pick up the current build.` The page reloads by itself as soon as nothing would be lost (no unsent text, no reply streaming, nothing open over the page), once per answer; if the reloaded page still hears the same answer, the button stays. |
+| A program that reports no version | `This build does not report a version, so it cannot be checked against the daemon's floor of 3.5.0. Restart it from the current install to be sure it is current.` |
+
+The other way round, a program does not use a daemon older than it needs: the terminal app and the Agent need 3.3.2 or newer, the web app 3.1.2. This happens when it is paired with a daemon on another machine that has not updated:
+
+| Program | What the person sees |
+| --- | --- |
+| The terminal app | A notice, `The daemon at http://server.lan:3421 is running build 3.2.0; this client requires 3.3.2 or newer, update the daemon.`, said once; that daemon is not used. It is read again when it comes back online, so an updated daemon is taken up without a restart. |
+| The web app | The same sentence in a warning banner. |
+| The Agent | Each request to that daemon is refused with `the GoodVibes host at http://server.lan:3421 is older than this Agent build needs` and the next step `update GoodVibes on the host (goodvibes-daemon) to this Agent's version, then retry`. |
+| Any of them, for a daemon that reports no version | `The daemon at http://server.lan:3421 did not report a version, so this client is not using it. Check that the address points at a GoodVibes daemon, and update the daemon to 3.3.2 or newer.` |
+
 ## Uninstalling
 
 ### Uninstalling a release installation
@@ -1343,7 +1357,7 @@ Re-run to update from the current checkout. Use ./scripts/uninstall.sh to remove
 | `--workspace DIR` | the checkout directory | The working directory of the daemon's service. Must be an existing directory, not the home directory, not `/`, and not inside the program or data directory. |
 | `--port PORT` | `3421`; on an update, the daemon's current `controlPlane.port` | The daemon's port (`controlPlane.port`), 1024 to 65535. |
 | `--no-service` / `--service` | `--service`; on an update, the daemon's current `service.enabled` | Whether to install and start the daemon's systemd user unit (`goodvibes.service`, or the name set in `service.serviceName`). |
-| `--decision-policy POLICY` | unchanged | `Hybrid`, `Decision Model Only` or `No Decision Model`, saved as `judgment.policy`. |
+| `--decision-policy POLICY` | unchanged | `Hybrid` or `Decision Model Only` (the "If Jev can't answer" choices Ask me and Refuse the action), saved as `judgment.policy`. |
 | `--uninstall [--prefix DIR] [--purge]` | | Must be the first argument. Runs `scripts/uninstall.sh` with the remaining arguments. |
 | `--help`, `-h` | | Prints the help. Must be the first argument. |
 
@@ -1514,16 +1528,6 @@ To move from a checkout installation to the release installer while keeping sess
 | `` A GoodVibes program from <prefix> is still running (a daemon started with `goodvibes-daemon serve`, a terminal or an agent); quit it, then run the uninstall again. `` | Uninstall found a process of this user running a program from the installation after its service was stopped. Nothing was removed; the service stays stopped and disabled. | Quit that program, then run the uninstall again. |
 | `<command> failed (<status>): <output>` / `<command> could not be started (ENOENT)` | A build or system command failed. | Read its output, fix, retry. |
 
-### Running from source without installing
-
-From a clone, after `bun install --frozen-lockfile`:
-
-- `bun products/agent/bin/goodvibes-agent.ts` runs the Agent from source.
-- `bun products/daemon/bin/goodvibes-daemon` runs the daemon. The launcher prefers a built `products/daemon/dist/cli/entrypoint.js` whenever that file exists, and only otherwise runs the source (`src/cli/entrypoint.ts`); after source changes without `bun run build`, it runs the older build. To run the current source regardless, use `bun products/daemon/src/cli/entrypoint.ts <arguments>`. Either way it is a run from source. A daemon run from source never updates itself, never promotes itself to a service, and refuses `install-service`, `refresh-service`, `start-service` and `restart-service` with exit `2` (`Serving requires an explicit production inbox composition. Configured providers require trusted local account admission. Service activation requires an explicitly composed executable.`).
-- `products/tui/bin/goodvibes` runs the terminal app's built program from the workspace. Without a build it prints `goodvibes: this private Jev workspace has no built TUI binary.` and `Build the workspace engine, then run bun run --filter @goodvibes/tui build from the workspace root.`
-
-`bun run build` at the repository root builds the engine and every product. Programs run from a workspace print workspace rebuild guidance for `/update` instead of updating themselves.
-
 ## Installer errors and their fixes
 
 Every refusal of the release installer ends with its id in parentheses, for example `install.sh: need curl or wget (INSTALL_E004)`. The exit status is `1`.
@@ -1649,7 +1653,7 @@ Sections, in order:
 | --- | --- |
 | header | `workingDir` and `homeDir`. |
 | `Provider:` | The provider, the model (`provider:model`), the reasoning effort and what this model supports, the sign-in in use (for example `API key (OPENROUTER_API_KEY)`), and where the model list comes from. |
-| `Decision model:` | The `judgment.policy` value and whether a decision model is in use. |
+| `Decision model:` | The "If Jev can't answer" choice (`judgment.policy`) and whether a decision model is in use. |
 | `Auth:` | The permission mode with its meaning, `behavior.autoApprove`, the secret storage policy, and whether the local user store, the bootstrap credential and the operator token file exist (with their paths). |
 | `Service:` | `service.enabled`, `service.autostart`, `service.restartOnFailure`, the platform, whether the service is installed and running, its pid, the definition path and the log path. |
 | `Surfaces:` | Whether the control plane, the HTTP listener and the web surface are on, with their addresses (defaults `127.0.0.1:3421`, `127.0.0.1:3422`, `127.0.0.1:3423`), and whether other machines are served (`controlPlane.enabled`). The web UI itself is served on the control plane's address. |

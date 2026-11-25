@@ -265,6 +265,13 @@ export class ClusterGroupRuntime {
   /** Group tenants by the message type they own (group-tenants.ts). */
   readonly #tenants = new Map<string, GroupTenant>();
   readonly #memberHeardListeners = new Set<(nodeId: string) => void>();
+  readonly #membershipClearedListeners = new Set<() => void>();
+
+  /** Called when this machine stops being a member (it left, was forgotten or removed); returns the removal. */
+  onMembershipCleared(listener: () => void): () => void {
+    this.#membershipClearedListeners.add(listener);
+    return () => { this.#membershipClearedListeners.delete(listener); };
+  }
   /** When this process started listening to the group, or null before it has. */
   private listeningSince: number | null = null;
   /** A key material write is failing; its cause has been logged. */
@@ -782,6 +789,9 @@ export class ClusterGroupRuntime {
     this.refreshFromRecord();
     this.lastHeard.clear();
     this.membershipRevision += 1;
+    for (const listener of [...this.#membershipClearedListeners]) {
+      try { listener(); } catch (error) { this.options.logger.warn('cluster: a membership-cleared listener failed', { error: error instanceof Error ? error.message : String(error) }); }
+    }
   }
 
   /** Delete from the same actual encrypted store that owns this membership. */

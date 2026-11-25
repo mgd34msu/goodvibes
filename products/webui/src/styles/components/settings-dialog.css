@@ -761,8 +761,6 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .settings-details__chevron {
-    transition: none;
-  }
+:root[data-motion="reduce"] .settings-details__chevron {
+  transition: none;
 }

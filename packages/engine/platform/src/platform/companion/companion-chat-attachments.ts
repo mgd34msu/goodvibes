@@ -26,6 +26,8 @@ const MAX_INLINE_TEXT_ATTACHMENT_BYTES = 200 * 1024;
 
 export interface CompanionChatArtifactStore {
   get(artifactId: string): ArtifactDescriptor | null;
+  /** Remove a stored file for good (a file the person removed from a sent message); false when it was not there. */
+  delete?(artifactId: string): boolean;
   readContent(artifactId: string): Promise<{
     readonly record: { readonly mimeType: string; readonly filename?: string | undefined };
     readonly buffer: ArrayBuffer | Uint8Array | Buffer;
@@ -94,6 +96,18 @@ export function formatAttachmentSummary(attachments: readonly AttachmentFacts[])
 
 export function buildReplayUserContent(message: CompanionChatMessage): string {
   return `${message.content}${formatAttachmentSummary(message.attachments ?? [])}`;
+}
+
+/**
+ * The note a message whose files the person removed after sending carries to the
+ * model in place of them: the names only, so an earlier reply that spoke of a file
+ * still makes sense, and the model knows the content is gone.
+ */
+export function formatRemovedAttachmentNote(message: Pick<CompanionChatMessage, 'removedAttachments'>): string {
+  const removed = message.removedAttachments ?? [];
+  if (removed.length === 0) return '';
+  const names = removed.map((entry) => entry.name).join(', ');
+  return `\n\n[The person removed ${removed.length === 1 ? 'this attached file' : 'these attached files'} after sending: ${names}. ${removed.length === 1 ? 'Its' : 'Their'} content is no longer available.]`;
 }
 
 function isInlineTextAttachment(attachment: AttachmentFacts): boolean {

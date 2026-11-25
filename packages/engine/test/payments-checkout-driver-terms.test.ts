@@ -38,7 +38,7 @@ function driverOn(page: { url: string; submit: string; text: string }) {
 }
 
 test('with no decision model, only the merchant\'s page with the approved total and submit control passes the last check', async () => {
-  const retire = configureDecisionModelPolicy(() => 'No Decision Model');
+  const retire = configureDecisionModelPolicy(() => 'Hybrid', () => false);
   try {
     const shown = (page: { url: string; submit: string; text: string }) => {
       const driver = driverOn(page);

@@ -65,7 +65,7 @@ async function ntfyServer(refused: ReadonlySet<string>) {
 async function automation(ntfyUrl: string, outcome: AgentRecord['status']) {
   const root = mkdtempSync(join(tmpdir(), 'gv-run-delivery-'));
   cleanups.push(() => rmSync(root, { recursive: true, force: true }));
-  cleanups.push(configureDecisionModelPolicy(() => 'No Decision Model'));
+  cleanups.push(configureDecisionModelPolicy(() => 'Hybrid', () => false));
   const configManager = new ConfigManager({ surfaceRoot: 'tui', workingDir: root, configDir: join(root, 'config') });
   configManager.setMany([{ key: 'surfaces.ntfy.baseUrl' as ConfigKey, value: ntfyUrl }], localOwnerActor());
   const secretsManager = new SecretsManager({ surfaceRoot: 'goodvibes', globalHome: join(root, 'home'), projectRoot: root });

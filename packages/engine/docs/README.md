@@ -12,14 +12,12 @@ history, including upstream releases.
 - [Getting started](./getting-started.md)
 - [Packages and entry points](./packages.md)
 - [Public exports](./exports.md)
-- [Runtime surface architecture](./runtime-surfaces.md): capability and runtime boundary model.
 - [Published surface matrix](./surfaces.md): package export entrypoints and supported import surfaces.
 - [Public surface reference](./public-surface.md)
 
 ## Client integration
 
-- [Authentication](./authentication.md): consumer token and session guidance.
-- [Auth architecture](./auth.md): internal auth plumbing and daemon enforcement.
+- [Authentication](./authentication.md): which entry point to use, tokens, sessions and refresh.
 - [Browser integration](./browser-integration.md)
 - [Web UI integration](./web-ui-integration.md)
 - [React Native integration](./react-native-integration.md)
@@ -40,18 +38,15 @@ history, including upstream releases.
 - [Daemon embedding](./daemon-embedding.md)
 - [platform embedding API](./embedding-api.md): the stability-marked `/embed` surface for hosting the runtime in another app.
 - [Provider and model API](./provider-model-api.md)
-- [Provider architecture](./providers.md)
-- [Runtime orchestration](./runtime-orchestration.md)
+- [Provider architecture](./providers.md), including [which model answered](./providers.md#which-model-answered-response-identity)
+- [Runtime orchestration](./runtime-orchestration.md), including a contract's [code context](./runtime-orchestration.md#isolation-commit-and-persistence) and [hosted ACP permission requests](./runtime-orchestration.md#acp-and-remote-runners)
 - [Completion verification](./runtime-orchestration.md#completion-verification): applicability, private repairs and original evidence.
 - [Tool system](./tools.md)
 - [Tool safety](./tool-safety.md)
 - [Contract criteria](./contract-criteria.md)
 - [Project review inventory](./contract-criteria.md#project-review-inventory): inspected files, accepted assessments and current versions.
-- [Autonomous ACP and MCP protocol decisions](./autonomous-protocol-permissions.md)
-- [Receipt-bound passive code context](./captured-passive-code-context.md)
 - [Cluster operation outcomes](./cluster-operations.md)
 - [Cluster ranking during upgrades](./cluster-ranking.md)
-- [Gemini response identity](./gemini-response-identity.md)
 - [Cancel one hosted turn without ending its session](./hosted-turn-cancellation.md)
 
 ## Knowledge, media, and search
@@ -91,8 +86,7 @@ history, including upstream releases.
 - [Observability](./observability.md)
 - [Performance and tuning](./performance.md)
 - [Transport architecture](./transports.md)
-- [Error architecture](./errors.md): internal error model and category sources.
-- [Error handling](./error-handling.md): consumer patterns for catching structured errors.
+- [Error handling](./error-handling.md): catching structured errors, refusals, serializing and checking errors.
 - [Error kinds reference](./error-kinds.md): public `EngineErrorKind` reference table.
 - [Troubleshooting](./troubleshooting.md)
 - [Saved-data compatibility and native updates](./native-reader-compatibility.md)

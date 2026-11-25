@@ -4,7 +4,7 @@ Generated from the synced GoodVibes operator contract artifact.
 
 ## Summary
 
-- Methods: `656`
+- Methods: `661`
 - Events: `37`
 - Auth modes: `shared-bearer`, `session-login`
 - HTTP status path: `/status`
@@ -42336,9 +42336,165 @@ Check the deployed worker: its `/batch/health` route (`workerHealth`) and its `/
 
 ### companion
 
+#### `companion.chat.attachments.remove`
+
+Remove a file attached to a sent companion-chat message, for good: the file is deleted from the artifact store and cannot be put back. Every message of the chat that carried it keeps a line in its place (`removedAttachments`: `artifactId`, `name`, `removedAt`; clients show "<name> was removed"), and the model no longer receives the file on later turns (it is told the file's name and that it was removed). Works on a closed chat too. Repeating it answers the same way with `alreadyRemoved: true`. An unknown chat is 404 SESSION_NOT_FOUND, an unknown message 404 MESSAGE_NOT_FOUND, a file the message never carried 404 ATTACHMENT_NOT_FOUND; while a reply is streaming, a message is being prepared or sends are queued it is refused with 409 CHAT_TURN_BUSY and nothing changes (stop the reply or let it finish, then remove); a daemon with no file store is 501 ATTACHMENTS_UNAVAILABLE.
+
+- Title: `Remove a File From a Sent Companion Chat Message`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `DELETE /api/companion/chat/sessions/{sessionId}/messages/{messageId}/attachments/{artifactId}`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "artifactId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "messageId",
+    "artifactId"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "artifactId": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "removed": {
+      "type": "boolean"
+    },
+    "alreadyRemoved": {
+      "type": "boolean"
+    },
+    "messageIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "sessionId",
+    "messageId",
+    "artifactId",
+    "name",
+    "removed",
+    "messageIds"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `companion.chat.branches.switch`
+
+Put another version of a turn on the conversation. A turn has versions when a user message was edited (the message and its edits, linked by `revisionOf`) or a reply was regenerated (the replies to one user message, linked by `inReplyTo`); each version heads the run of messages one fork marked superseded. `messageId` is the first message of the version wanted. The version on the conversation now (that turn's active message and everything after it, except a reply to an earlier message) is marked superseded, kept as history, and the chosen version is active again, so the chat shows it on every device and the model continues from it; nothing is deleted and no turn starts. Switching back is the same call with the other version's first message. A `messageId` already on the conversation answers `switched: false` and changes nothing. Works on a closed chat. An unknown chat is 404 SESSION_NOT_FOUND, an unknown message 404 MESSAGE_NOT_FOUND; a message that does not start a version, or whose turn is not on the conversation now, is 409 NOT_A_BRANCH; while a reply is streaming, a message is being prepared or sends are queued it is 409 CHAT_TURN_BUSY and nothing changes.
+
+- Title: `Switch Companion Chat Branch`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `http`, `ws`
+- HTTP: `POST /api/companion/chat/sessions/{sessionId}/branches/switch`
+- Scopes: `write:sessions`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "sessionId",
+    "messageId"
+  ],
+  "additionalProperties": true
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "sessionId": {
+      "type": "string"
+    },
+    "messageId": {
+      "type": "string"
+    },
+    "switched": {
+      "type": "boolean"
+    },
+    "supersededMessageIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "restoredMessageIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "required": [
+    "sessionId",
+    "messageId",
+    "switched",
+    "supersededMessageIds",
+    "restoredMessageIds"
+  ],
+  "additionalProperties": false
+}
+```
+
 #### `companion.chat.events.stream`
 
-Server-Sent Events stream of turn and agent events scoped to a single companion-chat session.
+Server-Sent Events stream of turn and agent events scoped to a single companion-chat session. Besides the turn frames (`companion-chat.turn.*`), `companion-chat.transcript.changed` (`{ type: "transcript.changed", sessionId, change: "attachment-removed" | "branch-switched", messageIds }`) says the transcript changed outside a turn (companion.chat.attachments.remove, companion.chat.branches.switch): read the messages again.
 
 - Title: `Stream Companion Chat Events`
 - Source: `builtin`
@@ -42842,6 +42998,29 @@ Return the messages of a companion-chat session, oldest first. With neither `lim
               "additionalProperties": true
             }
           },
+          "removedAttachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "artifactId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "removedAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "artifactId",
+                "name",
+                "removedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
           "createdAt": {
             "type": "number"
           },
@@ -42997,6 +43176,19 @@ Return the messages of a companion-chat session, oldest first. With neither `lim
             "additionalProperties": false
           },
           "inReplyTo": {
+            "type": "string"
+          },
+          "supersededAt": {
+            "type": "number"
+          },
+          "supersededReason": {
+            "type": "string",
+            "enum": [
+              "regenerate",
+              "edit"
+            ]
+          },
+          "revisionOf": {
             "type": "string"
           },
           "clientMessageId": {
@@ -44113,6 +44305,29 @@ Return a companion-chat session record together with its full message history.
               "additionalProperties": true
             }
           },
+          "removedAttachments": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "artifactId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                },
+                "removedAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "artifactId",
+                "name",
+                "removedAt"
+              ],
+              "additionalProperties": false
+            }
+          },
           "createdAt": {
             "type": "number"
           },
@@ -44268,6 +44483,19 @@ Return a companion-chat session record together with its full message history.
             "additionalProperties": false
           },
           "inReplyTo": {
+            "type": "string"
+          },
+          "supersededAt": {
+            "type": "number"
+          },
+          "supersededReason": {
+            "type": "string",
+            "enum": [
+              "regenerate",
+              "edit"
+            ]
+          },
+          "revisionOf": {
             "type": "string"
           },
           "clientMessageId": {
@@ -135853,7 +136081,7 @@ Apply the surface's per-offer decisions in ONE pass: an accepted notifications o
 
 #### `pairing.handoff.create`
 
-The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: goodvibes-daemon webui enable --lan --https, or Tailscale" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
+The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER SET this daemon can satisfy (notifications, carrying the VAPID public key; relay; passkey step-up), so a freshly-paired surface can complete them in one pass. Returns the offer set, the `#pair=<token>` deep-link fragment (the exact URL-fragment shape the web app consumes, token in `pair=`, offers in `offers=`), a full deep link when a web origin is configured, and that origin's honest TLS/capability POSTURE: the one plain-http-on-LAN notice line (stated here, never a nag) plus per-capability availability labels so surfaces render "needs https: set up a secure address in Settings, General, Secure address (...)" instead of dead buttons. The token secret is returned exactly once. When a paired device asks, the new token records that device (mintedBy) and is revoked with it; a device whose own pairing is gone is refused with 403 PAIRING_TOKEN_NOT_FOUND. Each offer is independently declinable at completion. A pairing minted narrower than full authority cannot complete a hand-off (pairing.handoff.complete needs what stepup.credentials.register needs), so it is offered nothing to complete and gets its token alone. The device it pairs is recorded as the owner's own (origin owner-pairing) when the caller holds the owner's own credential (the operator token, an admin sign-in, an app on his machine, or a device he paired himself) with full authority; from a token minted for automation, the Agent's credential or a narrowed caller it is recorded as automation. `fromSharedToken: true` is how a client signed in with the shared operator token (the owner's own browser) moves onto its own token: it pairs itself here, exempt from device.nodes.maxPaired as pairing.tokens.migrate is, and the token it gets is an owner device; only a caller on the shared token may send it (400 INVALID_ARGUMENT otherwise). No code is made that a phone could not open: when the daemon's web address is reachable only from its own machine (a loopback address, or controlPlane.enabled off without web.publicBaseUrl naming it), the call is refused with 409 PAIRING_CODE_UNREACHABLE, saying why and the command to run in a terminal on the daemon's machine (goodvibes-daemon webui enable --lan); pairing.posture.get gives the same decision with numbered steps before anything is minted. `serveToNetwork: true` is the owner's yes to "Phones on your network cannot reach GoodVibes yet. Serve it to your network?", which a pairing surface asks in place of that refusal: the daemon writes what goodvibes-daemon webui enable --lan writes, waits for its own listener to report it is bound again (TRANSPORT_CONNECTED; no sleep, no poll), and then mints for the address phones can open, in the same call; refused 409 PAIRING_CODE_UNREACHABLE only when it still cannot be reached. `fromSharedToken: true`, and `forThisMachine: true` (a code for a browser on the daemon's own machine), are not refused for that.
 
 - Title: `Create Pairing Hand-off`
 - Source: `builtin`
@@ -136065,7 +136293,7 @@ The owner's pairing flow. Mint a per-device token AND assemble the set-up OFFER 
 
 #### `pairing.posture.get`
 
-The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https: goodvibes-daemon webui enable --lan --https, or Tailscale" so surfaces render labels instead of dead buttons. Localhost keeps all three. https on a private address that is not a tailnet name is the daemon's own LAN certificate (controlPlane.lanHttps): its capabilities are available and its notice says each phone installs the certificate once from /lan-https on the plain address. With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done|next|then, text, detail, command). Every pairing surface asks this before minting. With controlPlane.lanHttps on, the address a pairing code carries is the LAN https one, issued by the certificate authority the daemon made for this machine's own names and private addresses.
+The honest TLS/capability posture of a web origin, pass your surface's current origin (or omit it to read the configured web origin). Plain http on a private-network origin (LAN IP, .local, localhost) is a supported posture reported with its ONE notice line; browser-gated capabilities (service worker/PWA install, push, microphone) are each labeled available or "needs https: set up a secure address in Settings, General, Secure address (...)" so surfaces render labels instead of dead buttons. Localhost keeps all three. https on a private address that is not a tailnet name is the daemon's own LAN certificate (controlPlane.lanHttps): its capabilities are available and its notice says each phone installs the certificate once from /lan-https on the plain address. With no origin supplied the answer is about the address a pairing code carries and adds `reach`: whether a phone can open it (otherDevices), decided by the daemon from its settings with no request on the network, and when not, the reason, the fix (a command to run in a terminal on the daemon's machine) and the numbered steps (state done|next|then, text, detail, command). Every pairing surface asks this before minting. With controlPlane.lanHttps on (the Secure address), the address a pairing code carries is the https one the listener serves: at the certificate's own name for Let's Encrypt, a certificate you made or a group's (secureAddress.get), with no install notice; at the same host for GoodVibes' own certificate, with its install notice. Plain http keeps working as before.
 
 - Title: `Get Origin TLS/Capability Posture`
 - Source: `builtin`
@@ -148894,6 +149122,1350 @@ Return queued and leased remote work items.
 ```
 
 ### remote-access
+
+#### `secureAddress.get`
+
+What the Secure address screen shows: the four ways to give the daemon an https address for phones (Let's Encrypt for a domain you own, a certificate you made, Tailscale, GoodVibes' own certificate), each with what it does, what it needs from the person, what the phone gains and what is sent where; which one is in force and what the https listener serves now (address, names, end date, or why it does not serve); Let's Encrypt's last attempt, the address records written and this machine's own lookup of the name (a router that refuses local answers is named, with what to change); the own files' check; the local authority's fingerprint and the page a phone installs it from; the Tailscale address while one is served; and the group: on a lead, the machines that follow it and the line that every machine serves with the same certificate; on a node, the line that its secure address comes from the lead and what it received. No key or token is ever returned.
+
+- Title: `Read The Secure Address`
+- Source: `builtin`
+- Access: `authenticated`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `read:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "intro": {
+      "type": "string"
+    },
+    "choices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "lets-encrypt",
+              "own-files",
+              "tailscale",
+              "local-authority"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "does": {
+            "type": "string"
+          },
+          "needs": {
+            "type": "string"
+          },
+          "phoneGains": {
+            "type": "string"
+          },
+          "sends": {
+            "type": "string"
+          },
+          "caution": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "does",
+          "needs",
+          "phoneGains",
+          "sends"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "groupLines": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "node": {
+      "type": "boolean"
+    },
+    "inForce": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "certificate": {
+          "type": "string",
+          "enum": [
+            "local-authority",
+            "own-files",
+            "lets-encrypt"
+          ]
+        },
+        "servedToNetwork": {
+          "type": "boolean"
+        },
+        "serving": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "number"
+        },
+        "address": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notAfter": {
+          "type": "number"
+        },
+        "problem": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string",
+          "enum": [
+            "this-machine",
+            "group"
+          ]
+        },
+        "servedSource": {
+          "type": "string",
+          "enum": [
+            "local-authority",
+            "own-files",
+            "lets-encrypt"
+          ]
+        }
+      },
+      "required": [
+        "on",
+        "certificate",
+        "servedToNetwork",
+        "serving"
+      ],
+      "additionalProperties": false
+    },
+    "letsEncrypt": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string"
+        },
+        "tokenStored": {
+          "type": "boolean"
+        },
+        "issuing": {
+          "type": "boolean"
+        },
+        "certificate": {
+          "type": "object",
+          "properties": {
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            },
+            "issuedAt": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "names",
+            "notAfter",
+            "issuedAt"
+          ],
+          "additionalProperties": false
+        },
+        "lastAttempt": {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "words": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "ok",
+            "words"
+          ],
+          "additionalProperties": false
+        },
+        "addressProblem": {
+          "type": "string"
+        },
+        "routerCheck": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "words": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "ok",
+            "words"
+          ],
+          "additionalProperties": false
+        },
+        "addressRecords": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "domain",
+        "tokenStored",
+        "issuing",
+        "addressRecords"
+      ],
+      "additionalProperties": false
+    },
+    "ownFiles": {
+      "type": "object",
+      "properties": {
+        "certFile": {
+          "type": "string"
+        },
+        "keyFile": {
+          "type": "string"
+        },
+        "check": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "problem": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "ok",
+            "names"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "certFile",
+        "keyFile"
+      ],
+      "additionalProperties": false
+    },
+    "localAuthority": {
+      "type": "object",
+      "properties": {
+        "made": {
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "page": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "made"
+      ],
+      "additionalProperties": false
+    },
+    "tailscale": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "properties": {
+        "following": {
+          "type": "object",
+          "properties": {
+            "nodeId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nodeId",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "received": {
+          "type": "object",
+          "properties": {
+            "leadName": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            },
+            "receivedAt": {
+              "type": "number"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            }
+          },
+          "required": [
+            "leadName",
+            "names",
+            "notAfter",
+            "receivedAt",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "followers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "address": {
+                "type": "string"
+              },
+              "covered": {
+                "type": "boolean"
+              },
+              "needs": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "address",
+              "covered"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "followers"
+      ],
+      "additionalProperties": false
+    },
+    "reissue": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "line",
+        "available"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "intro",
+    "choices",
+    "groupLines",
+    "node",
+    "inForce",
+    "letsEncrypt",
+    "ownFiles",
+    "localAuthority",
+    "tailscale",
+    "group",
+    "reissue"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `secureAddress.reissue`
+
+The Secure address screen's "Issue a new certificate now", on the machine that set the secure address up (a group's lead, or a machine of its own): a new certificate with a new key at once, served by the https listener and sent, sealed, to the machines that follow it. With Let's Encrypt a new order is placed (an order already running finishes first); Let's Encrypt allows only five certificates for the same names a week, so a repeat spends one more of them. With GoodVibes' own certificate a new server certificate is made under the same authority, so phones that installed it need nothing. No input. The answer is ok, one line of words (issued with its end date, or the authority's refusal in plain words) and the screen as secureAddress.get returns it; never a key or a token. Refused 409 SECURE_ADDRESS_NODE on a node (its certificate comes from the lead), and 409 SECURE_ADDRESS_UNAVAILABLE with words when https is off or the certificate is one the person made (they renew it themselves); nothing changes then. A certificate is also issued again by itself when it is due and when a machine that held it leaves or is removed from the group.
+
+- Title: `Issue A New Secure Address Certificate`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`
+- Emits events: none
+- Dangerous: `no`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "ok": {
+      "type": "boolean"
+    },
+    "words": {
+      "type": "string"
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "intro": {
+          "type": "string"
+        },
+        "choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "enum": [
+                  "lets-encrypt",
+                  "own-files",
+                  "tailscale",
+                  "local-authority"
+                ]
+              },
+              "title": {
+                "type": "string"
+              },
+              "does": {
+                "type": "string"
+              },
+              "needs": {
+                "type": "string"
+              },
+              "phoneGains": {
+                "type": "string"
+              },
+              "sends": {
+                "type": "string"
+              },
+              "caution": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "title",
+              "does",
+              "needs",
+              "phoneGains",
+              "sends"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "groupLines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "node": {
+          "type": "boolean"
+        },
+        "inForce": {
+          "type": "object",
+          "properties": {
+            "on": {
+              "type": "boolean"
+            },
+            "certificate": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            },
+            "servedToNetwork": {
+              "type": "boolean"
+            },
+            "serving": {
+              "type": "boolean"
+            },
+            "port": {
+              "type": "number"
+            },
+            "address": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            },
+            "problem": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string",
+              "enum": [
+                "this-machine",
+                "group"
+              ]
+            },
+            "servedSource": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            }
+          },
+          "required": [
+            "on",
+            "certificate",
+            "servedToNetwork",
+            "serving"
+          ],
+          "additionalProperties": false
+        },
+        "letsEncrypt": {
+          "type": "object",
+          "properties": {
+            "domain": {
+              "type": "string"
+            },
+            "tokenStored": {
+              "type": "boolean"
+            },
+            "issuing": {
+              "type": "boolean"
+            },
+            "certificate": {
+              "type": "object",
+              "properties": {
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                },
+                "issuedAt": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "names",
+                "notAfter",
+                "issuedAt"
+              ],
+              "additionalProperties": false
+            },
+            "lastAttempt": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "type": "number"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "words": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "at",
+                "ok",
+                "words"
+              ],
+              "additionalProperties": false
+            },
+            "addressProblem": {
+              "type": "string"
+            },
+            "routerCheck": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "ok": {
+                  "type": "boolean"
+                },
+                "words": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "name",
+                "ok",
+                "words"
+              ],
+              "additionalProperties": false
+            },
+            "addressRecords": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "domain",
+            "tokenStored",
+            "issuing",
+            "addressRecords"
+          ],
+          "additionalProperties": false
+        },
+        "ownFiles": {
+          "type": "object",
+          "properties": {
+            "certFile": {
+              "type": "string"
+            },
+            "keyFile": {
+              "type": "string"
+            },
+            "check": {
+              "type": "object",
+              "properties": {
+                "ok": {
+                  "type": "boolean"
+                },
+                "problem": {
+                  "type": "string"
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "ok",
+                "names"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "required": [
+            "certFile",
+            "keyFile"
+          ],
+          "additionalProperties": false
+        },
+        "localAuthority": {
+          "type": "object",
+          "properties": {
+            "made": {
+              "type": "boolean"
+            },
+            "fingerprint": {
+              "type": "string"
+            },
+            "page": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "made"
+          ],
+          "additionalProperties": false
+        },
+        "tailscale": {
+          "type": "object",
+          "properties": {
+            "address": {
+              "type": "string"
+            }
+          },
+          "additionalProperties": false
+        },
+        "group": {
+          "type": "object",
+          "properties": {
+            "following": {
+              "type": "object",
+              "properties": {
+                "nodeId": {
+                  "type": "string"
+                },
+                "name": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "nodeId",
+                "name"
+              ],
+              "additionalProperties": false
+            },
+            "received": {
+              "type": "object",
+              "properties": {
+                "leadName": {
+                  "type": "string"
+                },
+                "names": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "notAfter": {
+                  "type": "number"
+                },
+                "receivedAt": {
+                  "type": "number"
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "local-authority",
+                    "own-files",
+                    "lets-encrypt"
+                  ]
+                }
+              },
+              "required": [
+                "leadName",
+                "names",
+                "notAfter",
+                "receivedAt",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "followers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "address": {
+                    "type": "string"
+                  },
+                  "covered": {
+                    "type": "boolean"
+                  },
+                  "needs": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "address",
+                  "covered"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "followers"
+          ],
+          "additionalProperties": false
+        },
+        "reissue": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "line": {
+              "type": "string"
+            },
+            "available": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "title",
+            "line",
+            "available"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "intro",
+        "choices",
+        "groupLines",
+        "node",
+        "inForce",
+        "letsEncrypt",
+        "ownFiles",
+        "localAuthority",
+        "tailscale",
+        "group",
+        "reissue"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "ok",
+    "words",
+    "status"
+  ],
+  "additionalProperties": false
+}
+```
+
+#### `secureAddress.set`
+
+The Secure address screen's change. certificate lets-encrypt (domain, and cloudflareToken when none is stored: a token with Zone, DNS, Edit on the zone that holds the name, stored in the secret store only once Cloudflare accepted it; never returned), own-files (certFile and keyFile, paths on the daemon's machine, checked first: the key must belong to the certificate and it must be in force), local-authority (GoodVibes' own certificate), or off (the https listener stops; plain http is unchanged). Refused 400 SECURE_ADDRESS_INVALID with words and nothing written when the input cannot work; refused 409 SECURE_ADDRESS_NODE on a node of a group, whose secure address comes from its lead. Otherwise the web UI is served to the network when it is not yet (what goodvibes-daemon webui enable --lan writes), secureAddress.* and controlPlane.lanHttps.enabled are written, and the answer (the same as secureAddress.get) comes once the https listener has synced and, for Let's Encrypt, once the order has an outcome: issued, or the authority's refusal in plain words.
+
+- Title: `Set Up The Secure Address`
+- Source: `builtin`
+- Access: `admin`
+- Transport: `ws`
+- HTTP: none
+- Scopes: `write:control-plane`, `write:config`
+- Emits events: none
+- Dangerous: `yes`
+- Invokable: `yes`
+
+##### Input schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "certificate": {
+      "type": "string",
+      "enum": [
+        "lets-encrypt",
+        "own-files",
+        "local-authority",
+        "off"
+      ]
+    },
+    "domain": {
+      "type": "string"
+    },
+    "cloudflareToken": {
+      "type": "string"
+    },
+    "certFile": {
+      "type": "string"
+    },
+    "keyFile": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "certificate"
+  ],
+  "additionalProperties": false
+}
+```
+
+##### Output schema
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "intro": {
+      "type": "string"
+    },
+    "choices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "enum": [
+              "lets-encrypt",
+              "own-files",
+              "tailscale",
+              "local-authority"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "does": {
+            "type": "string"
+          },
+          "needs": {
+            "type": "string"
+          },
+          "phoneGains": {
+            "type": "string"
+          },
+          "sends": {
+            "type": "string"
+          },
+          "caution": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "does",
+          "needs",
+          "phoneGains",
+          "sends"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "groupLines": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "node": {
+      "type": "boolean"
+    },
+    "inForce": {
+      "type": "object",
+      "properties": {
+        "on": {
+          "type": "boolean"
+        },
+        "certificate": {
+          "type": "string",
+          "enum": [
+            "local-authority",
+            "own-files",
+            "lets-encrypt"
+          ]
+        },
+        "servedToNetwork": {
+          "type": "boolean"
+        },
+        "serving": {
+          "type": "boolean"
+        },
+        "port": {
+          "type": "number"
+        },
+        "address": {
+          "type": "string"
+        },
+        "names": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notAfter": {
+          "type": "number"
+        },
+        "problem": {
+          "type": "string"
+        },
+        "from": {
+          "type": "string",
+          "enum": [
+            "this-machine",
+            "group"
+          ]
+        },
+        "servedSource": {
+          "type": "string",
+          "enum": [
+            "local-authority",
+            "own-files",
+            "lets-encrypt"
+          ]
+        }
+      },
+      "required": [
+        "on",
+        "certificate",
+        "servedToNetwork",
+        "serving"
+      ],
+      "additionalProperties": false
+    },
+    "letsEncrypt": {
+      "type": "object",
+      "properties": {
+        "domain": {
+          "type": "string"
+        },
+        "tokenStored": {
+          "type": "boolean"
+        },
+        "issuing": {
+          "type": "boolean"
+        },
+        "certificate": {
+          "type": "object",
+          "properties": {
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            },
+            "issuedAt": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "names",
+            "notAfter",
+            "issuedAt"
+          ],
+          "additionalProperties": false
+        },
+        "lastAttempt": {
+          "type": "object",
+          "properties": {
+            "at": {
+              "type": "number"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "words": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "at",
+            "ok",
+            "words"
+          ],
+          "additionalProperties": false
+        },
+        "addressProblem": {
+          "type": "string"
+        },
+        "routerCheck": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "ok": {
+              "type": "boolean"
+            },
+            "words": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "ok",
+            "words"
+          ],
+          "additionalProperties": false
+        },
+        "addressRecords": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "domain",
+        "tokenStored",
+        "issuing",
+        "addressRecords"
+      ],
+      "additionalProperties": false
+    },
+    "ownFiles": {
+      "type": "object",
+      "properties": {
+        "certFile": {
+          "type": "string"
+        },
+        "keyFile": {
+          "type": "string"
+        },
+        "check": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "problem": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "ok",
+            "names"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "certFile",
+        "keyFile"
+      ],
+      "additionalProperties": false
+    },
+    "localAuthority": {
+      "type": "object",
+      "properties": {
+        "made": {
+          "type": "boolean"
+        },
+        "fingerprint": {
+          "type": "string"
+        },
+        "page": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "made"
+      ],
+      "additionalProperties": false
+    },
+    "tailscale": {
+      "type": "object",
+      "properties": {
+        "address": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "group": {
+      "type": "object",
+      "properties": {
+        "following": {
+          "type": "object",
+          "properties": {
+            "nodeId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "nodeId",
+            "name"
+          ],
+          "additionalProperties": false
+        },
+        "received": {
+          "type": "object",
+          "properties": {
+            "leadName": {
+              "type": "string"
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notAfter": {
+              "type": "number"
+            },
+            "receivedAt": {
+              "type": "number"
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "local-authority",
+                "own-files",
+                "lets-encrypt"
+              ]
+            }
+          },
+          "required": [
+            "leadName",
+            "names",
+            "notAfter",
+            "receivedAt",
+            "source"
+          ],
+          "additionalProperties": false
+        },
+        "followers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "address": {
+                "type": "string"
+              },
+              "covered": {
+                "type": "boolean"
+              },
+              "needs": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name",
+              "address",
+              "covered"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "required": [
+        "followers"
+      ],
+      "additionalProperties": false
+    },
+    "reissue": {
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string"
+        },
+        "line": {
+          "type": "string"
+        },
+        "available": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "title",
+        "line",
+        "available"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "intro",
+    "choices",
+    "groupLines",
+    "node",
+    "inForce",
+    "letsEncrypt",
+    "ownFiles",
+    "localAuthority",
+    "tailscale",
+    "group",
+    "reissue"
+  ],
+  "additionalProperties": false
+}
+```
 
 #### `tailscale.get`
 

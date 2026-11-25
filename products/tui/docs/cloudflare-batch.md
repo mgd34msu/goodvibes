@@ -53,7 +53,7 @@ Use `/cloudflare` for runtime inspection and daemon actions:
 
 Bare `/cloudflare` opens its list of actions (from a model or script it runs `status`). `/cloudflare setup` opens the guided Cloudflare setup, the same form as `/setup cloudflare`. All other actions call platform-owned daemon routes under local daemon admin/auth. The Agent has the same `/cloudflare` command over its connected host (without the guided setup); the model may run its reads, while `create-token`, `provision` and `disable` count only when the owner types them.
 
-`create-token` returns the token the daemon already made for the same account, zone and components while Cloudflare reports it active and unexpired (one check at Cloudflare); a token deleted in the dashboard, disabled or expired is replaced by a new one. `--new` always makes a new token and revokes the one it replaces.
+`create-token` returns the token the daemon already made for the same account, zone and components while Cloudflare reports it active and unexpired (one check at Cloudflare); a token deleted in the dashboard, disabled or expired is replaced by a new one. `--new` always makes a new token and revokes the one it replaces. When Cloudflare creates the operational token but does not keep the permission policy GoodVibes asked for, the token is not stored and `create-token` fails with code `CLOUDFLARE_TOKEN_POLICY_MISMATCH`, naming the missing permission groups; creating the token again revokes the unusable one first.
 
 Each action accepts only its own flags, and a line is refused before anything is sent when it has an unknown or misspelt flag (`--keepcron`), a flag that needs a value and has none (`--token-env` with no name), a word that names no component (`provision tunel`), a `--batch-mode` other than `off`, `explicit` or `eligible-by-default`, or a `--token-env`/`--bootstrap-env` naming a variable that is not set in the app's environment (the stored token would otherwise be used). The refusal names the accepted values.
 
@@ -85,7 +85,7 @@ Errors return JSON with `error`; failures raised by the Cloudflare integration a
 
 `/cloudflare provision` reports `ok: true` only when what was asked for works: the Worker check (`/batch/health` and the Worker's proxy to the daemon) passed, or was turned off with `--no-verify`, and Access, when selected, protects the daemon hostname. Only then does it turn `cloudflare.enabled` on and move `batch.queueBackend` to `cloudflare`; otherwise the result is `ok: false`, the integration stays off, and the `switch-on` step says why.
 
-`/cloudflare status` lists a resource component (Worker, queues, Tunnel, Access, KV, Durable Objects, R2, Secrets Store) as configured only after a provision created or confirmed it. The record of what provisioning created is kept in the daemon's control-plane directory as `cloudflare-resources.json`.
+`/cloudflare status` lists a resource component (Worker, queues, Tunnel, Access, KV, Durable Objects, R2, Secrets Store) as configured only after a provision created or confirmed it. Provisioning again is safe: a resource of the configured name that already exists, from an earlier run or made by hand, is reused rather than created a second time, and when Cloudflare refuses a new Secrets Store because the account has reached its limit (`maximum_stores_exceeded`) and the account holds exactly one store, that store is used. The record of what provisioning created is kept in the daemon's control-plane directory as `cloudflare-resources.json`.
 
 | Component | What it does in the batch path |
 | --- | --- |

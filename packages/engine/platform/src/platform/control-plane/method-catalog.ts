@@ -57,6 +57,7 @@ import {
 import {
   builtinGatewayTailscaleMethodDescriptors,
 } from './method-catalog-tailscale.js';
+import { builtinGatewaySecureAddressMethodDescriptors } from './method-catalog-secure-address.js';
 import {
   builtinGatewayAcpMethodDescriptors,
 } from './method-catalog-acp.js';
@@ -187,6 +188,7 @@ export const BUILTIN_GATEWAY_METHODS: readonly GatewayMethodDescriptor[] = [
   ...builtinGatewayPushMethodDescriptors,
   ...builtinGatewayPairingMethodDescriptors,
   ...builtinGatewayTailscaleMethodDescriptors,
+  ...builtinGatewaySecureAddressMethodDescriptors,
   ...builtinGatewayAcpMethodDescriptors,
   ...builtinGatewaySkillsMethodDescriptors,
   ...builtinGatewayPrincipalsMethodDescriptors,

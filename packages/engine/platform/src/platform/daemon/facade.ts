@@ -92,6 +92,9 @@ import { isWildcardHost } from '../config/control-plane-base-url.js';
 import { LanHttpsListener, type LanHttpsState } from './lan-https/listener.js';
 import { lanAuthorityCertificate } from './lan-https/authority.js';
 import { lanHttpsPageResponse } from './lan-https/page.js';
+import { SecureAddressGroupShare } from './lan-https/group-share.js';
+import { registerSecureAddressGatewayMethods } from '../control-plane/routes/secure-address.js';
+import { activeTailscaleServeOrigin } from '../remote-access/tailscale.js';
 import { lanHttpsOriginOf } from '../pairing/web-origin.js';
 import { createHostModeRestartWatcher, RestartController } from './host-mode-watcher.js';
 import { configureJudgmentRequestLifetime } from './http/judgment-request-lifetime.js';
@@ -223,7 +226,14 @@ export class DaemonServer {
   private readonly serviceRegistry: ServiceRegistry;
   private readonly serveFactory: typeof Bun.serve;
   /** The opt-in https listener on the local network beside the plain one (lan-https/listener.ts). */
-  private readonly lanHttps = new LanHttpsListener({ config: () => this.configManager, secrets: () => this.runtimeServices?.secretsManager });
+  /** Stops the group share of the secure address (set when the daemon has a group runtime). */
+  private stopSecureAddressGroup: (() => void) | null = null;
+  private readonly lanHttps = new LanHttpsListener({
+    config: () => this.configManager,
+    secrets: () => this.runtimeServices?.secretsManager,
+    // A certificate ending soon, a renewal that failed close to the end, a node's authority set aside: one line to the owner (owner-alert.ts).
+    alertOwner: (text) => { try { createDaemonOwnerAlerter(this.routeBindings, this.surfaceDeliveryHelper)(text); } catch (error) { logger.warn('DaemonServer: a secure address notice could not be sent', { error: summarizeError(error) }); } },
+  });
   private readonly pendingSurfaceReplies = new Map<string, PendingSurfaceReply>();
   private readonly controlPlaneHelper: DaemonControlPlaneHelper;
   private readonly surfaceDeliveryHelper: DaemonSurfaceDeliveryHelper;
@@ -453,6 +463,19 @@ export class DaemonServer {
     // Whether this daemon is keeping itself current, asked over the wire
     // rather than read out of a log on the host, see routes/update.ts.
     registerUpdateGatewayMethods(this.runtimeServices.gatewayMethods, this.lifecycle);
+    // The Secure address screen (secureAddress.get / .set) over the https listener and its certificate owner.
+    registerSecureAddressGatewayMethods(this.runtimeServices.gatewayMethods, {
+      listener: this.lanHttps,
+      config: this.configManager,
+      tailscaleOrigin: () => activeTailscaleServeOrigin(),
+      ...(config.serveToNetwork ? { serveToNetwork: config.serveToNetwork } : {}),
+    });
+    // A group's machines share the secure address of the one that set it up (lan-https/group-share.ts).
+    if (config.secureAddressGroup) {
+      const share = new SecureAddressGroupShare(config.secureAddressGroup, this.lanHttps.secureAddress);
+      this.stopSecureAddressGroup = share.start();
+      this.lanHttps.observe((on, state) => share.noteSynced(on, state.source ?? 'local-authority', state.from === 'this-machine' && state.source === 'lets-encrypt' ? state.hostName ?? '' : ''));
+    }
     // A join that turned sharing on finishes after a restart: the daemon restarts itself through its service.
     if (config.clusterGroupVerbs) {
       const lifecycle = this.lifecycle;
@@ -887,7 +910,8 @@ export class DaemonServer {
         });
       }
       if (this.configManager.get('watchers.enabled')) {
-        registerDaemonHeartbeatWatcher(this.watcherRegistry, this.configManager, () => this.automationManager.reconcileSchedules());
+        // Each beat also compares the https certificate's renewal time with the clock (lan-https/secure-address.ts checkDue).
+        registerDaemonHeartbeatWatcher(this.watcherRegistry, this.configManager, () => { this.lanHttps.secureAddress.checkDue(); this.automationManager.reconcileSchedules(); });
       }
       // Trigger family. start() always runs: it recovers persisted state (so an on-exit trigger from a
       // previous boot fires its honest unknown/daemon-restart payload) and arms the supervision tick,
@@ -1053,13 +1077,15 @@ export class DaemonServer {
     };
     try {
       // One request handler for the listener and, when switched on, the LAN https listener beside it (lan-https/listener.ts).
-      const serveWith = (address: { readonly port: number; readonly hostname: string; readonly tls?: Bun.TLSOptions | undefined }) => this.serveFactory({
+      const serveWith = (address: { readonly port: number; readonly hostname: string; readonly tls?: Bun.TLSOptions | undefined; readonly onRequest?: (() => void) | undefined }) => this.serveFactory({
         port: address.port,
         hostname: address.hostname,
         // Derived from the SSE heartbeat interval so a quiet stream outlives it (Bun's 10s default would not).
         idleTimeout: sseIdleTimeoutSeconds(),
         ...(address.tls ? { tls: address.tls } : {}),
         async fetch(req: Request, server: UpgradeCapableServer): Promise<Response | undefined> {
+          // The https listener's certificate is compared with the clock at each request it serves (secure-address.ts checkDue).
+          address.onRequest?.();
           configureJudgmentRequestLifetime(req, server);
           configureVoiceRequestLifetime(req, server);
           // Resolved once here; every security event, the sign-in limiter and the audit read this one value.
@@ -1119,7 +1145,7 @@ export class DaemonServer {
       this.acceptedTransportBinding = { host: this.boundHost, port: this.boundPort };
       if (replacing) await this.closeControlPlaneListener(replacing.server);
       // Each bind (and so each start) makes the LAN https listener's certificate again for the addresses this machine has now.
-      await this.lanHttps.sync(listenerHost, (port, tls) => serveWith({ port, hostname: listenerHost, tls }));
+      await this.lanHttps.sync(listenerHost, (port, tls) => serveWith({ port, hostname: listenerHost, tls, onRequest: () => this.lanHttps.noteRequest() }));
       return true;
     } catch (error) {
       withdrawLifetime();
@@ -1437,6 +1463,8 @@ export class DaemonServer {
     };
     this._configWatchUnsub?.();
     this._configWatchUnsub = null;
+    this.stopSecureAddressGroup?.();
+    this.stopSecureAddressGroup = null;
 
     // Synchronous pre-stop teardown. Only stop the heartbeat watcher when start() engaged it (registered solely behind `watchers.enabled`); stopWatcher() runs requireFeatureGate('watcher-framework') and THROWS when that gate is off, which would break a clean shutdown of a watchers-disabled daemon. Wrapped as well because stop() is reachable on a daemon whose start() never ran, where the watcher is not registered and stopWatcher() runs its gate check before discovering that, a clean shutdown must not depend on the gate, the same stance start()'s own cleanup path takes.
     if (this.configManager.get('watchers.enabled')) { try { this.watcherRegistry.stopWatcher('daemon-heartbeat', 'daemon-stopped'); } catch (error) { logger.warn('DaemonServer: heartbeat watcher stop failed', { error: summarizeError(error) }); } }
@@ -1557,6 +1585,9 @@ export class DaemonServer {
     const unsubscribeLanHttps = [
       this.configManager.subscribe('controlPlane.lanHttps.enabled', () => { void this.lanHttps.resync(); }),
       this.configManager.subscribe('controlPlane.lanHttps.port', () => { void this.lanHttps.resync(); }),
+      // Which certificate it serves (the Secure address screen): the same resync.
+      ...(['secureAddress.certificate', 'secureAddress.domain', 'secureAddress.acmeDirectory', 'secureAddress.certFile', 'secureAddress.keyFile'] as const)
+        .map((key) => this.configManager.subscribe(key, () => { void this.lanHttps.resync(); })),
     ];
     this._configWatchUnsub = () => { watcher.unsubscribe(); unsubscribeStreamMode(); for (const stop of unsubscribeLanHttps) stop(); };
   }

@@ -99,6 +99,18 @@ export interface DaemonConfig {
    */
   clusterGroupVerbs?: import('./http/cluster-group-routes.js').ClusterGroupVerbs | undefined;
   /**
+   * The group's channel, for sharing the secure address with the machines of
+   * a group (lan-https/group-share.ts). Absent: this daemon's https address is
+   * its own alone.
+   */
+  secureAddressGroup?: import('./lan-https/group-share.js').SecureAddressGroupAccess | undefined;
+  /**
+   * Serve the web UI to the network (what `goodvibes-daemon webui enable
+   * --lan` writes) and resolve once the listener is bound again; the Secure
+   * address screen's change uses it when the web UI is not served there yet.
+   */
+  serveToNetwork?: (() => Promise<void>) | undefined;
+  /**
    * Turn on daemon-hosted sessions (`sessions.hosted.*`).
    *
    * Absent means this daemon hosts no conversation loops and the verbs refuse

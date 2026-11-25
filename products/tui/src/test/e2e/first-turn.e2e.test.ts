@@ -1,5 +1,5 @@
 // Proves: The shipped goodvibes binary starts, completes an interactive first turn, and its headless entry point exits 0 with the reply as JSON and reaches no outside network.
-// Red when: The daemon cannot start or pair, the compiled terminal does not reach its input area or writes to stderr, a first turn is not answered or creates work, or the headless run does not exit 0 with JSON, asks a decision model under No Decision Model, or tries the network.
+// Red when: The daemon cannot start or pair, the compiled terminal does not reach its input area or writes to stderr, a first turn is not answered or creates work, or the headless run does not exit 0 with JSON, or tries the network.
 // Proves: A headless run whose turn failed at the provider exits with a code other than the documented failure code 1, so a script or CI job takes the failure for done or for an outcome it must not retry.
 // Red when: The headless entry point does not set exit code 1 when the turn ends in an error (it exits 0, or 3 for an unknown outcome), or writes more than the one JSON result to stdout.
 /**
@@ -16,7 +16,6 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { TuiConfigManager } from '../../config/host-settings.ts';
 import { startE2ENativeHost } from './native-host-fixture.ts';
 import { closeE2EFixture, inputAreaVisible, isolatedEnv, lastUserText, launchTui, makeHome, resolveBinary, screenText, startStubModel, type E2EHome, type TuiSession } from './harness.ts';
 
@@ -64,11 +63,8 @@ describe('first turn', () => {
     await tui!.stop();
   });
 
-  test('under No Decision Model the headless entry point exits 0 with the reply, asks no decision model, and nothing reached the outside network', async () => {
+  test('the headless entry point exits 0 with the reply, and nothing reached the outside network', async () => {
     const home = ownedHome!;
-    new TuiConfigManager({ configDir: join(home.home, '.goodvibes/tui'), homeDir: home.home, workingDir: home.workspace, surfaceRoot: 'tui' })
-      .set('judgment.policy', 'No Decision Model', { daemonNotRunning: true });
-    const asked = host!.judgments.requests.length;
     const child = Bun.spawn([resolveBinary(), '--prompt', PROMPT, '--output-format', 'json'], {
       cwd: home.workspace, env: isolatedEnv(home, host!.env), stdout: 'pipe', stderr: 'pipe',
     });
@@ -76,7 +72,6 @@ describe('first turn', () => {
       const [stdout, stderr, exitCode] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
       expect({ exitCode, stderr: exitCode ? stderr : '' }).toEqual({ exitCode: 0, stderr: '' });
       expect(JSON.parse(stdout)).toMatchObject({ ok: true, response: REPLY });
-      expect(host!.judgments.requests.length).toBe(asked);
       // The interactive session's check ran inside stop(); the headless child writes to the same log.
       const violations = join(home.root, 'network-violations.log');
       expect(existsSync(violations) ? readFileSync(violations, 'utf8') : '').toBe('');

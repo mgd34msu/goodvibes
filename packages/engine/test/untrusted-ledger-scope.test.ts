@@ -26,7 +26,7 @@ import { grantOwnerApproval } from '../platform/src/platform/security/owner-appr
 import { configureDecisionModelPolicy } from '../platform/src/platform/runtime/decision-policy.ts';
 
 let retirePolicy: () => void;
-beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'No Decision Model'); });
+beforeEach(() => { retirePolicy = configureDecisionModelPolicy(() => 'Hybrid', () => false); });
 afterEach(() => { retirePolicy(); });
 
 const page = (ledger: UntrustedContentLedger, name: string) => ledger.record({

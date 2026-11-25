@@ -171,10 +171,8 @@
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .mail-compose {
-    animation: none;
-  }
+:root[data-motion="reduce"] .mail-compose {
+  animation: none;
 }
 
 /* Settings panel (MailAccountSettings) */

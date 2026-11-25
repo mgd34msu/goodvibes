@@ -1,7 +1,8 @@
-import { ChevronDown, ChevronRight, History, Paperclip } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, History, Paperclip } from 'lucide-react';
 import { useCallback, useState } from 'react';
 import type { ChatMessage } from './types';
-import type { SupersededReason } from './lineage';
+import type { BranchChoice, SupersededReason } from './lineage';
+import { IconButton } from '../../components/ui/IconButton';
 import { retainedHistoryLabel, sortByCreatedAt, supersededReason as reasonOf } from './lineage';
 import { MarkdownMessage } from '../../components/MarkdownMessage';
 import { attachmentLabel, bestId, messageAttachments, messageText, messageTone } from './message-utils';
@@ -90,6 +91,41 @@ export function MessageLineage({ priorMessages, reason, revisionOf }: MessageLin
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * The switcher on a turn that has versions (an edited message, or a regenerated
+ * reply): which version of how many, and the one before and after. Switching puts
+ * that version on the conversation in the daemon, so it is the one shown on every
+ * device and after leaving the chat and coming back, and the one the model continues.
+ */
+export function BranchSwitcher({ choice, disabled = false, onSwitch }: {
+  choice: BranchChoice;
+  disabled?: boolean;
+  onSwitch: (messageId: string) => void;
+}) {
+  const { previousId, nextId } = choice;
+  return (
+    <div className="message-branches" role="group" aria-label={`Version ${String(choice.position)} of ${String(choice.count)}`}>
+      <IconButton
+        size="sm"
+        label="Previous version"
+        icon={<ChevronLeft />}
+        tooltipPlacement="top"
+        disabled={disabled || !previousId}
+        onClick={() => { if (previousId) onSwitch(previousId); }}
+      />
+      <span className="message-branches__place">{choice.position} of {choice.count}</span>
+      <IconButton
+        size="sm"
+        label="Next version"
+        icon={<ChevronRight />}
+        tooltipPlacement="top"
+        disabled={disabled || !nextId}
+        onClick={() => { if (nextId) onSwitch(nextId); }}
+      />
     </div>
   );
 }

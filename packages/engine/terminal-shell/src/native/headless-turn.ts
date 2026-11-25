@@ -2,7 +2,8 @@ import { decisionModelUse } from '@goodvibes/engine/platform/platform/runtime/de
 import { isTerminalContractStatus } from '@goodvibes/engine/platform/platform/contract/types';
 import type { ContractRunner, ContractStatus } from '@goodvibes/engine/platform/platform/contract';
 import type { ConversationMessageSnapshot, Orchestrator, TurnFailoverMove } from '@goodvibes/engine/platform/platform/core';
-import type { PermissionManager, PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
+import { describePermissionModeInForce, type PermissionManager, type PermissionRequestHandler } from '@goodvibes/engine/platform/platform/permissions';
+import { VERSION } from '@goodvibes/engine/platform/platform/version';
 import { buildPersistedSessionContextFromFacts } from '@goodvibes/engine/platform/platform/runtime/operations';
 import type { RuntimeEventBus } from '@goodvibes/engine/platform/platform/runtime/state';
 import type { AgentManager } from '@goodvibes/engine/platform/platform/tools';
@@ -33,6 +34,8 @@ export interface HeadlessTurnContext {
 
 export type HeadlessTurnLimits = Pick<HeadlessTurnObserverOptions, 'maxTurns' | 'omitAccumulated'> & {
   readonly answerPermissions?: boolean | undefined;
+  /** The settings the chosen mode is read from: a `PERMISSION_MODE_CHANGED` frame names it and says why the mode in force differs. */
+  readonly settings?: Parameters<typeof describePermissionModeInForce>[0] | undefined;
 };
 
 /** Stop reason a headless run reports, in both terminal apps, when the turn ends without a settling event. */
@@ -71,8 +74,12 @@ export async function executeHeadlessTurn(
     for (const contract of owned()) runner.cancel(contract.id, 'Headless invocation cancelled');
     for (const agent of ownedAgents()) agents.cancel(agent.id);
   };
-  const { answerPermissions, ...observerLimits } = limits;
-  const observer = observeHeadlessTurn(ctx.runtimeBus, format, UNSETTLED_REASON, { ...observerLimits, stop: abort });
+  const { answerPermissions, settings, ...observerLimits } = limits;
+  const chosenMode = settings === undefined ? undefined : (modeInForce: string): { chosen: string; reason?: string } => {
+    const described = describePermissionModeInForce(settings);
+    return { chosen: described.chosen, ...(described.chosen !== modeInForce && described.reason !== undefined ? { reason: described.reason } : {}) };
+  };
+  const observer = observeHeadlessTurn(ctx.runtimeBus, format, UNSETTLED_REASON, { ...observerLimits, stop: abort, chosenMode });
   // A provider failure moved the turn along the fallback order (providers/failover.ts): told on stderr in
   // every output format, and the result names the model that answered.
   let answeredBy: TurnFailoverMove | undefined;
@@ -286,18 +293,24 @@ export interface HeadlessSessionSource {
 /**
  * The first `stream-json` frame of a run that reached a session, written once
  * the session is final (after a resume): `{"type":"SESSION","sessionId",
- * "model","provider","workingDirectory","permissionMode"}`. Nothing in the
- * other formats.
+ * "model","provider","workingDirectory","version","permissionMode",
+ * "chosenMode"}`, with `modeReason` when the mode in force (`permissionMode`)
+ * is not the chosen one. Nothing in the other formats.
  */
 export function announceHeadlessSession(
   ctx: HeadlessSessionSource,
   workingDirectory: string,
   format: string,
+  settings: Parameters<typeof describePermissionModeInForce>[0],
   stdout: (line: string) => void = (line) => { process.stdout.write(`${line}\n`); },
 ): void {
   if (format !== 'stream-json') return;
+  const permissionMode = ctx.permissions.getMode();
+  const described = describePermissionModeInForce(settings);
   stdout(JSON.stringify({ schemaVersion: HEADLESS_SCHEMA_VERSION, type: 'SESSION', sessionId: ctx.runtime.sessionId,
-    model: ctx.runtime.model, provider: ctx.runtime.provider, workingDirectory, permissionMode: ctx.permissions.getMode() }));
+    model: ctx.runtime.model, provider: ctx.runtime.provider, workingDirectory, version: VERSION, permissionMode,
+    chosenMode: described.chosen,
+    ...(permissionMode !== described.chosen && described.reason !== undefined ? { modeReason: described.reason } : {}) }));
 }
 
 /**

@@ -159,6 +159,92 @@ export function planRegenerate(
   return { ...(regeneratedFrom !== undefined ? { regeneratedFrom } : {}), supersededMessageIds, anchorUserMessageId };
 }
 
+export interface BranchSwitchPlan {
+  /** The message that heads the version now on the conversation. */
+  readonly messageId: string;
+  /** False when that version was already the one on the conversation (nothing changed). */
+  readonly switched: boolean;
+  /** The messages of the version left, now retained history (one fork time, so the way back is the same call). */
+  readonly supersededMessageIds: readonly string[];
+  /** The messages of the version returned to, active again. */
+  readonly restoredMessageIds: readonly string[];
+}
+
+/**
+ * Switch a turn that has versions (an edited message, or a regenerated reply) to
+ * another of its versions. The versions of a turn are the messages that head
+ * one fork each: a user message and the edits linked to it by `revisionOf`, or
+ * the replies to one user message (`inReplyTo`). A version is the run one fork
+ * marked superseded at one time, so the target must be the first message of its
+ * run. The version on the conversation now (the turn's active message and
+ * everything after it, except a reply to an earlier message) is marked
+ * superseded at one new time, and the target's run is made active again.
+ * Nothing is deleted; switching back is the same call on the other version.
+ */
+export function planBranchSwitch(
+  session: BranchingSession,
+  targetMessageId: string,
+  now: number,
+): BranchSwitchPlan {
+  const messages = session.messages;
+  const target = messages.find((m) => m.id === targetMessageId);
+  if (!target) throw branchError(`Message not found: ${targetMessageId}`, 'MESSAGE_NOT_FOUND', 404);
+  if (target.supersededAt === undefined) {
+    return { messageId: target.id, switched: false, supersededMessageIds: [], restoredMessageIds: [] };
+  }
+  const forkTime = target.supersededAt;
+  const run = messages.filter((m) => m.supersededAt === forkTime);
+  if (run[0]?.id !== target.id) {
+    throw branchError('That message does not start another version of a message in this chat.', 'NOT_A_BRANCH', 409);
+  }
+
+  // The turn's version on the conversation now, and the message the turn starts after.
+  let currentIndex = -1;
+  let turnStart = -1;
+  if (target.role === 'user') {
+    const family = new Set<string>([target.id]);
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const m of messages) {
+        if (m.role !== 'user') continue;
+        const linked = family.has(m.id) || (m.revisionOf !== undefined && family.has(m.revisionOf));
+        if (!linked) continue;
+        for (const id of [m.id, m.revisionOf]) if (id !== undefined && !family.has(id)) { family.add(id); grew = true; }
+      }
+    }
+    currentIndex = messages.findIndex((m) => m.role === 'user' && m.supersededAt === undefined && family.has(m.id));
+    turnStart = currentIndex;
+  } else if (target.inReplyTo !== undefined) {
+    const anchorIndex = messages.findIndex((m) => m.id === target.inReplyTo && m.supersededAt === undefined);
+    if (anchorIndex !== -1) {
+      currentIndex = messages.findIndex((m) => m.role === 'assistant' && m.supersededAt === undefined && m.inReplyTo === target.inReplyTo);
+      turnStart = anchorIndex;
+    }
+  }
+  if (currentIndex === -1) {
+    throw branchError('That version belongs to a message that is not on the conversation now; switch the earlier message first.', 'NOT_A_BRANCH', 409);
+  }
+
+  // A reply to a message before the turn stays where it is (it is not part of this turn's versions).
+  const earlierUserIds = new Set(messages.slice(0, turnStart).filter((m) => m.supersededAt === undefined && m.role === 'user').map((m) => m.id));
+  const spare = (m: CompanionChatMessage): boolean => m.role === 'assistant' && m.inReplyTo !== undefined && earlierUserIds.has(m.inReplyTo);
+  // One new fork time, later than any in the chat, so the version left is one run of its own.
+  const latest = messages.reduce((max, m) => Math.max(max, m.supersededAt ?? 0), 0);
+  const switchTime = Math.max(now, latest + 1);
+  const reason: CompanionChatSupersededReason = target.supersededReason ?? (target.role === 'user' ? 'edit' : 'regenerate');
+  const supersededMessageIds = supersedeFrom(session, currentIndex, reason, switchTime, spare);
+  const restoredMessageIds: string[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (m.supersededAt !== forkTime) continue;
+    const { supersededAt: _at, supersededReason: _reason, ...active } = m;
+    messages[i] = active;
+    restoredMessageIds.push(m.id);
+  }
+  session.lastActivityAt = now;
+  return { messageId: target.id, switched: true, supersededMessageIds, restoredMessageIds };
+}
+
 export interface EditBranchPlan {
   readonly editedFrom: string;
   readonly newMessageId: string;

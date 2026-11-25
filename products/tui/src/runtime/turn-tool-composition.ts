@@ -9,6 +9,7 @@ import { terminalOwnerQuestions } from './client/owner-questions.ts';
 import { createDaemonVerbCaller } from './client/operator-endpoint.ts';
 import { remoteTriggerOperations } from '@goodvibes/engine/platform/platform/triggers';
 import { controlSurfacesFor } from './control-surfaces.ts';
+import { registerAgentOperatorMethodTool } from '@goodvibes/engine/terminal-shell/agent-turn/operator-method-tool';
 import type { RuntimeServices } from './services.ts';
 
 /**
@@ -19,12 +20,23 @@ import type { RuntimeServices } from './services.ts';
  */
 const turnPermissionManagers = new WeakMap<RuntimeServices, PermissionManager>();
 
-export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: RuntimeServices, options: {
+interface TuiTurnToolOptions {
   readonly resolveSessionId: () => string;
   readonly onSandboxedRun?: NonNullable<Parameters<typeof registerAllTools>[1]>['onSandboxedRun'];
   /** Approval for a model-requested hook change; the turn's permission manager is built after the tools, so the host binds it late. */
   readonly hookChangeGate?: NonNullable<Parameters<typeof registerAllTools>[1]>['hookChangeGate'] | undefined;
-}) {
+}
+
+export function registerTuiTurnTools(toolRegistry: ToolRegistry, services: RuntimeServices, options: TuiTurnToolOptions) {
+  const registered = registerTerminalTurnTools(toolRegistry, services, options);
+  // The daemon's methods by id (the same tool the Agent and the daemon's own turns carry): what a person's
+  // screens do through the daemon, the model here does through this, each call admitted by the gate under
+  // the mode in force; the owner's own acts are refused (operator-method-tool.ts).
+  registerAgentOperatorMethodTool(toolRegistry, services.shellPaths, services.configManager);
+  return registered;
+}
+
+function registerTerminalTurnTools(toolRegistry: ToolRegistry, services: RuntimeServices, options: TuiTurnToolOptions) {
   return registerAllTools(toolRegistry, {
     // The query tool's questions go to the daemon's owner inbox; answers come back into this conversation.
     ownerQuestions: () => terminalOwnerQuestions(services, options.resolveSessionId),

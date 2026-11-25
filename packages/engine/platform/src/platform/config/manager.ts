@@ -38,7 +38,7 @@ import {
 } from './settings-io.js';
 import { watchConfigFiles, reloadAndNotifyChanges, type ConfigFileWatchHandle } from './config-file-watcher.js';
 import { isDaemonOwnedConfigKey, listDaemonOwnedConfigPaths, type DaemonOwnedConfigPath } from './config-ownership.js';
-import { RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, describeSettingsCarryForward, type SettingsCarryForward } from './settings-carry-forward.js';
+import { PROGRAM_SETTINGS_ROOTS, RETIRED_NO_DECISION_MODEL_POLICIES, RETIRED_SETTING_KEYS, carriedAnything, carrySettingsForward, describeSettingsCarryForward, type SettingsCarryForward } from './settings-carry-forward.js';
 import { resolveOrCreateDaemonPath } from './daemon-tier-paths.js';
 import { collectDaemonOwnedEntries, daemonConfigPathForHome, overlayDaemonTierFrom, readDaemonTierFile, removeDaemonKey } from './daemon-config-tier.js';
 import { resolveGoodVibesDaemonHome } from './goodvibes-home.js';
@@ -2430,6 +2430,7 @@ export class ConfigManager {
     this.hostLoadSources = this.hostSettings.active ? new Map() : null;
     try {
       this.ingestionNotices = [];
+      this.#carryDecisionModelsOffForward();
       this.#fileBaselines.delete(this.configPath);
       if (this.projectConfigPath) this.#fileBaselines.delete(this.projectConfigPath);
       if (this.hostSettings.active ? hostSettingsFileExists(this.configPath) : existsSync(this.configPath)) {
@@ -2559,6 +2560,63 @@ export class ConfigManager {
     logger.info('Settings an earlier version left were carried forward', { file: this.configPath, keptAs, ...result });
     this.migrationReceipt(`carried-forward:${this.configPath}:${[...result.moved, ...result.superseded, ...result.removed].join(',')}`,
       describeSettingsCarryForward(this.configPath, daemonFile, result, keptAs));
+  }
+
+  /**
+   * 3.5.0 and earlier had a third value for `judgment.policy`, No Decision Model:
+   * no decision model is asked, as with none set. It is carried once to the mode
+   * Ask me, the decision-model settings kept. This manager sets `permissions.mode`
+   * to `ask-me` in its own settings file while the daemon's file on this machine
+   * holds the value; the daemon (the one manager that owns that file) also sets
+   * it in the terminal app's and the Agent's settings files, then removes the
+   * value (Ask me is then the "If Jev can't answer" answer, the default), so the
+   * order the programs start in does not matter. Every file changed is kept
+   * beside itself as it was, and the owner is told once. A 3.5.0 program reading
+   * the files afterwards finds two values it knows. A failure leaves the files as
+   * they were and says so in the log.
+   */
+  #carryDecisionModelsOffForward(): void {
+    const tierPath = this.daemonTierPath;
+    if (this.readOnly || tierPath === null || tierPath === this.configPath || this.#daemonIsRemote() || !existsSync(tierPath)) return;
+    let held: boolean;
+    try {
+      const stored = readDotPath(readDaemonTierFile(tierPath), 'judgment.policy').value;
+      held = typeof stored === 'string' && RETIRED_NO_DECISION_MODEL_POLICIES.includes(stored);
+    } catch {
+      return; // An unreadable daemon file is refused, with its reason, by the tier load that follows.
+    }
+    if (!held) return;
+    const files = new Set<string>([this.configPath]);
+    if (this.daemonTierOwner && this.homeDirectory !== null) {
+      for (const root of PROGRAM_SETTINGS_ROOTS) files.add(resolveSurfaceDirectory(this.homeDirectory, root, 'settings.json'));
+    }
+    const changed: string[] = [];
+    const kept: string[] = [];
+    try {
+      for (const file of files) {
+        const exists = existsSync(file);
+        // A program that never saved a setting has no file of its own to change; this manager's own file is made.
+        if (!exists && file !== this.configPath) continue;
+        const document = exists ? readRawSettingsFile(file) : {};
+        if (readDotPath(document, 'permissions.mode').value === 'ask-me') continue;
+        if (exists) kept.push(this.#keepFileBeforeCarryForward(file));
+        writeRawDotPath(document, 'permissions.mode', 'ask-me');
+        writeJsonFileAtomic(file, document, { durable: true });
+        changed.push(file);
+      }
+      if (this.daemonTierOwner) {
+        kept.push(this.#keepFileBeforeCarryForward(tierPath));
+        removeDaemonKey(tierPath, 'judgment.policy');
+      }
+    } catch (error) {
+      logger.warn('Decision models switched off in an earlier version could not be carried to the mode Ask me; the settings are left where they are', { file: tierPath, error: summarizeError(error) });
+      return;
+    }
+    logger.info('Decision models switched off in an earlier version were carried to the mode Ask me', { changed, keptAs: kept });
+    this.migrationReceipt(`carried-forward:decision-models-off:${tierPath}`,
+      'An earlier version had decision models switched off (No Decision Model). That choice is gone, so GoodVibes now uses the mode Ask me; '
+      + 'your decision model settings are kept, and another mode can be chosen with shift+tab or in Settings.'
+      + (kept.length > 0 ? ` The files as they were are kept beside them (${kept.join(', ')}).` : ''));
   }
 
   /** Copies a settings file (this manager's own by default) to `<file>.before-<version>` (a free name), keeping its mode; returns the copy's path. */

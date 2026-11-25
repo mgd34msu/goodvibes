@@ -32,9 +32,9 @@ The footer keeps an honest running total: fresh input tokens separated from cach
 
 ### Permissions and workspace trust
 
-<img src="docs/assets/workspace-trust.png" alt="A modal titled Trust ~/projects/garden-planner?, open over the dimmed start screen as the app opens. Its sentence reads: Trusting it lets the tool server (MCP) garden-tools in .goodvibes/mcp.json start, and lets GoodVibes change files and run commands here. It approves nothing: each action still follows your setting for when GoodVibes asks. Change it later with /security trust-folder or /security restrict-folder. Two options follow, Trust this workspace (selected) and Keep restricted (read-only), with the keys move, choose and details." width="820">
+<img src="docs/assets/workspace-trust.png" alt="A modal titled Trust ~/projects/garden-planner?, open over the dimmed start screen as the app opens. Its sentence describes the selected choice: GoodVibes reads this folder and changes nothing in it: no file is changed and no command runs, and the folder's own hooks and MCP servers stay off, until you trust it. Change it later with /security trust-folder or /security restrict-folder. Two options follow, Trust this workspace and Keep restricted (read-only) (selected), with the keys move, choose and details." width="820">
 
-When you open a directory that brings hooks or tool servers (MCP) of its own, GoodVibes asks, as it opens and before anything runs, how much it is allowed to do there; a directory with none of its own is trusted without a question, since trusting it would let nothing run that your permission setting does not already govern. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. The question names the folder and the hooks and tool-server files of its own it found; `/security trust-folder` or `/security restrict-folder` changes the answer later.
+When you open a directory that brings hooks or tool servers (MCP) of its own, GoodVibes asks, as it opens and before anything runs, how much it is allowed to do there, with the cursor on "Keep restricted", so Enter pressed at once trusts nothing; a directory with none of its own is trusted without a question, since trusting it would let nothing run that your permission setting does not already govern. Restricted is read-only. The model can look around, but writes and commands are refused until you trust the workspace. Until then a `hooks.json` in the workspace is not loaded and the MCP servers its `.mcp/mcp.json` or `.goodvibes/mcp.json` name do not start. The decision is kept in your own workspace register; a project cannot mark itself trusted. The question names the folder and the hooks and tool-server files of its own it found; `/security trust-folder` or `/security restrict-folder` changes the answer later.
 
 <img src="docs/assets/permission-prompt.png" alt="An approval card over the dimmed conversation, headed Run this command? with the folder ~/projects/garden-planner on the right. It shows the command $ mkdir -p build, the line Why: Ask me: GoodVibes asks before it runs commands or changes things outside this folder, three buttons, Yes, once (selected), Yes, and remember (choose what) and No, and the keys y yes, a remember, n no, w say why and d details. Below it the turn reads Waiting for your approval · Running a command · mkdir -p build." width="900">
 
@@ -118,7 +118,6 @@ Each row links to the page that documents it. The product's own `?` list (`/help
 | Channels and API | Slack, Discord, Telegram, Matrix, webhook and other surfaces; the shared reply pipeline; remote peers and node hosts; the control-plane HTTP and streaming API | [channels-remote-and-api.md](docs/channels-remote-and-api.md) |
 | Voice | Live spoken answers (`/voice`), TTS and STT providers, streaming voice API | [voice-and-live-tts.md](docs/voice-and-live-tts.md) |
 | Integrations | Home Assistant surface, Cloudflare Workers/Queues batch, GitHub Action | [homeassistant-surface.md](docs/homeassistant-surface.md) · [cloudflare-batch.md](docs/cloudflare-batch.md) · [github-action.md](docs/github-action.md) |
-| Contributing surfaces | The checked-in operator/peer contracts and knowledge schemas | [foundation-artifacts](docs/foundation-artifacts/README.md) |
 
 Full index: [docs/README.md](docs/README.md).
 
@@ -138,7 +137,6 @@ Edit them live with `/settings` rather than by hand. A few of the most-reached-f
 | Key | Default | What it does |
 | --- | --- | --- |
 | `permissions.mode` | `jev-decides` | `ask-me`, `jev-decides`, `just-vibes`, `yolo`, or `plan` |
-| `judgment.policy` | `Hybrid` | `Hybrid`, `Decision Model Only`, or `No Decision Model` |
 | `provider.model` | `openrouter:openrouter/free` | Active model for main chat |
 | `provider.reasoningEffort` | `medium` | Reasoning depth on models that support it |
 | `display.theme` | `goodvibes` | Color theme |
@@ -245,60 +243,10 @@ Native `/work`, headless intake and legacy-import reads use a TUI-owned device c
 
 ---
 
-## Development
+## How it fits with the rest of GoodVibes
 
-```sh
-git clone https://github.com/mgd34msu/goodvibes.git
-cd goodvibes
-bun install
-bun run build
-bun run --cwd products/tui dev
-```
-
-Run these commands from `products/tui` after preparing the monorepo:
-
-| Command | Does |
-| --- | --- |
-| `bun run dev` | Run the TUI from source |
-| `bun run test` | Run this product's tests except `src/test/e2e/` through the shared runner, `packages/engine/scripts/test.ts` (`bun run test:e2e` runs the end-to-end files) |
-| `bun run build` | Compile the selected target, such as `dist/goodvibes-linux-x64` |
-
-The compiled binary is the TUI entrypoint. With `daemon.enabled` on (the default) it adopts a running standalone GoodVibes daemon over loopback, and when a daemon is installed as a service but stopped, it starts that service once and waits for it to come online. It never embeds or constructs a daemon of its own. The control plane, HTTP listener (`danger.httpListener`), and web surface are all hosted by the daemon; the TUI configures them and reports their bindings.
-
-Tests live under `src/test/`, mirroring the source tree. End-to-end tests under `src/test/e2e/` drive the compiled binary in a real terminal against a scripted model. To run one file, pass it to the runner from the repository root: `bun run test:one products/tui/src/test/<file>.test.ts`. Test working directories are created under `.test-tmp/run-*`, which Git ignores. `bun run architecture:check` from the repository root checks this product's import cycles and layer boundaries, `@/` imports included (`packages/engine/scripts/daemon-architecture-check.ts`).
-
-Some decisions worth knowing before you read the source:
-
-- **Bun runtime.** Native TypeScript execution, fast startup, built-in test runner.
-- **Raw ANSI renderer.** It writes the UI straight to the alternate screen buffer, giving direct control over every byte sent to the terminal. Conversation, modals, overlays, and the footer all share that one renderer.
-- **In-process agents.** Agents run in the same process rather than over IPC, staying isolated through scoped tool registries and namespaced state.
-- **Typed runtime store.** A plain `zustand/vanilla` store with typed selectors and dispatch paths, reachable from agents, tools, renderer, hooks, channels, and daemon surfaces alike.
-- **Tree-sitter and bundled language servers.** Grammars for structural analysis, outlines, and AST-level edits, several embedded as WASM for instant startup. TypeScript, Python, Bash, CSS, HTML, and JSON language servers ship as dependencies; `rust-analyzer` (checksum-verified) and `gopls` are installed only when you run `/intelligence install`. After an edit, the agent is told the running language server's type errors for the new text.
-- **Backend-first external surface.** The daemon product exposes typed HTTP and gateway methods, so other clients do not reimplement runtime logic.
-- **Crash recovery.** A crash snapshot written when a prompt is accepted and after each tool batch, offered at the next start.
-- **Render coalescing and a per-message line cache.** Same-tick render requests collapse into one composite frame, and transcript growth re-renders only the appended message instead of rebuilding the whole conversation.
-
-The TUI consumes `@goodvibes/engine` and `@goodvibes/daemon` through `workspace:*` dependencies for shared runtime behavior, contracts and transports, and keeps terminal rendering, input and product composition here. Reference clients written only against the published engine entry points live under `examples/`: [`reference-http-client`](examples/reference-http-client/README.md) talks to a running daemon, [`reference-operator-client`](examples/reference-operator-client/README.md) makes the same calls against the generated fixture daemon.
-
-Source layout, in brief:
-
-```text
-src/
-├── main.ts, core/          terminal entrypoint, orchestrator, conversation and transcript state
-├── renderer/               raw ANSI compositor, overlays, modals, fullscreen workspaces
-├── views/                  modal surfaces, the fleet read model and acts behind Agents, view wiring
-├── input/                  slash commands, keybindings, composer, pickers, settings modals
-├── runtime/                bootstrap wiring, typed store, service composition, session recovery
-├── shell/                  shell-level modal openers, blocking input, retry affordances
-├── config/                 settings layering, surface roots, secrets, credential availability
-├── permissions/            approval cards, hunk selection, sandbox exec gate
-├── cli/                    flag parsing, management verbs, doctor, launch-time self-update
-├── providers/              provider classification and reasoning-effort presentation
-├── audio/, export/         voice capture, wake word, playback and speech routing; gist upload
-├── verification/           live verifier
-├── utils/                  formatting and clipboard helpers
-└── test/                   the suite, mirroring the tree above
-```
+How the terminal app, the Agent, the daemon and the web UI fit together, what
+runs where and why: [How GoodVibes works](../../docs/how-goodvibes-works.md).
 
 ---
 

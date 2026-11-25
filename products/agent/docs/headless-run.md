@@ -70,18 +70,19 @@ Every frame carries `schemaVersion` (currently `1`). Consumers should ignore fra
 | `native` | no | The intake state: `status`, `message`, `request`, `result`, `execution`; `nextStep` (`retry`, `resume`, `cancel` or `inspect`: run `--intake-<nextStep>`, with `inspect` meaning `--intake-status`) when an earlier input must be moved forward first; `notSent: true` when this run's own text was not sent because of that earlier input; `hostedTurn` (`state`, `sessionId`, and on `failed` a `failure` with `summary` and `retryable`) when the host runs the reply. |
 | `refusal` | no | Present when the run was refused before it started (`stopReason` `session-open-elsewhere` or `session-not-found`): `code`, `state`, `reason`, `next`. |
 | `recovery` | no | Present when the run restored its session from a crash snapshot: `sessionId`, `applied`, `refusal` (when not applied), `snapshotAt`, `snapshotKept`, `messages`, `turns`, `interruptedTurn` (`prompt` masked and cut at 1000 characters, `toolResults`, `interruptedToolCalls` as `{ callId, tool }`, `partialReply`), `lost`. |
-| `diagnostics` | no | Present when no decision model was in use: `decisionModel` with `inUse: false`, `policy`, `reason` (`not-set`, `selected` for No Decision Model, or `unavailable`), `line` (the sentence also printed on stderr) and, when the set model was failing, `failure` (`model`, `what`, `nextStep`). The exit code is what the work earned; a run that finished without the decision model still exits `0`. |
+| `diagnostics` | no | Present when no decision model was in use: `decisionModel` with `inUse: false`, `policy` (the stored "If Jev can't answer" value: `Hybrid` for Ask me, `Decision Model Only` for Refuse the action), `reason` (`not-set` or `unavailable`), `line` (the sentence also printed on stderr) and, when the set model was failing, `failure` (`model`, `what`, `nextStep`). The exit code is what the work earned; a run that finished without the decision model still exits `0`. |
 
 ### Stream frames
 
 | `type` | Fields |
 | --- | --- |
-| `SESSION` | `sessionId`, `model`, `provider`, `workingDirectory`, `permissionMode`: the first frame of a run that reached a session, before the first request |
+| `SESSION` | `sessionId`, `model`, `provider`, `workingDirectory`, `version` (the GoodVibes version), `permissionMode` (the mode in force), `chosenMode` (the mode chosen in settings), `modeReason` (one sentence, only when the two differ): the first frame of a run that reached a session, before the first request |
+| `PERMISSION_MODE_CHANGED` | `permissionMode`, `previousMode`, `chosenMode`, `modeReason` (when the new mode in force is not the chosen one): the mode in force changed during the run (a setting changed, or the decision model stopped or started answering) |
 | `STREAM_DELTA` | `content`, `accumulated` (unless `--omit-accumulated`) |
 | `DRAFT_WITHDRAWN` | `reason`: the answer streamed so far was withdrawn (the turn moved to another model after it had begun); drop that text, the replacement streams from empty |
 | `TOOL_EXECUTING`, `TOOL_SUCCEEDED`, `TOOL_FAILED`, `TOOL_CANCELLED` | `turnId`, `callId`, `tool`; plus `durationMs`, `error` or `reason` |
 | `PERMISSION_REQUESTED` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `ownerPrompt` (one per gated tool call, written when its decision is known) |
-| `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `ownerPrompt` (follows its request) |
+| `PERMISSION_DECIDED` | `callId`, `tool`, `category`, `approved`, `source`, `reasonCode`, `reason` (why: Jev's reason when Jev decided, the explanation on a refusal), `ownerPrompt` (follows its request) |
 | `PERMISSION_PROMPT` | `callId`, `tool`, `category`, `riskLevel`, `summary`, `answer` (only with `--answer-permissions`; the run waits for the answer) |
 | `PERMISSION_ANSWERED` | `callId`, `approved` (an answer line was accepted) |
 | `PERMISSION_ANSWER_REJECTED` | `callId` (when it was a string), `reason`, `waiting` (an answer line was not used, and which call ids still wait) |

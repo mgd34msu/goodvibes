@@ -1,0 +1,59 @@
+/* SecureAddressSettings: the status line, each way's four labelled parts, its form. */
+
+.secure-address__status {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  color: var(--text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-ui);
+  overflow-wrap: anywhere;
+}
+
+.secure-address__status .gv-dot {
+  margin-top: 6px;
+}
+
+.secure-address__words {
+  display: grid;
+  grid-template-columns: minmax(9rem, max-content) 1fr;
+  gap: var(--space-1) var(--space-3);
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  line-height: var(--leading-ui);
+}
+
+.secure-address__words dt {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
+.secure-address__words dd {
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .secure-address__words {
+    grid-template-columns: 1fr;
+  }
+  .secure-address__words dd {
+    margin-bottom: var(--space-2);
+  }
+}
+
+.secure-address__form {
+  display: grid;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+  max-width: 40rem;
+}
+
+.secure-address__list {
+  margin: 0 0 var(--space-3);
+  padding-left: var(--space-4);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}

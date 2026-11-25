@@ -7,6 +7,10 @@
  * that does not trust the authority yet can open them.
  */
 import { X509Certificate } from 'node:crypto';
+/** Which certificate the https listener serves: only GoodVibes' own is installed on a phone from this page. */
+export { httpsCertificateSource, type HttpsCertificateSource } from './served-https.js';
+/** The check of a certificate you made, for `goodvibes-daemon webui enable --https --certificate own-files`. */
+export { readOwnCertificate } from './own-certificate.js';
 
 export const LAN_HTTPS_PAGE_PATH = '/lan-https';
 export const LAN_HTTPS_CA_PATH = '/lan-https/goodvibes-ca.crt';

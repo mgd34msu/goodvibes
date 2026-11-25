@@ -172,48 +172,10 @@ quoting). A request whose answer was lost is recovered with `/work submission`,
 
 ---
 
-## Development
+## How it fits with the rest of GoodVibes
 
-Agent builds on the existing terminal renderer and workspace foundations of the GoodVibes platform; what differs is the product layer composed on top of them.
-
-```sh
-git clone https://github.com/mgd34msu/goodvibes.git
-cd goodvibes
-bun install
-bun run build
-bun run --cwd products/agent dev
-```
-
-Run these commands from `products/agent` after preparing the monorepo:
-
-| Command | Does |
-| --- | --- |
-| `bun run dev` | Run the Agent TUI from source |
-| `bun run test` | Run this product's tests except `src/test/e2e/` through the shared runner, `packages/engine/scripts/test.ts` (`bun run test:e2e` runs the end-to-end files) |
-| `bun run typecheck` | Type-check the source tree |
-| `bun run build` | Bundle the workspace package entrypoint into `dist/package/main.js` |
-| `bun run build:binary` | Compile the native Agent executable and stage its sqlite-vec library in `dist/lib` |
-
-Source layout, in brief:
-
-```text
-src/
-├── main.ts, core/       terminal entrypoint, orchestrator
-├── agent/               channel, calendar, document, and automation domain logic
-├── tools/               agent-owned model tools (harness, workspace, channels, knowledge, work plans, ...)
-├── permissions/         approval posture and confirmation prompts
-├── input/               slash commands, workspace actions, command routing, MCP server management
-├── renderer/            terminal UI
-├── cli/, cli-flags.ts   CLI subcommands and flags, package verification
-├── config/              settings, secrets, checkpoint and update policy
-├── runtime/             update checks, release-artifact resolution
-├── audio/               spoken-turn playback and routing
-└── verification/        release-readiness and evidence checks
-```
-
-Tests live under `src/test/`, mirroring the source tree, and cover runtime contracts, security boundaries and workspace/tool/CLI behavior. Use the declared workspace scripts above or the root product checks; package publication commands from the upstream product are not part of this private workspace.
-
-The Agent consumes `@goodvibes/engine` and `@goodvibes/daemon` through `workspace:*` dependencies for shared contracts, daemon routes, and transports, and keeps the workspace, local behavior library, and Agent Knowledge boundary here. GoodVibes Agent owns the autonomous assistant harness; the connected GoodVibes host owns the platform capabilities Agent presents.
+How the Agent, the terminal app, the daemon and the web UI fit together, what
+runs where and why: [How GoodVibes works](../../docs/how-goodvibes-works.md).
 
 ---
 

@@ -78,7 +78,7 @@ function google() {
 }
 
 test('a message Google would not hand over keeps the position below it, is read on the next poll, and every message is announced once', async () => {
-  retire.push(configureDecisionModelPolicy(() => 'No Decision Model'));
+  retire.push(configureDecisionModelPolicy(() => 'Hybrid', () => false));
   const dir = mkdtempSync(join(tmpdir(), 'gv-gmail-position-'));
   dirs.push(dir);
   const gmail = google();

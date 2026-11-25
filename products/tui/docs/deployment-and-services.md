@@ -14,16 +14,10 @@ GoodVibes supports a few distinct deployment shapes:
 
 ## TUI-only mode
 
-This is the default development and local-use path:
+This is the plain local path:
 
 ```sh
-bun run dev
-```
-
-or, for the compiled build:
-
-```sh
-./dist/goodvibes
+goodvibes
 ```
 
 In this mode you still get the full TUI, tools, providers, knowledge system, artifacts, and local runtime surfaces.
@@ -44,8 +38,6 @@ does on this side:
 The HTTP listener is different. It genuinely runs in-process in this app when enabled, controlled by:
 
 - `danger.httpListener` (default `false`)
-
-The compiled binary built by `bun run build` includes this path because it compiles `src/main.ts`, and the main runtime bootstraps external services through the deferred startup path.
 
 ## Running the daemon
 
@@ -75,11 +67,11 @@ Two ways to point a TUI instance at a daemon it did not start itself:
 GOODVIBES_DAEMON_TOKEN=gv_shared_token goodvibes-daemon --hostname 0.0.0.0 --port 3421
 
 # Point a TUI at it (any home directory, no shared operator-tokens.json needed):
-GOODVIBES_DAEMON_TOKEN=gv_shared_token bun run dev \
+GOODVIBES_DAEMON_TOKEN=gv_shared_token goodvibes \
   --config daemon.connectedHost.url=http://<daemon-host>:3421
 ```
 
-`GOODVIBES_DAEMON_TOKEN` is read by both sides. The daemon uses it as the bearer token every route requires, and the TUI uses it as its token for that run only: nothing is written, so the local daemon and every other app keep their own token, and adoption needs no hand-edited files. To keep the connection across runs, use the interactive step above. This mirrors `src/verification/live-verifier.ts`'s existing fallback to the same variable when probing a daemon's HTTP surface from the outside.
+`GOODVIBES_DAEMON_TOKEN` is read by both sides. The daemon uses it as the bearer token every route requires, and the TUI uses it as its token for that run only: nothing is written, so the local daemon and every other app keep their own token, and adoption needs no hand-edited files. To keep the connection across runs, use the interactive step above.
 
 ## Background service and autostart
 
@@ -220,15 +212,6 @@ Four keys configure it:
 | `network.outboundTls.allowInsecureLocalhost` | `false` | Disable certificate verification only for loopback HTTPS targets; intended for local development |
 
 This is the right place to add enterprise or internal roots for outbound HTTPS access to providers, registries, proxies, or internal services.
-
-## Build behavior
-
-`bun run build` compiles:
-
-- entrypoint: `src/main.ts`
-- output: `dist/goodvibes`
-
-This build does not produce a daemon executable. The daemon binary is built from `products/daemon` and ships in the same release (see the [daemon command reference](../../daemon/docs/commands-reference.md)).
 
 ## Local auth and service tokens
 

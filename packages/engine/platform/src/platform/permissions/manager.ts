@@ -158,6 +158,7 @@ function jevDecisionDetail(outcome: string, reading: Awaited<ReturnType<typeof r
   ].filter(Boolean);
   const because = facts.length > 0 ? `the safety reading found that ${facts.join(', ')}${reading?.stakes ? ` (stakes: ${reading.stakes})` : ''}`
     : reading?.stakes ? `the safety reading put its stakes at ${reading.stakes}` : 'no safety reading was available';
+  if (outcome === 'act') return `Jev allowed it: ${because}.`;
   if (outcome === 'revise') return `Jev chose a narrower alternative instead of this call, because ${because}.`;
   if (outcome === 'defer') return `Jev's reason: ${because}. It may run once its condition changes.`;
   return `Jev's reason: ${because}. A narrower call that avoids this may be allowed.`;
@@ -1327,7 +1328,7 @@ export class PermissionManager {
     input.assertCurrent();
     const why = failure instanceof Error ? failure.message : String(failure);
     return { result: this.result(false, false, 'safety_check', 'jev_defer', input.policyResult.analysis, {
-      detail: `Not run: the decision model could not decide this call (${why}), and Decision Model Only refuses what it cannot decide. Fix the decision model, or choose Hybrid for "When the decision model is missing or fails" to have such calls take the no-model path.` }) };
+      detail: `Not run: the decision model could not decide this call (${why}), and "If Jev can't answer" is set to Refuse the action. Fix the decision model, or choose Ask me for "If Jev can't answer" in the decision model settings to have such calls come to you.` }) };
   }
 
   private captureRefusalAction(input: SafetyInput): RefusedDecisionAction {
@@ -1651,7 +1652,7 @@ export class PermissionManager {
     }
     return {
       result: this.result(receipt.outcome === 'act', false, 'jev_decision', `jev_${receipt.outcome}`, analysis,
-        { boundary: boundaryResult, autonomousDecision: receipt, detail: receipt.outcome === 'act' ? receipt.summary : detail,
+        { boundary: boundaryResult, autonomousDecision: receipt, detail,
           preset: { preset: input.mode, action: receipt.outcome === 'act' ? 'allow' : 'deny' } }),
       recordClaim: () => decision.recordClaim(),
       ...(decision.revision ? { revision: decision.revision } : {}),
